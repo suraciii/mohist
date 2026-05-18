@@ -4,310 +4,218 @@
 
 Mohist 当前的 issue 是可执行工作单元：它进入 Backlog、Plan、Build、Check、Integrate、Done，并由 agent 执行、审查、合并。这个模型适合追踪一个明确任务，但不适合追踪长期产品功能、系统性重构或跨多个 issue 的能力建设。
 
-用户需要一种更高层的产品目标管理方式，用来回答：
+用户需要一种更高层的目标管理方式，用来回答：
 
-- 这个长期目标到底是什么？
-- 已经交付了什么？
-- 还剩什么？
-- 现在卡在哪里？
-- 下一步应该推进哪个 issue？
-- 什么时候算完成？
+- 这个长期目标是什么？
+- 它下面有哪些 issue？
+- 已经交付了多少？
+- 当前卡在哪里？
+- 下一步应该看哪个 issue？
 
-## 关键发现
+## 核心结论
 
-Epic 不应该实现为 issue 的一种 subtype，也不应该通过 label 伪装出来。
+Epic 应实现为 Mohist 的 first-class feature，而不是 issue subtype，也不是 label 扩展。
 
-原因是 Epic 和 Issue 的生命周期不同：
+原因是 Epic 和 Issue 的职责不同：
 
 ```text
 Issue:
+  可执行工作单元
   Backlog -> Plan -> Build -> Check -> Integrate -> Done
+  可以 start，运行 agent，创建 worktree，经过审批和合并
 
 Epic:
-  Draft -> Active -> Done / Closed
+  长期目标容器
+  Active -> Done / Closed
+  不 start，不运行 agent，不创建 worktree，不进入 workflow stage
 ```
 
-Issue 是执行单元，会 start、跑 agent、创建 worktree、经历审批和合并。Epic 是长期目标容器，不执行代码工作，不进入 Plan/Build/Check/Integrate，也不拥有 worktree。
-
-如果把 Epic 做成 issue subtype，会导致用户概念混乱：
+如果把 Epic 做成 issue subtype，会让用户必须理解一组不成立的问题：
 
 - Epic 要不要 start？
-- Epic 要不要 Plan/Build/Check？
+- Epic 要不要 Plan / Build / Check？
 - Epic 有没有 worktree？
-- Epic done 是自己完成，还是子 issue 全部 delivered？
-- Epic blocked 是自己的状态，还是子 issue 聚合？
-- Epic approval 是审批整体目标，还是审批某个实现？
+- Epic approval 是审批目标，还是审批实现？
+- Epic done 是自己完成，还是子 issue 全部完成？
 
-这些问题说明 Epic 应该是 Mohist 的 first-class feature，但通过关系连接现有 issue。
+这些问题说明 Epic 不应该继承 issue 的执行语义。Issue still executes work. Epic tracks goals.
 
-## 产品形态
+## 用户端到端场景
 
-Epic 是 Mohist 面向长期产品功能和重构工作的目标层。它不替代 issue，也不参与 workflow 执行；它通过组织 issue、聚合交付状态、暴露阻塞和下一步行动，帮助用户持续推进一个长期目标直到可验收完成。
-
-```text
-┌─ Epic #12: Workflow runtime model cleanup ──────────────┐
-│ Status: Active        Progress: 6/10 delivered           │
-│ Health: Blocked       Next Action: Resolve #226          │
-│                                                         │
-│ Goal                                                    │
-│   让 workflow 的 task/check/run 模型清晰、可恢复、可观察。 │
-│                                                         │
-│ Success Criteria                                        │
-│   - 用户能看到真实 stage tasks/checks                    │
-│   - retry/rerun/resume 语义清晰                          │
-│   - workflow run 有单一运行态投影                         │
-│                                                         │
-├─ Delivery Map ──────────────────────────────────────────┤
-│ Delivered                                               │
-│   ✅ #181 show real stage task list                      │
-│   ✅ #182 materialize WorkflowRun                        │
-│                                                         │
-│ In Progress                                             │
-│   🔄 #226 require completion evidence                    │
-│                                                         │
-│ Blocked                                                 │
-│   ❌ #224 task owns session retry                        │
-│                                                         │
-│ Planned                                                 │
-│   ○ #202 generic Workflow event system                   │
-└─────────────────────────────────────────────────────────┘
-```
-
-Epic 详情页的主视图不应该是 Kanban。Kanban 回答的是每个 issue 分别在哪个 workflow stage；Epic 回答的是长期目标整体交付到哪里了。因此 Epic 详情页应使用 Delivery Map，按交付状态组织子 issue。
-
-## 端到端用户旅程
-
-Epic 的用户不是在执行一个任务，而是在持续推进一个长期产品目标。完整旅程应该是：
+Epic 的用户不是在执行一个任务，而是在持续推进一个长期产品目标：
 
 ```text
 1. 用户意识到一个长期目标
    -> 2. 创建 Epic
-      -> 3. 用 Explore / 手工方式澄清目标
-         -> 4. 关联已有 issues / 创建新 issues
+      -> 3. 写清 title / description
+         -> 4. 关联已有 issue，或后续从 Epic 中创建新 issue
             -> 5. 日常回来看整体进展
-               -> 6. 子 issue 阻塞时，Epic 暴露目标级影响和 next action
-                  -> 7. 目标范围变化，Epic 调整 scope / child issues
+               -> 6. 看到阻塞、活跃 issue 和下一步
+                  -> 7. 随着范围变化添加或移除 issue
                      -> 8. 子 issue 持续交付
-                        -> 9. 用户判断 success criteria 是否满足
-                           -> 10. Epic Done / Closed / Archived
+                        -> 9. 用户判断目标已经满足
+                           -> 10. 手动 Mark Done 或 Close
 ```
 
-### 1. 创建 Epic
-
-用户不是从“我要建一个容器”开始，而是从长期目标开始：
-
-```text
-Create Epic
-
-Title:
-  Workflow runtime model cleanup
-
-Goal:
-  让 Mohist workflow 的 task/check/run 模型清晰、可恢复、可观察。
-
-Why:
-  当前 workflow 相关 issue 越来越多，用户无法判断整体改造进度。
-
-Success Criteria:
-  - 用户能看到真实 stage tasks/checks
-  - workflow run 有明确状态投影
-  - retry/rerun/resume 语义清晰
-  - check 只检查，task 负责执行
-
-Non-Goals:
-  - 不做完整 workflow.yaml DSL
-  - 不做 fallback chain
-```
-
-用户此时想要的是把长期目标说清楚，而不是启动 agent 写代码。
-
-### 2. 关联和拆分
-
-创建后，Epic 应帮助用户把目标组织成可执行 issue：
-
-```text
-Epic #12 Workflow runtime model cleanup
-
-Suggested / linked issues:
-  ✅ #181 show real stage task list
-  ✅ #182 materialize WorkflowRun
-  ✅ #199 split Build dynamic tasks
-  ○ #202 generic workflow event system
-  ○ #224 task owns session retry
-```
-
-用户需要能做这些动作：
-
-- Add existing issue
-- Create child issue
-- Remove issue from epic
-- Mark issue as out of scope
-- Reorder / group issues
-
-### 3. 日常回访
-
-用户可能一天后、一周后回来，只想 5 秒内知道：
+用户最核心的回访问题是：
 
 ```text
 这个长期目标现在怎么样？
 卡在哪里？
-我需要做什么？
-下一步推进哪个 issue？
+我现在应该看哪个 issue？
 ```
 
-Epic 首页应直接回答：
+因此第一版 Epic 不需要完整 roadmap、milestone、gantt、独立成功标准实体或决策历史。它只需要把相关 issue 组织起来，并给出清晰的进度和下一步。
+
+## 产品形态
+
+Epic 是有名称和描述的 issue 集合。它不替代 issue，也不参与 workflow 执行；它通过组织 issue、聚合交付状态、暴露阻塞和下一步行动，帮助用户推进长期目标。
+
+产品原则：
+
+1. Epic is a named collection of issues with progress.
+2. Issue still executes work.
+3. Epic never runs workflow.
+4. Epic progress is projected from issues, not manually edited.
+
+## Web UI 形态
+
+### 导航
+
+在主导航中增加 `Epics`：
 
 ```text
-┌─ Epic #12: Workflow runtime model cleanup ───────────────┐
-│ Status: Active                                            │
-│ Progress: 6/10 delivered                                  │
-│ Health: Blocked                                           │
-│ Next Action: Resolve #226 completion evidence blocker      │
-├───────────────────────────────────────────────────────────┤
-│ Delivered                                                 │
-│   ✅ #181 show real stage task list                        │
-│   ✅ #182 materialize WorkflowRun                          │
-│   ✅ #199 split Build dynamic tasks                        │
-│                                                           │
-│ In Progress                                               │
-│   🔄 #226 require completion evidence                      │
-│                                                           │
-│ Blocked                                                   │
-│   ❌ #224 task owns session retry                          │
-│                                                           │
-│ Planned                                                   │
-│   ○ #202 generic Workflow event system                     │
-└───────────────────────────────────────────────────────────┘
+Board | Epics | Explore | Archived | Settings
 ```
 
-### 4. 处理阻塞
-
-当某个子 issue 阻塞，Epic 不应该只显示红点。它要解释对长期目标的影响：
-
-```text
-Blocked
-
-Issue:
-  #226 require completion evidence
-
-Impact:
-  Blocks success criterion:
-  "workflow run 有明确状态投影"
-
-Next Action:
-  Review #226 failure and decide whether to retry or split scope.
-```
-
-用户在 Epic 里看到的是目标级影响，而不是某个 issue 的底层错误。
-
-### 5. 范围变化
-
-长期目标一定会变化。Epic 必须允许用户管理 scope：
-
-```text
-Add to scope:
-  #231 workflow yaml first-class definition
-
-Remove from scope:
-  #202 generic event system
-  reason: too broad for this epic
-
-Split out:
-  Provider credential migration
-  reason: separate product direction
-```
-
-这说明 Epic 需要 `Scope / Non-Goals / Decisions`，否则它会无限膨胀。
-
-### 6. 判断完成
-
-Epic Done 不能只是“所有 child issues done”。更准确是：
-
-```text
-All required success criteria are satisfied.
-Delivered issues provide evidence.
-No blocking planned issue remains required for this goal.
-User explicitly marks epic done.
-```
-
-Completion Review 应显示：
-
-```text
-Success Criteria
-  ✅ 用户能看到真实 stage tasks/checks       evidence: #181
-  ✅ workflow run 有明确状态投影             evidence: #182
-  ✅ retry/rerun/resume 语义清晰             evidence: #178
-  ○ workflow.yaml 支持                       moved to future epic
-
-Decision:
-  Mark Epic Done
-```
-
-## 页面信息架构
+Epic 是目标管理入口，不放进 Board 的 workflow lane。
 
 ### Epic 列表页
 
-Epic 列表页回答：我现在有哪些长期目标在推进，哪个最需要注意？
+Epic 列表页回答：我现在有哪些长期目标，哪个最需要注意？
 
 ```text
-Active Epics
-
-#12 Workflow runtime model cleanup
-  6/10 delivered · 1 blocked · next: #226
-
-#15 Session UI redesign
-  3/7 delivered · healthy · next: start #231
-
-#18 Provider credential storage
-  0/4 delivered · draft · needs breakdown
++----------------------------------------------------------------+
+| Epics                                             [New Epic]    |
++----------------------------------------------------------------+
+| Active                                                         |
+|                                                                |
+| #12 Workflow runtime model cleanup                             |
+| 6/10 delivered · next: #226 require completion evidence         |
+|                                                                |
+| #15 Session UI redesign                                        |
+| 3/7 delivered · next: start #231                                |
+|                                                                |
+| Done                                                           |
+|                                                                |
+| #8 Provider settings cleanup                                   |
+| 5/5 delivered                                                  |
++----------------------------------------------------------------+
 ```
 
-排序优先级：
+第一版列表只显示：
 
-1. blocked epic
-2. waiting user action epic
-3. active epic
-4. draft epic
-5. done / closed epic
+- title
+- status
+- delivered / total
+- next issue
+
+不要引入健康分、复杂图表或 roadmap 视图。
+
+### 创建 Epic
+
+创建表单保持简单：
+
+```text
++--------------------------------------+
+| New Epic                             |
++--------------------------------------+
+| Title                                |
+| [Workflow runtime model cleanup    ] |
+|                                      |
+| Description                          |
+| [长期目标说明...]                    |
+|                                      |
+| Priority                             |
+| [P1 v]                               |
+|                                      |
+|                  [Cancel] [Create]   |
++--------------------------------------+
+```
+
+第一版不要求结构化 success criteria。长期目标先由 description 承载，避免过早建模。
 
 ### Epic 详情页
 
-Epic 详情页应围绕六个问题组织：
+Epic 详情页回答：目标、进度、下一步、关联 issue。
 
-- Goal：这个长期目标要交付什么用户价值？
-- Success Criteria：什么时候算完成？
-- Delivery Map：哪些 issue 已交付、进行中、阻塞、计划中？
-- Next Action：现在最该推进什么？
-- Scope / Non-Goals：哪些属于范围，哪些明确不做？
-- Decisions：过程中形成了哪些关键产品或架构决策？
+```text
++----------------------------------------------------------------+
+| Epic #12 Workflow runtime model cleanup      [Mark Done] [Close]|
+| Active · P1                                                     |
++----------------------------------------------------------------+
+| Progress                                                       |
+| 6 / 10 delivered                                               |
+|                                                                |
+| Next                                                           |
+| #226 require completion evidence                               |
++----------------------------------------------------------------+
+| Description                                                    |
+| 让 workflow 的 task/check/run 模型清晰、可恢复、可观察。          |
++----------------------------------------------------------------+
+| Issues                                             [Add Issue]  |
+|                                                                |
+| Done                                                           |
+| [done] #181 show real stage task list                          |
+| [done] #182 materialize WorkflowRun                            |
+|                                                                |
+| Active                                                         |
+| [check] #226 require completion evidence                       |
+|                                                                |
+| Backlog                                                        |
+| [backlog] #202 generic workflow event system                   |
++----------------------------------------------------------------+
+```
+
+详情页不做 Kanban。Kanban 回答 issue 的 workflow stage；Epic 回答长期目标交付进度。
+
+### Add Issue
+
+从 Epic 详情页添加已有 issue：
+
+```text
++-----------------------------------------------+
+| Add Issue to Epic #12                         |
++-----------------------------------------------+
+| Search issues                                 |
+| [completion evidence                         ]|
+|                                               |
+| #226 require completion evidence              |
+| #224 task owns session retry                  |
+|                                               |
+|                         [Cancel] [Add Issue]  |
++-----------------------------------------------+
+```
+
+第一版只允许一个 issue 属于一个 primary Epic。如果 issue 已属于其他 Epic，应阻止添加并告诉用户原因。
 
 ### Issue 详情页
 
-Issue 仍然是 Mohist 的执行单元。Issue 侧只需要显示所属 Epic 的轻量上下文：
+Issue 仍是执行单元。Issue 详情页只显示轻量 Epic 上下文：
 
 ```text
-Part of Epic #12: Workflow runtime model cleanup
-Related issues in this epic: #181, #182, #226
+Part of Epic: #12 Workflow runtime model cleanup
 ```
 
-这样用户从单个 issue 可以回到长期目标，不会迷失在局部任务里。
+用户可以从局部 issue 回到长期目标，但 issue 的 start、approval、merge、prerequisite 语义不被 Epic 改写。
 
-## 奥卡姆剃刀后的核心模型
+## 核心领域模型
 
-前面的探索一度引入了 SuccessCriterion、EpicDecision、EpicHealth、EpicNextAction 等更细的概念。第一版不应该这样做。用户真正需要的是：
-
-```text
-我有一个长期目标。
-它下面有一些 issue。
-我想知道这些 issue 交付到哪里了。
-我想知道下一步该看哪个。
-```
-
-因此核心概念收缩为：
+遵循奥卡姆剃刀，第一版只需要四个核心概念：
 
 ```text
 Epic
-  有名称和描述的长期目标
+  有名称和描述的长期目标容器
 
 Issue
   现有可执行工作单元
@@ -319,7 +227,7 @@ Progress
   从关联 issue 状态投影出来的只读摘要
 ```
 
-`Progress` 不需要作为独立实体持久化。它可以由查询时聚合得到：
+`Progress` 不需要持久化。它可以查询时从关联 issue 聚合：
 
 ```text
 deliveredCount
@@ -329,22 +237,7 @@ activeIssues
 nextIssue
 ```
 
-先不要建模：
-
-```text
-EpicDecision
-EpicHealth
-EpicNextAction
-独立 SuccessCriterion 实体
-复杂事件流
-多层 scope history
-复杂 completion review
-owner / role / milestone / group
-```
-
-这些只有在真实使用中出现明确痛点后再加。
-
-## 最小领域模型
+最小持久模型：
 
 ```text
 Epic
@@ -363,13 +256,14 @@ EpicIssue
   epicId
   issueId
   position
-  required
   createdAt
 ```
 
-Issue 保持现有 workflow，不增加新的 Epic stage。
+第一版不需要 `required` 字段。因为没有结构化 completion review，也不自动判断完成，required 暂时不会影响用户可见行为。
 
-Epic 进度从子 issue 自动投影：
+## 投影规则
+
+Epic progress 从子 issue 自动投影：
 
 ```text
 delivered = issue.stage == done
@@ -377,7 +271,7 @@ delivered = issue.stage == done
          && issue.mergeState == merged
 ```
 
-Next action 也先作为简单投影，不作为领域对象：
+Next issue 使用简单规则：
 
 ```text
 如果有 blocked issue -> next = 第一个 blocked issue
@@ -386,7 +280,7 @@ Next action 也先作为简单投影，不作为领域对象：
 否则 next = Ready to mark done
 ```
 
-Epic Done 也不要自动判断。第一版只提供进度辅助，最终由用户手动标记 done。
+Epic Done 不自动判断。第一版只提供进度辅助，最终由用户手动标记 done。
 
 ## 与现有概念的边界
 
@@ -394,11 +288,11 @@ Epic Done 也不要自动判断。第一版只提供进度辅助，最终由用�
 
 Issue executes work. Epic tracks goals.
 
-Issue 是执行单元；Epic 是目标容器。Epic 不 start、不跑 agent、不创建 worktree、不进入 Plan/Build/Check/Integrate。
+Epic 不 start、不跑 agent、不创建 worktree、不进入 Plan/Build/Check/Integrate。
 
 ### Epic vs Label
 
-Label 适合分类和过滤，不适合承载目标、成功标准、进度、阻塞和下一步行动。Epic 不能降级成 label。
+Label 适合分类和过滤，不适合承载目标、进度、阻塞和下一步行动。Epic 不能降级成 label。
 
 ### Epic vs Prerequisite
 
@@ -414,61 +308,42 @@ Epic 是目标组织：
 #181、#182、#226 一起组成 workflow runtime cleanup
 ```
 
-Epic membership 不应该控制 issue 能否 start。Epic 页面可以展示依赖关系，但不替代 prerequisite。
+Epic membership 不控制 issue 能否 start，也不替代 prerequisite。
 
 ### Epic vs Explore
 
-Explore 很适合成为 Epic 的前置讨论形态：
+Explore 可以在未来成为 Epic 的前置澄清方式：
 
 ```text
-Explore session
-  -> crystallize into Epic
-  -> create / attach child Issues
+Explore session -> Create Epic -> attach / create child Issues
 ```
 
-未来可以支持：
-
-- Explore -> Create Epic
-- Explore -> Update Epic
-- Epic -> Explore this epic
+但这不是第一版必需能力。MVP 可以先从手工创建 Epic 和关联 issue 开始。
 
 ## MVP 范围
 
-第一版应保持克制：
-
-- Epic CRUD
-- Epic 列表页
-- Epic 详情页
-- 添加 / 移除 child issues
-- issue 详情页显示所属 epic
-- progress / next issue 自动投影
-- CLI 支持 `mo epic create/list/show/add/remove/close`
+- Epic create / list / detail
+- Epic mark done / close
+- 添加 / 移除 child issue
+- Issue 详情页显示所属 Epic 链接
+- Progress / next issue 自动投影
+- CLI 支持 `mo epic create/list/show/add-issue/remove-issue/close`
 
 ## 非目标
 
-第一版暂不做：
-
 - nested epic
-- milestone / gantt
-- 多层 roadmap
-- epic 自己跑 workflow
-- 复杂 owner / 权限
-- 自动批量拆 issue
-- 多 epic membership
-- 用 epic membership 替代 prerequisite
+- milestone / gantt / roadmap
+- Epic 自己跑 workflow
+- Epic 创建 worktree
 - 独立 success criterion 实体
-- 决策历史 / scope history
+- decision history / scope history
 - 自动完成判断
+- 用 Epic membership 替代 prerequisite
+- 一个 issue 同时属于多个 Epic
+- Explore crystallize directly into Epic
 
-## 产品原则
+## 就绪结论
 
-1. Epic is a named collection of issues with progress.
-2. Issue still executes work.
-3. Epic never runs workflow.
-4. Epic progress is projected from issues, not manually edited.
+该功能已经可以进入实施。核心需求足够窄：新增一个目标容器，并围绕 issue 关联、进度投影、下一步投影提供 Web + CLI 的最小闭环。
 
-## 开放问题
-
-- MVP 是否只允许一个 issue 属于一个 primary epic？
-- Epic 是否需要独立 priority，还是从子 issue 聚合最高 priority？
-- Explore crystallize 到 Epic 是否应和 create issue 并列出现？
+实施时应避免把 Epic 做成通用项目管理系统。只要用户能创建 Epic、关联 issue、查看进度和下一步、从 issue 返回 Epic，就已经交付第一版核心价值。
