@@ -655,6 +655,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
       attempt,
       failedCheck: options.failedCheck,
       worktreePath: this.worktreePath,
+      agentSessionRef: executionKind === 'agent-session' ? policy?.agentSessionRef : undefined,
     });
   }
 

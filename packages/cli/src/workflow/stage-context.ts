@@ -1,6 +1,6 @@
 import type { Stage, Issue, Project, IssueStatus } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
-import type { AgentSessionOptions } from '../agent-runtime/agent-session';
+import type { AgentSession, AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { MergeBackResult, MergeMetadata } from '../git/worktree-manager';
 import type { EventBus } from '../services/event-bus';
 import type { WorkflowLogRepo } from '../db/workflow-log-repo';
@@ -13,8 +13,31 @@ import type { StageStateService } from '../services/stage-state-service';
 import type { WorkflowApplicationService } from '../services/workflow-application-service';
 import type { TaskRunSnapshot, WorkflowWork } from './domain';
 
+export interface AgentSessionRegistry {
+  getOrCreate(ref: string, factory: () => Promise<AgentSession>): Promise<AgentSession>;
+  closeAll(): Promise<void>;
+}
 
+export class InMemoryAgentSessionRegistry implements AgentSessionRegistry {
+  private sessions = new Map<string, AgentSession>();
+  private closed = false;
 
+  async getOrCreate(ref: string, factory: () => Promise<AgentSession>): Promise<AgentSession> {
+    const existing = this.sessions.get(ref);
+    if (existing) return existing;
+    const session = await factory();
+    this.sessions.set(ref, session);
+    return session;
+  }
+
+  async closeAll(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    const sessions = [...this.sessions.values()];
+    this.sessions.clear();
+    await Promise.allSettled(sessions.map(s => s.close()));
+  }
+}
 
 type StageType = Stage;
 
@@ -71,6 +94,7 @@ export interface StageContext {
   requestedWork?: WorkflowWork;
   requestedTask?: TaskRunSnapshot;
   rejectionFeedback?: unknown;
+  agentSessionRegistry?: AgentSessionRegistry;
   signal?: AbortSignal;
   emit: (event: string, data: unknown) => void;
   log: (eventType: string, data: object) => void;

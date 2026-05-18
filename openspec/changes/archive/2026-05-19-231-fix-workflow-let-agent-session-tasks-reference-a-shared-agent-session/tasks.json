@@ -1,0 +1,205 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Carry agentSessionRef through task dispatch",
+      "spec": "specs/workflow-definition/spec.md#stage-task-policies-can-reference-named-agent-sessions",
+      "description": "Add optional `agentSessionRef` support to agent-session task execution policy and runtime input, then propagate the resolved policy value into dispatched agent-session tasks. Tasks that omit the field must continue to receive no shared-session behavior.",
+      "acceptanceCriteria": [
+        "TaskExecutionPolicy and AgentSessionTaskInput support an optional agentSessionRef field with agent-session task semantics",
+        "Config-driven task dispatch passes a configured agentSessionRef from stage task policy into AgentSessionTaskInput",
+        "Non-agent task kinds ignore agentSessionRef without changing behavior",
+        "Existing agent-session tasks that omit agentSessionRef still build task-local inputs",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts; packages/cli/src/workflow/task-runtime/types.ts; packages/cli/src/workflow/task-runtime/task-dispatch-factory-registry.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "This establishes the explicit domain reference. Do not model this as previous-task reuse or as a session group.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        205197
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Resolve named sessions per stage attempt",
+      "spec": "specs/workflow-agent/spec.md#agent-session-tasks-resolve-named-refs-through-stage-attempt-context",
+      "description": "Add a stage-attempt-scoped agent session registry and make the agent-session task handler use it when `agentSessionRef` is present. Omitted refs must preserve current task-local create/execute/close behavior, while repeated uses of the same ref in one stage attempt execute against the same real AgentSession.",
+      "acceptanceCriteria": [
+        "StageContext exposes an agent session registry or equivalent lifecycle object for named session refs",
+        "Agent-session task handler creates and closes a task-local session when agentSessionRef is absent",
+        "Agent-session task handler resolves the same agentSessionRef to the same AgentSession instance within one stage attempt",
+        "Task output for shared-session tasks preserves independent task result data and reports the real acpSessionId used by execution",
+        "A named session execution failure returns a failed task result instead of making session status decide workflow completion",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/stage-context.ts; packages/cli/src/workflow/task-runtime/agent-session-task-handler.ts",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "The registry must be keyed by logical ref within the active stage attempt, not by previous task order.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        152446
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Own shared-session lifecycle in WorkflowEngine",
+      "spec": "specs/workflow-agent/spec.md#agent-session-tasks-resolve-named-refs-through-stage-attempt-context; specs/workflow-run/spec.md#stage-attempt-boundaries-create-fresh-named-sessions",
+      "description": "Make WorkflowEngine attach a stable registry to every StageContext built for the same active stage attempt and close registries at stage terminal boundaries. A stage retry, rerun, or rewind must derive a new stage-attempt key so the same logical ref creates a fresh real session instead of appending to an old transcript.",
+      "acceptanceCriteria": [
+        "Sequential requested tasks in the same stage attempt receive the same registry for matching agentSessionRef values",
+        "The stage-attempt registry key uses workflow run and stage attempt identity through one centralized helper or equivalent boundary",
+        "Registries are closed and removed when the owning stage attempt reaches passed, failed, awaiting approval, cancelled, or pipeline-complete boundaries",
+        "Stage retry, rerun, or rewind creates a fresh real session for an already-used agentSessionRef",
+        "Registry close behavior is idempotent and best-effort so error paths do not leak running sessions",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/workflow-engine.ts; packages/cli/src/workflow/config-driven-stage-runner.ts; packages/cli/src/workflow/stage-context.ts",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Prefer persisted workflow/stage-run identity when available; if not available, centralize the strongest current discriminator so it can be tightened later.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        598309
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Share the default Plan artifact session",
+      "spec": "specs/workflow-definition/spec.md#default-plan-artifact-tasks-share-one-planning-session-reference; specs/session-timeline-ui/spec.md#session-surfaces-show-shared-transcripts-without-collapsing-task-progress",
+      "description": "Configure the default Plan artifact tasks to use one named `plan-artifacts` agentSessionRef. Proposal, specs, design, tasks, and self-review should share one coherent Plan transcript while continuing to record separate task rows, artifacts, statuses, attempts, durations, and outputs.",
+      "acceptanceCriteria": [
+        "Default Plan task policies for proposal, specs, design, tasks, and self-review set agentSessionRef to plan-artifacts",
+        "A fresh Plan run that executes all five artifact tasks creates one real Plan coder session for those tasks",
+        "The shared Plan session transcript contains separate Mohist prompt blocks for each executed artifact task",
+        "Plan task list still records independent results for proposal, specs, design, tasks, and self-review",
+        "Build and Check task session behavior is unchanged unless those tasks explicitly configure agentSessionRef",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/domain/index.ts; packages/cli/src/workflow/task-runtime/task-dispatch-factory-registry.ts",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Repair and rebase runtime tasks should remain separate operational sessions unless explicitly configured otherwise.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        209078
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Preserve restore and multi-ref semantics",
+      "spec": "specs/workflow-run/spec.md#stage-attempt-boundaries-create-fresh-named-sessions; specs/workflow-definition/spec.md#stage-task-policies-can-reference-named-agent-sessions",
+      "description": "Harden dispatch and runtime behavior so restored or skipped Plan artifact tasks remain service-call completions and do not create empty shared sessions. Also ensure one stage can define multiple named refs and route different agent-session task subsets to different real sessions.",
+      "acceptanceCriteria": [
+        "Checkpoint or disk-restored Plan artifact tasks complete without creating or touching an AgentSession solely because their policy has agentSessionRef",
+        "A later non-restored Plan task still resolves its configured plan-artifacts ref deterministically after an earlier restored or skipped task",
+        "A stage definition can configure at least two distinct agentSessionRef values and task subsets using each value resolve to separate real sessions",
+        "Task completion is not inferred from named session completion in restore, skip, failure, or mixed-ref cases",
+        "Existing service-call, repair-task, rebase-task, and Ralph execution semantics remain unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/task-runtime/task-dispatch-factory-registry.ts; packages/cli/src/workflow/task-runtime/agent-session-task-handler.ts; packages/cli/src/workflow/config-driven-stage-runner.ts",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "This task protects the core invariant that session ownership is configured by ref, not changed by skip/restore order.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        729088
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Add shared-session runtime regressions",
+      "spec": "specs/workflow-run/spec.md#taskrun-references-shared-agent-sessions-without-owning-transcripts; specs/coder-session-tracking/spec.md#shared-task-prompts-are-tracked-in-one-real-coder-session",
+      "description": "Add targeted backend tests proving shared session refs work while task progress stays independent. Cover default task-local behavior, shared Plan sessions, multiple refs in one stage, restored or skipped intermediate tasks, and fresh session creation after a stage retry or rerun.",
+      "acceptanceCriteria": [
+        "A test proves multiple Plan artifact tasks with plan-artifacts share one acpSessionId while preserving separate task results",
+        "A test proves agent-session tasks without agentSessionRef still create separate task-local sessions and close them per task",
+        "A test proves two different agentSessionRef values in one stage produce two real sessions used by their respective task subsets",
+        "A test proves restored or skipped intermediate Plan tasks do not create a session and do not change the ref used by later tasks",
+        "A test proves retry, rerun, or rewind of a stage creates a new real session for the same logical ref",
+        "Relevant workflow and task-runtime tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests/workflow/; packages/cli/tests/workflow/task-runtime/",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Prefer focused runtime tests with injected session creation over fragile UI assertions.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        500351
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Verify session projections and full workflow behavior",
+      "spec": "specs/session-timeline-ui/spec.md#session-surfaces-show-shared-transcripts-without-collapsing-task-progress; specs/coder-session-tracking/spec.md#shared-task-prompts-are-tracked-in-one-real-coder-session",
+      "description": "Run final verification that transcript, task, and session projections still present separate task progress and coherent shared transcripts. Fix any regressions found by the project build, relevant tests, or projection checks without changing the transcript UI design.",
+      "acceptanceCriteria": [
+        "Session stream or workflow log projection shows one Plan transcript with multiple task prompt blocks for shared Plan artifact execution",
+        "Issue task progress projection still shows proposal, specs, design, tasks, and self-review as independent task rows",
+        "No API or UI behavior changes for Build and Check sessions unless agentSessionRef is explicitly configured",
+        "`cd packages/cli && npm run build` succeeds",
+        "`cd packages/cli && npm test` succeeds"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "verification result in task run logs",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "This is the final integration verification task and should not introduce a transcript UI redesign.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        449349
+      ]
+    }
+  ]
+}

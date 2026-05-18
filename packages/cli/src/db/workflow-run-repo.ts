@@ -38,6 +38,7 @@ export interface WorkflowStageRun {
   stage: Stage;
   status: WorkflowStageRunStatus;
   stageOrder: number;
+  attemptSequence: number;
   approvalStatus: string | null;
   approvalOutput: unknown | null;
   approvalRequestedAt: string | null;
@@ -112,6 +113,7 @@ interface WorkflowStageRunRow {
   stage: string;
   status: string;
   stage_order: number;
+  attempt_sequence: number;
   approval_status: string | null;
   approval_output: string | null;
   approval_requested_at: string | null;
@@ -180,6 +182,7 @@ function rowToWorkflowStageRun(row: WorkflowStageRunRow): WorkflowStageRun {
     stage: row.stage as Stage,
     status: row.status as WorkflowStageRunStatus,
     stageOrder: row.stage_order,
+    attemptSequence: row.attempt_sequence,
     approvalStatus: row.approval_status,
     approvalOutput: row.approval_output ? JSON.parse(row.approval_output) : null,
     approvalRequestedAt: row.approval_requested_at,
@@ -429,7 +432,7 @@ export class WorkflowRunRepo {
       [row.id],
     );
 
-    const stageRuns = stageRows.map((stageRow): StageRunSnapshot => {
+  const stageRuns = stageRows.map((stageRow): StageRunSnapshot => {
       const taskRows = this.db.all<WorkflowTaskRow>(
         'SELECT * FROM workflow_tasks WHERE stage_run_id = ? ORDER BY task_order ASC, task_id ASC',
         [stageRow.id],
@@ -438,10 +441,11 @@ export class WorkflowRunRepo {
         'SELECT * FROM workflow_checks WHERE stage_run_id = ? ORDER BY check_name ASC',
         [stageRow.id],
       );
-  const stageSnapshot: StageRunSnapshot = {
+      const stageSnapshot: StageRunSnapshot = {
         stage: stageRow.stage as Stage,
         status: stageRow.status as WorkflowStageRunStatus,
         order: stageRow.stage_order,
+        attemptSequence: stageRow.attempt_sequence,
         tasks: taskRows.map(taskRowToSnapshot),
         checks: orderCheckSnapshots(stageRow.stage as Stage, checkRows.map(checkRowToSnapshot)),
         approval: approvalFromStageRow(stageRow),
@@ -496,13 +500,14 @@ export class WorkflowRunRepo {
 
       if (existingStage) {
         this.db.run(
-          `UPDATE workflow_stage_runs
-           SET status = ?, stage_order = ?, approval_status = ?, approval_output = ?, approval_requested_at = ?,
+           `UPDATE workflow_stage_runs
+           SET status = ?, stage_order = ?, attempt_sequence = ?, approval_status = ?, approval_output = ?, approval_requested_at = ?,
                approval_responded_at = ?, started_at = ?, completed_at = ?, build_work_source_state = ?, updated_at = ?
-           WHERE id = ?`,
+            WHERE id = ?`,
           [
             stageRun.status,
             stageRun.order,
+            stageRun.attemptSequence ?? 1,
             approval?.status ?? null,
             approval ? JSON.stringify(approval.output) : null,
             approval?.requestedAt ?? null,
@@ -517,15 +522,16 @@ export class WorkflowRunRepo {
       } else {
         this.db.run(
           `INSERT INTO workflow_stage_runs
-           (id, workflow_run_id, stage, status, stage_order, approval_status, approval_output,
+           (id, workflow_run_id, stage, status, stage_order, attempt_sequence, approval_status, approval_output,
             approval_requested_at, approval_responded_at, started_at, completed_at, build_work_source_state, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             stageRunId,
             snapshot.id,
             stageRun.stage,
             stageRun.status,
             stageRun.order,
+            stageRun.attemptSequence ?? 1,
             approval?.status ?? null,
             approval ? JSON.stringify(approval.output) : null,
             approval?.requestedAt ?? null,
@@ -742,6 +748,7 @@ export class WorkflowRunRepo {
       stage: data.stage,
       status: 'pending',
       stageOrder: data.stageOrder,
+      attemptSequence: 1,
       approvalStatus: null,
       approvalOutput: null,
       approvalRequestedAt: null,

@@ -60,6 +60,7 @@ export interface TaskExecutionPolicy {
   taskId: string;
   kind: TaskExecutionKind;
   workSourceKind?: WorkSourceKind;
+  agentSessionRef?: string;
 }
 
 export type CheckPhase = 'pre-task' | 'post-task' | 'approval';
@@ -268,6 +269,7 @@ export interface StageRunSnapshot {
   stage: Stage;
   status: StageRunStatus;
   order: number;
+  attemptSequence?: number;
   tasks: TaskRunSnapshot[];
   checks: CheckStateSnapshot[];
   approval: ApprovalSnapshot | null;
@@ -364,6 +366,7 @@ export class StageRun {
   readonly tasks: TaskRun[];
   readonly checks: CheckState[];
   status: StageRunStatus = 'pending';
+  attemptSequence = 1;
   approval: ApprovalSnapshot | null = null;
   failure: FailureDetails | null = null;
   freezePoint: FreezePoint | null = null;
@@ -644,6 +647,7 @@ export class StageRun {
       stage: this.stage,
       status: this.status,
       order: this.order,
+      attemptSequence: this.attemptSequence,
       tasks: this.tasks.map(task => task.snapshot()),
       checks: this.checks.map(check => check.snapshot()),
       approval: this.approval ? { ...this.approval } : null,
@@ -681,11 +685,11 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
       { kind: 'static', taskIds: ['proposal', 'specs', 'design', 'tasks', 'self-review'] },
     ],
     taskExecutionPolicies: [
-      { taskId: 'proposal', kind: 'agent-session' },
-      { taskId: 'specs', kind: 'agent-session' },
-      { taskId: 'design', kind: 'agent-session' },
-      { taskId: 'tasks', kind: 'agent-session' },
-      { taskId: 'self-review', kind: 'agent-session' },
+      { taskId: 'proposal', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
+      { taskId: 'specs', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
+      { taskId: 'design', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
+      { taskId: 'tasks', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
+      { taskId: 'self-review', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
       { taskId: 'fix-plan-review', kind: 'repair-task', workSourceKind: 'runtime' },
       { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
     ],
@@ -1127,6 +1131,7 @@ export class WorkflowRun {
     }
 
     stageRun.status = 'running';
+    stageRun.attemptSequence += 1;
     const wasApprovalRejected = (stageFailureReason ?? runFailureReason) === 'approval-rejected';
     const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
     const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
@@ -1238,6 +1243,7 @@ export class WorkflowRun {
     }
 
     stageRun.status = 'running';
+    stageRun.attemptSequence += 1;
     stageRun.failure = null;
     stageRun.approval = null;
 
