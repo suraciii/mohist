@@ -508,6 +508,8 @@ export class WorkflowRunRepo {
         );
       }
 
+      this.pruneStageRunChildren(stageRunId, stageRun.tasks.map(task => task.id), stageRun.checks.map(check => check.name));
+
       for (const task of stageRun.tasks) {
         this.upsertTaskInternal({
           workflowRunId: snapshot.id,
@@ -539,6 +541,28 @@ export class WorkflowRunRepo {
           runCount: check.runCount,
         });
       }
+    }
+  }
+
+  private pruneStageRunChildren(stageRunId: string, taskIds: string[], checkNames: string[]): void {
+    if (taskIds.length === 0) {
+      this.db.run('DELETE FROM workflow_tasks WHERE stage_run_id = ?', [stageRunId]);
+    } else {
+      const placeholders = taskIds.map(() => '?').join(', ');
+      this.db.run(
+        `DELETE FROM workflow_tasks WHERE stage_run_id = ? AND task_id NOT IN (${placeholders})`,
+        [stageRunId, ...taskIds],
+      );
+    }
+
+    if (checkNames.length === 0) {
+      this.db.run('DELETE FROM workflow_checks WHERE stage_run_id = ?', [stageRunId]);
+    } else {
+      const placeholders = checkNames.map(() => '?').join(', ');
+      this.db.run(
+        `DELETE FROM workflow_checks WHERE stage_run_id = ? AND check_name NOT IN (${placeholders})`,
+        [stageRunId, ...checkNames],
+      );
     }
   }
 

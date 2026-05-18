@@ -521,6 +521,21 @@ export class StageRun {
     return task;
   }
 
+  removeGeneratedTasks(): void {
+    const repairTaskIds = new Set([
+      ...(this.definition.repairPolicies?.map(policy => policy.fixTaskId) ?? []),
+      ...(this.definition.checkFailurePolicies?.map(policy => policy.fixTaskId) ?? []),
+    ]);
+    for (let index = this.tasks.length - 1; index >= 0; index--) {
+      const task = this.tasks[index];
+      const isRepairTask = [...repairTaskIds].some(fixTaskId => task.id === fixTaskId || task.id.startsWith(`${fixTaskId}:`));
+      const isRuntimeTask = task.causedBy !== null || task.id === 'rebase-branch' || task.id === 'check:converge-review-snapshot';
+      if (isRepairTask || isRuntimeTask) {
+        this.tasks.splice(index, 1);
+      }
+    }
+  }
+
   materializeTaskForPersistence(id: string, title: string, order: number): TaskRun {
     const existing = this.tasks.find(task => task.id === id);
     if (existing) return existing;
@@ -1138,6 +1153,8 @@ export class WorkflowRun {
     stageRun.status = 'running';
     stageRun.failure = null;
     stageRun.approval = null;
+
+    stageRun.removeGeneratedTasks();
 
     for (const task of stageRun.tasks) {
       task.status = 'pending';

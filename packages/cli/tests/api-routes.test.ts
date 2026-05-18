@@ -1717,6 +1717,77 @@ describe('API Routes', () => {
           fs.rmSync(tmpRerunDir, { recursive: true, force: true });
         }
       });
+
+      it('reruns review from awaiting Check approval when retry rejects a running WorkflowRun', async () => {
+        const tmpRerunDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-rerun-approval-test-'));
+
+        try {
+          const rerunProject = await projectService.create({ name: 'CheckRerunApproval', path: tmpRerunDir });
+          projectService.setCurrent(rerunProject);
+
+          const issue = issueService.create({ projectId: rerunProject.id, title: 'Rerun Stale Approval Review' });
+          issueRepo.updateStage(issue.id, Stage.Check);
+
+          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          const stageStateService = new StageStateService(db);
+
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass', output: { candidateHeadSha: 'new-head' } } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'old-head' } } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass', output: {
+            kind: 'merge-ready',
+            targetBranch: 'master',
+            strategy: 'squash',
+            baseSha: 'base',
+            candidateHeadSha: 'new-head',
+            mergeBaseSha: 'base',
+            canMerge: true,
+            conflictFiles: [],
+            checkedAt: new Date().toISOString(),
+          } } });
+
+          const changeDir = path.join(tmpRerunDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+          fs.writeFileSync(path.join(changeDir, 'review.md'), 'stale review');
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-rerun-review', status: 'pending' });
+
+          const mockWm = { getPath: () => tmpRerunDir, exists: () => true } as any;
+          const rerunApp = new Hono();
+          rerunApp.route('/api/issues', createIssueRoutes(
+            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
+            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
+            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
+          ));
+          const rerunServer = createTestServer(rerunApp);
+
+          const response = await request(rerunServer).post(`/api/issues/${issue.number}/check/rerun-review`);
+
+          expect(response.status).toBe(202);
+          expect(response.body.success).toBe(true);
+          expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+
+          const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
+          const checkRun = activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
+          expect(checkRun?.status).toBe('running');
+          expect(checkRun?.approvalStatus).toBeNull();
+          expect(checkRun?.tasks.find(task => task.taskId === 'ai-review')?.status).toBe('pending');
+          expect(checkRun?.checks.find(check => check.checkName === 'review-passed')?.status).toBe('pending');
+        } finally {
+          fs.rmSync(tmpRerunDir, { recursive: true, force: true });
+        }
+      });
     });
 
     describe('POST /api/issues/:number/check/repair-review-findings', () => {

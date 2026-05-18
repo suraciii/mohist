@@ -322,6 +322,47 @@ describe('CheckStageRunner ordering', () => {
       expect(execute).toHaveBeenCalledTimes(1);
     });
 
+    it('executes check health repair tasks from WorkflowRun', async () => {
+      const worktreePath = path.join(tmpDir, 'worktree');
+      fs.mkdirSync(worktreePath, { recursive: true });
+      const execute = vi.fn().mockResolvedValue({ success: true, text: 'fixed health' });
+      const close = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(AgentSession.create).mockResolvedValue({
+        execute,
+        close,
+      } as any);
+
+      const ctx = createMockContext(tmpDir, 42, {
+        acpOptions: { cwd: worktreePath, issueNumber: 42 } as any,
+        projectRepo: {
+          findById: vi.fn().mockReturnValue({
+            id: 'test-project',
+            name: 'test-project',
+            path: tmpDir,
+            baseBranch: 'master',
+          }),
+        } as any,
+        worktreeManager: {
+          getPath: vi.fn().mockReturnValue(worktreePath),
+        } as any,
+        requestedWork: { kind: 'task', stage: Stage.Check, taskId: 'fix-check-health' },
+      });
+      const runner = new CheckStageRunner({ worktreePath });
+
+      const result = await runner.executeTaskWork(ctx, 'fix-check-health', {
+        failedCheck: {
+          name: 'health:check',
+          status: 'fail',
+          message: 'Check health failed',
+        },
+        attempt: 1,
+      });
+
+      expect(result?.taskId).toBe('fix-check-health');
+      expect(result?.status).toBe('completed');
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
     it('normalizes mismatched task results to the requested WorkflowRun task instance id', async () => {
       const runner = new TestStageRunner();
       runner.reportedTaskResult = {

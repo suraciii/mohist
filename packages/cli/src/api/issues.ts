@@ -4257,19 +4257,22 @@ export function createIssueRoutes(
       if (workflowApplicationService && activeWorkflowRunExists(issue.id) && project) {
         const worktreePath = worktreeManager?.getPath(project.name, issue.number);
         const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
-        const result = workflowApplicationService.retryStage({
+        const workflowInput = {
           issueId: issue.id,
           stage: Stage.Check,
           tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
           startedBy: 'rerun-review',
-        });
-        if (result.decision.nextWork.kind === 'failed') {
-          workflowApplicationService.rerunStage({
-            issueId: issue.id,
-            stage: Stage.Check,
-            tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
-            startedBy: 'rerun-review',
-          });
+        };
+        try {
+          const result = workflowApplicationService.retryStage(workflowInput);
+          if (result.decision.nextWork.kind === 'failed') {
+            workflowApplicationService.rerunStage(workflowInput);
+          }
+        } catch (error) {
+          if (!(error instanceof Error) || !error.message.includes('WorkflowRun is running')) {
+            throw error;
+          }
+          workflowApplicationService.rerunStage(workflowInput);
         }
       }
 

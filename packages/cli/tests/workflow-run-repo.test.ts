@@ -171,4 +171,37 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(build.tasks).toHaveLength(2);
     expect(build.tasks.every(task => task.status === 'pending' && task.attempts === 0 && task.output === null)).toBe(true);
   });
+
+  it('persists removal of generated repair tasks when rerunning a stage', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_rerun', issueId, issueNumber });
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.recordCheckResult(Stage.Plan, { name: 'self-review-passed', status: 'pass', output: { verdict: 'PASS' } });
+    run.recordCheckResult(Stage.Plan, { name: 'health:plan', status: 'pass' });
+    run.approveStage(Stage.Plan);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', output: { verdict: 'FAIL' } });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+    run.rerunStage(Stage.Check);
+    repo.saveAggregate(run, 'tester');
+
+    const loaded = repo.loadAggregateById(run.id)!;
+    const checkStage = loaded.snapshot().stageRuns.find(stage => stage.stage === Stage.Check)!;
+    const taskRows = db.all<{ task_id: string }>(
+      `SELECT task_id FROM workflow_tasks WHERE stage_run_id = ? ORDER BY task_order ASC, task_id ASC`,
+      [`${run.id}/check`],
+    );
+
+    expect(taskRows.map(row => row.task_id)).toEqual(['ai-review']);
+    expect(checkStage.tasks.map(task => task.id)).toEqual(['ai-review']);
+  });
 });

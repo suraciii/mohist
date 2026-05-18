@@ -855,6 +855,30 @@ describe('WorkflowRun domain aggregate', () => {
       expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
     });
 
+    it('does not resurrect old repair tasks when rerunning Check', () => {
+      const run = startRun();
+      advanceToBuild(run);
+      run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+      run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+      run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+      run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+
+      run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+      run.recordCheckResult(Stage.Check, {
+        name: 'review-passed',
+        status: 'fail',
+        message: 'Review failed',
+        output: { verdict: 'FAIL' },
+      });
+      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+      const rerun = run.rerunStage(Stage.Check);
+      const checkStage = run.stageRun(Stage.Check);
+
+      expect(checkStage.tasks.map(task => task.id)).not.toContain('fix-review-findings');
+      expect(rerun.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+    });
+
     it('records review-passed check result after repair completion and re-run', () => {
       const run = startRun();
       advanceToBuild(run);
