@@ -18,4 +18,6 @@ export { StageStateService, normalizeCheckStatus, normalizeTaskStatus, type Stag
 export { WorkflowRunService } from './workflow-run-service';
 export { IssuePrerequisiteService, type IssuePrerequisiteSummary, type IssueStartEligibility, type IssuePrerequisiteView } from './issue-prerequisite-service';
 export { WorkflowApplicationService } from './workflow-application-service';
+export { AttemptReconciliationService, DatabaseAttemptEvidencePort } from './attempt-reconciliation-service';
+export type { WorkflowAttemptEvidencePort, AttemptReconciliationResult } from './attempt-reconciliation-service';
 export { BaseDriftService, evaluateBaseDrift, type BaseDriftState, type BaseDriftInput, type GitFacts, type CandidateEvidence, type WorkflowFacts, type RebaseDecision, type DeferReason, type StaleEvidence, type RebaseTaskOutput } from './base-drift-service';

@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 34;
+const SCHEMA_VERSION = 35;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -233,6 +233,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 34) {
     migrateToVersion34(db);
+  }
+  if (currentVersion < 35) {
+    migrateToVersion35(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1362,5 +1365,45 @@ function migrateToVersion34(db: DatabaseManager): void {
       db.exec('ALTER TABLE workflow_stage_runs ADD COLUMN attempt_sequence INTEGER NOT NULL DEFAULT 1');
     }
     setSchemaVersion(db, 34);
+  });
+}
+
+const CREATE_WORKFLOW_WORK_ITEM_ATTEMPTS_TABLE = `
+CREATE TABLE IF NOT EXISTS workflow_work_item_attempts (
+  id                  TEXT PRIMARY KEY,
+  workflow_run_id     TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  stage               TEXT NOT NULL,
+  work_item_type      TEXT NOT NULL,
+  work_item_id        TEXT NOT NULL,
+  attempt_number      INTEGER NOT NULL,
+  state               TEXT NOT NULL,
+  started_at          TEXT NOT NULL,
+  completed_at        TEXT,
+  output              TEXT,
+  error               TEXT,
+  diagnostic          TEXT,
+  queue_task_id       TEXT,
+  acp_session_id      TEXT,
+  coder_session_id    TEXT,
+  execution_id        TEXT,
+  process_pid         INTEGER,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  UNIQUE(workflow_run_id, stage, work_item_type, work_item_id, attempt_number)
+);
+`;
+
+const CREATE_WORKFLOW_WORK_ITEM_ATTEMPTS_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS idx_workflow_work_item_attempts_run_id ON workflow_work_item_attempts(workflow_run_id);',
+  'CREATE INDEX IF NOT EXISTS idx_workflow_work_item_attempts_latest ON workflow_work_item_attempts(workflow_run_id, stage, work_item_type, work_item_id, attempt_number DESC);',
+];
+
+function migrateToVersion35(db: DatabaseManager): void {
+  db.transaction(() => {
+    db.exec(CREATE_WORKFLOW_WORK_ITEM_ATTEMPTS_TABLE);
+    for (const indexSql of CREATE_WORKFLOW_WORK_ITEM_ATTEMPTS_INDEXES) {
+      db.exec(indexSql);
+    }
+    setSchemaVersion(db, 35);
   });
 }

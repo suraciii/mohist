@@ -120,6 +120,10 @@ export function hydrateWorkflowRun(
       task.output = taskSnapshot.output;
       task.reason = taskSnapshot.reason;
       task.causedBy = isCausedByMetadata(taskSnapshot.causedBy) ? { ...taskSnapshot.causedBy } : null;
+      task.latestAttempt = taskSnapshot.latestAttempt ? { ...taskSnapshot.latestAttempt } : null;
+      if (!task.latestAttempt) {
+        task.synthesizeLatestAttempt(new Date().toISOString());
+      }
     }
 
     stageRun.checks.splice(0, stageRun.checks.length);
@@ -129,6 +133,10 @@ export function hydrateWorkflowRun(
       check.message = checkSnapshot.message;
       check.output = checkSnapshot.output;
       check.runCount = checkSnapshot.runCount;
+      check.latestAttempt = checkSnapshot.latestAttempt ? { ...checkSnapshot.latestAttempt } : null;
+      if (!check.latestAttempt) {
+        check.synthesizeLatestAttempt(new Date().toISOString());
+      }
     }
   }
 
@@ -206,6 +214,7 @@ export function repairWorkflowRunSnapshot(
           output: null,
           reason: null,
           causedBy: null,
+          latestAttempt: null,
         });
       }
     } else if (shouldRepairStaticStage) {
@@ -223,6 +232,7 @@ export function repairWorkflowRunSnapshot(
           output: null,
           reason: null,
           causedBy: null,
+          latestAttempt: null,
         });
       }
     }
@@ -237,6 +247,7 @@ export function repairWorkflowRunSnapshot(
           message: null,
           output: null,
           runCount: 0,
+          latestAttempt: null,
         });
       }
     }

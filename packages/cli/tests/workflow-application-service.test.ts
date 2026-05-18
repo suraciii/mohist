@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { WorkflowApplicationService, type WorkflowRunProjectionPort, type WorkflowRunRepositoryPort } from '../src/services/workflow-application-service';
 import { WorkflowRun } from '../src/workflow/domain';
 import { Stage } from '../src/types';
+import type { WorkflowAttemptEvidencePort } from '../src/services/attempt-reconciliation-service';
 
 function createRunningPlanRun(issueId = 'issue-1'): WorkflowRun {
   return WorkflowRun.startWorkflow({ id: 'wr-1', issueId, issueNumber: 188 }).run;
@@ -167,6 +168,8 @@ describe('WorkflowApplicationService', () => {
     expect(calls).toEqual([
       'repo.loadRunningAggregate',
       'repo.loadLatestAggregate',
+      'repo.loadRunningAggregate',
+      'repo.loadLatestAggregate',
       'repo.saveAggregate:running',
       'projection.apply:running:task',
     ]);
@@ -199,6 +202,8 @@ describe('WorkflowApplicationService', () => {
 
     expect(result.nextWork.kind).toBe('failed');
     expect(calls).toEqual([
+      'repo.loadRunningAggregate',
+      'repo.loadLatestAggregate',
       'repo.loadRunningAggregate',
       'repo.loadLatestAggregate',
       'repo.saveAggregate:failed',
@@ -410,7 +415,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     expect(result.message).toContain('No workflow run found');
   });
 
-  it('returns no-failed-workflow-run when run is not failed', () => {
+  it('returns no-retryable-failed-work when run is not failed', () => {
     const run = createRunningPlanRun();
     const repo: WorkflowRunRepositoryPort = {
       createOrLoadActiveAggregate: () => run,
@@ -423,8 +428,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
 
     expect(result.available).toBe(false);
-    expect(result.reason).toBe('no-failed-workflow-run');
-    expect(result.message).toContain('No failed workflow run');
+    expect(result.reason).toBe('no-retryable-failed-work');
   });
 
   it('returns stage-mismatch when current stage differs', () => {
@@ -446,7 +450,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     expect(result.reason).toBe('stage-mismatch');
   });
 
-  it('returns no-failed-workflow-run when run status is not failed', () => {
+  it('returns no-retryable-failed-work when run status is not failed', () => {
     const run = createRunningPlanRun();
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
@@ -468,11 +472,12 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     const result = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
 
     expect(result.available).toBe(false);
-    expect(result.reason).toBe('no-failed-workflow-run');
+    expect(result.reason).toBe('no-retryable-failed-work');
   });
 
   it('returns available when run is failed with a failed task', () => {
     const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', '2026-05-19T00:00:00.000Z', { executionId: 'plan-188-proposal-1' });
     run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
     expect(run.snapshot().status).toBe('failed');
 
@@ -495,6 +500,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
+    run.startCheckAttempt(Stage.Plan, 'proposal-complete', '2026-05-19T00:00:00.000Z', { executionId: 'plan-188-proposal-complete-check' });
     run.recordCheckResult(Stage.Plan, { name: 'proposal-complete', status: 'fail', message: 'incomplete' });
     expect(run.snapshot().status).toBe('failed');
 
@@ -514,6 +520,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
 
   it('returns available when latest aggregate is failed even when active is null', () => {
     const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', '2026-05-19T00:00:00.000Z', { executionId: 'plan-188-proposal-1' });
     run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
     expect(run.snapshot().status).toBe('failed');
 
@@ -541,5 +548,298 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
 
     expect(result.available).toBe(true);
     expect(calls).toContain('loadLatestAggregate');
+  });
+
+  it('reconciles only attempts without matching live evidence', () => {
+    const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString(), { executionId: 'plan-188-proposal-1' });
+    run.startTaskAttempt(Stage.Plan, 'specs', new Date().toISOString(), { executionId: 'plan-188-specs-1' });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+    const evidencePort: WorkflowAttemptEvidencePort = {
+      hasActiveQueueTask: () => false,
+      hasLiveProcess: () => true,
+      findQueueTaskById: () => null,
+      findRunningCoderSessionsByAttemptEvidence: attempt => {
+        if (attempt.executionId === 'plan-188-proposal-1') {
+          return [{ id: 'session-1', issueId: 'issue-1', acpSessionId: 'acp-1', executionId: 'plan-188-proposal-1', taskDescription: null, createdAt: '', updatedAt: '', stage: 'plan', title: null, processPid: 321, status: 'running', completedAt: null, failureReason: null, model: null, coderType: null, lastDataAt: null, probeSentAt: null, probeDeadlineAt: null }];
+        }
+        return [];
+      },
+    };
+    service.setEvidencePort(evidencePort);
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(true);
+    expect(result.interruptedCount).toBe(1);
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('running');
+    expect(run.stageRun(Stage.Plan).findTask('specs').latestAttempt?.state).toBe('interrupted');
+  });
+
+  it('does not treat unrelated issue queue activity as live evidence for an attempt', () => {
+    const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString(), { executionId: 'stale-execution' });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+    const evidencePort: WorkflowAttemptEvidencePort = {
+      hasActiveQueueTask: () => true,
+      hasLiveProcess: () => false,
+      findQueueTaskById: () => null,
+      findRunningCoderSessionsByAttemptEvidence: () => [],
+    };
+    service.setEvidencePort(evidencePort);
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(true);
+    expect(result.interruptedCount).toBe(1);
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('interrupted');
+  });
+
+  it('keeps running attempt live when only active issue queue evidence exists', () => {
+    const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString());
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+    const evidencePort: WorkflowAttemptEvidencePort = {
+      hasActiveQueueTask: () => true,
+      hasLiveProcess: () => false,
+      findQueueTaskById: () => null,
+      findRunningCoderSessionsByAttemptEvidence: () => [],
+    };
+    service.setEvidencePort(evidencePort);
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(false);
+    expect(result.interruptedCount).toBe(0);
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('running');
+  });
+
+  it('keeps attempt running when queue evidence is stale but matching session process is live', () => {
+    const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString(), {
+      queueTaskId: 'stale-queue-task',
+      executionId: 'live-execution',
+    });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+    const evidencePort: WorkflowAttemptEvidencePort = {
+      hasActiveQueueTask: () => false,
+      hasLiveProcess: () => true,
+      findQueueTaskById: () => ({ status: 'completed' }),
+      findRunningCoderSessionsByAttemptEvidence: () => [{
+        id: 'session-1',
+        issueId: 'issue-1',
+        acpSessionId: 'acp-1',
+        executionId: 'live-execution',
+        taskDescription: null,
+        createdAt: '',
+        updatedAt: '',
+        stage: 'plan',
+        title: null,
+        processPid: 321,
+        status: 'running',
+        completedAt: null,
+        failureReason: null,
+        model: null,
+        coderType: null,
+        lastDataAt: null,
+        probeSentAt: null,
+        probeDeadlineAt: null,
+      }],
+    };
+    service.setEvidencePort(evidencePort);
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(false);
+    expect(result.interruptedCount).toBe(0);
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('running');
+  });
+
+  it('reconciles PID-less running coder session evidence without liveness proof', () => {
+    const run = createRunningPlanRun();
+    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString(), {
+      executionId: 'pidless-live-execution',
+      acpSessionId: 'acp-pidless',
+    });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+    const evidencePort: WorkflowAttemptEvidencePort = {
+      hasActiveQueueTask: () => false,
+      hasLiveProcess: () => false,
+      findQueueTaskById: () => null,
+      findRunningCoderSessionsByAttemptEvidence: () => [{
+        id: 'session-1',
+        issueId: 'issue-1',
+        acpSessionId: 'acp-pidless',
+        executionId: 'pidless-live-execution',
+        taskDescription: null,
+        createdAt: '',
+        updatedAt: '',
+        stage: 'plan',
+        title: null,
+        processPid: null,
+        status: 'running',
+        completedAt: null,
+        failureReason: null,
+        model: null,
+        coderType: null,
+        lastDataAt: null,
+        probeSentAt: null,
+        probeDeadlineAt: null,
+      }],
+    };
+    service.setEvidencePort(evidencePort);
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(true);
+    expect(result.interruptedCount).toBe(1);
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('interrupted');
+  });
+
+  it('reconciles stale running latest attempts on failed latest runs', () => {
+    const calls: string[] = [];
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+    const proposalTask = run.stageRun(Stage.Plan).findTask('proposal');
+    proposalTask.latestAttempt = {
+      ...proposalTask.latestAttempt!,
+      state: 'running',
+      completedAt: null,
+      error: null,
+      diagnostic: null,
+      executionId: 'stale-failed-run-attempt',
+    };
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => {
+        calls.push('repo.loadActiveAggregate');
+        return null;
+      },
+      loadRunningAggregate: () => {
+        calls.push('repo.loadRunningAggregate');
+        return null;
+      },
+      loadLatestAggregate: () => {
+        calls.push('repo.loadLatestAggregate');
+        return run;
+      },
+      saveAggregate: saved => {
+        calls.push(`repo.saveAggregate:${saved.snapshot().status}:${saved.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state}`);
+      },
+    };
+    const projection: WorkflowRunProjectionPort = {
+      apply: input => calls.push(`projection.apply:${input.run.snapshot().status}:${input.decision.nextWork.kind}`),
+    };
+    const service = new WorkflowApplicationService(repo, projection);
+    const evidencePort: WorkflowAttemptEvidencePort = {
+      hasActiveQueueTask: () => false,
+      hasLiveProcess: () => false,
+      findQueueTaskById: () => null,
+      findRunningCoderSessionsByAttemptEvidence: () => [],
+    };
+    service.setEvidencePort(evidencePort);
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(true);
+    expect(result.interruptedCount).toBe(1);
+    expect(run.snapshot().status).toBe('failed');
+    expect(run.stageRun(Stage.Plan).findTask('proposal').status).toBe('pending');
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('interrupted');
+    expect(run.workflowRecoverySummary()).toBe('waiting-for-recovery');
+    expect(calls).toEqual([
+      'repo.loadRunningAggregate',
+      'repo.loadActiveAggregate',
+      'repo.loadLatestAggregate',
+      'repo.saveAggregate:failed:interrupted',
+      'projection.apply:failed:failed',
+    ]);
+  });
+
+  it('derives recovery from the current work item after a repairable check failure', () => {
+    const run = createRunningPlanRun();
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.startCheckAttempt(Stage.Plan, 'self-review-passed', '2026-05-19T00:00:00.000Z', { executionId: 'plan-188-self-review-passed-check' });
+    run.recordCheckResult(Stage.Plan, {
+      name: 'self-review-passed',
+      status: 'fail',
+      message: 'Self review failed',
+    });
+
+    expect(run.stageRun(Stage.Plan).findCheck('self-review-passed').latestAttempt?.state).toBe('failed');
+    expect(run.nextWork()).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'fix-plan-review' });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const recovery = service.getRecoveryProjection('issue-1');
+    expect(recovery?.currentWorkItem).toEqual({
+      type: 'task',
+      id: 'fix-plan-review',
+      title: 'Fix plan review findings',
+    });
+    expect(recovery?.latestAttemptState).toBeNull();
+    expect(recovery?.allowedActions).not.toContain('retry');
+
+    const retry = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
+    expect(retry.available).toBe(false);
   });
 });

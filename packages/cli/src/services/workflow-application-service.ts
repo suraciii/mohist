@@ -9,8 +9,12 @@ import {
   type WorkflowDecision,
   type WorkflowRun,
   type WorkflowWork,
+  type WorkflowRecoverySummary,
+  type WorkItemAttemptState,
 } from '../workflow/domain';
 import { WorkflowRunProjection } from './workflow-run-projection';
+import type { WorkflowAttemptEvidencePort, AttemptReconciliationResult } from './attempt-reconciliation-service';
+import { AttemptReconciliationService } from './attempt-reconciliation-service';
 
 export interface WorkflowRunRepositoryPort {
   createOrLoadActiveAggregate(data: { issueId: string; issueNumber: number; startedBy?: string | null; tasksPath?: string }): WorkflowRun;
@@ -39,7 +43,20 @@ export type RetryRejectionReason =
   | 'no-retryable-failed-work'
   | 'missing-project'
   | 'missing-worktree'
-  | 'missing-change-artifacts';
+  | 'missing-change-artifacts'
+  | 'latest-attempt-interrupted'
+  | 'latest-attempt-running';
+
+export interface RecoveryProjection {
+  currentWorkItem: {
+    type: 'task' | 'check';
+    id: string;
+    title: string;
+  } | null;
+  latestAttemptState: WorkItemAttemptState | null;
+  workflowSummaryState: WorkflowRecoverySummary | null;
+  allowedActions: string[];
+}
 
 export interface RetryAvailability {
   available: true;
@@ -57,6 +74,7 @@ export type RetryCheckResult = RetryAvailability | RetryRejection;
 export class WorkflowApplicationService {
   private repo: WorkflowRunRepositoryPort;
   private projection: WorkflowRunProjectionPort;
+  private reconciliationService: AttemptReconciliationService | null;
 
   constructor(db: DatabaseManager);
   constructor(repo: WorkflowRunRepositoryPort, projection: WorkflowRunProjectionPort);
@@ -64,14 +82,198 @@ export class WorkflowApplicationService {
     if (projection) {
       this.repo = dbOrRepo as WorkflowRunRepositoryPort;
       this.projection = projection;
+      this.reconciliationService = null;
     } else {
       const db = dbOrRepo as DatabaseManager;
       this.repo = new WorkflowRunRepo(db);
       this.projection = new WorkflowRunProjection(db);
+      this.reconciliationService = AttemptReconciliationService.fromDatabase(db);
     }
   }
 
+  setEvidencePort(evidencePort: WorkflowAttemptEvidencePort): void {
+    this.reconciliationService = new AttemptReconciliationService(evidencePort);
+  }
+
+  reconcileIssueWorkflow(issueId: string, options: WorkflowCommandOptions = {}): AttemptReconciliationResult {
+    const run = this.loadAggregateForReconciliation(issueId, options.tasksPath);
+    if (!run) {
+      return { reconciled: false, interruptedCount: 0, reasons: [], interruptedAttempts: [] };
+    }
+
+    const stageRun = run.currentStageRun();
+    if (!stageRun) {
+      return { reconciled: false, interruptedCount: 0, reasons: [], interruptedAttempts: [] };
+    }
+
+    const runningAttempts: import('../workflow/domain').WorkItemAttempt[] = [];
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'running') {
+        runningAttempts.push(task.latestAttempt);
+      }
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'running') {
+        runningAttempts.push(check.latestAttempt);
+      }
+    }
+
+    if (runningAttempts.length === 0) {
+      return { reconciled: false, interruptedCount: 0, reasons: [], interruptedAttempts: [] };
+    }
+
+    if (!this.reconciliationService) {
+      return { reconciled: false, interruptedCount: 0, reasons: [], interruptedAttempts: [] };
+    }
+
+    const result = this.reconciliationService.reconcileRunningAttempts(issueId, runningAttempts);
+
+    if (result.reconciled) {
+      run.interruptSpecificWorkAttempts(result.interruptedAttempts, 'agent-lost', 'reconciliation: no live execution evidence');
+      this.repo.saveAggregate(run);
+      const decision: WorkflowDecision = { events: [], nextWork: run.nextWork() };
+      this.projection.apply({ run, decision, sessionId: options.sessionId });
+    }
+
+    return result;
+  }
+
+  private loadAggregateForReconciliation(issueId: string, tasksPath?: string): WorkflowRun | null {
+    const running = this.repo.loadRunningAggregate?.(issueId, { tasksPath })
+      ?? this.repo.loadActiveAggregate(issueId, { tasksPath });
+    if (running) return running;
+    return this.repo.loadLatestAggregate?.(issueId, { tasksPath }) ?? null;
+  }
+
+  getWorkflowRecoverySummary(issueId: string, options: WorkflowCommandOptions = {}): WorkflowRecoverySummary | null {
+    this.reconcileIssueWorkflow(issueId, options);
+    const run = this.repo.loadLatestAggregate?.(issueId, { tasksPath: options.tasksPath })
+      ?? this.repo.loadActiveAggregate(issueId, { tasksPath: options.tasksPath });
+    if (!run) return null;
+    return run.workflowRecoverySummary();
+  }
+
+  getRecoveryProjection(issueId: string, options: WorkflowCommandOptions = {}): RecoveryProjection | null {
+    this.reconcileIssueWorkflow(issueId, options);
+    const run = this.repo.loadLatestAggregate?.(issueId, { tasksPath: options.tasksPath })
+      ?? this.repo.loadActiveAggregate(issueId, { tasksPath: options.tasksPath });
+    if (!run) return null;
+
+    const workflowSummaryState = run.workflowRecoverySummary();
+    const stageRun = run.currentStageRun();
+
+    if (!stageRun) {
+      return {
+        currentWorkItem: null,
+        latestAttemptState: null,
+        workflowSummaryState,
+        allowedActions: this.computeAllowedActions(null, workflowSummaryState),
+      };
+    }
+
+    const blocking = this.findCurrentWorkItem(stageRun);
+    return {
+      currentWorkItem: blocking ? { type: blocking.type, id: blocking.id, title: blocking.title } : null,
+      latestAttemptState: blocking?.attemptState ?? null,
+      workflowSummaryState,
+      allowedActions: this.computeAllowedActions(blocking?.attemptState ?? null, workflowSummaryState),
+    };
+  }
+
+  private findCurrentWorkItem(stageRun: import('../workflow/domain').StageRun): {
+    type: 'task' | 'check';
+    id: string;
+    title: string;
+    attemptState: WorkItemAttemptState | null;
+  } | null {
+    const failedTask = stageRun.tasks.find(task => task.status === 'failed' || task.status === 'skipped');
+    if (failedTask) return {
+      type: 'task',
+      id: failedTask.id,
+      title: failedTask.title,
+      attemptState: failedTask.latestAttempt?.state ?? null,
+    };
+    const failedCheck = stageRun.checks.find(check => check.status === 'failed' || check.status === 'error');
+    if (failedCheck) return {
+      type: 'check',
+      id: failedCheck.name,
+      title: failedCheck.title,
+      attemptState: failedCheck.latestAttempt?.state ?? null,
+    };
+    const preTaskCheck = stageRun.nextCheck('pre-task');
+    if (preTaskCheck) return {
+      type: 'check',
+      id: preTaskCheck.name,
+      title: preTaskCheck.title,
+      attemptState: preTaskCheck.latestAttempt?.state ?? null,
+    };
+    const task = stageRun.nextTask();
+    if (task) return { type: 'task', id: task.id, title: task.title, attemptState: task.latestAttempt?.state ?? null };
+    const postTaskCheck = stageRun.nextCheck('post-task');
+    if (postTaskCheck) return {
+      type: 'check',
+      id: postTaskCheck.name,
+      title: postTaskCheck.title,
+      attemptState: postTaskCheck.latestAttempt?.state ?? null,
+    };
+    const blocking = this.findBlockingAttemptWorkItem(stageRun);
+    if (blocking) return blocking;
+    return null;
+  }
+
+  private findBlockingAttemptWorkItem(stageRun: import('../workflow/domain').StageRun): {
+    type: 'task' | 'check';
+    id: string;
+    title: string;
+    attemptState: WorkItemAttemptState;
+  } | null {
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'running') {
+        return { type: 'task', id: task.id, title: task.title, attemptState: 'running' };
+      }
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'running') {
+        return { type: 'check', id: check.name, title: check.title, attemptState: 'running' };
+      }
+    }
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'interrupted') {
+        return { type: 'task', id: task.id, title: task.title, attemptState: 'interrupted' };
+      }
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'interrupted') {
+        return { type: 'check', id: check.name, title: check.title, attemptState: 'interrupted' };
+      }
+    }
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'failed') {
+        return { type: 'task', id: task.id, title: task.title, attemptState: 'failed' };
+      }
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'failed') {
+        return { type: 'check', id: check.name, title: check.title, attemptState: 'failed' };
+      }
+    }
+    return null;
+  }
+
+  private computeAllowedActions(attemptState: WorkItemAttemptState | null, workflowSummary: WorkflowRecoverySummary): string[] {
+    if (attemptState === 'running') return ['wait', 'stop'];
+    if (attemptState === 'failed') return ['retry'];
+    if (attemptState === 'interrupted') return ['resume', 'rerun', 'inspect'];
+    if (attemptState === 'completed') return [];
+    if (workflowSummary === 'awaiting-approval') return ['approve', 'reject'];
+    if (workflowSummary === 'completed') return [];
+    if (workflowSummary === 'waiting-for-recovery') return ['rerun', 'inspect'];
+    return [];
+  }
+
   checkRetryAvailability(input: { issueId: string; stage: Stage; tasksPath?: string }): RetryCheckResult {
+    this.reconcileIssueWorkflow(input.issueId, { tasksPath: input.tasksPath });
+
     const run = this.repo.loadLatestAggregate?.(input.issueId, { tasksPath: input.tasksPath })
       ?? this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
 
@@ -80,14 +282,6 @@ export class WorkflowApplicationService {
         available: false as const,
         reason: 'no-failed-workflow-run' as const,
         message: `No workflow run found for this issue. The pipeline may not have started yet.`,
-      };
-    }
-
-    if (run.snapshot().status !== 'failed') {
-      return {
-        available: false as const,
-        reason: 'no-failed-workflow-run' as const,
-        message: `No failed workflow run to retry. Current status is '${run.snapshot().status}'.`,
       };
     }
 
@@ -100,18 +294,38 @@ export class WorkflowApplicationService {
     }
 
     const stageRun = run.stageRun(input.stage);
-    const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
-    const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
-
-    if (!failedTask && !failedCheck) {
+    if (!stageRun) {
       return {
         available: false as const,
-        reason: 'no-retryable-failed-work' as const,
-        message: `The workflow run shows a failure, but no failed task or check was found in the '${input.stage}' stage.`,
+        reason: 'stage-mismatch' as const,
+        message: `No stage run found for '${input.stage}'.`,
       };
     }
 
-    return { available: true as const, reason: null };
+    const currentWork = this.findCurrentWorkItem(stageRun);
+    if (currentWork?.attemptState === 'running') {
+      return {
+        available: false as const,
+        reason: 'latest-attempt-running' as const,
+        message: `Cannot retry: ${currentWork.type} '${currentWork.id}' is still running. Wait for it to complete or stop it first.`,
+      };
+    }
+    if (currentWork?.attemptState === 'interrupted') {
+      return {
+        available: false as const,
+        reason: 'latest-attempt-interrupted' as const,
+        message: `Cannot retry: ${currentWork.type} '${currentWork.id}' was interrupted, not failed. Interrupted work is not retryable as failed work. Use resume, rerun stage, or inspect instead.`,
+      };
+    }
+    if (currentWork?.attemptState === 'failed') {
+      return { available: true as const, reason: null };
+    }
+
+    return {
+      available: false as const,
+      reason: 'no-retryable-failed-work' as const,
+      message: `No failed latest attempt was found for the current work item in the '${input.stage}' stage.`,
+    };
   }
 
   startWorkflow(input: { issueId: string; issueNumber: number } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
@@ -127,6 +341,27 @@ export class WorkflowApplicationService {
 
   completeTask(input: { issueId: string; stage: Stage; taskId: string; result: TaskResultInput } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
     return this.updateActiveRun(input.issueId, input, run => run.completeTask(input.stage, input.taskId, input.result));
+  }
+
+  startTaskAttempt(input: { issueId: string; stage: Stage; taskId: string; evidence?: Partial<Pick<import('../workflow/domain').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
+    const run = this.loadActive(input.issueId);
+    run.startTaskAttempt(input.stage, input.taskId, new Date().toISOString(), input.evidence);
+    this.repo.saveAggregate(run);
+  }
+
+  startCheckAttempt(input: { issueId: string; stage: Stage; checkName: string; evidence?: Partial<Pick<import('../workflow/domain').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
+    const run = this.loadActive(input.issueId);
+    run.startCheckAttempt(input.stage, input.checkName, new Date().toISOString(), input.evidence);
+    this.repo.saveAggregate(run);
+  }
+
+  interruptRunningWorkAttempts(input: { issueId: string; reason: string; diagnostic?: string | null }): void {
+    const run = this.repo.loadActiveAggregate(input.issueId);
+    if (!run) return;
+    run.interruptRunningWorkAttempts(input.reason, input.diagnostic ?? null);
+    this.repo.saveAggregate(run);
+    const decision: WorkflowDecision = { events: [], nextWork: run.nextWork() };
+    this.projection.apply({ run, decision });
   }
 
   recordCheckResult(input: { issueId: string; stage: Stage; result: CheckResultInput } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
@@ -153,6 +388,7 @@ export class WorkflowApplicationService {
   }
 
   retryStageOrReject(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { ok: true; run: WorkflowRun; decision: WorkflowDecision } | { ok: false; reason: RetryRejectionReason; message: string } {
+    this.reconcileIssueWorkflow(input.issueId, input);
     const availability = this.checkRetryAvailability(input);
     if (!availability.available) {
       return { ok: false, reason: availability.reason, message: availability.message };
@@ -187,6 +423,7 @@ export class WorkflowApplicationService {
   }
 
   rerunStage(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    this.reconcileIssueWorkflow(input.issueId, input);
     const run = this.repo.loadRunningAggregate
       ? this.repo.loadRunningAggregate(input.issueId, { tasksPath: input.tasksPath })
       : this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
@@ -299,6 +536,7 @@ export class WorkflowApplicationService {
   }
 
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {
+    this.reconcileIssueWorkflow(issueId, options);
     const run = this.loadForDecision(issueId, options.tasksPath);
     const nextWork = run.nextWork();
     if (nextWork.kind === 'failed') {

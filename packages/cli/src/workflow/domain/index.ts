@@ -4,7 +4,9 @@ export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
 export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type CheckRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
-export type FailureReason = 'task-failed' | 'check-unrepaired' | 'approval-rejected' | 'post-merge-health-failed';
+export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted';
+export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed';
+export type FailureReason = 'task-failed' | 'check-unrepaired' | 'approval-rejected' | 'post-merge-health-failed' | 'work-interrupted';
 
 export interface CausedByMetadata {
   type: 'check-failure' | 'task-failure' | 'branch-changed' | 'conflict' | 'retry' | 'user-action' | 'system-policy';
@@ -20,6 +22,21 @@ export interface FailureDetails {
   checkName?: string;
   message?: string;
   causedBy?: CausedByMetadata;
+}
+
+export interface WorkItemAttempt {
+  state: WorkItemAttemptState;
+  attemptNumber: number;
+  startedAt: string;
+  completedAt: string | null;
+  output: unknown | null;
+  error: string | null;
+  diagnostic: string | null;
+  queueTaskId: string | null;
+  acpSessionId: string | null;
+  coderSessionId: string | null;
+  executionId: string | null;
+  processPid: number | null;
 }
 
 export interface TaskDefinition {
@@ -233,6 +250,7 @@ export interface TaskRunSnapshot {
   output: unknown | null;
   reason: string | null;
   causedBy: CausedByMetadata | null;
+  latestAttempt: WorkItemAttempt | null;
 }
 
 export interface CheckStateSnapshot {
@@ -242,6 +260,7 @@ export interface CheckStateSnapshot {
   message: string | null;
   output: unknown | null;
   runCount: number;
+  latestAttempt: WorkItemAttempt | null;
 }
 
 export interface VerificationEvidence {
@@ -307,6 +326,7 @@ export class TaskRun {
   output: unknown | null = null;
   reason: string | null = null;
   causedBy: CausedByMetadata | null = null;
+  latestAttempt: WorkItemAttempt | null = null;
 
   constructor(
     readonly id: string,
@@ -322,6 +342,17 @@ export class TaskRun {
     return this.status === 'completed';
   }
 
+  resetForFreshAttempt(): void {
+    this.status = 'pending';
+    this.attempts = 0;
+    this.duration = 0;
+    this.artifacts = [];
+    this.output = null;
+    this.reason = null;
+    this.causedBy = null;
+    this.latestAttempt = null;
+  }
+
   snapshot(): TaskRunSnapshot {
     return {
       id: this.id,
@@ -335,7 +366,123 @@ export class TaskRun {
       output: this.output,
       reason: this.reason,
       causedBy: this.causedBy,
+      latestAttempt: this.latestAttempt,
     };
+  }
+
+  startWorkAttempt(now: string, evidence: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> = {}): WorkItemAttempt {
+    this.status = 'running';
+    const attemptNumber = this.latestAttempt ? this.latestAttempt.attemptNumber + 1 : 1;
+    this.latestAttempt = {
+      state: 'running',
+      attemptNumber,
+      startedAt: now,
+      completedAt: null,
+      output: null,
+      error: null,
+      diagnostic: null,
+      queueTaskId: evidence.queueTaskId ?? null,
+      acpSessionId: evidence.acpSessionId ?? null,
+      coderSessionId: evidence.coderSessionId ?? null,
+      executionId: evidence.executionId ?? null,
+      processPid: evidence.processPid ?? null,
+    };
+    return this.latestAttempt;
+  }
+
+  completeWorkAttempt(result: { output?: unknown; artifacts?: string[]; duration?: number; reason?: string }, now: string): WorkItemAttempt | null {
+    if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
+    this.status = 'completed';
+    this.attempts = this.latestAttempt.attemptNumber;
+    this.output = result.output ?? this.output;
+    this.artifacts = result.artifacts ?? this.artifacts;
+    this.duration = result.duration ?? this.duration;
+    this.reason = result.reason ?? this.reason;
+    this.latestAttempt = {
+      ...this.latestAttempt,
+      state: 'completed',
+      completedAt: now,
+      output: result.output ?? null,
+    };
+    return this.latestAttempt;
+  }
+
+  failWorkAttempt(error: string, diagnostic: string | null = null, now: string): WorkItemAttempt | null {
+    if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
+    this.status = 'failed';
+    this.attempts = this.latestAttempt.attemptNumber;
+    this.reason = error;
+    this.latestAttempt = {
+      ...this.latestAttempt,
+      state: 'failed',
+      completedAt: now,
+      error,
+      diagnostic,
+    };
+    return this.latestAttempt;
+  }
+
+  interruptWorkAttempt(reason: string, diagnostic: string | null = null, now: string): WorkItemAttempt | null {
+    if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
+    this.status = 'pending';
+    this.latestAttempt = {
+      ...this.latestAttempt,
+      state: 'interrupted',
+      completedAt: now,
+      error: reason,
+      diagnostic,
+    };
+    return this.latestAttempt;
+  }
+
+  synthesizeLatestAttempt(now: string): void {
+    if (this.latestAttempt) return;
+    if (this.status === 'completed') {
+      this.latestAttempt = {
+        state: 'completed',
+        attemptNumber: Math.max(1, this.attempts),
+        startedAt: now,
+        completedAt: now,
+        output: this.output,
+        error: null,
+        diagnostic: null,
+        queueTaskId: null,
+        acpSessionId: null,
+        coderSessionId: null,
+        executionId: null,
+        processPid: null,
+      };
+    } else if (this.status === 'failed' || this.status === 'skipped') {
+      this.latestAttempt = {
+        state: 'failed',
+        attemptNumber: Math.max(1, this.attempts),
+        startedAt: now,
+        completedAt: now,
+        output: this.output,
+        error: this.reason,
+        diagnostic: null,
+        queueTaskId: null,
+        acpSessionId: null,
+        coderSessionId: null,
+        executionId: null,
+        processPid: null,
+      };
+    } else if (this.status === 'running') {
+      this.latestAttempt = {
+        state: 'running',
+        attemptNumber: Math.max(1, this.attempts),
+        startedAt: now,
+        completedAt: null,
+        output: null,
+        error: null,
+        diagnostic: null,
+        queueTaskId: null,
+        acpSessionId: null,
+        coderSessionId: null,
+        executionId: null,
+        processPid: null,
+      };
+    }
   }
 }
 
@@ -344,11 +491,20 @@ export class CheckState {
   message: string | null = null;
   output: unknown | null = null;
   runCount = 0;
+  latestAttempt: WorkItemAttempt | null = null;
 
   constructor(
     readonly name: string,
     readonly title: string,
   ) {}
+
+  resetForFreshAttempt(): void {
+    this.status = 'pending';
+    this.message = null;
+    this.output = null;
+    this.runCount = 0;
+    this.latestAttempt = null;
+  }
 
   snapshot(): CheckStateSnapshot {
     return {
@@ -358,7 +514,118 @@ export class CheckState {
       message: this.message,
       output: this.output,
       runCount: this.runCount,
+      latestAttempt: this.latestAttempt,
     };
+  }
+
+  startWorkAttempt(now: string, evidence: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> = {}): WorkItemAttempt {
+    this.status = 'running';
+    const attemptNumber = this.latestAttempt ? this.latestAttempt.attemptNumber + 1 : 1;
+    this.latestAttempt = {
+      state: 'running',
+      attemptNumber,
+      startedAt: now,
+      completedAt: null,
+      output: null,
+      error: null,
+      diagnostic: null,
+      queueTaskId: evidence.queueTaskId ?? null,
+      acpSessionId: evidence.acpSessionId ?? null,
+      coderSessionId: evidence.coderSessionId ?? null,
+      executionId: evidence.executionId ?? null,
+      processPid: evidence.processPid ?? null,
+    };
+    return this.latestAttempt;
+  }
+
+  completeWorkAttempt(now: string): WorkItemAttempt | null {
+    if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
+    this.status = 'passed';
+    this.runCount = this.latestAttempt.attemptNumber;
+    this.latestAttempt = {
+      ...this.latestAttempt,
+      state: 'completed',
+      completedAt: now,
+    };
+    return this.latestAttempt;
+  }
+
+  failWorkAttempt(error: string, diagnostic: string | null = null, now: string): WorkItemAttempt | null {
+    if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
+    this.status = 'failed';
+    this.runCount = this.latestAttempt.attemptNumber;
+    this.message = error;
+    this.latestAttempt = {
+      ...this.latestAttempt,
+      state: 'failed',
+      completedAt: now,
+      error,
+      diagnostic,
+    };
+    return this.latestAttempt;
+  }
+
+  interruptWorkAttempt(reason: string, diagnostic: string | null = null, now: string): WorkItemAttempt | null {
+    if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
+    this.status = 'pending';
+    this.latestAttempt = {
+      ...this.latestAttempt,
+      state: 'interrupted',
+      completedAt: now,
+      error: reason,
+      diagnostic,
+    };
+    return this.latestAttempt;
+  }
+
+  synthesizeLatestAttempt(now: string): void {
+    if (this.latestAttempt) return;
+    if (this.status === 'passed') {
+      this.latestAttempt = {
+        state: 'completed',
+        attemptNumber: Math.max(1, this.runCount),
+        startedAt: now,
+        completedAt: now,
+        output: this.output,
+        error: null,
+        diagnostic: null,
+        queueTaskId: null,
+        acpSessionId: null,
+        coderSessionId: null,
+        executionId: null,
+        processPid: null,
+      };
+    } else if (this.status === 'failed' || this.status === 'error') {
+      this.latestAttempt = {
+        state: 'failed',
+        attemptNumber: Math.max(1, this.runCount),
+        startedAt: now,
+        completedAt: now,
+        output: this.output,
+        error: this.message,
+        diagnostic: null,
+        queueTaskId: null,
+        acpSessionId: null,
+        coderSessionId: null,
+        executionId: null,
+        processPid: null,
+      };
+    } else if (this.status === 'running') {
+      this.latestAttempt = {
+        state: 'running',
+        attemptNumber: Math.max(1, this.runCount),
+        startedAt: now,
+        completedAt: null,
+        output: null,
+        error: null,
+        diagnostic: null,
+        queueTaskId: null,
+        acpSessionId: null,
+        coderSessionId: null,
+        executionId: null,
+        processPid: null,
+      };
+    }
   }
 }
 
@@ -476,20 +743,12 @@ export class StageRun {
 
   resetTask(taskId: string): void {
     const task = this.findTask(taskId);
-    task.status = 'pending';
-    task.attempts = 0;
-    task.duration = 0;
-    task.artifacts = [];
-    task.output = null;
-    task.reason = null;
-    task.causedBy = null;
+    task.resetForFreshAttempt();
   }
 
   resetCheck(checkName: string): void {
     const check = this.findCheck(checkName);
-    check.status = 'pending';
-    check.message = null;
-    check.output = null;
+    check.resetForFreshAttempt();
   }
 
   resetTaskAndDownstream(taskId: string): void {
@@ -498,12 +757,7 @@ export class StageRun {
 
     for (const t of this.tasks) {
       if (t.order >= boundaryOrder) {
-        t.status = 'pending';
-        t.duration = 0;
-        t.artifacts = [];
-        t.output = null;
-        t.reason = null;
-        t.causedBy = null;
+        t.resetForFreshAttempt();
       }
     }
   }
@@ -513,20 +767,13 @@ export class StageRun {
 
     for (const [index, c] of this.checks.entries()) {
       if (index >= boundaryIndex) {
-        c.status = 'pending';
-        c.message = null;
-        c.output = null;
+        c.resetForFreshAttempt();
       }
     }
 
     for (const t of this.tasks) {
       if (t.causedBy?.type === 'check-failure' && t.causedBy.checkName === checkName) {
-        t.status = 'pending';
-        t.duration = 0;
-        t.artifacts = [];
-        t.output = null;
-        t.reason = null;
-        t.causedBy = null;
+        t.resetForFreshAttempt();
       }
     }
   }
@@ -956,6 +1203,15 @@ export class WorkflowRun {
     task.reason = result.reason ?? task.reason;
     task.causedBy = result.causedBy ?? task.causedBy;
 
+    if (task.latestAttempt?.state === 'running') {
+      const attemptNow = new Date().toISOString();
+      if (result.status === 'completed') {
+        task.completeWorkAttempt({ output: result.output, artifacts: result.artifacts, duration: result.duration }, attemptNow);
+      } else if (result.status === 'failed' || result.status === 'skipped') {
+        task.failWorkAttempt(result.reason ?? 'Task failed', null, attemptNow);
+      }
+    }
+
     if (stage === Stage.Integrate && taskId === 'integrate:merge' && result.status === 'completed') {
       stageRun.freezePoint = {
         taskId,
@@ -1007,6 +1263,15 @@ export class WorkflowRun {
     check.message = result.message ?? null;
     check.output = this.normalizeCheckOutput(stageRun, result) ?? null;
     if (result.status !== 'pending') check.runCount += 1;
+
+    if (check.latestAttempt?.state === 'running') {
+      const attemptNow = new Date().toISOString();
+      if (result.status === 'pass') {
+        check.completeWorkAttempt(attemptNow);
+      } else if (result.status === 'fail' || result.status === 'error') {
+        check.failWorkAttempt(result.message ?? `Check ${result.name} failed`, null, attemptNow);
+      }
+    }
 
     const events: WorkflowEvent[] = [{ type: 'check-recorded', stage, checkName: check.name, status: check.status }];
     if (this.needsCheckConvergenceTask(stageRun, result)) {
@@ -1100,6 +1365,66 @@ export class WorkflowRun {
     return this.fail(stageRun, failure, [{ type: 'approval-rejected', stage, reason: failure }]);
   }
 
+  startTaskAttempt(stage: Stage, taskId: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
+    if (this.status !== 'running') return;
+    const stageRun = this.stageRun(stage);
+    const task = stageRun.findTask(taskId);
+    task.startWorkAttempt(now, evidence);
+  }
+
+  startCheckAttempt(stage: Stage, checkName: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
+    if (this.status !== 'running') return;
+    const stageRun = this.stageRun(stage);
+    const check = stageRun.findCheck(checkName);
+    check.startWorkAttempt(now, evidence);
+  }
+
+  interruptSpecificWorkAttempts(attempts: WorkItemAttempt[], reason: string, diagnostic: string | null = null): void {
+    if (attempts.length === 0) return;
+    const stageRun = this.stageRuns.find(candidate => candidate.stage === this.currentStage);
+    if (!stageRun) return;
+    const now = new Date().toISOString();
+    const pending = new Set(attempts);
+    let interrupted = 0;
+
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'running' && pending.has(task.latestAttempt)) {
+        task.interruptWorkAttempt(reason, diagnostic, now);
+        pending.delete(task.latestAttempt);
+        interrupted++;
+      }
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'running' && pending.has(check.latestAttempt)) {
+        check.interruptWorkAttempt(reason, diagnostic, now);
+        pending.delete(check.latestAttempt);
+        interrupted++;
+      }
+    }
+    if (interrupted > 0) this.markWaitingForRecovery(stageRun, reason, diagnostic);
+  }
+
+  interruptRunningWorkAttempts(reason: string, diagnostic: string | null = null): void {
+    if (this.status !== 'running') return;
+    const stageRun = this.stageRuns.find(candidate => candidate.stage === this.currentStage);
+    if (!stageRun) return;
+    const now = new Date().toISOString();
+    let interrupted = 0;
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'running') {
+        task.interruptWorkAttempt(reason, diagnostic, now);
+        interrupted++;
+      }
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'running') {
+        check.interruptWorkAttempt(reason, diagnostic, now);
+        interrupted++;
+      }
+    }
+    if (interrupted > 0) this.markWaitingForRecovery(stageRun, reason, diagnostic);
+  }
+
   retryStage(stage: Stage): WorkflowDecision {
     if (this.status !== 'failed') {
       throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);
@@ -1140,25 +1465,16 @@ export class WorkflowRun {
 
     if (wasApprovalRejected) {
       for (const task of stageRun.tasks) {
-        task.status = 'pending';
-        task.duration = 0;
-        task.artifacts = [];
-        task.output = null;
-        task.reason = null;
-        task.causedBy = null;
+        task.resetForFreshAttempt();
       }
       for (const check of stageRun.checks) {
-        check.status = 'pending';
-        check.message = null;
-        check.output = null;
+        check.resetForFreshAttempt();
       }
     } else {
       if (failedTask) {
         stageRun.resetTaskAndDownstream(failedTask.id);
         for (const check of stageRun.checks) {
-          check.status = 'pending';
-          check.message = null;
-          check.output = null;
+          check.resetForFreshAttempt();
         }
       } else if (failedCheck) {
         if (
@@ -1183,12 +1499,7 @@ export class WorkflowRun {
           if (!task.terminal) {
             const isRepairTaskForFailedCheck = task.causedBy?.type === 'check-failure' && task.causedBy.checkName === failedCheck.name;
             if (!isRepairTaskForFailedCheck) {
-              task.status = 'pending';
-              task.duration = 0;
-              task.artifacts = [];
-              task.output = null;
-              task.reason = null;
-              task.causedBy = null;
+              task.resetForFreshAttempt();
             }
           }
         }
@@ -1196,18 +1507,11 @@ export class WorkflowRun {
       } else {
         for (const task of stageRun.tasks) {
           if (!task.terminal) {
-            task.status = 'pending';
-            task.duration = 0;
-            task.artifacts = [];
-            task.output = null;
-            task.reason = null;
-            task.causedBy = null;
+            task.resetForFreshAttempt();
           }
         }
         for (const check of stageRun.checks) {
-          check.status = 'pending';
-          check.message = null;
-          check.output = null;
+          check.resetForFreshAttempt();
         }
       }
     }
@@ -1221,7 +1525,9 @@ export class WorkflowRun {
     const stageRun = this.stageRuns.find(candidate => candidate.stage === stage);
     if (!stageRun) return false;
     if (stageRun.status !== 'failed') return false;
-    return true;
+    if (this.findCurrentStageInterruptedAttempt(stageRun)) return false;
+    if ((stageRun.failure?.reason ?? this.failure?.reason) === 'approval-rejected') return true;
+    return this.findCurrentStageFailedAttempt(stageRun) !== null;
   }
 
   rerunStage(stage: Stage): WorkflowDecision {
@@ -1254,19 +1560,10 @@ export class WorkflowRun {
     }
 
     for (const task of stageRun.tasks) {
-      task.status = 'pending';
-      task.duration = 0;
-      task.artifacts = [];
-      task.output = null;
-      task.reason = null;
-      task.causedBy = null;
-      task.attempts = 0;
+      task.resetForFreshAttempt();
     }
     for (const check of stageRun.checks) {
-      check.status = 'pending';
-      check.message = null;
-      check.output = null;
-      check.runCount = 0;
+      check.resetForFreshAttempt();
     }
 
     return this.decision([{ type: 'stage-retried', stage }]);
@@ -1313,6 +1610,78 @@ export class WorkflowRun {
       stageRuns: this.stageRuns.map(stageRun => stageRun.snapshot()),
       failure: this.failure,
     };
+  }
+
+  workflowRecoverySummary(): WorkflowRecoverySummary {
+    if (this.status === 'passed') return 'completed';
+
+    const stageRun = this.currentStageRun();
+    if (!stageRun) {
+      return this.status === 'failed' ? 'waiting-for-recovery' : 'running';
+    }
+
+    if (stageRun.status === 'awaiting-approval') return 'awaiting-approval';
+
+    const latestRunningAttempt = this.findCurrentStageRunningAttempt(stageRun);
+    if (latestRunningAttempt) return 'running';
+
+    const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
+    const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
+    if (failedTask || failedCheck) return 'waiting-for-recovery';
+
+    const interruptedAttempt = this.findCurrentStageInterruptedAttempt(stageRun);
+    if (interruptedAttempt) return 'waiting-for-recovery';
+
+    const currentWorkItem = this.findCurrentStagePendingWorkItem(stageRun);
+    if (currentWorkItem?.latestAttempt?.state === 'failed') return 'waiting-for-recovery';
+    if (currentWorkItem?.latestAttempt === null && currentWorkItem.causedBy) return 'waiting-for-recovery';
+
+    if (this.status === 'failed') return 'waiting-for-recovery';
+
+    return 'running';
+  }
+
+  private findCurrentStagePendingWorkItem(stageRun: StageRun): {
+    latestAttempt: WorkItemAttempt | null;
+    causedBy?: CausedByMetadata | null;
+  } | null {
+    const preTaskCheck = stageRun.nextCheck('pre-task');
+    if (preTaskCheck) return { latestAttempt: preTaskCheck.latestAttempt };
+    const task = stageRun.nextTask();
+    if (task) return { latestAttempt: task.latestAttempt, causedBy: task.causedBy };
+    const postTaskCheck = stageRun.nextCheck('post-task');
+    if (postTaskCheck) return { latestAttempt: postTaskCheck.latestAttempt };
+    return null;
+  }
+
+  private findCurrentStageRunningAttempt(stageRun: StageRun): WorkItemAttempt | null {
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'running') return task.latestAttempt;
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'running') return check.latestAttempt;
+    }
+    return null;
+  }
+
+  private findCurrentStageInterruptedAttempt(stageRun: StageRun): WorkItemAttempt | null {
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'interrupted') return task.latestAttempt;
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'interrupted') return check.latestAttempt;
+    }
+    return null;
+  }
+
+  private findCurrentStageFailedAttempt(stageRun: StageRun): WorkItemAttempt | null {
+    for (const task of stageRun.tasks) {
+      if (task.latestAttempt?.state === 'failed') return task.latestAttempt;
+    }
+    for (const check of stageRun.checks) {
+      if (check.latestAttempt?.state === 'failed') return check.latestAttempt;
+    }
+    return null;
   }
 
   private assertRunning(): void {
@@ -1491,6 +1860,18 @@ export class WorkflowRun {
     events.push({ type: 'stage-failed', stage: stageRun.stage, reason: failure });
     events.push({ type: 'workflow-failed', reason: failure });
     return this.decision(events);
+  }
+
+  private markWaitingForRecovery(stageRun: StageRun, reason: string, diagnostic: string | null): void {
+    const failure: FailureDetails = {
+      reason: 'work-interrupted',
+      stage: stageRun.stage,
+      message: diagnostic ?? reason,
+    };
+    stageRun.status = 'failed';
+    stageRun.failure = failure;
+    this.status = 'failed';
+    this.failure = failure;
   }
 
   private decision(events: WorkflowEvent[]): WorkflowDecision {

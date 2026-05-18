@@ -69,6 +69,9 @@ function makeService(run: ReturnType<typeof startBuildRun>): WorkflowApplication
     startWorkflow: vi.fn(),
     resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
     materializeTasks: vi.fn(({ stage, tasks, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, buildWorkSourceState) })),
+    startTaskAttempt: vi.fn(({ stage, taskId, evidence }) => {
+      run.startTaskAttempt(stage, taskId, new Date().toISOString(), evidence);
+    }),
     completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
     recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
     approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
@@ -139,6 +142,41 @@ describe('Build aggregate-backed task runtime', () => {
     });
     expect(run.stageRun(Stage.Build).tasks.map(task => task.id)).toEqual(['T-001', 'T-002']);
     expect(run.stageRun(Stage.Build).tasks.every(task => task.status === 'completed')).toBe(true);
+  });
+
+  it('starts a WorkflowRun attempt before executing each Ralph Build task', async () => {
+    setAcpSessionRunner(vi.fn().mockResolvedValue({ success: true, text: 'done' }));
+    const issue = makeIssue();
+    const change = makeChange(tempDir, [
+      { id: 'T-001', order: 1, title: 'First', description: 'd', passes: false, attempts: 0 },
+    ]);
+    const run = startBuildRun(issue);
+    const service = makeService(run);
+    service.materializeTasks({
+      issueId: issue.id,
+      stage: Stage.Build,
+      tasks: [{ id: 'T-001', title: 'First', order: 1 }],
+    });
+
+    const result = await runRalphLoop(change, {
+      worktreePath: tempDir,
+      projectPath: tempDir,
+      issueId: issue.id,
+      executionId: 'build-188',
+      workflowApplicationService: service,
+    }, { maxRetries: 0 });
+
+    expect(result.success).toBe(true);
+    expect(service.startTaskAttempt).toHaveBeenCalledWith({
+      issueId: issue.id,
+      stage: Stage.Build,
+      taskId: 'T-001',
+      evidence: { executionId: 'build-188-T-001' },
+    });
+    expect(run.stageRun(Stage.Build).findTask('T-001').latestAttempt).toMatchObject({
+      state: 'completed',
+      executionId: 'build-188-T-001',
+    });
   });
 
   it('BuildStageRunner materializes tasks before executing Ralph', async () => {

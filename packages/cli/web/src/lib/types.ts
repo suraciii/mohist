@@ -50,6 +50,21 @@ export interface IssueStartEligibility {
   waitingForDelivery: IssuePrerequisiteSummary[]
 }
 
+export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted'
+
+export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed'
+
+export interface RecoveryProjection {
+  currentWorkItem: {
+    type: 'task' | 'check'
+    id: string
+    title: string
+  } | null
+  latestAttemptState: WorkItemAttemptState | null
+  workflowSummaryState: WorkflowRecoverySummary | null
+  allowedActions: string[]
+}
+
 export interface Issue {
   id: string
   number: number
@@ -76,6 +91,7 @@ export interface Issue {
   startEligibility?: IssueStartEligibility
   drift?: BaseDriftInfo | null
   primaryEpic?: { id: string; title: string; status: string; priority: string } | null
+  recovery?: RecoveryProjection | null
 }
 
 export interface Project {

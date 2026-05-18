@@ -90,7 +90,7 @@ export interface RalphExecutorContext {
   observers?: SessionObserver[];
   syncTasksToStageState?: () => void;
   syncTasksToWorkflowRun?: () => void;
-  workflowApplicationService?: Pick<WorkflowApplicationRuntime, 'completeTask'>;
+  workflowApplicationService?: Pick<WorkflowApplicationRuntime, 'completeTask' | 'startTaskAttempt'>;
 }
 
 export interface RalphLoopResult {
@@ -580,6 +580,19 @@ export async function runRalphLoop(
     const taskExecutionId = context.executionId
       ? `${context.executionId}-${nextTask.id}`
       : undefined;
+
+    if (context.workflowApplicationService && context.issueId) {
+      try {
+        context.workflowApplicationService.startTaskAttempt({
+          issueId: context.issueId,
+          stage: Stage.Build,
+          taskId: nextTask.id,
+          evidence: { executionId: taskExecutionId ?? context.executionId },
+        });
+      } catch (e) {
+        log.warn('startTaskAttempt failed for Ralph task', { taskId: nextTask.id, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
 
     const timeoutConfig = getAgentTimeoutConfig(loadConfig());
     const perTaskTimeout = timeoutConfig.taskTimeout * 1000;

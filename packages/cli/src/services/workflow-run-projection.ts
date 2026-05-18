@@ -71,6 +71,15 @@ export class WorkflowRunProjection {
       return;
     }
 
+    const recoverySummary = run.workflowRecoverySummary();
+    const interruptedAttempt = this.findInterruptedAttempt(snapshot);
+    if (recoverySummary === 'waiting-for-recovery' || interruptedAttempt) {
+      this.issueRepo.updateStatus(snapshot.issueId, interruptedAttempt ? IssueStatus.Interrupted : IssueStatus.Blocked);
+      this.issueRepo.updateBlockedReason(snapshot.issueId, interruptedAttempt?.diagnostic ?? interruptedAttempt?.error ?? 'Workflow is waiting for recovery');
+      this.issueRepo.clearApprovalState(snapshot.issueId);
+      return;
+    }
+
     if (snapshot.status === 'failed') {
       this.issueRepo.updateStatus(snapshot.issueId, IssueStatus.Blocked);
       this.issueRepo.clearApprovalState(snapshot.issueId);
@@ -92,6 +101,18 @@ export class WorkflowRunProjection {
     } else {
       this.issueRepo.clearApprovalState(snapshot.issueId);
     }
+  }
+
+  private findInterruptedAttempt(snapshot: WorkflowRunSnapshot) {
+    const currentStage = snapshot.stageRuns.find(stage => stage.stage === snapshot.currentStage);
+    if (!currentStage) return null;
+    for (const task of currentStage.tasks) {
+      if (task.latestAttempt?.state === 'interrupted') return task.latestAttempt;
+    }
+    for (const check of currentStage.checks) {
+      if (check.latestAttempt?.state === 'interrupted') return check.latestAttempt;
+    }
+    return null;
   }
 
   private validateCompletionProjection(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {

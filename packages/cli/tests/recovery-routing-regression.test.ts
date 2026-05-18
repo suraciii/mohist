@@ -18,6 +18,18 @@ import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
 import { createIssueRoutes } from '../src/api/issues';
 import { Stage, IssueStatus, MergeState } from '../src/types';
+import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { WorkflowRunService } from '../src/services/workflow-run-service';
+import { StageStateService } from '../src/services/stage-state-service';
+
+function completePlanToApproval(workflowApplicationService: WorkflowApplicationService, issueId: string): void {
+  for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+    workflowApplicationService.completeTask({ issueId, stage: Stage.Plan, taskId, result: { status: 'completed' } });
+  }
+  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Plan, result: { name: checkName, status: 'pass' } });
+  }
+}
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -249,7 +261,9 @@ describe('Recovery routing regression tests', () => {
 
       const response = await request(server).post(`/api/issues/${issue.number}/resume`);
 
-      expect(response.status).toBe(202);
+      expect(response.body).toMatchObject({ success: true });
+      expect(response.body.error ?? '').not.toContain('current status');
+      expect(response.status, JSON.stringify(response.body)).toBe(202);
       expect(response.body.success).toBe(true);
       expect(response.body.data.issue.status).toBe(IssueStatus.Active);
 
@@ -273,15 +287,212 @@ describe('Recovery routing regression tests', () => {
       expect(updated?.status).toBe(IssueStatus.Active);
     });
 
-    it('returns 409 when trying to resume a blocked issue', async () => {
+    it('surfaces resumable interrupted recovery for blocked issues', async () => {
       const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Blocked Issue' });
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateStage(issue.id, Stage.Build);
 
-      const response = await request(server).post(`/api/issues/${issue.number}/resume`);
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      completePlanToApproval(workflowApplicationService, issue.id);
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+      workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-issue-task-1' } });
+      workflowApplicationService.interruptRunningWorkAttempts({ issueId: issue.id, reason: 'agent-lost' });
+      const recovery = workflowApplicationService.getRecoveryProjection(issue.id);
+      expect(recovery?.latestAttemptState).toBe('interrupted');
+      expect(recovery?.allowedActions).toContain('resume');
 
-      expect(response.status).toBe(409);
-      expect(response.body.error).toContain('cannot be resumed');
+      const refreshedRecovery = workflowApplicationService.getRecoveryProjection(issue.id);
+      expect(refreshedRecovery?.latestAttemptState).toBe('interrupted');
+      expect(refreshedRecovery?.allowedActions).toContain('resume');
+    });
+
+    it('issue detail reloads issue status after recovery reconciliation', async () => {
+      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Stale Detail Issue' });
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Build);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      completePlanToApproval(workflowApplicationService, issue.id);
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+      workflowApplicationService.startTaskAttempt({
+        issueId: issue.id,
+        stage: Stage.Build,
+        taskId: 'T-001',
+        evidence: { executionId: 'build-detail-stale', acpSessionId: 'detail-stale-acp', processPid: 99999999 },
+      });
+      stateManager.getCoderSessionRepo().insert({
+        issueId: issue.id,
+        acpSessionId: 'detail-stale-acp',
+        executionId: 'build-detail-stale',
+        stage: Stage.Build,
+        title: 'Build task',
+        processPid: 99999999,
+      });
+
+      const app = new Hono();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
+      const detailServer = createTestServer(app);
+
+      const response = await request(detailServer).get(`/api/issues/${issue.number}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.status).toBe(IssueStatus.Interrupted);
+      expect(response.body.data.blockedReason).toContain('reconciliation');
+      expect(response.body.data.recovery).toMatchObject({
+        latestAttemptState: 'interrupted',
+        workflowSummaryState: 'waiting-for-recovery',
+      });
+    });
+
+    it('stage-state reloads WorkflowRun after recovery reconciliation', async () => {
+      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Stale Stage State Issue' });
+      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      issueRepo.updateStage(issue.id, Stage.Build);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      completePlanToApproval(workflowApplicationService, issue.id);
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+      workflowApplicationService.startTaskAttempt({
+        issueId: issue.id,
+        stage: Stage.Build,
+        taskId: 'T-001',
+        evidence: { executionId: 'build-stage-state-stale', acpSessionId: 'stage-state-stale-acp', processPid: 99999999 },
+      });
+      stateManager.getCoderSessionRepo().insert({
+        issueId: issue.id,
+        acpSessionId: 'stage-state-stale-acp',
+        executionId: 'build-stage-state-stale',
+        stage: Stage.Build,
+        title: 'Build task',
+        processPid: 99999999,
+      });
+
+      const app = new Hono();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new StageStateService(db), new WorkflowRunService(db)));
+      const stageStateServer = createTestServer(app);
+
+      const response = await request(stageStateServer).get(`/api/issues/${issue.number}/stage-state`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.recovery).toMatchObject({
+        latestAttemptState: 'interrupted',
+        workflowSummaryState: 'waiting-for-recovery',
+      });
+      const build = response.body.data.stages.find((stage: any) => stage.stage === Stage.Build);
+      expect(build.status).toBe('failed');
+      expect(build.tasks.find((task: any) => task.taskId === 'T-001')).toMatchObject({
+        status: 'pending',
+      });
+    });
+
+    it('surfaces recovery projection on queue status responses', async () => {
+      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Queued Blocked Issue' });
+      issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+      issueRepo.updateStage(issue.id, Stage.Build);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      completePlanToApproval(workflowApplicationService, issue.id);
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+      workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-queue-task-1' } });
+      workflowApplicationService.interruptRunningWorkAttempts({ issueId: issue.id, reason: 'agent-lost' });
+
+      const queueApp = new Hono();
+      const eventBus = new EventBus();
+      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+      queueApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
+      const queueServer = createTestServer(queueApp);
+
+      const response = await request(queueServer).get(`/api/issues/${issue.number}/queue`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.recovery).toMatchObject({
+        latestAttemptState: 'interrupted',
+        workflowSummaryState: 'waiting-for-recovery',
+      });
+      expect(response.body.data.recovery.allowedActions).toEqual(expect.arrayContaining(['resume', 'rerun', 'inspect']));
+    });
+
+    it('reconciles stale running evidence before blocked retry decisions', async () => {
+      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Stale Running Issue' });
+      issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+      issueRepo.updateStage(issue.id, Stage.Build);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      completePlanToApproval(workflowApplicationService, issue.id);
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+      workflowApplicationService.startTaskAttempt({
+        issueId: issue.id,
+        stage: Stage.Build,
+        taskId: 'T-001',
+        evidence: { executionId: 'build-stale-task-1', acpSessionId: 'stale-acp', processPid: 99999999 },
+      });
+      stateManager.getCoderSessionRepo().insert({
+        issueId: issue.id,
+        acpSessionId: 'stale-acp',
+        executionId: 'build-stale-task-1',
+        stage: Stage.Build,
+        title: 'Build task',
+        processPid: 99999999,
+      });
+
+      const recovery = workflowApplicationService.getRecoveryProjection(issue.id);
+      expect(recovery?.latestAttemptState).toBe('interrupted');
+      expect(recovery?.allowedActions).toEqual(expect.arrayContaining(['resume', 'rerun', 'inspect']));
+
+      const retryAvailability = workflowApplicationService.checkRetryAvailability({ issueId: issue.id, stage: Stage.Build });
+      expect(retryAvailability.available).toBe(false);
+      expect(retryAvailability.reason).toBe('latest-attempt-interrupted');
+
+      const reconciledRecovery = workflowApplicationService.getRecoveryProjection(issue.id);
+      expect(reconciledRecovery?.latestAttemptState).toBe('interrupted');
+      expect(reconciledRecovery?.allowedActions).toContain('resume');
+    });
+
+    it('reconciles matching PID-less running coder session evidence as interrupted', async () => {
+      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'PID-less Live Issue' });
+      issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+      issueRepo.updateStage(issue.id, Stage.Build);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      completePlanToApproval(workflowApplicationService, issue.id);
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+      workflowApplicationService.startTaskAttempt({
+        issueId: issue.id,
+        stage: Stage.Build,
+        taskId: 'T-001',
+        evidence: { executionId: 'build-pidless-task-1', acpSessionId: 'live-acp' },
+      });
+      stateManager.getCoderSessionRepo().insert({
+        issueId: issue.id,
+        acpSessionId: 'live-acp',
+        executionId: 'build-pidless-task-1',
+        stage: Stage.Build,
+        title: 'Build task',
+        processPid: null,
+      });
+
+      const recovery = workflowApplicationService.getRecoveryProjection(issue.id);
+
+      expect(recovery?.latestAttemptState).toBe('interrupted');
+      expect(recovery?.allowedActions).toEqual(expect.arrayContaining(['resume', 'rerun', 'inspect']));
+      expect(recovery?.allowedActions).not.toContain('wait');
     });
 
     it('returns 409 when trying to resume a closed issue', async () => {

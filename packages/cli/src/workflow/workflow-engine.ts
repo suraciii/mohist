@@ -173,6 +173,7 @@ export class WorkflowEngine {
             message: task.reason ?? undefined,
           }
         : null,
+      latestAttempt: null,
     };
   }
 

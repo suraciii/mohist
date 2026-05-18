@@ -742,6 +742,19 @@ export function createIssueRoutes(
     return changeDir ? path.join(changeDir, 'tasks.json') : undefined;
   };
 
+  const getReconciledRecoveryProjection = (
+    projectId: string,
+    issue: Issue,
+  ): { recovery: ReturnType<WorkflowApplicationService['getRecoveryProjection']> | null; issue: Issue } => {
+    const workflowAppService = createWorkflowApplicationService();
+    if (!workflowAppService) return { recovery: null, issue };
+
+    const tasksPath = getIssueTasksPath(projectId, issue);
+    const recovery = workflowAppService.getRecoveryProjection(issue.id, { tasksPath });
+    const refreshedIssue = issueService.getByNumber(projectId, issue.number) ?? issue;
+    return { recovery, issue: refreshedIssue };
+  };
+
   const getIssueChangeDir = (projectId: string, issue: Issue): string | null => {
     const project = projectService.getById(projectId);
     if (!project) return null;
@@ -779,31 +792,46 @@ export function createIssueRoutes(
     return null;
   };
 
+  const canResumeIssue = (issue: Issue): boolean => {
+    if (issue.status === IssueStatus.Paused || issue.status === IssueStatus.Interrupted) {
+      return true;
+    }
+    if (issue.status !== IssueStatus.Blocked) {
+      return false;
+    }
+
+    const workflowApplicationService = createWorkflowApplicationService();
+    if (!workflowApplicationService) return false;
+    const recovery = workflowApplicationService.getRecoveryProjection(issue.id, {
+      tasksPath: getIssueTasksPath(issue.projectId, issue),
+    });
+    return recovery?.latestAttemptState === 'interrupted' && recovery.allowedActions.includes('resume');
+  };
+
   const retryIssueCheckpoint = (
     projectId: string,
     issue: Issue,
     startedBy: 'retry' | 'retry-checkpoint',
-  ): void => {
-    const issueRepo = stateManager.getIssueRepo();
-    issueRepo.updateRetryCount(issue.id, 0);
-    issueRepo.updateBlockedReason(issue.id, null);
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-
+  ): { ok: true } | { ok: false; message: string } => {
     const workflowApplicationService = createWorkflowApplicationService();
-    if (!workflowApplicationService) {
-      return;
-    }
-
-    try {
-      workflowApplicationService.retryStage({
+    if (workflowApplicationService) {
+      const result = workflowApplicationService.retryStageOrReject({
         issueId: issue.id,
         stage: issue.stage,
         tasksPath: getIssueTasksPath(projectId, issue),
         startedBy,
       });
-    } catch {
-      // Legacy blocked issues may not have a recoverable WorkflowRun aggregate.
+      if (!result.ok) {
+        return { ok: false, message: result.message };
+      }
     }
+
+    const issueRepo = stateManager.getIssueRepo();
+    issueRepo.updateRetryCount(issue.id, 0);
+    issueRepo.updateBlockedReason(issue.id, null);
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+
+    return { ok: true };
   };
 
   const approveThroughWorkflowRun = (issue: Issue): boolean => {
@@ -1247,10 +1275,12 @@ export function createIssueRoutes(
       if (workflowRunService) {
         const run = workflowRunService.getLatestRunForIssue(issue.id);
         if (run) {
-          const stages = stageStateService.getIssueStageStateFromWorkflowRun(run);
+          const { recovery, issue: refreshedIssue } = getReconciledRecoveryProjection(projectId, issue);
+          const refreshedRun = workflowRunService.getLatestRunForIssue(refreshedIssue.id) ?? run;
+          const stages = stageStateService.getIssueStageStateFromWorkflowRun(refreshedRun);
           const project = projectService.getById(projectId);
           const driftState = computeDriftStateForIssue(
-            issue,
+            refreshedIssue,
             projectId,
             project?.baseBranch || 'main',
             worktreeManager ?? null,
@@ -1260,19 +1290,21 @@ export function createIssueRoutes(
           return c.json({
             success: true,
             data: {
-              issueId: issue.id,
-              issueNumber: issue.number,
+              issueId: refreshedIssue.id,
+              issueNumber: refreshedIssue.number,
               stages,
               drift: buildDriftResponse(driftState),
+              recovery,
             },
           } satisfies ApiResponse);
         }
       }
 
-      const stages = stageStateService.getIssueStageState(issue.id);
+      const { recovery, issue: refreshedIssue } = getReconciledRecoveryProjection(projectId, issue);
+      const stages = stageStateService.getIssueStageState(refreshedIssue.id);
       const project = projectService.getById(projectId);
       const driftState = computeDriftStateForIssue(
-        issue,
+        refreshedIssue,
         projectId,
         project?.baseBranch || 'main',
         worktreeManager ?? null,
@@ -1283,10 +1315,11 @@ export function createIssueRoutes(
       return c.json({
         success: true,
         data: {
-          issueId: issue.id,
-          issueNumber: issue.number,
+          issueId: refreshedIssue.id,
+          issueNumber: refreshedIssue.number,
           stages,
           drift: buildDriftResponse(driftState),
+          recovery,
         },
       } satisfies ApiResponse);
     } catch (error) {
@@ -1335,16 +1368,17 @@ export function createIssueRoutes(
         return c.json(response, 404);
       }
 
-      const comments = issueService.getCommentsByIssue(issue.id);
+      const { recovery, issue: refreshedIssue } = getReconciledRecoveryProjection(projectId, issue);
+      const comments = issueService.getCommentsByIssue(refreshedIssue.id);
       const project = projectService.getById(projectId);
 
-      const checkSuite = checkSuiteRepo ? checkSuiteRepo.findActiveByIssueId(issue.id) : null;
+      const checkSuite = checkSuiteRepo ? checkSuiteRepo.findActiveByIssueId(refreshedIssue.id) : null;
 
       let prerequisites: IssuePrerequisiteSummary[] = [];
       let startEligibility: IssueStartEligibility = { startable: true, reason: 'ready' as const, waitingForDelivery: [] };
 
       if (issuePrerequisiteService) {
-        const view = issuePrerequisiteService.getPrerequisiteView(projectId, issue);
+        const view = issuePrerequisiteService.getPrerequisiteView(projectId, refreshedIssue);
         prerequisites = view.prerequisites;
         startEligibility = view.startEligibility;
       }
@@ -1355,7 +1389,7 @@ export function createIssueRoutes(
       }
 
       const driftState = computeDriftStateForIssue(
-        issue,
+        refreshedIssue,
         projectId,
         project?.baseBranch || 'main',
         worktreeManager ?? null,
@@ -1367,7 +1401,7 @@ export function createIssueRoutes(
       const response: ApiResponse = {
         success: true,
         data: {
-          ...issue,
+          ...refreshedIssue,
           projectName: project?.name || 'unknown',
           projectPath: project?.path || '',
           baseBranch: project?.baseBranch || 'main',
@@ -1377,6 +1411,7 @@ export function createIssueRoutes(
           startEligibility,
           primaryEpic,
           ...driftResponse,
+          recovery,
         }
       };
       return c.json(response);
@@ -1886,7 +1921,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      if (issue.status !== IssueStatus.Paused && issue.status !== IssueStatus.Interrupted) {
+      if (!canResumeIssue(issue)) {
         return c.json({
           success: false,
           error: `Issue #${number} cannot be resumed (current status: ${issue.status}). Use retry, rerun, or rewind instead.`
@@ -3772,6 +3807,12 @@ export function createIssueRoutes(
       }
 
       const queueStatus = agentRunner.getQueueStatus(issue.id) as IssueQueueStatus;
+      let recovery = null;
+      const workflowAppService = createWorkflowApplicationService();
+      if (workflowAppService) {
+        const tasksPath = getIssueTasksPath(projectId, issue);
+        recovery = workflowAppService.getRecoveryProjection(issue.id, { tasksPath });
+      }
 
       return c.json({
         success: true,
@@ -3793,6 +3834,7 @@ export function createIssueRoutes(
             startedAt: t.startedAt,
           })),
           queueLength: queueStatus.queueLength,
+          recovery,
         },
       } satisfies ApiResponse);
     } catch (error) {
@@ -4004,11 +4046,14 @@ export function createIssueRoutes(
         }
       }
 
+      const retryResult = retryIssueCheckpoint(projectId, issue, 'retry');
+      if (!retryResult.ok) {
+        return c.json({ success: false, error: retryResult.message } satisfies ApiResponse, 409);
+      }
+
       const retryMessage = workflowApplicationService
         ? `Issue #${number} retrying from failed work in ${issue.stage} stage`
         : `Issue #${number} retrying from checkpoint in ${issue.stage} stage`;
-
-      retryIssueCheckpoint(projectId, issue, 'retry');
 
       if (agentRunner) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
@@ -4067,12 +4112,25 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      if (issue.stage === Stage.Backlog) {
+      const { recovery, issue: reconciledIssue } = getReconciledRecoveryProjection(projectId, issue);
+      const currentIssue = reconciledIssue;
+
+      if (currentIssue.stage === Stage.Backlog) {
         return c.json({ success: false, error: `Issue #${number} is in ${issue.stage} stage. Use start instead of rerun.` } satisfies ApiResponse, 400);
       }
 
-      if (issue.stage === Stage.Done) {
+      if (currentIssue.stage === Stage.Done) {
         return c.json({ success: false, error: `Issue #${number} is in done stage. Rerun is not supported for completed issues.` } satisfies ApiResponse, 400);
+      }
+
+      if (recovery && !recovery.allowedActions.includes('rerun')) {
+        const detail = recovery.currentWorkItem
+          ? `${recovery.currentWorkItem.type} '${recovery.currentWorkItem.id}'`
+          : 'current workflow state';
+        return c.json({
+          success: false,
+          error: `Cannot rerun: ${detail} is ${recovery.latestAttemptState ?? recovery.workflowSummaryState}. Wait for it to complete or stop it first.`,
+        } satisfies ApiResponse, 409);
       }
 
       if (!agentRunner) {
@@ -4085,20 +4143,20 @@ export function createIssueRoutes(
       }
 
       if (coderSessionRepo) {
-        coderSessionRepo.failRunningByIssueId(issue.id);
+        coderSessionRepo.cancelRunningByIssueId(currentIssue.id, 'Stage rerun requested');
       }
 
       if (checkpointRepo) {
-        checkpointRepo.delete(issue.number, issue.stage);
-        if (issue.stage === Stage.Plan) {
-          checkpointRepo.delete(issue.number, 'plan');
+        checkpointRepo.delete(currentIssue.number, currentIssue.stage);
+        if (currentIssue.stage === Stage.Plan) {
+          checkpointRepo.delete(currentIssue.number, 'plan');
         }
       }
 
-      if (issue.stage === Stage.Check && worktreeManager) {
-        const worktreePath = worktreeManager.getPath(project.name, issue.number);
+      if (currentIssue.stage === Stage.Check && worktreeManager) {
+        const worktreePath = worktreeManager.getPath(project.name, currentIssue.number);
         if (worktreePath) {
-          const changeDir = findChangeDir(worktreePath, issue.number);
+          const changeDir = findChangeDir(worktreePath, currentIssue.number);
           if (changeDir) {
             for (const filename of ['review.md', 'review-self-check.md']) {
               const artifactPath = path.join(changeDir, filename);
@@ -4112,28 +4170,28 @@ export function createIssueRoutes(
         }
       }
 
-      agentRunner.cancelAll(issue.id);
+      agentRunner.cancelAll(currentIssue.id);
 
       const issueRepo = stateManager.getIssueRepo();
-      clearApprovalEverywhere(issue.id, issue.stage);
-      issueRepo.updateBlockedReason(issue.id, null);
-      issueRepo.updateRetryCount(issue.id, 0);
-      issueRepo.updateStatus(issue.id, IssueStatus.Active);
+      clearApprovalEverywhere(currentIssue.id, currentIssue.stage);
+      issueRepo.updateBlockedReason(currentIssue.id, null);
+      issueRepo.updateRetryCount(currentIssue.id, 0);
+      issueRepo.updateStatus(currentIssue.id, IssueStatus.Active);
 
       const workflowApplicationService = createWorkflowApplicationService();
       if (workflowApplicationService) {
-        const worktreePath = worktreeManager?.getPath(project.name, issue.number);
-        const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
+        const worktreePath = worktreeManager?.getPath(project.name, currentIssue.number);
+        const changeDir = worktreePath ? findChangeDir(worktreePath, currentIssue.number) : null;
         const workflowOptions = {
-          issueId: issue.id,
-          stage: issue.stage,
+          issueId: currentIssue.id,
+          stage: currentIssue.stage,
           tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
           startedBy: 'rerun',
         };
         workflowApplicationService.rerunStage(workflowOptions);
       }
 
-      const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
+      const result = agentRunner.enqueue(currentIssue.id, 'resume-pipeline');
 
       return c.json({
         success: true,
@@ -4142,7 +4200,7 @@ export function createIssueRoutes(
           taskId: result.taskId,
           status: result.status,
           queuePosition: result.queuePosition,
-          message: `Issue #${number} rerun from ${issue.stage} stage`,
+          message: `Issue #${number} rerun from ${currentIssue.stage} stage`,
         },
       } satisfies ApiResponse, 202);
     } catch (error) {
@@ -4210,7 +4268,10 @@ export function createIssueRoutes(
       const stageState = stageStateService?.getIssueStageState(issue.id).find(s => s.stage === Stage.Check);
       const checkRepair = stageState?.checkRepair;
       if (checkRepair && !checkRepair.repairAvailable && checkRepair.attemptsRemaining === 0) {
-        retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
+        const retryResult = retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
+        if (!retryResult.ok) {
+          return c.json({ success: false, error: retryResult.message } satisfies ApiResponse, 409);
+        }
 
         if (agentRunner) {
           const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
@@ -4235,7 +4296,10 @@ export function createIssueRoutes(
         } satisfies ApiResponse);
       }
 
-      retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
+      const retryResult = retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
+      if (!retryResult.ok) {
+        return c.json({ success: false, error: retryResult.message } satisfies ApiResponse, 409);
+      }
 
       if (agentRunner) {
         const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
@@ -4283,7 +4347,7 @@ export function createIssueRoutes(
       }
 
       if (coderSessionRepo) {
-        coderSessionRepo.failRunningByIssueId(issue.id);
+        coderSessionRepo.cancelRunningByIssueId(issue.id, 'Review rerun requested');
       }
 
       if (checkpointRepo) {

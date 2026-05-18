@@ -135,7 +135,7 @@ export class IssueService {
     if (!issue) return null;
     if (issue.status === IssueStatus.Completed) return null;
     if (issue.status === IssueStatus.Closed) return null;
-    if (issue.status !== IssueStatus.Paused && issue.status !== IssueStatus.Interrupted) return null;
+    if (issue.status !== IssueStatus.Paused && issue.status !== IssueStatus.Interrupted && issue.status !== IssueStatus.Blocked) return null;
 
     return this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
   }

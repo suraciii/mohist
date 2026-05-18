@@ -201,6 +201,15 @@ export class CoderSessionRepo {
     return result.changes;
   }
 
+  cancelRunningByIssueId(issueId: string, reason: string = 'Agent stopped'): number {
+    const now = new Date().toISOString();
+    const result = this.db.run(
+      "UPDATE coder_session SET status = 'cancelled', completed_at = ?, failure_reason = ? WHERE issue_id = ? AND status IN ('running', 'probing')",
+      [now, reason, issueId]
+    );
+    return result.changes;
+  }
+
   findByIssueId(issueId: string): CoderSession[] {
     const rows = this.db.all<CoderSessionRow>(
       'SELECT * FROM coder_session WHERE issue_id = ? ORDER BY created_at DESC',
