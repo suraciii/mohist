@@ -13,7 +13,7 @@ import type { ConfigInfo } from '../config/config-schema';
 import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { TaskRunSnapshot, WorkflowWork } from './domain';
+import type { StageCompletionGuard, TaskRunSnapshot, WorkflowWork } from './domain';
 
 export interface PipelineResult {
   completed: boolean;
@@ -185,11 +185,24 @@ export class WorkflowEngine {
     return reason.message ?? `${reason.reason}: ${subject}`;
   }
 
+  private formatBlocked(stage: Stage, reason: StageCompletionGuard): string {
+    if (reason.complete) return `Blocked at ${stage}`;
+    const subject = 'taskId' in reason
+      ? reason.taskId
+      : 'checkName' in reason
+        ? reason.checkName
+        : 'stage' in reason
+          ? reason.stage
+          : stage;
+    return `${reason.reason}: ${subject}`;
+  }
+
   private workKey(work: WorkflowWork): string {
     if (work.kind === 'task') return `task:${work.stage}:${work.taskId}`;
     if (work.kind === 'check') return `check:${work.stage}:${work.checkName}`;
     if (work.kind === 'await-approval') return `await-approval:${work.stage}`;
     if (work.kind === 'failed') return `failed:${work.reason.stage}:${work.reason.taskId ?? work.reason.checkName ?? work.reason.reason}`;
+    if (work.kind === 'blocked') return `blocked:${work.stage}:${this.formatBlocked(work.stage, work.reason)}`;
     return work.kind;
   }
 
@@ -271,6 +284,10 @@ export class WorkflowEngine {
 
       if (work.kind === 'await-approval') {
         return { completed: false, stage: work.stage, message: `Awaiting ${work.stage} approval` };
+      }
+
+      if (work.kind === 'blocked') {
+        return { completed: false, stage: work.stage, message: this.formatBlocked(work.stage, work.reason) };
       }
 
       const runner = this.getRunner(work.stage);
