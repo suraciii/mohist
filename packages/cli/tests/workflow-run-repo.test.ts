@@ -165,13 +165,13 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(integrateCheckCount).toBe(1);
   });
 
-  it('materializes missing Build tasks from tasks.json definitions without using progress as runtime truth', () => {
+  it('repairs Build task evidence from passed tasks.json progress when loading active runs', () => {
     const run = repo.createOrLoadActiveAggregate({ issueId, issueNumber });
     const tasksPath = path.join(tempDir, 'tasks.json');
     fs.writeFileSync(tasksPath, JSON.stringify({
       version: 1,
       tasks: [
-        { id: 'T-001', title: 'Persist aggregate', order: 2, passes: true, error: 'ignored old progress' },
+        { id: 'T-001', title: 'Persist aggregate', order: 2, passes: true, attempts: 3, durations: [100, 200] },
         { id: 'T-002', title: 'Expose aggregate', order: 1, passes: false },
       ],
     }), 'utf-8');
@@ -188,7 +188,52 @@ describe('WorkflowRunRepo aggregate persistence', () => {
 
     expect(taskRows.map(row => row.task_id)).toEqual(['T-002', 'T-001']);
     expect(build.tasks).toHaveLength(2);
-    expect(build.tasks.every(task => task.status === 'pending' && task.attempts === 0 && task.output === null)).toBe(true);
+    expect(build.tasks.find(task => task.id === 'T-001')).toMatchObject({
+      status: 'completed',
+      attempts: 3,
+      duration: 300,
+      output: { kind: 'tasks-json-progress', stage: Stage.Build, success: true },
+    });
+    expect(build.tasks.find(task => task.id === 'T-002')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      output: null,
+    });
+  });
+
+  it('repairs rerun-cleared Build tasks from passed tasks.json progress before dispatch', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_build_rerun', issueId, issueNumber });
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.approveStage(Stage.Plan);
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'Persist aggregate', order: 1 },
+      { id: 'T-002', title: 'Expose aggregate', order: 2 },
+    ]);
+    run.rerunStage(Stage.Build);
+    repo.saveAggregate(run, 'tester');
+
+    const tasksPath = path.join(tempDir, 'tasks.json');
+    fs.writeFileSync(tasksPath, JSON.stringify({
+      version: 1,
+      tasks: [
+        { id: 'T-001', title: 'Persist aggregate', order: 1, passes: true, attempts: 1, durations: [50] },
+        { id: 'T-002', title: 'Expose aggregate', order: 2, passes: true, attempts: 2, durations: [75, 25] },
+      ],
+    }), 'utf-8');
+
+    const loaded = repo.loadAggregateById(run.id, { tasksPath })!;
+    const build = loaded.snapshot().stageRuns.find(stage => stage.stage === Stage.Build)!;
+
+    expect(build.tasks.map(task => [task.id, task.status])).toEqual([
+      ['T-001', 'completed'],
+      ['T-002', 'completed'],
+    ]);
+    expect(loaded.nextWork()).toMatchObject({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
   });
 
   it('persists removal of generated repair tasks when rerunning a stage', () => {
