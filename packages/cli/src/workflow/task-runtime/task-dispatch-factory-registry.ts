@@ -265,8 +265,10 @@ function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrato
 
   if (taskId === 'integrate:archive-change') {
     return async (ctx) => {
+      const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+      if (!changeDir) throw new Error(`Change directory not found for issue #${ctx.issue.number}`);
       await ctx.artifactManager.archiveChange(ctx.issue.number);
-      return { step: 'integrate:archive-change' as const, archivePath: ctx.artifactManager.getChangeDir(ctx.issue.number), success: true };
+      return { step: 'integrate:archive-change' as const, archivePath: path.relative(worktreePath, changeDir), success: true };
     };
   }
 

@@ -1404,8 +1404,13 @@ export class WorkflowRun {
     if (archive?.status !== 'completed' || !archive.output || typeof archive.output !== 'object') {
       return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
     }
-    const archiveOutput = archive.output as Record<string, unknown>;
-    if (typeof archiveOutput.archivePath !== 'string' || archiveOutput.archivePath.length === 0) {
+    const archiveOutput = this.unwrapTaskOutput(archive.output);
+    if (!archiveOutput) {
+      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
+    }
+    const hasArchivePath = typeof archiveOutput.archivePath === 'string' && archiveOutput.archivePath.length > 0;
+    const hasArchiveSuccess = archiveOutput.success === true;
+    if (!hasArchivePath && !hasArchiveSuccess) {
       return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
     }
     if (merge?.status !== 'completed') {

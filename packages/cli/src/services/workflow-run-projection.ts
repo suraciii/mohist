@@ -118,8 +118,13 @@ export class WorkflowRunProjection {
     if (archive?.status !== 'completed' || !archive.output || typeof archive.output !== 'object') {
       return { ok: false, reason: 'integrate:archive-change evidence is missing' };
     }
-    const archiveOutput = archive.output as Record<string, unknown>;
-    if (typeof archiveOutput.archivePath !== 'string' || archiveOutput.archivePath.length === 0) {
+    const archiveOutput = this.unwrapTaskOutput(archive.output);
+    if (!archiveOutput) {
+      return { ok: false, reason: 'integrate:archive-change evidence is missing' };
+    }
+    const hasArchivePath = typeof archiveOutput.archivePath === 'string' && archiveOutput.archivePath.length > 0;
+    const hasArchiveSuccess = archiveOutput.success === true;
+    if (!hasArchivePath && !hasArchiveSuccess) {
       return { ok: false, reason: 'integrate:archive-change archivePath is missing' };
     }
 
@@ -134,6 +139,15 @@ export class WorkflowRunProjection {
     if (health?.status !== 'passed') return { ok: false, reason: 'health:integrate evidence is missing' };
 
     return { ok: true };
+  }
+
+  private unwrapTaskOutput(output: unknown): Record<string, unknown> | null {
+    if (!output || typeof output !== 'object') return null;
+    const data = output as Record<string, unknown>;
+    if (data.kind === 'service-call-task' && data.result && typeof data.result === 'object') {
+      return data.result as Record<string, unknown>;
+    }
+    return data;
   }
 
   private projectStageStates(run: WorkflowRun): void {
