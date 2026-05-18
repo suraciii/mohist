@@ -293,11 +293,29 @@ function approvalFromStageRow(row: WorkflowStageRunRow): StageRunSnapshot['appro
   };
 }
 
-function readBuildTasks(tasksPath?: string): Array<{ id: string; title: string; order?: number; dependsOn?: string[] }> {
+function readBuildTasks(tasksPath?: string): Array<{
+  id: string;
+  title: string;
+  order?: number;
+  dependsOn?: string[];
+  passes?: boolean;
+  attempts?: number;
+  durations?: number[];
+  error?: string | null;
+}> {
   if (!tasksPath || !fs.existsSync(tasksPath)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf-8')) as {
-      tasks?: Array<{ id?: unknown; title?: unknown; order?: unknown; dependsOn?: unknown }>;
+      tasks?: Array<{
+        id?: unknown;
+        title?: unknown;
+        order?: unknown;
+        dependsOn?: unknown;
+        passes?: unknown;
+        attempts?: unknown;
+        durations?: unknown;
+        error?: unknown;
+      }>;
     };
     if (!Array.isArray(parsed.tasks)) return [];
     return parsed.tasks.flatMap((task, index) => {
@@ -309,6 +327,12 @@ function readBuildTasks(tasksPath?: string): Array<{ id: string; title: string; 
         dependsOn: Array.isArray(task.dependsOn)
           ? task.dependsOn.filter((dep): dep is string => typeof dep === 'string')
           : [],
+        passes: typeof task.passes === 'boolean' ? task.passes : undefined,
+        attempts: typeof task.attempts === 'number' ? task.attempts : undefined,
+        durations: Array.isArray(task.durations)
+          ? task.durations.filter((duration): duration is number => typeof duration === 'number')
+          : undefined,
+        error: typeof task.error === 'string' ? task.error : null,
       }];
     });
   } catch {
