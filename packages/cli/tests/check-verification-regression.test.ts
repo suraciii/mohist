@@ -404,7 +404,7 @@ describe('Check verification regression', () => {
 
       const policies = loadHealthGatePolicies(workflow);
 
-      expect(policies.check.command).toBe('npm run build && npm test');
+      expect(policies.check.command).toBe('npm ci && npm run build && npm test');
       expect(policies.check.enabled).toBe(true);
       expect(policies.check.timeout).toBe(300000);
     });
