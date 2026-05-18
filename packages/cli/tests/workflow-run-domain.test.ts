@@ -1416,6 +1416,45 @@ describe('WorkflowRun domain aggregate', () => {
     }));
   });
 
+  it('policy-driven review invalidation matches suffixed repair task ids', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed again' });
+    run.stageRun(Stage.Check).appendAdHocTask('fix-review-findings:1', 'Fix review findings', {
+      type: 'check-failure',
+      checkName: 'review-passed',
+      message: 'Review failed again',
+    });
+    run.stageRun(Stage.Check).reopenForRepair();
+    run.status = 'running';
+    run.failure = null;
+
+    expect(run.stageRun(Stage.Check).findTask('fix-review-findings:1')).toMatchObject({ status: 'pending' });
+    const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed' });
+
+    expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'pending' });
+    expect(fixDecision.events).toContainEqual(expect.objectContaining({
+      type: 'task-invalidated',
+      stage: Stage.Check,
+      taskId: 'ai-review',
+    }));
+    expect(fixDecision.events).toContainEqual(expect.objectContaining({
+      type: 'check-invalidated',
+      stage: Stage.Check,
+      checkName: 'review-passed',
+    }));
+  });
+
   it('Integrate post-merge health failure remains non-repairable after merge freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);
