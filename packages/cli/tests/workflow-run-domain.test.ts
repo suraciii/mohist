@@ -712,6 +712,32 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
   });
 
+  it('approveStage returns the exact completion guard blocker without accepting approval', () => {
+    const run = startRun();
+
+    completePlanTasks(run);
+    passPlanChecks(run);
+    const planStage = run.stageRun(Stage.Plan);
+    const designCheck = planStage.checks.find(check => check.name === 'design-complete');
+    expect(designCheck).toBeDefined();
+    designCheck!.status = 'pending';
+
+    const decision = run.approveStage(Stage.Plan, { output: { approved: true } });
+
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Plan,
+      reason: { complete: false, reason: 'static-check-not-passed', checkName: 'design-complete' },
+    });
+    expect(planStage.approval?.status).toBe('awaiting');
+    expect(planStage.approval?.output).toEqual({
+      result: 'PASS',
+      selfReviewNotes: 'Plan self review\n<promise>PASS</promise>',
+      dimensions: [{ name: 'Completeness', status: 'PASS' }],
+    });
+    expect(run.currentStage).toBe(Stage.Plan);
+  });
+
   it('requests Check approval with merge-ready and verification evidence', () => {
     const run = startRun();
     advanceToBuild(run);

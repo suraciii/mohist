@@ -1044,6 +1044,10 @@ export class WorkflowRun {
     if (stageRun.approval.staleEvidenceDetected) {
       throw new WorkflowDomainError(`Approval cannot be submitted: evidence is stale due to base drift or rebase. Please rebase or rerun checks before approving.`);
     }
+    const guard = this.evaluateStageCompletionGuard(stageRun);
+    if (!guard.complete) {
+      return { events: [], nextWork: { kind: 'blocked', stage, reason: guard } };
+    }
     stageRun.approval = {
       ...stageRun.approval,
       status: 'approved',

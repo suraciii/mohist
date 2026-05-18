@@ -349,13 +349,15 @@ function getLatestCheckResultFromStage(ctx: StageContext, checkName: string): { 
 }
 
 function normalizeRepairTaskId(taskId: string): RepairFixTaskId {
-  if (taskId === 'fix-merge-readiness') return 'repair-merge';
-  if (taskId === 'fix-plan-review') return 'repair-plan-artifacts';
-  return taskId as RepairFixTaskId;
+  const baseTaskId = taskId.replace(/:\d+$/, '');
+  if (baseTaskId === 'fix-merge-readiness') return 'repair-merge';
+  if (baseTaskId === 'fix-plan-review') return 'repair-plan-artifacts';
+  return baseTaskId as RepairFixTaskId;
 }
 
 function defaultFailedCheckForTask(taskId: string, failedCheck?: CheckResult): CheckResult {
   if (failedCheck) return failedCheck;
+  const baseTaskId = taskId.replace(/:\d+$/, '');
   const defaults: Record<string, CheckResult> = {
     'fix-build-health': { name: 'health:build', status: 'fail' },
     'fix-check-health': { name: 'health:check', status: 'fail' },
@@ -364,5 +366,5 @@ function defaultFailedCheckForTask(taskId: string, failedCheck?: CheckResult): C
     'fix-merge-readiness': { name: 'merge-ready', status: 'fail' },
     'fix-plan-review': { name: 'self-review-passed', status: 'fail' },
   };
-  return defaults[taskId] ?? { name: taskId, status: 'fail' };
+  return defaults[baseTaskId] ?? { name: taskId, status: 'fail' };
 }
