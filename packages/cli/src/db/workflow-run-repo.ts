@@ -6,6 +6,7 @@ import {
   type BuildWorkSourceState,
   type StageRunSnapshot,
   type VerificationEvidence,
+  type WorkItemAttempt,
   type WorkflowRunSnapshot,
   WorkflowRun as DomainWorkflowRun,
 } from '../workflow/domain';
@@ -162,6 +163,28 @@ interface WorkflowCheckRow {
   updated_at: string;
 }
 
+interface WorkflowWorkItemAttemptRow {
+  id: string;
+  workflow_run_id: string;
+  stage: string;
+  work_item_type: string;
+  work_item_id: string;
+  attempt_number: number;
+  state: string;
+  started_at: string;
+  completed_at: string | null;
+  output: string | null;
+  error: string | null;
+  diagnostic: string | null;
+  queue_task_id: string | null;
+  acp_session_id: string | null;
+  coder_session_id: string | null;
+  execution_id: string | null;
+  process_pid: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
   return {
     id: row.id,
@@ -244,6 +267,23 @@ function safeParseJson(value: string | null): unknown | null {
   }
 }
 
+function rowToWorkItemAttempt(row: WorkflowWorkItemAttemptRow): WorkItemAttempt {
+  return {
+    state: row.state as WorkItemAttempt['state'],
+    attemptNumber: row.attempt_number,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    output: safeParseJson(row.output),
+    error: row.error,
+    diagnostic: row.diagnostic,
+    queueTaskId: row.queue_task_id,
+    acpSessionId: row.acp_session_id,
+    coderSessionId: row.coder_session_id,
+    executionId: row.execution_id,
+    processPid: row.process_pid,
+  };
+}
+
 function causedByFromTask(row: WorkflowTaskRow): CausedByMetadata | null {
   if (!row.caused_by_type) return null;
   return {
@@ -267,6 +307,7 @@ function taskRowToSnapshot(row: WorkflowTaskRow): StageRunSnapshot['tasks'][numb
     output: safeParseJson(row.output),
     reason: row.reason,
     causedBy: causedByFromTask(row),
+    latestAttempt: null,
   };
 }
 
@@ -278,6 +319,7 @@ function checkRowToSnapshot(row: WorkflowCheckRow): StageRunSnapshot['checks'][n
     message: row.message,
     output: safeParseJson(row.output),
     runCount: row.run_count,
+    latestAttempt: null,
   };
 }
 
@@ -431,6 +473,7 @@ export class WorkflowRunRepo {
       'SELECT * FROM workflow_stage_runs WHERE workflow_run_id = ? ORDER BY stage_order ASC',
       [row.id],
     );
+    const latestAttempts = this.latestAttemptsByWorkItem(row.id);
 
   const stageRuns = stageRows.map((stageRow): StageRunSnapshot => {
       const taskRows = this.db.all<WorkflowTaskRow>(
@@ -446,8 +489,14 @@ export class WorkflowRunRepo {
         status: stageRow.status as WorkflowStageRunStatus,
         order: stageRow.stage_order,
         attemptSequence: stageRow.attempt_sequence,
-        tasks: taskRows.map(taskRowToSnapshot),
-        checks: orderCheckSnapshots(stageRow.stage as Stage, checkRows.map(checkRowToSnapshot)),
+        tasks: taskRows.map(taskRow => ({
+          ...taskRowToSnapshot(taskRow),
+          latestAttempt: latestAttempts.get(this.attemptKey(stageRow.stage as Stage, 'task', taskRow.task_id)) ?? null,
+        })),
+        checks: orderCheckSnapshots(stageRow.stage as Stage, checkRows.map(checkRow => ({
+          ...checkRowToSnapshot(checkRow),
+          latestAttempt: latestAttempts.get(this.attemptKey(stageRow.stage as Stage, 'check', checkRow.check_name)) ?? null,
+        }))),
         approval: approvalFromStageRow(stageRow),
         failure: null,
         freezePoint: null,
@@ -471,6 +520,26 @@ export class WorkflowRunRepo {
       failure: failureStage?.failure ?? null,
     };
     return snapshot;
+  }
+
+  private latestAttemptsByWorkItem(workflowRunId: string): Map<string, WorkItemAttempt> {
+    const rows = this.db.all<WorkflowWorkItemAttemptRow>(
+      `SELECT *
+       FROM workflow_work_item_attempts
+       WHERE workflow_run_id = ?
+       ORDER BY stage ASC, work_item_type ASC, work_item_id ASC, attempt_number DESC`,
+      [workflowRunId],
+    );
+    const attempts = new Map<string, WorkItemAttempt>();
+    for (const row of rows) {
+      const key = this.attemptKey(row.stage as Stage, row.work_item_type as 'task' | 'check', row.work_item_id);
+      if (!attempts.has(key)) attempts.set(key, rowToWorkItemAttempt(row));
+    }
+    return attempts;
+  }
+
+  private attemptKey(stage: Stage, workItemType: 'task' | 'check', workItemId: string): string {
+    return `${stage}:${workItemType}:${workItemId}`;
   }
 
   private saveAggregateSnapshot(snapshot: WorkflowRunSnapshot, startedBy?: string | null): void {
@@ -564,6 +633,7 @@ export class WorkflowRunRepo {
           causedByCheckName: task.causedBy?.checkName ?? null,
           causedByTaskId: task.causedBy?.taskId ?? null,
         });
+        this.syncWorkItemAttempt(snapshot.id, stageRun.stage, 'task', task.id, task.latestAttempt);
       }
 
       for (const check of stageRun.checks) {
@@ -577,8 +647,70 @@ export class WorkflowRunRepo {
           output: check.output,
           runCount: check.runCount,
         });
+        this.syncWorkItemAttempt(snapshot.id, stageRun.stage, 'check', check.name, check.latestAttempt);
       }
     }
+  }
+
+  private syncWorkItemAttempt(
+    workflowRunId: string,
+    stage: Stage,
+    workItemType: 'task' | 'check',
+    workItemId: string,
+    attempt: WorkItemAttempt | null,
+  ): void {
+    if (!attempt) {
+      this.db.run(
+        `DELETE FROM workflow_work_item_attempts
+         WHERE workflow_run_id = ? AND stage = ? AND work_item_type = ? AND work_item_id = ?`,
+        [workflowRunId, stage, workItemType, workItemId],
+      );
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `${workflowRunId}/${stage}/${workItemType}/${workItemId}/${attempt.attemptNumber}`;
+    this.db.run(
+      `INSERT INTO workflow_work_item_attempts
+       (id, workflow_run_id, stage, work_item_type, work_item_id, attempt_number, state, started_at,
+        completed_at, output, error, diagnostic, queue_task_id, acp_session_id, coder_session_id,
+        execution_id, process_pid, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(workflow_run_id, stage, work_item_type, work_item_id, attempt_number)
+       DO UPDATE SET state = excluded.state,
+         started_at = excluded.started_at,
+         completed_at = excluded.completed_at,
+         output = excluded.output,
+         error = excluded.error,
+         diagnostic = excluded.diagnostic,
+         queue_task_id = excluded.queue_task_id,
+         acp_session_id = excluded.acp_session_id,
+         coder_session_id = excluded.coder_session_id,
+         execution_id = excluded.execution_id,
+         process_pid = excluded.process_pid,
+         updated_at = excluded.updated_at`,
+      [
+        id,
+        workflowRunId,
+        stage,
+        workItemType,
+        workItemId,
+        attempt.attemptNumber,
+        attempt.state,
+        attempt.startedAt,
+        attempt.completedAt,
+        attempt.output !== undefined ? JSON.stringify(attempt.output) : null,
+        attempt.error,
+        attempt.diagnostic,
+        attempt.queueTaskId,
+        attempt.acpSessionId,
+        attempt.coderSessionId,
+        attempt.executionId,
+        attempt.processPid,
+        now,
+        now,
+      ],
+    );
   }
 
   private pruneStageRunChildren(stageRunId: string, taskIds: string[], checkNames: string[]): void {

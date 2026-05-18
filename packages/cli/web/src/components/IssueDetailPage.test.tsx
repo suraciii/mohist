@@ -389,6 +389,33 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
   })
 
   describe('Check repair actions', () => {
+    it('renders running recovery guidance from recovery projection without local agent status', () => {
+      setupDefaultMocks()
+      mocks.useIssue.mockReturnValue({
+        data: {
+          ...SAMPLE_ISSUE,
+          recovery: {
+            currentWorkItem: { type: 'task', id: 'T-001', title: 'Implement recovery projection' },
+            latestAttemptState: 'running',
+            workflowSummaryState: 'running',
+            allowedActions: ['wait', 'stop'],
+          },
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useAgentStatus.mockReturnValue({
+        data: { activeAgents: [], maxConcurrentAgents: 2 },
+      })
+
+      renderPage()
+
+      expect(screen.getByText(/Waiting for running work/i)).toBeTruthy()
+      expect(screen.getByText(/Current: task/)).toBeTruthy()
+      expect(screen.getByText(/Implement recovery projection/)).toBeTruthy()
+      expect(screen.getByText(/Force Stop/i)).toBeTruthy()
+    })
+
     it('shows explicit Check recovery actions from workflow-run when stage-state is unavailable', () => {
       setupDefaultMocks()
       mocks.useIssue.mockReturnValue({
@@ -397,6 +424,12 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
           status: 'blocked',
           stage: 'check',
           blockedReason: '[check] Review failed',
+          recovery: {
+            currentWorkItem: { type: 'check', id: 'review-passed', title: 'Review passed' },
+            latestAttemptState: 'failed',
+            workflowSummaryState: 'waiting-for-recovery',
+            allowedActions: ['retry', 'rerun', 'inspect'],
+          },
         },
         isLoading: false,
         isError: false,
@@ -443,6 +476,69 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
       expect(screen.getByText(/Fix review findings/i)).toBeTruthy()
       expect(screen.getByText(/Retry checkpoint/i)).toBeTruthy()
       expect(screen.getByText(/Rerun review only/i)).toBeTruthy()
+      expect(screen.queryByText(/^Retry$/)).toBeNull()
+    })
+
+    it('does not show Check recovery actions when workflow recovery does not allow them', () => {
+      setupDefaultMocks()
+      mocks.useIssue.mockReturnValue({
+        data: {
+          ...SAMPLE_ISSUE,
+          status: 'blocked',
+          stage: 'check',
+          blockedReason: '[check] Review failed',
+          recovery: {
+            currentWorkItem: { type: 'check', id: 'review-passed', title: 'Review passed' },
+            latestAttemptState: 'failed',
+            workflowSummaryState: 'waiting-for-recovery',
+            allowedActions: [],
+          },
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useIssueStageState.mockReturnValue({ data: undefined })
+      mocks.useWorkflowRun.mockReturnValue({
+        data: {
+          id: 'wr_123',
+          issueId: '1',
+          issueNumber: 123,
+          status: 'failed',
+          currentStage: 'check',
+          stageRuns: [
+            {
+              stage: 'check',
+              status: 'failed',
+              tasks: [],
+              checks: [
+                {
+                  checkName: 'review-passed',
+                  title: 'Review passed',
+                  status: 'failed',
+                  message: 'Review failed',
+                  output: { verdict: 'FAIL', summary: '2 issues remain' },
+                  runCount: 1,
+                  lastRunAt: new Date().toISOString(),
+                },
+              ],
+              approvalStatus: null,
+              approvalOutput: null,
+              approvalRequestedAt: null,
+              approvalRespondedAt: null,
+              attempts: 0,
+              startedAt: new Date().toISOString(),
+              completedAt: null,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        },
+      })
+
+      renderPage()
+
+      expect(screen.queryByText(/Fix review findings/i)).toBeNull()
+      expect(screen.queryByText(/Retry checkpoint/i)).toBeNull()
+      expect(screen.queryByText(/Rerun review only/i)).toBeNull()
       expect(screen.queryByText(/^Retry$/)).toBeNull()
     })
   })

@@ -10,6 +10,7 @@ import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
 import { WorkflowRun } from '../src/workflow/domain';
+import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 
 let projectCounter = 0;
 
@@ -241,6 +242,74 @@ describe('T-005: rejected approval retry regressions', () => {
       const dbRecord = taskQueueRepo.findById(result.taskId)!;
       expect(dbRecord.status).toBe('completed');
       expect(dbRecord.result).toBe('skipped');
+    });
+
+    it('resume-pipeline does not skip when blocked issue has interrupted recovery projection', async () => {
+      const project = setupProject();
+      const issue = setupIssue(project.id);
+      issueRepo.updateStage(issue.id, Stage.Build);
+      issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+        workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Plan, taskId, result: { status: 'completed' } });
+      }
+      for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+        workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Plan, result: { name: checkName, status: 'pass' } });
+      }
+      workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+      workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 0 }] });
+      workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-issue-task-1' } });
+      workflowApplicationService.interruptRunningWorkAttempts({ issueId: issue.id, reason: 'agent-lost' });
+
+      const service = createService();
+      const runPipelineSpy = vi.spyOn(service as any, 'runPipelineToCompletion').mockResolvedValue(undefined);
+      const result = service.enqueue(issue.id, 'resume-pipeline');
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const dbRecord = taskQueueRepo.findById(result.taskId)!;
+      expect(dbRecord.result).not.toBe('skipped');
+      expect(runPipelineSpy).toHaveBeenCalledTimes(1);
+      expect(runPipelineSpy.mock.calls[0][1].stage).toBe(Stage.Build);
+    });
+
+    it('resume-pipeline does not treat stale running latest attempt as retryable failed work', async () => {
+      const project = setupProject();
+      const issue = setupIssue(project.id);
+      issueRepo.updateStage(issue.id, Stage.Plan);
+      issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
+
+      const workflowApplicationService = new WorkflowApplicationService(db);
+      workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+      for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+        workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Plan, taskId, result: { status: 'completed' } });
+      }
+      for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid']) {
+        workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Plan, result: { name: checkName, status: 'pass' } });
+      }
+      workflowApplicationService.startCheckAttempt({
+        issueId: issue.id,
+        stage: Stage.Plan,
+        checkName: 'self-review-passed',
+        evidence: { executionId: 'stale-self-review-check' },
+      });
+
+      const service = createService();
+      const runPipelineSpy = vi.spyOn(service as any, 'runPipelineToCompletion').mockResolvedValue(undefined);
+      const result = service.enqueue(issue.id, 'resume-pipeline');
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const dbRecord = taskQueueRepo.findById(result.taskId)!;
+      expect(dbRecord.result).not.toBe('skipped');
+      expect(runPipelineSpy).toHaveBeenCalledTimes(1);
+
+      const recovery = new WorkflowApplicationService(db).getRecoveryProjection(issue.id);
+      expect(recovery?.latestAttemptState).toBe('interrupted');
+      expect(recovery?.allowedActions).toContain('resume');
+      expect(recovery?.allowedActions).not.toContain('retry');
     });
   });
 

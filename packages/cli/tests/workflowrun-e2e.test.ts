@@ -181,6 +181,32 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(issueRepo.findById(issueId)?.blockedReason ?? null).toBeNull();
   });
 
+  it('projects interrupted recovery visibly instead of active issue status', () => {
+    startWorkflow();
+    workflowApplicationService.startTaskAttempt({
+      issueId,
+      stage: Stage.Plan,
+      taskId: 'proposal',
+      evidence: { executionId: 'plan-proposal-lost' },
+    });
+    workflowApplicationService.interruptRunningWorkAttempts({
+      issueId,
+      reason: 'agent-lost',
+      diagnostic: 'agent process disappeared',
+    });
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Plan,
+      status: IssueStatus.Interrupted,
+      blockedReason: 'agent process disappeared',
+    });
+    expect(workflowApplicationService.getRecoveryProjection(issueId)).toMatchObject({
+      latestAttemptState: 'interrupted',
+      workflowSummaryState: 'waiting-for-recovery',
+      allowedActions: expect.arrayContaining(['resume', 'rerun', 'inspect']),
+    });
+  });
+
   it('rejects a passed projection that did not reach final Integrate stage', () => {
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_impossible_check', issueId, issueNumber });
     run.status = 'passed';

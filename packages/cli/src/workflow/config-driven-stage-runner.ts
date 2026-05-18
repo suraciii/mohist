@@ -115,6 +115,20 @@ export class ConfigDrivenStageRunner implements StageRunner {
     const taskId = work.taskId;
     this.ensureStageExecution(ctx);
 
+    if (ctx.workflowApplicationService) {
+      try {
+        const executionId = `${ctx.issue.stage}-${ctx.issue.number}-${taskId}-${(ctx.requestedTask?.attempts ?? 0) + 1}`;
+        ctx.workflowApplicationService.startTaskAttempt({
+          issueId: ctx.issue.id,
+          stage: ctx.issue.stage,
+          taskId,
+          evidence: { executionId },
+        });
+      } catch (e) {
+        log.warn('startTaskAttempt failed', { taskId, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
     let result: StageTaskResult | null;
     try {
       result = await this.executeTaskWork(ctx, taskId, {
@@ -122,6 +136,18 @@ export class ConfigDrivenStageRunner implements StageRunner {
         attempt: (ctx.requestedTask?.attempts ?? 0) + 1,
       });
     } catch (err) {
+      if (!ctx.signal?.aborted && ctx.workflowApplicationService) {
+        try {
+          ctx.workflowApplicationService.completeTask({
+            issueId: ctx.issue.id,
+            stage: ctx.issue.stage,
+            taskId,
+            result: { status: 'failed', reason: err instanceof Error ? err.message : String(err) },
+          });
+        } catch (e) {
+          log.warn('completeTask after handler error failed', { taskId, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
       this.updateStageExecutionStatus(ctx, 'failed');
       return {
         success: false,
@@ -234,6 +260,18 @@ export class ConfigDrivenStageRunner implements StageRunner {
     }
 
     const checkCtx = this.buildCheckContext(ctx);
+    if (ctx.workflowApplicationService) {
+      try {
+        ctx.workflowApplicationService.startCheckAttempt({
+          issueId: ctx.issue.id,
+          stage: ctx.issue.stage,
+          checkName,
+          evidence: { executionId: `${ctx.issue.stage}-${ctx.issue.number}-${checkName}-check` },
+        });
+      } catch (e) {
+        log.warn('startCheckAttempt failed', { checkName, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
     const check = await resolveCheck(this.checkRegistry, checkCtx, checkName);
     const result = await check.run(checkCtx);
     this.recordCheckResult(ctx, result);

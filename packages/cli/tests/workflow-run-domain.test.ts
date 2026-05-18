@@ -269,6 +269,80 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('reruns a stage with old attempt snapshots cleared before fresh work starts', () => {
+    const definitions: StageDefinition[] = [
+      {
+        stage: Stage.Plan,
+        tasks: [{ id: 'proposal', title: 'Generate proposal' }],
+        checks: [{ name: 'proposal-complete', title: 'Proposal complete' }],
+      },
+    ];
+    const run = startRun(definitions);
+    const planStage = run.stageRun(Stage.Plan);
+    const task = planStage.findTask('proposal');
+    const check = planStage.findCheck('proposal-complete');
+    task.startWorkAttempt('2026-05-19T00:00:00.000Z', { queueTaskId: 'old-task' });
+    task.completeWorkAttempt({ output: { text: 'old task output' }, duration: 11 }, '2026-05-19T00:01:00.000Z');
+    check.startWorkAttempt('2026-05-19T00:02:00.000Z', { queueTaskId: 'old-check' });
+    check.completeWorkAttempt('2026-05-19T00:03:00.000Z');
+    planStage.status = 'passed';
+    run.status = 'passed';
+
+    run.rerunStage(Stage.Plan);
+
+    expect(task).toMatchObject({ status: 'pending', attempts: 0, output: null });
+    expect(task.latestAttempt).toBeNull();
+    expect(check).toMatchObject({ status: 'pending', runCount: 0, output: null });
+    expect(check.latestAttempt).toBeNull();
+
+    const freshAttempt = task.startWorkAttempt('2026-05-19T00:04:00.000Z', { queueTaskId: 'fresh-task' });
+    expect(freshAttempt).toMatchObject({ attemptNumber: 1, queueTaskId: 'fresh-task' });
+  });
+
+  it('summarizes pending work without latest attempt as normal running work', () => {
+    const run = startRun();
+
+    expect(run.nextWork()).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'proposal' });
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt).toBeNull();
+    expect(run.workflowRecoverySummary()).toBe('running');
+  });
+
+  it('moves interrupted work progress out of running without marking it failed', () => {
+    const run = startRun();
+    const stageRun = run.stageRun(Stage.Plan);
+    const task = stageRun.findTask('proposal');
+    const check = stageRun.findCheck('proposal-complete');
+
+    task.startWorkAttempt('2026-05-19T00:00:00.000Z', { queueTaskId: 'task-queue' });
+    task.interruptWorkAttempt('agent-lost', 'process exited', '2026-05-19T00:01:00.000Z');
+    check.startWorkAttempt('2026-05-19T00:02:00.000Z', { queueTaskId: 'check-queue' });
+    check.interruptWorkAttempt('agent-lost', 'process exited', '2026-05-19T00:03:00.000Z');
+
+    expect(task).toMatchObject({ status: 'pending', reason: null });
+    expect(task.latestAttempt).toMatchObject({ state: 'interrupted', error: 'agent-lost' });
+    expect(check).toMatchObject({ status: 'pending', message: null });
+    expect(check.latestAttempt).toMatchObject({ state: 'interrupted', error: 'agent-lost' });
+  });
+
+  it('reports waiting-for-recovery when repair work is pending without a live latest attempt', () => {
+    const run = startRun();
+
+    completePlanTasks(run);
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.startCheckAttempt(Stage.Plan, 'self-review-passed', '2026-05-19T00:00:00.000Z', { executionId: 'plan-self-review-passed' });
+    run.recordCheckResult(Stage.Plan, {
+      name: 'self-review-passed',
+      status: 'fail',
+      message: 'Self review failed',
+    });
+
+    expect(run.nextWork()).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'fix-plan-review' });
+    expect(run.stageRun(Stage.Plan).findTask('fix-plan-review').latestAttempt).toBeNull();
+    expect(run.workflowRecoverySummary()).toBe('waiting-for-recovery');
+  });
+
   it('reruns Build with dynamic work source evidence reset for the new attempt', () => {
     const run = startRun();
     advanceToBuild(run);
@@ -519,7 +593,8 @@ describe('WorkflowRun domain aggregate', () => {
       status: 'pending',
       message: null,
       output: null,
-      runCount: 1,
+      runCount: 0,
+      latestAttempt: null,
     });
     expect(run.stageRun(Stage.Check).findCheck('merge-ready')).toMatchObject({
       status: 'pending',
@@ -551,9 +626,45 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.failure).toBeNull();
     expect(run.currentStage).toBe(Stage.Build);
     expect(run.stageRun(Stage.Build).findTask('T-001')).toMatchObject({ status: 'completed' });
-    expect(run.stageRun(Stage.Build).findTask('T-002')).toMatchObject({ status: 'pending' });
-    expect(run.stageRun(Stage.Build).findTask('T-003')).toMatchObject({ status: 'pending' });
+    expect(run.stageRun(Stage.Build).findTask('T-002')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      output: null,
+      latestAttempt: null,
+    });
+    expect(run.stageRun(Stage.Build).findTask('T-003')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      output: null,
+      latestAttempt: null,
+    });
     expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-002' });
+  });
+
+  it('retries a failed task with old attempt snapshots cleared before fresh work starts', () => {
+    const run = startRun();
+
+    completePlanTasks(run);
+    passPlanChecks(run);
+    run.approveStage(Stage.Plan, { output: { approved: true } });
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First build task', order: 0 },
+      { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
+    ]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    const failedTask = run.stageRun(Stage.Build).findTask('T-002');
+    failedTask.startWorkAttempt('2026-05-19T00:00:00.000Z', { queueTaskId: 'old-task' });
+    run.completeTask(Stage.Build, 'T-002', { status: 'failed', reason: 'compilation error' });
+    expect(run.status).toBe('failed');
+    expect(failedTask.latestAttempt).toMatchObject({ state: 'failed', queueTaskId: 'old-task' });
+
+    run.retryStage(Stage.Build);
+
+    expect(failedTask).toMatchObject({ status: 'pending', attempts: 0, output: null, reason: null });
+    expect(failedTask.latestAttempt).toBeNull();
+
+    const freshAttempt = failedTask.startWorkAttempt('2026-05-19T00:02:00.000Z', { queueTaskId: 'fresh-task' });
+    expect(freshAttempt).toMatchObject({ attemptNumber: 1, queueTaskId: 'fresh-task' });
   });
 
   it('retries a failed check and resets downstream checks while preserving completed tasks', () => {
@@ -1249,6 +1360,32 @@ describe('WorkflowRun domain aggregate', () => {
       expect(run.status).toBe('failed');
       expect(run.currentStage).toBe(Stage.Build);
       expect(run.canRetryStage(Stage.Plan)).toBe(false);
+    });
+
+    it('reports non-retryable when current stage is waiting on interrupted recovery', () => {
+      const run = startRun();
+      advanceToBuild(run);
+      run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+      run.startTaskAttempt(Stage.Build, 'T-001', new Date().toISOString(), { executionId: 'build-task-1' });
+      run.interruptRunningWorkAttempts('agent-lost');
+
+      expect(run.status).toBe('failed');
+      expect(run.stageRun(Stage.Build).status).toBe('failed');
+      expect(run.canRetryStage(Stage.Build)).toBe(false);
+    });
+
+    it('reports non-retryable when interruption leaves failed run and stage flags behind', () => {
+      const run = startRun();
+      advanceToBuild(run);
+      run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+      run.startTaskAttempt(Stage.Build, 'T-001', new Date().toISOString(), { executionId: 'build-task-1' });
+      run.interruptRunningWorkAttempts('agent-lost');
+
+      expect(run.status).toBe('failed');
+      expect(run.failure?.reason).toBe('work-interrupted');
+      expect(run.stageRun(Stage.Build).status).toBe('failed');
+      expect(run.stageRun(Stage.Build).failure?.reason).toBe('work-interrupted');
+      expect(run.canRetryStage(Stage.Build)).toBe(false);
     });
   });
 

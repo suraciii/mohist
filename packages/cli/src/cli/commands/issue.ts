@@ -168,6 +168,70 @@ export interface IssueWithPrerequisites extends Issue {
   startEligibility?: IssueStartEligibility;
 }
 
+export interface IssueRecoveryProjection {
+  workflowSummaryState?: string | null;
+  latestAttemptState?: string | null;
+  currentWorkItem?: {
+    type: string;
+    title: string;
+  } | null;
+  allowedActions?: string[];
+}
+
+function renderRecovery(recovery: IssueRecoveryProjection | null | undefined): void {
+  if (!recovery) return;
+
+  const attemptLabels: Record<string, string> = {
+    running: chalk.green('Running'),
+    completed: chalk.green('Completed'),
+    failed: chalk.red('Failed'),
+    interrupted: chalk.keyword('orange')('Interrupted'),
+  };
+  const summaryLabels: Record<string, string> = {
+    running: chalk.green('Running'),
+    'awaiting-approval': chalk.yellow('Awaiting Approval'),
+    'waiting-for-recovery': chalk.yellow('Waiting for Recovery'),
+    completed: chalk.green('Completed'),
+  };
+
+  const attemptState = recovery.latestAttemptState
+    ? attemptLabels[recovery.latestAttemptState] ?? recovery.latestAttemptState
+    : chalk.gray('N/A');
+  const summaryState = recovery.workflowSummaryState
+    ? summaryLabels[recovery.workflowSummaryState] ?? recovery.workflowSummaryState
+    : chalk.gray('N/A');
+
+  console.log(chalk.gray('\n  Recovery:'));
+  console.log(`    Workflow: ${summaryState}`);
+  console.log(`    Latest attempt: ${attemptState}`);
+
+  if (recovery.currentWorkItem) {
+    console.log(`    Current work: ${chalk.cyan(recovery.currentWorkItem.type)} — ${recovery.currentWorkItem.title}`);
+  }
+
+  if (recovery.allowedActions && recovery.allowedActions.length > 0) {
+    const actionLabels: Record<string, string> = {
+      wait: 'wait',
+      stop: 'stop',
+      retry: chalk.red('retry'),
+      resume: chalk.yellow('resume'),
+      rerun: 'rerun stage',
+      inspect: 'inspect',
+      approve: 'approve',
+      reject: 'reject',
+    };
+    const actions = recovery.allowedActions.map((a: string) => actionLabels[a] ?? a).join(', ');
+    console.log(`    Allowed actions: ${actions}`);
+  }
+}
+
+async function renderIssueRecoveryFromApi(number: string | number): Promise<void> {
+  const issueResponse = await apiClient<ApiResponse<any>>('GET', `/issues/${number}`);
+  if (issueResponse.success && issueResponse.data?.recovery) {
+    renderRecovery(issueResponse.data.recovery);
+  }
+}
+
 export function formatSessionState(session: CoderSessionResponse | null): string {
   if (!session) return chalk.gray('No active session');
 
@@ -457,6 +521,8 @@ export function setupIssueCommands(program: Command): void {
           }
           console.log(`  Session: ${formatSessionState(currentSession)}`);
 
+          renderRecovery(issue.recovery);
+
           const executionsResponse = await apiClient<ApiResponse<any[]>>(
             'GET',
             `/issues/${number}/executions`
@@ -596,6 +662,34 @@ export function setupIssueCommands(program: Command): void {
         }
       } catch (error) {
         console.error(chalk.red(`Failed to show issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('status <number>')
+    .description('Show issue status and recovery guidance')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse<any>>(
+          'GET',
+          `/issues/${number}`
+        );
+
+        if (response.success && response.data) {
+          const issue = response.data;
+          const displayId = `${issue.projectName || 'unknown'}#${issue.number}`;
+          console.log(chalk.bold(`\nIssue ${displayId}: ${issue.title}\n`));
+          console.log(`  Stage: ${formatStage(issue.stage || 'unknown')}`);
+          console.log(`  Status: ${formatStatus(issue.status || 'unknown')}`);
+          renderRecovery(issue.recovery);
+          console.log();
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+          process.exit(1);
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to show issue status: ${error}`));
+        process.exit(1);
       }
     });
 
@@ -874,6 +968,7 @@ export function setupIssueCommands(program: Command): void {
           if (response.data?.taskId) {
             console.log(chalk.gray(`  Task ID: ${response.data.taskId}`));
           }
+          await renderIssueRecoveryFromApi(number);
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
           if (response.data?.startEligibility) {
@@ -963,11 +1058,60 @@ export function setupIssueCommands(program: Command): void {
           } else {
             console.log(chalk.green(`✓ Resumed issue #${number}`));
           }
+          await renderIssueRecoveryFromApi(number);
         } else {
           console.error(chalk.red(`Error: ${response.error}`));
         }
       } catch (error) {
         console.error(chalk.red(`Failed to resume issue: ${error}`));
+      }
+    });
+
+  issue
+    .command('retry <number>')
+    .description('Retry the failed current work item')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse<any>>(
+          'POST',
+          `/issues/${number}/retry`
+        );
+
+        if (response.success) {
+          const message = response.data?.message;
+          console.log(chalk.green(`✓ ${message || `Issue #${number} retry started`}`));
+          await renderIssueRecoveryFromApi(number);
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+          process.exit(1);
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to retry issue: ${error}`));
+        process.exit(1);
+      }
+    });
+
+  issue
+    .command('rerun <number>')
+    .description('Rerun the current stage')
+    .action(async (number) => {
+      try {
+        const response = await apiClient<ApiResponse<any>>(
+          'POST',
+          `/issues/${number}/rerun`
+        );
+
+        if (response.success) {
+          const message = response.data?.message;
+          console.log(chalk.green(`✓ ${message || `Issue #${number} rerun started`}`));
+          await renderIssueRecoveryFromApi(number);
+        } else {
+          console.error(chalk.red(`Error: ${response.error}`));
+          process.exit(1);
+        }
+      } catch (error) {
+        console.error(chalk.red(`Failed to rerun issue: ${error}`));
+        process.exit(1);
       }
     });
 

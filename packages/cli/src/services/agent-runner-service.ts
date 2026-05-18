@@ -265,6 +265,20 @@ export class AgentRunnerService {
     this.abortControllers.delete(issueId);
     this.waitingQuestions.delete(issueId);
 
+    this.cancelRunningCoderSessions(issueId);
+
+    if (this.workflowRunService) {
+      try {
+        const was = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager());
+        was.interruptRunningWorkAttempts({ issueId, reason: 'Agent stopped by user', diagnostic: 'force_stop' });
+      } catch (e) {
+        log.warn('Failed to interrupt work attempts during force stop', {
+          issueId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
     this.eventBus.emit('agent_stopped', {
       issueId,
       projectId: this.runningSlots.get(issueId)?.projectId ?? '',
@@ -820,6 +834,21 @@ export class AgentRunnerService {
     }
   }
 
+  private cancelRunningCoderSessions(issueId: string): void {
+    if (!this.coderSessionRepo) return;
+    try {
+      const cancelled = this.coderSessionRepo.cancelRunningByIssueId(issueId, 'Agent stopped by user');
+      if (cancelled > 0) {
+        log.info('Cancelled running coder_sessions during force stop', { issueId, count: cancelled });
+      }
+    } catch (err) {
+      log.error('Failed to cancel running coder_sessions during force stop', {
+        issueId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   setWaiting(issueId: string, questionId: string, question: string): void {
     this.waitingQuestions.set(issueId, { questionId, question });
   }
@@ -1166,7 +1195,9 @@ export class AgentRunnerService {
         this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
         this.issueRepo.updateBlockedReason(issue.id, null);
       } else if (this.workflowRunService) {
-        if (this.workflowRunService.canRetryStage(issue.id, issue.stage)) {
+        if (this.canResumeBlockedIssue(issue)) {
+          log.info('Allowing resumable blocked issue to resume pipeline', { issueNumber: issue.number });
+        } else if (this.canRetryBlockedIssue(issue)) {
           log.info('Allowing retryable blocked issue to resume pipeline', { issueNumber: issue.number });
         } else {
           log.info('Skipping resume-pipeline: issue is blocked without retryable current-stage failure', { issueNumber: issue.number });
@@ -1222,6 +1253,54 @@ export class AgentRunnerService {
 
     const acpOptions: AgentSessionOptions = { cwd: worktreePath };
     await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
+  }
+
+  private canResumeBlockedIssue(issue: Issue): boolean {
+    if (issue.status !== IssueStatus.Blocked) return false;
+    if (!this.workflowRunService) return false;
+    try {
+      const recovery = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).getRecoveryProjection(issue.id, {
+        tasksPath: this.getIssueTasksPath(issue),
+      });
+      return recovery?.latestAttemptState === 'interrupted' && recovery.allowedActions.includes('resume');
+    } catch (error) {
+      log.warn('Failed to evaluate blocked issue recovery projection', {
+        issueNumber: issue.number,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private canRetryBlockedIssue(issue: Issue): boolean {
+    if (issue.status !== IssueStatus.Blocked) return false;
+    if (!this.workflowRunService) return false;
+
+    let tasksPath: string | undefined;
+    try {
+      tasksPath = this.getIssueTasksPath(issue);
+      const availability = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).checkRetryAvailability({
+        issueId: issue.id,
+        stage: issue.stage,
+        tasksPath,
+      });
+      return availability.available;
+    } catch (error) {
+      log.warn('Failed to evaluate blocked issue retry availability', {
+        issueNumber: issue.number,
+        tasksPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  private getIssueTasksPath(issue: Issue): string | undefined {
+    if (!this.projectRepo || !this.worktreeManager) return undefined;
+    const project = this.projectRepo.findById(issue.projectId);
+    const worktreePath = project ? this.worktreeManager.getPath(project.name, issue.number) : null;
+    const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
+    return changeDir ? path.join(changeDir, 'tasks.json') : undefined;
   }
 
   private async runPipelineToCompletion(

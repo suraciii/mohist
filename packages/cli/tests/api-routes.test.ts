@@ -1558,6 +1558,67 @@ describe('API Routes', () => {
         }
       });
 
+      it('does not activate or enqueue retry when workflow retry mutation rejects after availability check', async () => {
+        const tmpRetryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-retry-reject-test-'));
+
+        try {
+          const retryProject = await projectService.create({ name: 'RetryRejects', path: tmpRetryDir });
+          projectService.setCurrent(retryProject);
+
+          const issue = issueService.create({ projectId: retryProject.id, title: 'Retry Rejects Interrupted' });
+          issueRepo.updateStage(issue.id, Stage.Build);
+          issueRepo.blockIssue(issue.id, 'Build interrupted');
+          issueRepo.updateRetryCount(issue.id, 2);
+
+          const workflowRunService = new WorkflowRunService(db);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-failed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'failed', error: 'failed before retry' } });
+
+          const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
+          fs.mkdirSync(changeDir, { recursive: true });
+          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', passes: true }] }));
+
+          const eventBus = new EventBus();
+          const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+          const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+
+          const mockWm = {
+            getPath: () => tmpRetryDir,
+            exists: () => true,
+          } as any;
+
+          const retryApp = new Hono();
+          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, undefined, undefined, undefined, workflowRunService));
+          const retryServer = createTestServer(retryApp);
+          const retrySpy = vi.spyOn(WorkflowApplicationService.prototype, 'retryStageOrReject').mockReturnValue({
+            ok: false,
+            reason: 'no-retryable-failed-work',
+            message: 'Retry rejected after availability check',
+          });
+
+          try {
+            const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
+
+            expect(response.status).toBe(409);
+            expect(response.body.error).toContain('Retry rejected after availability check');
+            expect(enqueueSpy).not.toHaveBeenCalled();
+          } finally {
+            retrySpy.mockRestore();
+          }
+
+          const updated = issueRepo.findById(issue.id);
+          expect(updated?.status).toBe(IssueStatus.Blocked);
+          expect(updated?.retryCount).toBe(2);
+        } finally {
+          fs.rmSync(tmpRetryDir, { recursive: true, force: true });
+        }
+      });
+
       it('should return 409 when issue is not blocked', async () => {
         const issue = await issueService.create({ projectId, title: 'Active Issue' });
         issueRepo.updateStage(issue.id, Stage.Plan);
@@ -1713,6 +1774,13 @@ describe('API Routes', () => {
           const issue = issueService.create({ projectId: rerunProject.id, title: 'Rerun Review Only' });
           issueRepo.updateStage(issue.id, Stage.Check);
           issueRepo.blockIssue(issue.id, 'Review still failing');
+          const runningSession = stateManager.getCoderSessionRepo().insert({
+            issueId: issue.id,
+            acpSessionId: 'acp-rerun-review',
+            executionId: 'check-review-running',
+            stage: Stage.Check,
+            title: 'Review still running',
+          });
 
           const workflowRunService = new WorkflowRunService(db, issueRepo);
           const workflowApplicationService = new WorkflowApplicationService(db);
@@ -1745,7 +1813,7 @@ describe('API Routes', () => {
           const rerunApp = new Hono();
           rerunApp.route('/api/issues', createIssueRoutes(
             issueService, projectService, stateManager, mockWm, undefined, agentRunner,
-            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
+            undefined, undefined, stateManager.getCoderSessionRepo(), undefined, undefined, stateManager.getPipelineCheckpointRepo(),
             undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
           ));
           const rerunServer = createTestServer(rerunApp);
@@ -1757,6 +1825,10 @@ describe('API Routes', () => {
           expect(response.body.data.message).toContain('no repair task will be added');
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
           expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+          expect(stateManager.getCoderSessionRepo().findById(runningSession.id)).toMatchObject({
+            status: 'cancelled',
+            failureReason: 'Review rerun requested',
+          });
 
           const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
           const checkRun = activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
@@ -1839,6 +1911,108 @@ describe('API Routes', () => {
         } finally {
           fs.rmSync(tmpRerunDir, { recursive: true, force: true });
         }
+      });
+
+      it('cancels running coder sessions when rerunning a stage', async () => {
+        const rerunProject = await projectService.create({ name: 'StageRerunCancels', path: fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-stage-rerun-cancels-')) });
+        projectService.setCurrent(rerunProject);
+
+        const issue = issueService.create({ projectId: rerunProject.id, title: 'Rerun Cancels Session' });
+        issueRepo.updateStage(issue.id, Stage.Build);
+        issueRepo.blockIssue(issue.id, 'Build stuck');
+        const runningSession = stateManager.getCoderSessionRepo().insert({
+          issueId: issue.id,
+          acpSessionId: 'acp-rerun-stage',
+          executionId: 'build-running',
+          stage: Stage.Build,
+          title: 'Build still running',
+        });
+
+        const workflowRunService = new WorkflowRunService(db, issueRepo);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+        completePlanToApproval(workflowApplicationService, issue.id);
+        workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+        workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+        workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-running' } });
+
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-rerun-stage', status: 'pending' });
+
+        const rerunApp = new Hono();
+        rerunApp.route('/api/issues', createIssueRoutes(
+          issueService, projectService, stateManager, undefined, undefined, agentRunner,
+          undefined, undefined, stateManager.getCoderSessionRepo(), undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, workflowRunService,
+        ));
+        const rerunServer = createTestServer(rerunApp);
+
+        const response = await request(rerunServer).post(`/api/issues/${issue.number}/rerun`);
+
+        expect(response.status).toBe(202);
+        expect(stateManager.getCoderSessionRepo().findById(runningSession.id)).toMatchObject({
+          status: 'cancelled',
+          failureReason: 'Stage rerun requested',
+        });
+      });
+
+      it('rejects rerun when the reconciled latest attempt is still running', async () => {
+        const rerunProject = await projectService.create({ name: 'StageRerunBlockedByRunningAttempt', path: fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-stage-rerun-running-')) });
+        projectService.setCurrent(rerunProject);
+
+        const issue = issueService.create({ projectId: rerunProject.id, title: 'Rerun blocked by running attempt' });
+        issueRepo.updateStage(issue.id, Stage.Build);
+        issueRepo.blockIssue(issue.id, 'Build appears stuck');
+        const runningSession = stateManager.getCoderSessionRepo().insert({
+          issueId: issue.id,
+          acpSessionId: 'acp-rerun-running',
+          executionId: 'build-running-live',
+          stage: Stage.Build,
+          title: 'Build still running',
+          processPid: process.pid,
+        });
+
+        const workflowRunService = new WorkflowRunService(db, issueRepo);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+        completePlanToApproval(workflowApplicationService, issue.id);
+        workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+        workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+        workflowApplicationService.startTaskAttempt({
+          issueId: issue.id,
+          stage: Stage.Build,
+          taskId: 'T-001',
+          evidence: { executionId: 'build-running-live', processPid: process.pid },
+        });
+
+        const eventBus = new EventBus();
+        const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(agentRunner, 'enqueue').mockReturnValue({ taskId: 'fake-rerun-running', status: 'pending' });
+
+        const rerunApp = new Hono();
+        rerunApp.route('/api/issues', createIssueRoutes(
+          issueService, projectService, stateManager, undefined, undefined, agentRunner,
+          undefined, undefined, stateManager.getCoderSessionRepo(), undefined, undefined, undefined,
+          undefined, undefined, undefined, undefined, undefined, workflowRunService,
+        ));
+        const rerunServer = createTestServer(rerunApp);
+
+        const response = await request(rerunServer).post(`/api/issues/${issue.number}/rerun`);
+
+        expect(response.status).toBe(409);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error).toContain('Cannot rerun');
+        expect(response.body.error).toContain('is running');
+        expect(response.body.error).toContain('stop it first');
+        expect(enqueueSpy).not.toHaveBeenCalled();
+        expect(stateManager.getCoderSessionRepo().findById(runningSession.id)).toMatchObject({
+          status: 'running',
+        });
+
+        const updated = issueRepo.findById(issue.id);
+        expect(updated?.stage).toBe(Stage.Build);
+        expect(updated?.status).toBe(IssueStatus.Active);
       });
     });
 

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Stage, IssueStatus } from '../lib/types'
+import { Stage, IssueStatus, type RecoveryProjection } from '../lib/types'
 import { api } from '../lib/api'
 import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession, useIssueStageState, useWorkflowRun } from '../hooks/useQueries'
 import type { CheckRepairState } from '../lib/types'
@@ -104,6 +104,11 @@ export function IssueDetailPage() {
 
   const activeAgents = agentStatus?.activeAgents ?? []
   const isAgentRunningOnThis = activeAgents.some(a => a.issueNumber === issueNumber)
+  const recovery: RecoveryProjection | null | undefined = issue?.recovery
+  const recoveryAllowedActions = recovery?.allowedActions ?? []
+  const recoveryAttemptState = recovery?.latestAttemptState
+  const recoveryCanWait = recoveryAllowedActions.includes('wait')
+  const recoveryCanStop = recoveryAllowedActions.includes('stop')
 
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
@@ -737,16 +742,23 @@ export function IssueDetailPage() {
                     </button>
                   )}
 
-                  {isAgentRunningOnThis && (
+                  {(isAgentRunningOnThis || recoveryCanWait || recoveryCanStop) && (
                     <div ref={forceStopPanelRef} className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
                       <div className="flex items-center gap-2">
                         <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
                         <span className="text-xs font-semibold text-blue-800">
                           {agentProgress
                             ? `${agentProgress.stage.charAt(0).toUpperCase() + agentProgress.stage.slice(1)} Stage`
-                            : 'Running...'}
+                            : recoveryCanWait
+                              ? 'Waiting for running work'
+                              : 'Running...'}
                         </span>
                       </div>
+                      {recoveryAttemptState === 'running' && recovery?.currentWorkItem && (
+                        <div className="text-xs text-blue-700">
+                          Current: {recovery.currentWorkItem.type} — {recovery.currentWorkItem.title}
+                        </div>
+                      )}
                       {agentProgress?.roundType && (
                         <div className="text-xs text-blue-700">
                           Round: {agentProgress.roundType} #{(agentProgress.roundIndex ?? 0) + 1}
@@ -762,27 +774,29 @@ export function IssueDetailPage() {
                           Last activity: {formatRelativeTime(agentProgress.lastActivityAt)}
                         </div>
                       )}
-                      <button
-                        onClick={() => {
-                          if (forceStopConfirming) {
-                            forceStopMutation.mutate()
-                          } else {
-                            setForceStopConfirming(true)
-                          }
-                        }}
-                        disabled={forceStopMutation.isPending}
-                        className={`w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                          forceStopConfirming
-                            ? 'bg-red-600 text-white hover:bg-red-700'
-                            : 'border border-red-300 bg-white text-red-600 hover:bg-red-50'
-                        } disabled:opacity-50`}
-                      >
-                        {forceStopMutation.isPending
-                          ? 'Stopping...'
-                          : forceStopConfirming
-                            ? 'Confirm Force Stop'
-                            : 'Force Stop'}
-                      </button>
+                      {recoveryCanStop && (
+                        <button
+                          onClick={() => {
+                            if (forceStopConfirming) {
+                              forceStopMutation.mutate()
+                            } else {
+                              setForceStopConfirming(true)
+                            }
+                          }}
+                          disabled={forceStopMutation.isPending}
+                          className={`w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                            forceStopConfirming
+                              ? 'bg-red-600 text-white hover:bg-red-700'
+                              : 'border border-red-300 bg-white text-red-600 hover:bg-red-50'
+                          } disabled:opacity-50`}
+                        >
+                          {forceStopMutation.isPending
+                            ? 'Stopping...'
+                            : forceStopConfirming
+                              ? 'Confirm Force Stop'
+                              : 'Force Stop'}
+                        </button>
+                      )}
                       {forceStopMutation.error && (
                         <div className="text-xs text-red-600">
                           {forceStopMutation.error.message}
@@ -791,71 +805,97 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {issue.status === IssueStatus.Blocked && (
-                    <div className="space-y-2">
-                      {issue.blockedReason && (
-                        <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
-                          {issue.blockedReason}
-                        </div>
-                      )}
-                      {showCheckRepairActions ? (
-                        <>
-                          {checkRepair!.repairAvailable && (
-                            <button
-                              onClick={() => repairReviewFindingsMutation.mutate()}
-                              disabled={repairReviewFindingsMutation.isPending}
-                              className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                            >
-                              {repairReviewFindingsMutation.isPending ? 'Fixing...' : 'Fix review findings'}
-                            </button>
-                          )}
-                          <button
-                            onClick={() => retryCheckpointMutation.mutate()}
-                            disabled={retryCheckpointMutation.isPending}
-                            className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                          >
-                            {retryCheckpointMutation.isPending ? 'Retrying...' : 'Retry checkpoint'}
-                          </button>
-                          <button
-                            onClick={() => rerunReviewMutation.mutate()}
-                            disabled={rerunReviewMutation.isPending}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                          >
-                            {rerunReviewMutation.isPending ? 'Rerunning...' : 'Rerun review only'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => retryMutation.mutate()}
-                            disabled={retryMutation.isPending}
-                            className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                          >
-                            {retryMutation.isPending ? 'Retrying...' : 'Retry'}
-                          </button>
-                          <button
-                            onClick={() => rerunMutation.mutate()}
-                            disabled={rerunMutation.isPending}
-                            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                          >
-                            {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  {(issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (() => {
+                    const canRetry = recoveryAllowedActions.includes('retry')
+                    const canResume = recoveryAllowedActions.includes('resume')
+                    const canRerun = recoveryAllowedActions.includes('rerun')
+                    const canInspect = recoveryAllowedActions.includes('inspect')
+                    const isInterrupted = recoveryAttemptState === 'interrupted'
+                    const showProjectedCheckRepairActions = showCheckRepairActions && (canRetry || canRerun)
 
-                  {issue.status === IssueStatus.Interrupted && (
-                    <button
-                      onClick={() => resumeMutation.mutate()}
-                      disabled={resumeMutation.isPending}
-                      className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
-                    >
-                      {resumeMutation.isPending ? 'Resuming...' : 'Resume Pipeline'}
-                    </button>
-                  )}
+                    return (
+                      <div className="space-y-2">
+                        {issue.blockedReason && (
+                          <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                            {issue.blockedReason}
+                          </div>
+                        )}
+                        {isInterrupted && (
+                          <div className="rounded-md bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-700">
+                            Execution was interrupted. This is not a failed result — the work item can be resumed or rerun.
+                          </div>
+                        )}
+                        {showProjectedCheckRepairActions ? (
+                          <>
+                            {canRetry && checkRepair!.repairAvailable && (
+                              <button
+                                onClick={() => repairReviewFindingsMutation.mutate()}
+                                disabled={repairReviewFindingsMutation.isPending}
+                                className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                              >
+                                {repairReviewFindingsMutation.isPending ? 'Fixing...' : 'Fix review findings'}
+                              </button>
+                            )}
+                            {canRetry && (
+                              <button
+                                onClick={() => retryCheckpointMutation.mutate()}
+                                disabled={retryCheckpointMutation.isPending}
+                                className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                              >
+                                {retryCheckpointMutation.isPending ? 'Retrying...' : 'Retry checkpoint'}
+                              </button>
+                            )}
+                            {canRerun && (
+                              <button
+                                onClick={() => rerunReviewMutation.mutate()}
+                                disabled={rerunReviewMutation.isPending}
+                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                              >
+                                {rerunReviewMutation.isPending ? 'Rerunning...' : 'Rerun review only'}
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            {canRetry && (
+                              <button
+                                onClick={() => retryMutation.mutate()}
+                                disabled={retryMutation.isPending}
+                                className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                              >
+                                {retryMutation.isPending ? 'Retrying...' : 'Retry'}
+                              </button>
+                            )}
+                            {canResume && (
+                              <button
+                                onClick={() => resumeMutation.mutate()}
+                                disabled={resumeMutation.isPending}
+                                className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                              >
+                                {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
+                              </button>
+                            )}
+                            {canRerun && (
+                              <button
+                                onClick={() => rerunMutation.mutate()}
+                                disabled={rerunMutation.isPending}
+                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                              >
+                                {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
+                              </button>
+                            )}
+                            {canInspect && recovery?.currentWorkItem && (
+                              <div className="text-xs text-gray-500">
+                                Current: {recovery.currentWorkItem.type} — {recovery.currentWorkItem.title}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )
+                  })()}
 
-                  {!isBacklog && issue.stage !== Stage.Done && !isAgentRunningOnThis && (
+                  {!isBacklog && issue.stage !== Stage.Done && !isAgentRunningOnThis && issue.recovery?.allowedActions.includes('rerun') && (
                     <button
                       onClick={() => rerunMutation.mutate()}
                       disabled={rerunMutation.isPending}

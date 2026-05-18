@@ -194,6 +194,50 @@ describe('WorkflowEngine aggregate progression', () => {
     expect(run.failure).toMatchObject({ reason: 'task-failed', stage: Stage.Plan, taskId: 'proposal' });
   });
 
+  it('resumes interrupted recovery instead of routing it through retryStage', async () => {
+    const issue = makeIssue(Stage.Build);
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
+    run.completeTask(Stage.Plan, 'proposal', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'specs', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'design', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'tasks', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'self-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'proposal-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'specs-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'design-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'tasks-valid', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'self-review-passed', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'health:plan', status: 'pass' });
+    run.approveStage(Stage.Plan, { output: { approved: true } });
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.startTaskAttempt(Stage.Build, 'T-001', new Date().toISOString(), { executionId: 'build-task-1' });
+    run.interruptRunningWorkAttempts('agent-lost');
+
+    const service: WorkflowApplicationRuntime = {
+      startWorkflow: vi.fn(() => ({ run, decision: { events: [], nextWork: run.nextWork() } })),
+      resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
+      completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
+      recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
+      materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
+      approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+      retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
+    };
+
+    const workflowRunService = {
+      canRetryStage: vi.fn(() => run.canRetryStage(Stage.Build)),
+      getActiveRunForIssue: vi.fn(() => run.snapshot()),
+      getLatestRunForIssue: vi.fn(() => run.snapshot()),
+    };
+    const engine = makeEngine(issue, service, [], workflowRunService);
+
+    const result = await engine.run(issue, { cwd: '/tmp' });
+
+    expect(result.completed).toBe(false);
+    expect(result.stage).toBe(Stage.Build);
+    expect(service.retryStage).not.toHaveBeenCalled();
+    expect(service.resumeDecision).toHaveBeenCalled();
+  });
+
   it('returns completed when runner finishes the aggregate without another resumeDecision', async () => {
     const issue = makeIssue(Stage.Backlog);
     const definitions = [

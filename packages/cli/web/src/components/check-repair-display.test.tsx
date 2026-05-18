@@ -78,6 +78,15 @@ const SAMPLE_COMMITS_DATA = {
   message: 'Issue has not started yet.',
 }
 
+const CHECK_RECOVERY_ACTIONS = {
+  recovery: {
+    currentWorkItem: { type: 'check' as const, id: 'review-passed', title: 'Review passed' },
+    latestAttemptState: 'failed' as const,
+    workflowSummaryState: 'waiting-for-recovery' as const,
+    allowedActions: ['retry', 'rerun', 'inspect'],
+  },
+}
+
 function setupDefaultMocks(overrideStageState?: object, issueOverride: object = {}) {
   mocks.useIssue.mockReturnValue({
     data: { ...SAMPLE_ISSUE, ...issueOverride },
@@ -319,7 +328,7 @@ describe('Check repair display semantics', () => {
         repairAvailable: true,
       })
 
-      setupDefaultMocks(makeStageStateWithCheckRepair(checkRepair))
+      setupDefaultMocks(makeStageStateWithCheckRepair(checkRepair), CHECK_RECOVERY_ACTIONS)
       renderPage()
 
       expect(screen.getByText(/Retry checkpoint/i)).toBeTruthy()
@@ -335,7 +344,7 @@ describe('Check repair display semantics', () => {
         repairAvailable: true,
       })
 
-      setupDefaultMocks(makeStageStateWithCheckRepair(checkRepair))
+      setupDefaultMocks(makeStageStateWithCheckRepair(checkRepair), CHECK_RECOVERY_ACTIONS)
       renderPage()
 
       expect(screen.getByText(/Rerun review only/i)).toBeTruthy()
@@ -357,7 +366,6 @@ describe('Check repair display semantics', () => {
       expect(screen.queryByText(/Retry checkpoint/i)).toBeNull()
       expect(screen.queryByText(/Rerun review only/i)).toBeNull()
       expect(screen.queryByText(/Fix review findings/i)).toBeNull()
-      expect(screen.getByText(/^Retry$/)).toBeTruthy()
     })
   })
 })

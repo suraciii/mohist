@@ -70,7 +70,7 @@ export interface StageRunResult {
 }
 
 export type WorkflowApplicationRuntime = Pick<WorkflowApplicationService,
-  'startWorkflow' | 'resumeDecision' | 'completeTask' | 'recordCheckResult' | 'materializeTasks' | 'approveStage' | 'retryStage'
+  'startWorkflow' | 'resumeDecision' | 'completeTask' | 'recordCheckResult' | 'materializeTasks' | 'approveStage' | 'retryStage' | 'startTaskAttempt' | 'startCheckAttempt'
 >;
 
 export interface StageContext {
@@ -179,6 +179,12 @@ export interface StageTaskResult {
   status: 'completed' | 'failed' | 'skipped';
   artifacts: string[];
   output?: unknown;
+  attemptEvidence?: {
+    executionId?: string;
+    acpSessionId?: string;
+    coderSessionId?: string;
+    processPid?: number;
+  };
   attempts: number;
   duration: number;
   reason?: string;

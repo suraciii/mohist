@@ -42,7 +42,10 @@ describe('CLI Commands', () => {
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'create')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'list')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'show')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'status')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'start')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'retry')).toBe(true);
+      expect(issueCmd?.commands.some(cmd => cmd.name() === 'rerun')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'close')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'reopen')).toBe(true);
       expect(issueCmd?.commands.some(cmd => cmd.name() === 'comment')).toBe(true);
@@ -110,6 +113,120 @@ describe('CLI Commands', () => {
       expect(output.match(/review-passed/g)?.length ?? 0).toBe(1);
       expect(output).toContain('review-passed');
       expect(output).toContain('user-approval');
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        command: ['issue', 'show', '232'],
+        attempt: 'running',
+        actions: ['wait', 'stop'],
+        absentActions: ['retry'],
+      },
+      {
+        command: ['issue', 'status', '232'],
+        attempt: 'failed',
+        actions: ['retry', 'rerun stage', 'inspect'],
+        absentActions: ['resume'],
+      },
+      {
+        command: ['issue', 'status', '232'],
+        attempt: 'interrupted',
+        actions: ['resume', 'rerun stage', 'inspect'],
+        absentActions: ['retry'],
+      },
+    ])('renders API recovery projection for $command with $attempt latest attempt', async ({ command, attempt, actions, absentActions }) => {
+      const mockedApiClient = vi.mocked(apiClient);
+      mockedApiClient
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            number: 232,
+            title: 'Recovery Issue',
+            priority: 'p1',
+            stage: 'build',
+            status: attempt === 'running' ? 'active' : 'blocked',
+            projectName: 'demo',
+            baseBranch: 'main',
+            labels: [],
+            comments: [],
+            recovery: {
+              workflowSummaryState: attempt === 'running' ? 'running' : 'waiting-for-recovery',
+              latestAttemptState: attempt,
+              currentWorkItem: { type: 'task', title: 'Implement recovery' },
+              allowedActions: actions.includes('rerun stage')
+                ? actions.map(action => action === 'rerun stage' ? 'rerun' : action)
+                : actions,
+            },
+          },
+        } as any);
+
+      if (command[1] === 'show') {
+        mockedApiClient
+          .mockResolvedValueOnce({ success: true, data: [] } as any)
+          .mockResolvedValueOnce({ success: true, data: [] } as any);
+      }
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const program = new Command();
+      setupIssueCommands(program);
+
+      await program.parseAsync(['node', 'test', ...command]);
+
+      const output = logSpy.mock.calls.map(call => call.join(' ')).join('\n');
+      expect(output).toContain('Recovery:');
+      expect(output).toContain('Latest attempt:');
+      expect(output).toContain(attempt[0].toUpperCase() + attempt.slice(1));
+      for (const action of actions) {
+        expect(output).toContain(action);
+      }
+      for (const action of absentActions) {
+        expect(output).not.toContain(action);
+      }
+      expect(errorSpy).not.toHaveBeenCalled();
+    });
+
+    it('recovery commands print refreshed guidance from the same issue projection', async () => {
+      const mockedApiClient = vi.mocked(apiClient);
+      mockedApiClient
+        .mockResolvedValueOnce({
+          success: true,
+          data: { message: 'Issue #232 retrying from failed work in build stage' },
+        } as any)
+        .mockResolvedValueOnce({
+          success: true,
+          data: {
+            number: 232,
+            title: 'Recovery Issue',
+            stage: 'build',
+            status: 'active',
+            recovery: {
+              workflowSummaryState: 'running',
+              latestAttemptState: 'running',
+              currentWorkItem: { type: 'task', title: 'Implement recovery' },
+              allowedActions: ['wait', 'stop'],
+            },
+          },
+        } as any);
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const program = new Command();
+      setupIssueCommands(program);
+
+      await program.parseAsync(['node', 'test', 'issue', 'retry', '232']);
+
+      expect(mockedApiClient).toHaveBeenNthCalledWith(1, 'POST', '/issues/232/retry');
+      expect(mockedApiClient).toHaveBeenNthCalledWith(2, 'GET', '/issues/232');
+      const output = logSpy.mock.calls.map(call => call.join(' ')).join('\n');
+      expect(output).toContain('Issue #232 retrying from failed work in build stage');
+      expect(output).toContain('Recovery:');
+      expect(output).toContain('Latest attempt:');
+      expect(output).toContain('Running');
+      expect(output).toContain('wait');
+      expect(output).toContain('stop');
+      expect(output).not.toContain('Allowed actions: retry');
       expect(errorSpy).not.toHaveBeenCalled();
     });
 

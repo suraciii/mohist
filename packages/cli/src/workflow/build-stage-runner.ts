@@ -367,6 +367,7 @@ export class BuildStageRunner extends BaseStageRunner {
           output: null,
           reason: null,
           causedBy: null,
+          latestAttempt: null,
         };
         const output = await this.executeTasks(ctx);
         const taskOutput = output as { completedTasks?: number; failedTasks?: number; totalTasks?: number } | null;
