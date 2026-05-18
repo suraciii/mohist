@@ -60,6 +60,10 @@ export class ReviewPassedCheck implements Check {
       const project = ctx.projectRepo?.findById(ctx.issue.projectId);
       const worktreePath = project && ctx.worktreeManager?.getPath(project.name, ctx.issue.number);
       if (!worktreePath) return null;
+      if (ctx.worktreeManager?.isWorktreeClean) {
+        const clean = await ctx.worktreeManager.isWorktreeClean(worktreePath);
+        if (!clean) return null;
+      }
       return await ctx.worktreeManager!.getHeadSha(worktreePath);
     } catch (err) {
       log.warn('Failed to resolve review snapshot SHA', {
