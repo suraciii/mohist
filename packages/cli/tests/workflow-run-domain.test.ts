@@ -947,12 +947,36 @@ describe('WorkflowRun domain aggregate', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
-    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'landed' } });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', {
+      status: 'completed',
+      output: {
+        kind: 'service-call-task',
+        result: { archivePath: 'openspec/changes/archive/188-workflowrun', success: true },
+      },
+    });
+    run.completeTask(Stage.Integrate, 'integrate:merge', {
+      status: 'completed',
+      output: { kind: 'service-call-task', result: { landedSha: 'landed' } },
+    });
     const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
 
     expect(run.status).toBe('passed');
     expect(run.stageRun(Stage.Integrate).status).toBe('passed');
+    expect(decision.nextWork).toEqual({ kind: 'complete' });
+  });
+
+  it('accepts explicit archive success evidence for already archived changes', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', {
+      status: 'completed',
+      output: { kind: 'service-call-task', result: { archivePath: null, success: true } },
+    });
+    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'landed' } });
+    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
+
+    expect(run.status).toBe('passed');
     expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 

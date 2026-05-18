@@ -219,6 +219,44 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
+  it('projects Done with service-call wrapped archive and merge delivery evidence', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_service_call_done', issueId, issueNumber });
+    run.status = 'passed';
+    run.currentStage = Stage.Integrate;
+    for (const stageRun of run.stageRuns) {
+      stageRun.status = 'passed';
+    }
+
+    const integrate = run.stageRun(Stage.Integrate);
+    const specSync = integrate.tasks.find(task => task.id === 'integrate:spec-sync')!;
+    specSync.status = 'completed';
+    specSync.output = { kind: 'service-call-task', result: { synced: ['workflow-run'] } };
+    const archive = integrate.tasks.find(task => task.id === 'integrate:archive-change')!;
+    archive.status = 'completed';
+    archive.output = { kind: 'service-call-task', result: { archivePath: null, success: true } };
+    const merge = integrate.tasks.find(task => task.id === 'integrate:merge')!;
+    merge.status = 'completed';
+    merge.output = {
+      kind: 'service-call-task',
+      result: { targetBranch: 'master', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed' },
+    };
+    integrate.freezePoint = {
+      taskId: 'integrate:merge',
+      delivery: { targetBranch: 'master', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed' },
+      frozenAt: '2026-05-18T00:00:00.000Z',
+    };
+    const health = integrate.checks.find(check => check.name === 'health:integrate')!;
+    health.status = 'passed';
+
+    applyProjection(run);
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Done,
+      status: IssueStatus.Completed,
+      blockedReason: undefined,
+    });
+  });
+
   it('rejects targetBranch-only Integrate delivery when projecting Done', () => {
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_target_branch_only_done', issueId, issueNumber });
     run.status = 'passed';
