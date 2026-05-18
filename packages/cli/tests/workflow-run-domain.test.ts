@@ -52,8 +52,22 @@ function advanceToIntegrate(run: WorkflowRun): void {
   run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
   run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
   run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
-  run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+  run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') });
   run.approveStage(Stage.Check, { output: { approved: true } });
+}
+
+function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
+  return {
+    kind: 'merge-ready',
+    targetBranch: 'master',
+    strategy: 'squash',
+    baseSha: 'base-sha',
+    candidateHeadSha,
+    mergeBaseSha: 'base-sha',
+    canMerge: true,
+    conflictFiles: [],
+    checkedAt: '2026-05-15T00:00:00.000Z',
+  };
 }
 
 describe('WorkflowRun domain aggregate', () => {
@@ -137,6 +151,56 @@ describe('WorkflowRun domain aggregate', () => {
 
     const task = run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
     expect(task.nextWork).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
+  });
+
+  it('does not infer completion when declared static tasks or checks are missing from run evidence', () => {
+    const runWithMissingTask = startRun([
+      {
+        stage: Stage.Build,
+        tasks: [{ id: 'T-001', title: 'Declared task' }],
+        checks: [],
+      },
+    ]);
+    runWithMissingTask.stageRun(Stage.Build).tasks.splice(0);
+
+    expect(runWithMissingTask.nextWork()).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'missing-static-task', taskId: 'T-001' },
+    });
+
+    const runWithMissingCheck = startRun([
+      {
+        stage: Stage.Build,
+        tasks: [],
+        checks: [{ name: 'health:build', title: 'Build health gate' }],
+      },
+    ]);
+    runWithMissingCheck.stageRun(Stage.Build).checks.splice(0);
+
+    expect(runWithMissingCheck.nextWork()).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'missing-static-check', checkName: 'health:build' },
+    });
+  });
+
+  it.each([
+    ['missing', 'dynamic-source-missing'],
+    ['invalid', 'dynamic-source-invalid'],
+    ['empty', 'dynamic-source-empty'],
+  ] as const)('blocks Build completion when dynamic tasks.json source is %s', (state, reason) => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [], state);
+    const decision = run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+
+    expect(run.status).toBe('running');
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason, stage: Stage.Build },
+    });
   });
 
   it('fails the stage and workflow with task-failed when a task fails', () => {
@@ -627,7 +691,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
-    const mergeReady = run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    const mergeReady = run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') });
 
     expect(mergeReady.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
     expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
@@ -676,15 +740,7 @@ describe('WorkflowRun domain aggregate', () => {
       name: 'merge-ready',
       status: 'pass',
       output: {
-        kind: 'merge-ready',
-        targetBranch: 'master',
-        strategy: 'squash',
-        baseSha: 'base-sha',
-        candidateHeadSha: 'candidate-sha',
-        mergeBaseSha: 'base-sha',
-        canMerge: true,
-        conflictFiles: [],
-        checkedAt: '2026-05-15T00:00:00.000Z',
+        ...mergeReadyOutput('candidate-sha'),
       },
     });
 
@@ -700,6 +756,59 @@ describe('WorkflowRun domain aggregate', () => {
       checkName: 'health:check',
       candidateHeadSha: 'candidate-sha',
       baseSha: 'base-sha',
+    });
+  });
+
+  it('does not request Check approval without authoritative review snapshot evidence', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, {
+      name: 'health:check',
+      status: 'pass',
+      output: { candidateHeadSha: 'candidate-sha' },
+    });
+    const review = run.recordCheckResult(Stage.Check, {
+      name: 'review-passed',
+      status: 'pass',
+      output: { verdict: 'PASS', reviewReport: 'PASS report' },
+    });
+
+    expect(run.stageRun(Stage.Check).approval).toBeNull();
+    expect(review.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'check:converge-review-snapshot' });
+  });
+
+  it('does not request Check approval when review and merge evidence refer to different candidates', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, {
+      name: 'health:check',
+      status: 'pass',
+      output: { candidateHeadSha: 'candidate-new' },
+    });
+    run.recordCheckResult(Stage.Check, {
+      name: 'review-passed',
+      status: 'pass',
+      output: { verdict: 'PASS', reviewReport: 'PASS report', snapshotSha: 'candidate-old' },
+    });
+    const decision = run.recordCheckResult(Stage.Check, {
+      name: 'merge-ready',
+      status: 'pass',
+      output: mergeReadyOutput('candidate-new'),
+    });
+
+    expect(run.stageRun(Stage.Check).approval).toBeNull();
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Check,
+      reason: { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check },
     });
   });
 
@@ -739,8 +848,8 @@ describe('WorkflowRun domain aggregate', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
+    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'landed' } });
     const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
 
     expect(run.status).toBe('passed');
@@ -778,6 +887,38 @@ describe('WorkflowRun domain aggregate', () => {
       type: 'integrate-frozen',
       stage: Stage.Integrate,
       freezePoint: run.stageRun(Stage.Integrate).freezePoint,
+    });
+  });
+
+  it('does not complete Integrate when archive delivery evidence is missing', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'landed' } });
+    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
+
+    expect(run.status).toBe('running');
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Integrate,
+      reason: { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' },
+    });
+  });
+
+  it('does not complete Integrate when merge delivery evidence is missing', () => {
+    const run = startRun();
+    advanceToIntegrate(run);
+    run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
+    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed' });
+    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
+
+    expect(run.status).toBe('running');
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Integrate,
+      reason: { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' },
     });
   });
 
@@ -999,8 +1140,8 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
-    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass' });
-    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') });
     run.scheduleRebaseTask('target branch moved');
 
     const decision = run.completeTask(Stage.Check, 'rebase-branch', { status: 'failed', reason: 'rebase conflict' });
@@ -1020,7 +1161,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
-    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-old') });
     run.scheduleRebaseTask('target branch moved');
     run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: true, beforeBaseSha: 'a', afterBaseSha: 'b', beforeHeadSha: 'c', afterHeadSha: 'd' } });
 
@@ -1038,7 +1179,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
-    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-old') });
     run.scheduleRebaseTask('target branch moved');
     run.completeTask(Stage.Check, 'rebase-branch', {
       status: 'completed',
@@ -1063,7 +1204,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-same' } });
-    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-same') });
     run.scheduleRebaseTask('target branch backported');
     run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: false } });
 
@@ -1131,7 +1272,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-same' } });
-    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-same') });
 
     expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
     expect(run.stageRun(Stage.Check).approval?.status).toBe('awaiting');
@@ -1155,6 +1296,59 @@ describe('WorkflowRun domain aggregate', () => {
 
     expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
     expect(run.stageRun(Stage.Plan).tasks.find(t => t.id === 'user-approval')).toBeUndefined();
+  });
+
+  it('updates Build work source evidence when tasks are materialized after an earlier missing source result', () => {
+    const run = startRun();
+    advanceToBuild(run);
+
+    expect(run.materializeTasks(Stage.Build, [], 'missing').nextWork).toEqual({
+      kind: 'check',
+      stage: Stage.Build,
+      checkName: 'health:build',
+    });
+    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+      evaluated: true,
+      missing: true,
+    });
+
+    const decision = run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+
+    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+      evaluated: true,
+      tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
+    });
+    expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+  });
+
+  it('keeps runtime-added rebase work out of static stage definitions but required once appended', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+
+    const checkDefinition = DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check)!;
+    expect(checkDefinition.tasks.map(task => task.id)).toEqual(['ai-review']);
+
+    run.scheduleRebaseTask('Target branch moved before review');
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+
+    const rebaseTask = run.stageRun(Stage.Check).findTask('rebase-branch');
+    expect(rebaseTask.causedBy).toEqual({
+      type: 'branch-changed',
+      message: 'Target branch moved before review',
+    });
+    expect(run.stageRun(Stage.Check).status).toBe('running');
+    expect(run.nextWork()).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'rebase-branch' });
+
+    run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: false } });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
+    const decision = run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') });
+
+    expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
+    expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
   });
 
   it('policy-driven review invalidation uses configured reason text', () => {

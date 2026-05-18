@@ -28,6 +28,7 @@ export interface WorkflowCommandOptions {
   tasksPath?: string;
   sessionId?: string | null;
   startedBy?: string | null;
+  buildWorkSourceState?: 'missing' | 'invalid' | 'empty';
 }
 
 type CheckRepairScheduleStatus = 'scheduled' | 'already-running' | 'exhausted' | 'not-check-stage' | 'not-available';
@@ -120,8 +121,8 @@ export class WorkflowApplicationService {
     return { run, decision };
   }
 
-  materializeTasks(input: { issueId: string; stage: Stage; tasks: MaterializedTaskInput[] } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    return this.updateActiveRun(input.issueId, input, run => run.materializeTasks(input.stage, input.tasks));
+  materializeTasks(input: { issueId: string; stage: Stage; tasks: MaterializedTaskInput[]; buildWorkSourceState?: 'missing' | 'invalid' | 'empty' } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    return this.updateActiveRun(input.issueId, input, run => run.materializeTasks(input.stage, input.tasks, input.buildWorkSourceState));
   }
 
   completeTask(input: { issueId: string; stage: Stage; taskId: string; result: TaskResultInput } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {

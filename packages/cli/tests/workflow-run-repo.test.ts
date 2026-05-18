@@ -64,13 +64,18 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     const loaded = repo.loadActiveAggregate(issueId)!;
     const snapshot = loaded.snapshot();
     const plan = snapshot.stageRuns[0];
+    const build = snapshot.stageRuns.find(stage => stage.stage === Stage.Build)!;
 
     expect(snapshot.currentStage).toBe(Stage.Build);
     expect(plan.stage).toBe(Stage.Plan);
     expect(plan.tasks.map(task => task.id)).toEqual(['proposal', 'specs', 'design', 'tasks', 'self-review']);
     expect(plan.checks.map(check => check.name)).toEqual(['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']);
     expect(plan.approval).toMatchObject({ status: 'approved', output: { approved: true } });
-    expect(snapshot.stageRuns.find(stage => stage.stage === Stage.Build)?.tasks).toHaveLength(1);
+    expect(build.tasks).toHaveLength(1);
+    expect(build.buildWorkSourceState).toMatchObject({
+      evaluated: true,
+      tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
+    });
   });
 
   it('saves run, stage, task, check, approval, failure, and freeze changes in one aggregate transaction', () => {
@@ -87,11 +92,25 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
-    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass' });
-    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'head' } });
+    run.recordCheckResult(Stage.Check, {
+      name: 'merge-ready',
+      status: 'pass',
+      output: {
+        kind: 'merge-ready',
+        targetBranch: 'main',
+        strategy: 'squash',
+        baseSha: 'base',
+        candidateHeadSha: 'head',
+        mergeBaseSha: 'base',
+        canMerge: true,
+        conflictFiles: [],
+        checkedAt: '2026-05-15T00:00:00.000Z',
+      },
+    });
     run.approveStage(Stage.Check, { output: { approved: true } });
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-persist-aggregate' } });
     run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
       output: { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed', rebased: true },

@@ -8,9 +8,11 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { WorkflowRunProjection } from '../src/services/workflow-run-projection';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
-import { IssueStatus, Stage } from '../src/types';
+import { IssueStatus, MergeState, Stage } from '../src/types';
+import { WorkflowRun } from '../src/workflow/domain';
 
 describe('WorkflowRun aggregate end-to-end regressions', () => {
   let db: DatabaseManager;
@@ -70,14 +72,35 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Build, result: { name: 'health:build', status: 'pass' } });
   }
 
+  function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
+    return {
+      kind: 'merge-ready',
+      targetBranch: 'master',
+      strategy: 'squash',
+      baseSha: 'base-sha',
+      candidateHeadSha,
+      mergeBaseSha: 'base-sha',
+      canMerge: true,
+      conflictFiles: [],
+      checkedAt: '2026-05-15T00:00:00.000Z',
+    };
+  }
+
   function advanceToIntegrate(): void {
     advanceToBuild();
     completeBuild();
     workflowApplicationService.completeTask({ issueId, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } } });
-    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') } });
     workflowApplicationService.approveStage({ issueId, stage: Stage.Check, approval: { output: { approved: true } } });
+  }
+
+  function applyProjection(run: WorkflowRun): void {
+    new WorkflowRunProjection(db).apply({
+      run,
+      decision: { events: [], nextWork: { kind: 'complete' } },
+    });
   }
 
   it('advances Plan to Done by WorkflowRun stageOrder and projects issue stage/status', () => {
@@ -102,7 +125,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     workflowApplicationService.completeTask({ issueId, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
     workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } } });
-    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass' } });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Check, result: { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') } });
     workflowApplicationService.approveStage({ issueId, stage: Stage.Check, approval: { output: { approved: true } } });
     workflowApplicationService.completeTask({ issueId, stage: Stage.Integrate, taskId: 'integrate:spec-sync', result: { status: 'completed', output: { synced: ['workflow-run'] } } });
     workflowApplicationService.completeTask({ issueId, stage: Stage.Integrate, taskId: 'integrate:archive-change', result: { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } } });
@@ -122,6 +145,44 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(latest.stageRuns.map(stageRun => stageRun.stage)).toEqual([Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate]);
     expect(latest.stageRuns.every(stageRun => stageRun.status === 'passed')).toBe(true);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Done, status: IssueStatus.Completed });
+  });
+
+  it('rejects a passed projection that did not reach final Integrate stage', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_impossible_check', issueId, issueNumber });
+    run.status = 'passed';
+    run.currentStage = Stage.Check;
+    for (const stageRun of run.stageRuns) {
+      if (stageRun.stage === Stage.Plan || stageRun.stage === Stage.Build || stageRun.stage === Stage.Check) {
+        stageRun.status = 'passed';
+      }
+    }
+
+    applyProjection(run);
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Check,
+      status: IssueStatus.Blocked,
+      blockedReason: expect.stringContaining('current stage is check, expected integrate'),
+    });
+  });
+
+  it('rejects mergeState-only Done projection without Integrate delivery evidence', () => {
+    issueRepo.update(issueId, { mergeState: MergeState.Merged });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_merge_only_done', issueId, issueNumber });
+    run.status = 'passed';
+    run.currentStage = Stage.Integrate;
+    for (const stageRun of run.stageRuns) {
+      stageRun.status = 'passed';
+    }
+
+    applyProjection(run);
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Integrate,
+      status: IssueStatus.Blocked,
+      mergeState: MergeState.Merged,
+      blockedReason: expect.stringContaining('integrate:spec-sync evidence is missing'),
+    });
   });
 
   it('fails a task with task-failed and does not run later tasks or checks', () => {

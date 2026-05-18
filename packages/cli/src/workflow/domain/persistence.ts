@@ -104,6 +104,9 @@ export function hydrateWorkflowRun(
     stageRun.approval = stageSnapshot.approval ? { ...stageSnapshot.approval } : null;
     stageRun.failure = inferStageFailure(stageSnapshot.stage, stageSnapshot);
     stageRun.freezePoint = stageSnapshot.freezePoint ? { ...stageSnapshot.freezePoint, delivery: { ...stageSnapshot.freezePoint.delivery } } : null;
+    if (stageSnapshot.buildWorkSourceState) {
+      stageRun.buildWorkSourceState = stageSnapshot.buildWorkSourceState;
+    }
 
     stageRun.tasks.splice(0, stageRun.tasks.length);
     for (const taskSnapshot of [...stageSnapshot.tasks].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))) {
@@ -165,6 +168,15 @@ export function repairWorkflowRunSnapshot(
     const shouldMaterializeBuild = workflowRunning && definition.stage === Stage.Build && buildTasks.length > 0;
 
     if (shouldMaterializeBuild) {
+      stageRun.buildWorkSourceState = {
+        evaluated: true,
+        tasks: buildTasks.map(t => ({
+          id: t.id,
+          title: t.title,
+          order: t.order ?? stageRun.tasks.length,
+          dependsOn: t.dependsOn ?? [],
+        })),
+      };
       for (const task of buildTasks) {
         const existing = stageRun.tasks.find(candidate => candidate.id === task.id);
         if (existing) {

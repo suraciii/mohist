@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 28;
+const SCHEMA_VERSION = 29;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -215,6 +215,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 28) {
     migrateToVersion28(db);
+  }
+  if (currentVersion < 29) {
+    migrateToVersion29(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1121,6 +1124,7 @@ CREATE TABLE IF NOT EXISTS workflow_stage_runs (
   approval_responded_at TEXT,
   started_at          TEXT,
   completed_at        TEXT,
+  build_work_source_state TEXT,
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL
 );
@@ -1215,5 +1219,16 @@ function migrateToVersion28(db: DatabaseManager): void {
       db.exec(indexSql);
     }
     setSchemaVersion(db, 28);
+  });
+}
+
+function migrateToVersion29(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>('PRAGMA table_info(workflow_stage_runs)');
+    const hasBuildWorkSourceState = tableInfo.some(column => column.name === 'build_work_source_state');
+    if (!hasBuildWorkSourceState) {
+      db.exec('ALTER TABLE workflow_stage_runs ADD COLUMN build_work_source_state TEXT');
+    }
+    setSchemaVersion(db, 29);
   });
 }

@@ -3,6 +3,7 @@ import { Stage } from '../types';
 import {
   DEFAULT_STAGE_DEFINITIONS,
   type CausedByMetadata,
+  type BuildWorkSourceState,
   type StageRunSnapshot,
   type VerificationEvidence,
   type WorkflowRunSnapshot,
@@ -117,6 +118,7 @@ interface WorkflowStageRunRow {
   approval_responded_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  build_work_source_state: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -412,7 +414,7 @@ export class WorkflowRunRepo {
         'SELECT * FROM workflow_checks WHERE stage_run_id = ? ORDER BY check_name ASC',
         [stageRow.id],
       );
-      const stageSnapshot: StageRunSnapshot = {
+  const stageSnapshot: StageRunSnapshot = {
         stage: stageRow.stage as Stage,
         status: stageRow.status as WorkflowStageRunStatus,
         order: stageRow.stage_order,
@@ -421,6 +423,9 @@ export class WorkflowRunRepo {
         approval: approvalFromStageRow(stageRow),
         failure: null,
         freezePoint: null,
+        buildWorkSourceState: stageRow.build_work_source_state
+          ? safeParseJson(stageRow.build_work_source_state) as BuildWorkSourceState
+          : undefined,
       };
       stageSnapshot.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot);
       return stageSnapshot;
@@ -469,7 +474,7 @@ export class WorkflowRunRepo {
         this.db.run(
           `UPDATE workflow_stage_runs
            SET status = ?, stage_order = ?, approval_status = ?, approval_output = ?, approval_requested_at = ?,
-               approval_responded_at = ?, started_at = ?, completed_at = ?, updated_at = ?
+               approval_responded_at = ?, started_at = ?, completed_at = ?, build_work_source_state = ?, updated_at = ?
            WHERE id = ?`,
           [
             stageRun.status,
@@ -480,6 +485,7 @@ export class WorkflowRunRepo {
             approval?.respondedAt ?? null,
             startedAt,
             completedAt,
+            stageRun.buildWorkSourceState ? JSON.stringify(stageRun.buildWorkSourceState) : null,
             now,
             stageRunId,
           ],
@@ -488,8 +494,8 @@ export class WorkflowRunRepo {
         this.db.run(
           `INSERT INTO workflow_stage_runs
            (id, workflow_run_id, stage, status, stage_order, approval_status, approval_output,
-            approval_requested_at, approval_responded_at, started_at, completed_at, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            approval_requested_at, approval_responded_at, started_at, completed_at, build_work_source_state, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             stageRunId,
             snapshot.id,
@@ -502,6 +508,7 @@ export class WorkflowRunRepo {
             approval?.respondedAt ?? null,
             startedAt,
             completedAt,
+            stageRun.buildWorkSourceState ? JSON.stringify(stageRun.buildWorkSourceState) : null,
             now,
             now,
           ],

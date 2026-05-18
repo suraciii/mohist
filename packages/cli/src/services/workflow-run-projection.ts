@@ -5,7 +5,7 @@ import { IssueRepo } from '../db/issue-repo';
 import { Stage, IssueStatus, type CheckState, type CheckSuiteStatus } from '../types';
 import { eventBus, type EventBus } from './event-bus';
 import { StageStateService, type StageCheckStatus, type StageStateStatus, type StageTaskStatus } from './stage-state-service';
-import type { WorkflowDecision, WorkflowEvent, WorkflowRun } from '../workflow/domain';
+import type { StageRunSnapshot, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/domain';
 
 interface IssueProjectionRow {
   id: string;
@@ -52,12 +52,19 @@ export class WorkflowRunProjection {
 
   private projectIssue(issue: IssueProjectionRow, run: WorkflowRun): void {
     const snapshot = run.snapshot();
-    const projectedStage = snapshot.status === 'passed' ? Stage.Done : snapshot.currentStage;
+    const completionProjection = this.validateCompletionProjection(snapshot);
+    const projectedStage = snapshot.status === 'passed' && completionProjection.ok ? Stage.Done : snapshot.currentStage;
     if (issue.stage !== projectedStage) {
       this.issueRepo.updateStage(snapshot.issueId, projectedStage);
     }
 
     if (snapshot.status === 'passed') {
+      if (!completionProjection.ok) {
+        this.issueRepo.updateStatus(snapshot.issueId, IssueStatus.Blocked);
+        this.issueRepo.updateBlockedReason(snapshot.issueId, `WorkflowRun projection rejected impossible passed snapshot: ${completionProjection.reason}`);
+        this.issueRepo.clearApprovalState(snapshot.issueId);
+        return;
+      }
       this.issueRepo.updateStatus(snapshot.issueId, IssueStatus.Completed);
       this.issueRepo.updateBlockedReason(snapshot.issueId, null);
       this.issueRepo.clearApprovalState(snapshot.issueId);
@@ -85,6 +92,48 @@ export class WorkflowRunProjection {
     } else {
       this.issueRepo.clearApprovalState(snapshot.issueId);
     }
+  }
+
+  private validateCompletionProjection(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
+    if (snapshot.status !== 'passed') return { ok: true };
+    if (snapshot.stageOrder[snapshot.stageOrder.length - 1] !== Stage.Integrate) {
+      return { ok: false, reason: 'final stage is not integrate' };
+    }
+    if (snapshot.currentStage !== Stage.Integrate) {
+      return { ok: false, reason: `current stage is ${snapshot.currentStage}, expected integrate` };
+    }
+
+    const integrate = snapshot.stageRuns.find(stageRun => stageRun.stage === Stage.Integrate);
+    if (!integrate) return { ok: false, reason: 'integrate stage run is missing' };
+    if (integrate.status !== 'passed') return { ok: false, reason: `integrate stage is ${integrate.status}` };
+
+    return this.validateIntegrateDeliveryEvidence(integrate);
+  }
+
+  private validateIntegrateDeliveryEvidence(stageRun: StageRunSnapshot): { ok: true } | { ok: false; reason: string } {
+    const specSync = stageRun.tasks.find(task => task.id === 'integrate:spec-sync');
+    if (specSync?.status !== 'completed') return { ok: false, reason: 'integrate:spec-sync evidence is missing' };
+
+    const archive = stageRun.tasks.find(task => task.id === 'integrate:archive-change');
+    if (archive?.status !== 'completed' || !archive.output || typeof archive.output !== 'object') {
+      return { ok: false, reason: 'integrate:archive-change evidence is missing' };
+    }
+    const archiveOutput = archive.output as Record<string, unknown>;
+    if (typeof archiveOutput.archivePath !== 'string' || archiveOutput.archivePath.length === 0) {
+      return { ok: false, reason: 'integrate:archive-change archivePath is missing' };
+    }
+
+    const merge = stageRun.tasks.find(task => task.id === 'integrate:merge');
+    if (merge?.status !== 'completed') return { ok: false, reason: 'integrate:merge evidence is missing' };
+    const delivery = stageRun.freezePoint?.delivery ?? {};
+    if (!delivery.landedSha && !delivery.targetBranch) {
+      return { ok: false, reason: 'integrate merge delivery evidence is missing' };
+    }
+
+    const health = stageRun.checks.find(check => check.name === 'health:integrate');
+    if (health?.status !== 'passed') return { ok: false, reason: 'health:integrate evidence is missing' };
+
+    return { ok: true };
   }
 
   private projectStageStates(run: WorkflowRun): void {
