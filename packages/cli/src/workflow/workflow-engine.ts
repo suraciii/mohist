@@ -339,7 +339,11 @@ export class WorkflowEngine {
   }
 
   private shouldMaterializeBeforeWork(work: WorkflowWork): boolean {
-    return work.kind === 'task' || work.kind === 'check';
+    if (work.kind === 'task' || work.kind === 'check') return true;
+    return work.kind === 'blocked'
+      && work.stage === Stage.Build
+      && !work.reason.complete
+      && work.reason.reason === 'dynamic-source-not-evaluated';
   }
 
   async run(issue: Issue, acpOptions: AgentSessionOptions): Promise<PipelineResult> {

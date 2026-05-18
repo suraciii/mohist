@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
+    "health:check": "npm run typecheck",
     "typecheck": "tsc --noEmit",
     "dev:web": "cd web && npm install && npm run dev"
   },

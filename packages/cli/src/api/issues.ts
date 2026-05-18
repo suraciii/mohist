@@ -31,12 +31,26 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import type { WorkflowRunSnapshot } from '../workflow/domain';
+import { WorkflowDomainError, type StageCompletionGuard, type WorkflowRunSnapshot } from '../workflow/domain';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
+type IncompleteStageCompletionGuard = Extract<StageCompletionGuard, { complete: false }>;
+
+function hasStageCompletionGuardDetails(error: unknown): error is { message: string; details: { stageCompletionGuard: IncompleteStageCompletionGuard } } {
+  if (!error || typeof error !== 'object' || !('details' in error)) return false;
+  const details = (error as { details?: unknown }).details;
+  if (!details || typeof details !== 'object' || !('stageCompletionGuard' in details)) return false;
+  const guard = (details as { stageCompletionGuard?: unknown }).stageCompletionGuard;
+  return !!guard
+    && typeof guard === 'object'
+    && 'complete' in guard
+    && (guard as { complete?: unknown }).complete === false
+    && 'reason' in guard
+    && typeof (guard as { reason?: unknown }).reason === 'string';
+}
 
 const STAGE_ALIASES: Record<string, Stage[]> = {
   active: [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate],
@@ -792,11 +806,26 @@ export function createIssueRoutes(
 
   const approveThroughWorkflowRun = (issue: Issue): boolean => {
     if (!issue.approvalState || !activeWorkflowRunExists(issue.id)) return false;
-    createWorkflowApplicationService()?.approveStage({
-      issueId: issue.id,
-      stage: issue.approvalState.stage as Stage,
-      approval: { output: issue.approvalState.output },
-    });
+    try {
+      createWorkflowApplicationService()?.approveStage({
+        issueId: issue.id,
+        stage: issue.approvalState.stage as Stage,
+        approval: { output: issue.approvalState.output },
+      });
+    } catch (error) {
+      if (hasStageCompletionGuardDetails(error)) {
+        const guard = error.details.stageCompletionGuard;
+        const location = 'taskId' in guard
+          ? guard.taskId
+          : 'checkName' in guard
+            ? guard.checkName
+            : 'stage' in guard
+              ? guard.stage
+              : issue.approvalState.stage;
+        throw new WorkflowDomainError(`Cannot approve: ${guard.reason}: ${location}`, { stageCompletionGuard: guard });
+      }
+      throw error;
+    }
     return true;
   };
 
@@ -928,6 +957,12 @@ export function createIssueRoutes(
       };
       return c.json(response);
     } catch (error) {
+      if (hasStageCompletionGuardDetails(error)) {
+        return c.json({
+          success: false,
+          error: error.message,
+        } satisfies ApiResponse, 409);
+      }
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -1001,6 +1036,12 @@ export function createIssueRoutes(
       };
       return c.json(response, 201);
     } catch (error) {
+      if (hasStageCompletionGuardDetails(error)) {
+        return c.json({
+          success: false,
+          error: error.message,
+        } satisfies ApiResponse, 409);
+      }
       const response: ApiResponse = {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -2329,10 +2370,17 @@ export function createIssueRoutes(
         }
 
         if (issue.approvalState) {
-          if (!approveThroughWorkflowRun(issue)) {
+          try {
+            if (!approveThroughWorkflowRun(issue)) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: issue #${number} has no active WorkflowRun. Re-run the pipeline so approval can be recorded through the workflow aggregate.`
+              } satisfies ApiResponse, 409);
+            }
+          } catch (error) {
             return c.json({
               success: false,
-              error: `Cannot approve: issue #${number} has no active WorkflowRun. Re-run the pipeline so approval can be recorded through the workflow aggregate.`
+              error: error instanceof Error ? error.message : String(error),
             } satisfies ApiResponse, 409);
           }
         }
@@ -2355,10 +2403,17 @@ export function createIssueRoutes(
       // Plan stage: just set approval state and resume pipeline; runner will auto-advance
       if (approvalStage === Stage.Plan) {
         if (issue.approvalState) {
-          if (!approveThroughWorkflowRun(issue)) {
+          try {
+            if (!approveThroughWorkflowRun(issue)) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: issue #${number} has no active WorkflowRun. Re-run the pipeline so approval can be recorded through the workflow aggregate.`
+              } satisfies ApiResponse, 409);
+            }
+          } catch (error) {
             return c.json({
               success: false,
-              error: `Cannot approve: issue #${number} has no active WorkflowRun. Re-run the pipeline so approval can be recorded through the workflow aggregate.`
+              error: error instanceof Error ? error.message : String(error),
             } satisfies ApiResponse, 409);
           }
         }

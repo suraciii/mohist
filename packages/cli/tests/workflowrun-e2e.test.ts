@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseManager } from '../src/db/database';
+import { CoderSessionRepo } from '../src/db/coder-session-repo';
 import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
@@ -18,6 +19,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
   let db: DatabaseManager;
   let issueRepo: IssueRepo;
   let workflowRunRepo: WorkflowRunRepo;
+  let coderSessionRepo: CoderSessionRepo;
   let workflowApplicationService: WorkflowApplicationService;
   let workflowRunService: WorkflowRunService;
   let stageStateService: StageStateService;
@@ -30,6 +32,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     initializeDatabase(db);
     issueRepo = new IssueRepo(db);
     workflowRunRepo = new WorkflowRunRepo(db);
+    coderSessionRepo = new CoderSessionRepo(db);
     workflowApplicationService = new WorkflowApplicationService(db);
     workflowRunService = new WorkflowRunService(db);
     stageStateService = new StageStateService(db);
@@ -145,6 +148,37 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(latest.stageRuns.map(stageRun => stageRun.stage)).toEqual([Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate]);
     expect(latest.stageRuns.every(stageRun => stageRun.status === 'passed')).toBe(true);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Done, status: IssueStatus.Completed });
+  });
+
+  it('projects Done from later workflow evidence despite a stale failed coder session', () => {
+    const staleSession = coderSessionRepo.insert({
+      issueId,
+      acpSessionId: 'acp-stale-failed',
+      stage: Stage.Check,
+      taskDescription: 'Older failed review attempt',
+    });
+    coderSessionRepo.markFailed(staleSession.id, 'review crashed');
+
+    startWorkflow();
+    advanceToIntegrate();
+    workflowApplicationService.completeTask({ issueId, stage: Stage.Integrate, taskId: 'integrate:spec-sync', result: { status: 'completed', output: { synced: ['workflow-run'] } } });
+    workflowApplicationService.completeTask({ issueId, stage: Stage.Integrate, taskId: 'integrate:archive-change', result: { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } } });
+    workflowApplicationService.completeTask({
+      issueId,
+      stage: Stage.Integrate,
+      taskId: 'integrate:merge',
+      result: {
+        status: 'completed',
+        output: { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed', rebased: false },
+      },
+    });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Integrate, result: { name: 'health:integrate', status: 'pass' } });
+
+    const latest = workflowRunService.getLatestRunForIssue(issueId)!;
+    expect(latest.status).toBe('passed');
+    expect(coderSessionRepo.findById(staleSession.id)).toMatchObject({ status: 'failed', failureReason: 'review crashed' });
+    expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Done, status: IssueStatus.Completed });
+    expect(issueRepo.findById(issueId)?.blockedReason ?? null).toBeNull();
   });
 
   it('rejects a passed projection that did not reach final Integrate stage', () => {
@@ -329,7 +363,11 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
 
     workflowApplicationService.approveStage({ issueId, stage: Stage.Plan, approval: { output: { approver: 'qa' } } });
-    expect(workflowApplicationService.resumeDecision(issueId).nextWork).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
+    expect(workflowApplicationService.resumeDecision(issueId).nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build },
+    });
     expect(workflowRunService.getActiveRunForIssue(issueId)!.currentStage).toBe(Stage.Build);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Build, approvalState: undefined });
     expect(stageStateService.getIssueStageState(issueId).find(stage => stage.stage === Stage.Plan)?.approval).toMatchObject({ status: 'approved' });

@@ -1,7 +1,8 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { Stage } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
-import { detectOpenSpecChange } from '../openspec/detector';
+import { detectOpenSpecChange, findChangeDir } from '../openspec/detector';
 import { RalphExecutor, readTasks, type RalphLoopResult } from '../openspec/ralph-executor';
 import { loadWorkflow, loadHealthGatePolicies } from './workflow-loader';
 import { GitCommitter } from './git-committer';
@@ -15,6 +16,8 @@ import { runHealthFixTask } from './health-fix-task';
 import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 
 const log = Log.create({ service: 'workflow' });
+
+type BuildWorkSourceState = 'missing' | 'invalid' | 'empty';
 
 export class BuildStageRunner extends BaseStageRunner {
   private worktreePath: string;
@@ -54,6 +57,19 @@ export class BuildStageRunner extends BaseStageRunner {
     }
 
     if (!change) {
+      if (ctx.workflowApplicationService) {
+        const changeDir = findChangeDir(this.worktreePath, issue.number);
+        if (changeDir) {
+          ctx.workflowApplicationService.materializeTasks({
+            issueId: issue.id,
+            stage: Stage.Build,
+            tasks: [],
+            tasksPath: path.join(changeDir, 'tasks.json'),
+            buildWorkSourceState: 'missing',
+          });
+        }
+      }
+
       log.warn('detectOpenSpecChange returned null', {
         worktreePath: this.worktreePath,
         issueNumber: issue.number,
@@ -101,18 +117,22 @@ export class BuildStageRunner extends BaseStageRunner {
     }
 
     if (ctx.workflowApplicationService) {
-      const buildTasks = readTasks(change.tasksPath) ?? [];
+      const buildTaskSource = this.readBuildTasksForMaterialization(change.tasksPath);
       ctx.workflowApplicationService.materializeTasks({
         issueId: issue.id,
         stage: Stage.Build,
-        tasks: buildTasks.map(task => ({
+        tasks: buildTaskSource.tasks.map(task => ({
           id: task.id,
           title: task.title,
           order: task.order,
           dependsOn: task.dependsOn ?? [],
         })),
         tasksPath: change.tasksPath,
+        buildWorkSourceState: buildTaskSource.state,
       });
+      if (buildTaskSource.state) {
+        throw new Error(`Build tasks source is ${buildTaskSource.state}`);
+      }
     } else {
       for (const t of taskSnapshot) {
         if (t.passes && !completedTaskIds.includes(t.id)) {
@@ -375,6 +395,18 @@ export class BuildStageRunner extends BaseStageRunner {
         issueNumber: ctx.issue.number,
       },
     };
+  }
+
+  private readBuildTasksForMaterialization(tasksPath: string): {
+    tasks: NonNullable<ReturnType<typeof readTasks>>;
+    state?: BuildWorkSourceState;
+  } {
+    if (!fs.existsSync(tasksPath)) return { tasks: [], state: 'missing' };
+
+    const tasks = readTasks(tasksPath);
+    if (!tasks) return { tasks: [], state: 'invalid' };
+
+    return { tasks, state: tasks.length === 0 ? 'empty' : undefined };
   }
 
   private getBuildStageTimeoutMs(): number | undefined {

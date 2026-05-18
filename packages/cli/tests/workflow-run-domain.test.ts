@@ -230,7 +230,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
 
-  it('reruns current stage from the first work item and clears all current-stage state', () => {
+  it('reruns Build from dynamic source evaluation and clears all current-stage state', () => {
     const run = startRun();
     advanceToBuild(run);
     run.materializeTasks(Stage.Build, [
@@ -254,24 +254,46 @@ describe('WorkflowRun domain aggregate', () => {
     expect(buildStage.status).toBe('running');
     expect(buildStage.failure).toBeNull();
     expect(buildStage.approval).toBeNull();
-    expect(buildStage.findTask('T-001')).toMatchObject({
-      status: 'pending',
-      attempts: 0,
-      output: null,
-      artifacts: [],
-    });
-    expect(buildStage.findTask('T-002')).toMatchObject({
-      status: 'pending',
-      output: null,
-      artifacts: [],
-    });
+    expect(buildStage.tasks).toEqual([]);
+    expect(buildStage.buildWorkSourceState).toEqual({ evaluated: false });
     expect(buildStage.findCheck('health:build')).toMatchObject({
       status: 'pending',
       message: null,
       output: null,
       runCount: 0,
     });
-    expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build },
+    });
+  });
+
+  it('reruns Build with dynamic work source evidence reset for the new attempt', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [
+      { id: 'T-001', title: 'First build task', order: 0 },
+      { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
+    ]);
+    const buildStage = run.stageRun(Stage.Build);
+    expect(buildStage.buildWorkSourceState).toMatchObject({
+      evaluated: true,
+      tasks: [
+        { id: 'T-001', title: 'First build task', order: 0 },
+        { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
+      ],
+    });
+
+    const decision = run.rerunStage(Stage.Build);
+
+    expect(buildStage.tasks).toEqual([]);
+    expect(buildStage.buildWorkSourceState).toEqual({ evaluated: false });
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build },
+    });
   });
 
   it('rerun does not reset earlier passed stages', () => {
@@ -367,7 +389,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Check).status).toBe('passed');
   });
 
-  it('rerun resets all current-stage tasks from the first work item, not just from first incomplete', () => {
+  it('Build rerun clears materialized tasks instead of replaying stale dynamic work', () => {
     const run = startRun();
     advanceToBuild(run);
     run.materializeTasks(Stage.Build, [
@@ -386,10 +408,14 @@ describe('WorkflowRun domain aggregate', () => {
     const decision = run.rerunStage(Stage.Build);
 
     expect(run.status).toBe('running');
-    expect(buildStage.findTask('T-001')).toMatchObject({ status: 'pending', attempts: 0, output: null, artifacts: [] });
-    expect(buildStage.findTask('T-002')).toMatchObject({ status: 'pending', attempts: 0, output: null, artifacts: [] });
+    expect(buildStage.tasks).toEqual([]);
+    expect(buildStage.buildWorkSourceState).toEqual({ evaluated: false });
     expect(buildStage.findCheck('health:build')).toMatchObject({ status: 'pending', runCount: 0 });
-    expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build },
+    });
   });
 
   it('records pass, fail, error, and pending check results', () => {
@@ -681,6 +707,22 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('does not report a required-approval stage as complete until approval is approved', () => {
+    const run = startRun();
+    completePlanTasks(run);
+    passPlanChecks(run);
+    const planStage = run.stageRun(Stage.Plan);
+
+    planStage.status = 'running';
+    planStage.approval = null;
+
+    expect(run.nextWork()).toEqual({
+      kind: 'blocked',
+      stage: Stage.Plan,
+      reason: { complete: false, reason: 'approval-required', stage: Stage.Plan },
+    });
+  });
+
   it('Check approval becomes available after review and merge checks pass', () => {
     const run = startRun();
 
@@ -709,7 +751,11 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Plan).approval?.status).toBe('approved');
     expect(run.stageRun(Stage.Plan).approval?.output).toEqual({ approved: true, note: 'ship it' });
     expect(run.currentStage).toBe(Stage.Build);
-    expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Build, checkName: 'health:build' });
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build },
+    });
   });
 
   it('approveStage returns the exact completion guard blocker without accepting approval', () => {
@@ -736,6 +782,33 @@ describe('WorkflowRun domain aggregate', () => {
       dimensions: [{ name: 'Completeness', status: 'PASS' }],
     });
     expect(run.currentStage).toBe(Stage.Plan);
+  });
+
+  it('does not approve Check when completion evidence becomes incomplete after awaiting approval', () => {
+    const run = startRun();
+
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
+    run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') });
+
+    const checkStage = run.stageRun(Stage.Check);
+    checkStage.findCheck('merge-ready').output = mergeReadyOutput('sha-new');
+
+    const decision = run.approveStage(Stage.Check, { output: { approved: true } });
+
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Check,
+      reason: { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check },
+    });
+    expect(checkStage.status).toBe('awaiting-approval');
+    expect(checkStage.approval?.status).toBe('awaiting');
+    expect(run.currentStage).toBe(Stage.Check);
   });
 
   it('requests Check approval with merge-ready and verification evidence', () => {
@@ -1348,9 +1421,9 @@ describe('WorkflowRun domain aggregate', () => {
     advanceToBuild(run);
 
     expect(run.materializeTasks(Stage.Build, [], 'missing').nextWork).toEqual({
-      kind: 'check',
+      kind: 'blocked',
       stage: Stage.Build,
-      checkName: 'health:build',
+      reason: { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build },
     });
     expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
       evaluated: true,
@@ -1364,6 +1437,35 @@ describe('WorkflowRun domain aggregate', () => {
       tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
     });
     expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+  });
+
+  it.each([
+    ['missing', 'dynamic-source-missing'],
+    ['invalid', 'dynamic-source-invalid'],
+    ['empty', 'dynamic-source-empty'],
+  ] as const)('replaces stale successful Build source evidence when tasks.json becomes %s', (state, reason) => {
+    const run = startRun();
+    advanceToBuild(run);
+
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+      evaluated: true,
+      tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
+    });
+
+    const decision = run.materializeTasks(Stage.Build, [], state);
+
+    expect(run.status).toBe('running');
+    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+      evaluated: true,
+      [state]: true,
+    });
+    expect(decision.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason, stage: Stage.Build },
+    });
   });
 
   it('keeps runtime-added rebase work out of static stage definitions but required once appended', () => {

@@ -37,19 +37,6 @@ function unwrapTaskOutput(output: unknown): Record<string, unknown> | null {
   return data;
 }
 
-function totalTaskDuration(durations?: number[]): number {
-  if (!Array.isArray(durations)) return 0;
-  return durations.reduce((total, duration) => total + (typeof duration === 'number' ? duration : 0), 0);
-}
-
-function buildTasksJsonProgressOutput(): Record<string, unknown> {
-  return {
-    kind: 'tasks-json-progress',
-    stage: Stage.Build,
-    success: true,
-  };
-}
-
 function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDetails | null {
   if (snapshot.failure) return snapshot.failure;
   if (snapshot.status !== 'failed') return null;
@@ -203,27 +190,18 @@ export function repairWorkflowRunSnapshot(
         const existing = stageRun.tasks.find(candidate => candidate.id === task.id);
         if (existing) {
           existing.dependsOn = [...(task.dependsOn ?? existing.dependsOn ?? [])];
-          if (task.passes === true && existing.status === 'pending') {
-            existing.status = 'completed';
-            existing.attempts = Math.max(existing.attempts, task.attempts ?? 1);
-            existing.duration = existing.duration || totalTaskDuration(task.durations);
-            existing.output = existing.output ?? buildTasksJsonProgressOutput();
-            existing.reason = null;
-            existing.causedBy = null;
-          }
           continue;
         }
-        const passed = task.passes === true;
         stageRun.tasks.push({
           id: task.id,
           title: task.title,
-          status: passed ? 'completed' : 'pending',
+          status: 'pending',
           order: task.order ?? stageRun.tasks.length,
           dependsOn: [...(task.dependsOn ?? [])],
-          attempts: passed ? Math.max(task.attempts ?? 1, 1) : 0,
-          duration: passed ? totalTaskDuration(task.durations) : 0,
+          attempts: 0,
+          duration: 0,
           artifacts: [],
-          output: passed ? buildTasksJsonProgressOutput() : null,
+          output: null,
           reason: null,
           causedBy: null,
         });

@@ -212,7 +212,8 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'dynamic-source-empty'; stage: Stage }
   | { complete: false; reason: 'check-review-evidence-missing'; stage: Stage }
   | { complete: false; reason: 'check-review-evidence-stale'; stage: Stage }
-  | { complete: false; reason: 'integrate-delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string };
+  | { complete: false; reason: 'integrate-delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string }
+  | { complete: false; reason: 'approval-required'; stage: Stage };
 
 export interface WorkflowDecision {
   events: WorkflowEvent[];
@@ -286,7 +287,14 @@ export interface WorkflowRunSnapshot {
   failure: FailureDetails | null;
 }
 
-export class WorkflowDomainError extends Error {}
+export class WorkflowDomainError extends Error {
+  constructor(
+    message: string,
+    readonly details?: { stageCompletionGuard?: StageCompletionGuard },
+  ) {
+    super(message);
+  }
+}
 
 export class TaskRun {
   status: TaskRunStatus = 'pending';
@@ -563,6 +571,15 @@ export class StageRun {
     }
   }
 
+  removeNonStaticTasks(): void {
+    const staticTaskIds = new Set(this.definition.tasks.map(task => task.id));
+    for (let index = this.tasks.length - 1; index >= 0; index--) {
+      if (!staticTaskIds.has(this.tasks[index].id)) {
+        this.tasks.splice(index, 1);
+      }
+    }
+  }
+
   recordBuildWorkSourceEvaluated(tasks: MaterializedTaskInput[]): void {
     if (this.stage !== Stage.Build) return;
     this.buildWorkSourceState = { evaluated: true, tasks };
@@ -570,20 +587,22 @@ export class StageRun {
 
   recordBuildWorkSourceMissing(): void {
     if (this.stage !== Stage.Build) return;
-    if (this.buildWorkSourceState.evaluated) return;
     this.buildWorkSourceState = { evaluated: true, missing: true };
   }
 
   recordBuildWorkSourceInvalid(): void {
     if (this.stage !== Stage.Build) return;
-    if (this.buildWorkSourceState.evaluated) return;
     this.buildWorkSourceState = { evaluated: true, invalid: true };
   }
 
   recordBuildWorkSourceEmpty(): void {
     if (this.stage !== Stage.Build) return;
-    if (this.buildWorkSourceState.evaluated) return;
     this.buildWorkSourceState = { evaluated: true, empty: true };
+  }
+
+  resetBuildWorkSourceState(): void {
+    if (this.stage !== Stage.Build) return;
+    this.buildWorkSourceState = { evaluated: false };
   }
 
   materializeTaskForPersistence(id: string, title: string, order: number): TaskRun {
@@ -1044,7 +1063,7 @@ export class WorkflowRun {
     if (stageRun.approval.staleEvidenceDetected) {
       throw new WorkflowDomainError(`Approval cannot be submitted: evidence is stale due to base drift or rebase. Please rebase or rerun checks before approving.`);
     }
-    const guard = this.evaluateStageCompletionGuard(stageRun);
+    const guard = this.evaluateStageCompletionGuard(stageRun, { includeApprovalEvidence: false });
     if (!guard.complete) {
       return { events: [], nextWork: { kind: 'blocked', stage, reason: guard } };
     }
@@ -1223,6 +1242,10 @@ export class WorkflowRun {
     stageRun.approval = null;
 
     stageRun.removeGeneratedTasks();
+    if (stage === Stage.Build) {
+      stageRun.removeNonStaticTasks();
+      stageRun.resetBuildWorkSourceState();
+    }
 
     for (const task of stageRun.tasks) {
       task.status = 'pending';
@@ -1264,6 +1287,8 @@ export class WorkflowRun {
     if (preTaskCheck) return { kind: 'check', stage: stageRun.stage, checkName: preTaskCheck.name };
     const task = stageRun.nextTask();
     if (task) return { kind: 'task', stage: stageRun.stage, taskId: task.id };
+    const buildWorkSourceFailure = this.evaluateBuildWorkSourceFailureGuard(stageRun);
+    if (buildWorkSourceFailure) return { kind: 'blocked', stage: stageRun.stage, reason: buildWorkSourceFailure };
     const check = stageRun.nextCheck('post-task');
     if (check) return { kind: 'check', stage: stageRun.stage, checkName: check.name };
     const guard = this.evaluateStageCompletionGuard(stageRun);
@@ -1297,7 +1322,7 @@ export class WorkflowRun {
   }
 
   private maybeCompleteStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
-    const guard = this.evaluateStageCompletionGuard(stageRun);
+    const guard = this.evaluateStageCompletionGuard(stageRun, { includeApprovalEvidence: false });
     if (!guard.complete) return this.decision(events);
     if (stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
       if (!stageRun.approval) {
@@ -1312,7 +1337,21 @@ export class WorkflowRun {
     return this.completeStage(stageRun, events);
   }
 
-  private evaluateStageCompletionGuard(stageRun: StageRun): StageCompletionGuard {
+  private evaluateBuildWorkSourceFailureGuard(stageRun: StageRun): StageCompletionGuard | null {
+    if (stageRun.stage !== Stage.Build) return null;
+    if (!(stageRun.definition.workSources ?? []).some(source => source.kind !== 'static' && source.kind !== 'runtime')) return null;
+    const state: BuildWorkSourceState = stageRun.buildWorkSourceState;
+    if (!state.evaluated) return { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build };
+    if ('missing' in state && state.missing) return { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build };
+    if ('invalid' in state && state.invalid) return { complete: false, reason: 'dynamic-source-invalid', stage: Stage.Build };
+    if ('empty' in state && state.empty) return { complete: false, reason: 'dynamic-source-empty', stage: Stage.Build };
+    return null;
+  }
+
+  private evaluateStageCompletionGuard(
+    stageRun: StageRun,
+    options: { includeApprovalEvidence?: boolean } = {},
+  ): StageCompletionGuard {
     for (const taskDef of stageRun.definition.tasks) {
       const taskRun = stageRun.tasks.find(t => t.id === taskDef.id);
       if (!taskRun) return { complete: false, reason: 'missing-static-task', taskId: taskDef.id };
@@ -1325,7 +1364,7 @@ export class WorkflowRun {
       if (checkRun.status !== 'passed') return { complete: false, reason: 'static-check-not-passed', checkName: checkDef.name };
     }
 
-    if (stageRun.stage === Stage.Build) {
+    if (stageRun.stage === Stage.Build && (stageRun.definition.workSources ?? []).some(source => source.kind !== 'static' && source.kind !== 'runtime')) {
       const state: BuildWorkSourceState = stageRun.buildWorkSourceState;
       if (!state.evaluated) return { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build };
       if ('missing' in state && state.missing) return { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build };
@@ -1345,6 +1384,10 @@ export class WorkflowRun {
 
     for (const taskRun of stageRun.tasks) {
       if (!taskRun.terminal) return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
+    }
+
+    if ((options.includeApprovalEvidence ?? true) && stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
+      return { complete: false, reason: 'approval-required', stage: stageRun.stage };
     }
 
     return { complete: true };
@@ -1409,6 +1452,9 @@ export class WorkflowRun {
   }
 
   private completeStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
+    const guard = this.evaluateStageCompletionGuard(stageRun);
+    if (!guard.complete) return this.decision(events);
+
     stageRun.status = 'passed';
     events.push({ type: 'stage-completed', stage: stageRun.stage });
 

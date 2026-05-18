@@ -846,6 +846,7 @@ describe('StageRunner migration regression coverage', () => {
           workflowRun: {
             stageRuns: [{
               stage: Stage.Build,
+              buildWorkSourceState: { evaluated: true, tasks: ['T-001', 'T-002'] },
               tasks: [
                 { id: 'row-1', taskId: 'T-001', title: 'Build first task', status: 'completed' as const },
                 { id: 'row-2', taskId: 'T-002', title: 'Build second task', status: 'pending' as const },
@@ -856,6 +857,143 @@ describe('StageRunner migration regression coverage', () => {
 
         expect(runner.materializeWork(ctx)).toBe(false);
         expect(materializeTasks).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('ConfigDrivenStageRunner records missing Build source evidence before checks', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-build-materialize-source-missing-'));
+      try {
+        const materializeTasks = vi.fn();
+        const runner = new ConfigDrivenStageRunner({
+          taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          checkRegistry: createBasicCheckRegistry({}),
+          getStageDefinition: createStageDefinition,
+          worktreePath: tmpDir,
+        });
+
+        const ctx = makeMockContext(Stage.Build, {
+          acpOptions: { cwd: tmpDir } as any,
+          workflowApplicationService: {
+            completeTask: vi.fn(),
+            recordCheckResult: vi.fn(),
+            approveStage: vi.fn(),
+            materializeTasks,
+          } as any,
+          workflowRun: {
+            stageRuns: [{ stage: Stage.Build, tasks: [], buildWorkSourceState: { evaluated: false } }],
+          } as any,
+        });
+
+        expect(runner.materializeWork(ctx)).toBe(true);
+        expect(materializeTasks).toHaveBeenCalledWith({
+          issueId: ctx.issue.id,
+          stage: Stage.Build,
+          tasks: [],
+          buildWorkSourceState: 'missing',
+        });
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('ConfigDrivenStageRunner records invalid Build source evidence when task loading throws', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-build-materialize-source-invalid-'));
+      try {
+        const changeDir = path.join(tmpDir, 'openspec', 'changes', '1-config-runner-build');
+        fs.mkdirSync(changeDir, { recursive: true });
+        fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [{ id: 'T-001', order: 1, title: 'Build first task' }] }), 'utf-8');
+
+        const materializeTasks = vi.fn();
+        const taskLoaderRegistry: TaskLoaderRegistry = {
+          get: vi.fn().mockImplementation((kind: string) => kind === 'ralph'
+            ? {
+                kind: 'ralph' as const,
+                load: () => { throw new Error('load failed'); },
+              }
+            : undefined),
+          list: vi.fn().mockReturnValue([]),
+        };
+        const runner = new ConfigDrivenStageRunner({
+          taskLoaderRegistry,
+          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          checkRegistry: createBasicCheckRegistry({}),
+          getStageDefinition: createStageDefinition,
+          worktreePath: tmpDir,
+        });
+
+        const ctx = makeMockContext(Stage.Build, {
+          acpOptions: { cwd: tmpDir } as any,
+          workflowApplicationService: {
+            completeTask: vi.fn(),
+            recordCheckResult: vi.fn(),
+            approveStage: vi.fn(),
+            materializeTasks,
+          } as any,
+          workflowRun: {
+            stageRuns: [{ stage: Stage.Build, tasks: [], buildWorkSourceState: { evaluated: false } }],
+          } as any,
+        });
+
+        expect(runner.materializeWork(ctx)).toBe(true);
+        expect(materializeTasks).toHaveBeenCalledWith({
+          issueId: ctx.issue.id,
+          stage: Stage.Build,
+          tasks: [],
+          buildWorkSourceState: 'invalid',
+        });
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('ConfigDrivenStageRunner records empty Build source evidence before checks', async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-build-materialize-source-empty-'));
+      try {
+        const changeDir = path.join(tmpDir, 'openspec', 'changes', '1-config-runner-build');
+        fs.mkdirSync(changeDir, { recursive: true });
+        fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [] }), 'utf-8');
+
+        const materializeTasks = vi.fn();
+        const taskLoaderRegistry: TaskLoaderRegistry = {
+          get: vi.fn().mockImplementation((kind: string) => kind === 'ralph'
+            ? {
+                kind: 'ralph' as const,
+                load: () => [],
+              }
+            : undefined),
+          list: vi.fn().mockReturnValue([]),
+        };
+        const runner = new ConfigDrivenStageRunner({
+          taskLoaderRegistry,
+          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          checkRegistry: createBasicCheckRegistry({}),
+          getStageDefinition: createStageDefinition,
+          worktreePath: tmpDir,
+        });
+
+        const ctx = makeMockContext(Stage.Build, {
+          acpOptions: { cwd: tmpDir } as any,
+          workflowApplicationService: {
+            completeTask: vi.fn(),
+            recordCheckResult: vi.fn(),
+            approveStage: vi.fn(),
+            materializeTasks,
+          } as any,
+          workflowRun: {
+            stageRuns: [{ stage: Stage.Build, tasks: [], buildWorkSourceState: { evaluated: false } }],
+          } as any,
+        });
+
+        expect(runner.materializeWork(ctx)).toBe(true);
+        expect(materializeTasks).toHaveBeenCalledWith({
+          issueId: ctx.issue.id,
+          stage: Stage.Build,
+          tasks: [],
+          buildWorkSourceState: 'empty',
+        });
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
