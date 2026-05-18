@@ -462,6 +462,24 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       return instanceResult;
     }
 
+    if (taskId === 'fix-check-health' || taskId.startsWith('fix-check-health:')) {
+      const adapter = createRepairFixAdapter();
+      const project = ctx.projectRepo?.findById(ctx.issue.projectId);
+      const worktreePath = project
+        ? ctx.worktreeManager.getPath(project.name, ctx.issue.number)
+        : null;
+      if (!worktreePath) {
+        log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
+        return null;
+      }
+      const result = await adapter.dispatch('fix-check-health', ctx, {
+        worktreePath,
+        failedCheck: failedCheck ?? { name: 'health:check', status: 'fail' as const },
+        attempt,
+      });
+      return { ...result, taskId };
+    }
+
     if (taskId === 'fix-merge-readiness' || taskId.startsWith('fix-merge-readiness:') || taskId === 'repair-merge' || taskId.startsWith('repair-merge:')) {
       const adapter = createRepairFixAdapter();
       const project = ctx.projectRepo?.findById(ctx.issue.projectId);
