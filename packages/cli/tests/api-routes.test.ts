@@ -24,6 +24,7 @@ import { Stage, IssueStatus, MergeState } from '../src/types';
 import { createStatusRoutes } from '../src/api/status';
 import { createConfigRoutes } from '../src/api/config';
 import { StageExecutionRepo } from '../src/db/stage-execution-repo';
+import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
@@ -810,6 +811,39 @@ describe('API Routes', () => {
         expect(response.body.error).toContain('merge-ready snapshot is missing');
         expect(enqueueSpy).not.toHaveBeenCalled();
         expect(workflowRunService.getActiveRunForIssue(issue.id)?.currentStage).toBe(Stage.Check);
+      });
+
+      it('Plan approval should surface the exact WorkflowRun completion guard reason through the workflow runner', async () => {
+        const issue = issueService.create({ projectId, title: 'Plan Approval Guard Reason Issue' });
+        const stageStateService = new StageStateService(db);
+        const workflowRunService = new WorkflowRunService(db);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowRunService.startRun(issue.id, issue.number);
+        completePlanToApproval(workflowApplicationService, issue.id);
+
+        const workflowRunRepo = new WorkflowRunRepo(db);
+        const activeRun = workflowRunRepo.loadActiveAggregate(issue.id)!;
+        const planStage = activeRun.stageRun(Stage.Plan);
+        const healthPlan = planStage.checks.find(check => check.name === 'health:plan');
+        if (!healthPlan) throw new Error('health:plan check missing');
+        healthPlan.status = 'pending';
+        workflowRunRepo.saveAggregate(activeRun);
+
+        const approveApp = new Hono();
+        const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
+        const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
+        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
+        const approveServer = createTestServer(approveApp);
+
+        const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
+
+        expect(response.status).toBe(202);
+        expect(response.body.success).toBe(true);
+        expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+
+        const updatedRun = workflowRunService.getActiveRunForIssue(issue.id);
+        expect(updatedRun?.currentStage).toBe(Stage.Plan);
+        expect(updatedRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Plan)?.approvalStatus).toBe('awaiting');
       });
 
       it('Check approval should reject stale merge-ready base SHA', async () => {

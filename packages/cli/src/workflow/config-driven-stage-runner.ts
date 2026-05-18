@@ -440,6 +440,11 @@ export class ConfigDrivenStageRunner implements StageRunner {
     const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
     if (!stageRun) return false;
 
+    if (stageRun.stage === Stage.Build) {
+      const buildWorkSourceState = (stageRun as { buildWorkSourceState?: { evaluated?: boolean } }).buildWorkSourceState;
+      if (!buildWorkSourceState?.evaluated) return true;
+    }
+
     const existingTaskIds = new Set(stageRun.tasks.map(task => this.persistedTaskId(task)));
     return (stageDefinition?.workSources ?? []).some(workSource => {
       if (workSource.kind === 'static' || workSource.kind === 'runtime') return false;
@@ -477,6 +482,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
             tasks: [],
             buildWorkSourceState: 'missing',
           });
+          materialized = true;
         }
         continue;
       }
@@ -492,6 +498,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
             tasks: [],
             buildWorkSourceState: 'invalid',
           });
+          materialized = true;
         }
         continue;
       }
@@ -502,9 +509,9 @@ export class ConfigDrivenStageRunner implements StageRunner {
         tasks,
         buildWorkSourceState: tasks.length === 0 ? 'empty' : undefined,
       });
+      materialized = true;
       if (tasks.length > 0) {
         for (const task of tasks) existingTaskIds.add(task.id);
-        materialized = true;
       }
     }
 

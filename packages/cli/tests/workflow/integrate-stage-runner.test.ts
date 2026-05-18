@@ -163,13 +163,11 @@ describe('IntegrateStageRunner', () => {
   beforeEach(() => {
     vi.resetModules();
     const execFileMock = vi.fn().mockImplementation((cmd: any, args: any, opts: any, cb: any) => {
-      const err = new Error('ENOENT');
-      (err as any).code = 'ENOENT';
       process.nextTick(() => {
         if (typeof opts === 'function') {
-          opts(err, { stdout: '', stderr: '' });
+          opts(null, { stdout: cmd === 'git' ? 'mock-sha\n' : 'ok', stderr: '' });
         } else if (typeof cb === 'function') {
-          cb(err, { stdout: '', stderr: '' });
+          cb(null, { stdout: cmd === 'git' ? 'mock-sha\n' : 'ok', stderr: '' });
         }
       });
       return {} as any;
@@ -182,9 +180,27 @@ describe('IntegrateStageRunner', () => {
     fs.writeFileSync(
       path.join(tmpDir, 'package.json'),
       JSON.stringify({
+        name: 'mohist-integrate-test',
+        version: '0.0.0',
         scripts: {
           build: 'node -e "process.exit(0)"',
           test: 'node -e "process.exit(0)"',
+        },
+      }),
+      'utf-8',
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'package-lock.json'),
+      JSON.stringify({
+        name: 'mohist-integrate-test',
+        version: '0.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': {
+            name: 'mohist-integrate-test',
+            version: '0.0.0',
+          },
         },
       }),
       'utf-8',
@@ -880,6 +896,24 @@ FH added scenario content.`);
       });
 
       const execFileMock = setupPassingExecFileMock();
+      fs.writeFileSync(path.join(tmpDir, 'workflow.yaml'), `
+stages:
+  - stage: explore
+  - stage: plan
+  - stage: build
+  - stage: check
+  - stage: integrate
+  - stage: done
+healthGates:
+  postMerge:
+    enabled: true
+    command: npm ci && npm run build && npm test
+    timeout: 300000
+    autoFix: false
+    maxFixAttempts: 0
+    fallbackReaction:
+      type: ask-user
+`, 'utf-8');
 
       const ctx = createMockContext(tmpDir, issueNumber, {
         worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,
@@ -927,6 +961,24 @@ FHF added scenario content.`);
       });
 
       const execFileMock = setupFailingExecFileMock(1, 'build failed\nerror details');
+      fs.writeFileSync(path.join(tmpDir, 'workflow.yaml'), `
+stages:
+  - stage: explore
+  - stage: plan
+  - stage: build
+  - stage: check
+  - stage: integrate
+  - stage: done
+healthGates:
+  postMerge:
+    enabled: true
+    command: npm ci && npm run build && npm test
+    timeout: 300000
+    autoFix: false
+    maxFixAttempts: 0
+    fallbackReaction:
+      type: ask-user
+`, 'utf-8');
 
       const ctx = createMockContext(tmpDir, issueNumber, {
         worktreeManager: { mergeApprovedCandidate: mergeApprovedCandidateMock } as any,

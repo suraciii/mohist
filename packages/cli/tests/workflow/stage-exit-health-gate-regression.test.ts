@@ -664,7 +664,7 @@ describe('checks.buildTest-only workflow config controls check-stage health comm
 
     const policies = loadHealthGatePolicies(workflow);
 
-    expect(policies.plan.command).toBe('npm run typecheck');
+    expect(policies.plan.command).toBe('npm ci && npm run typecheck');
     expect(policies.plan.command).not.toBe('npm run ci-test');
   });
 
@@ -680,7 +680,7 @@ describe('checks.buildTest-only workflow config controls check-stage health comm
 
     const policies = loadHealthGatePolicies(workflow);
 
-    expect(policies.build.command).toBe('npm run build');
+    expect(policies.build.command).toBe('npm ci && npm run build');
     expect(policies.build.command).not.toBe('npm run ci-test');
   });
 });

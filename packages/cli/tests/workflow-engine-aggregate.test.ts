@@ -130,7 +130,7 @@ describe('WorkflowEngine aggregate progression', () => {
 
     expect(result.completed).toBe(false);
     expect(result.stage).toBe(Stage.Build);
-    expect(result.message).toBe('Pipeline cannot handle stage: build');
+    expect(result.message).toBe('dynamic-source-not-evaluated: build');
     expect(run.stageRun(Stage.Plan).status).toBe('passed');
     expect(run.currentStage).toBe(Stage.Build);
     expect(runner.seenStages).toEqual([
@@ -332,6 +332,7 @@ describe('WorkflowEngine aggregate progression', () => {
     for (const check of run.stageRun(Stage.Plan).checks) {
       run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
     }
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
     run.scheduleRebaseTask('target branch moved before Build task materialization');
     expect(run.currentStage).toBe(Stage.Build);
     expect(run.nextWork()).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'rebase-branch' });
@@ -388,5 +389,108 @@ describe('WorkflowEngine aggregate progression', () => {
     expect(events[0]).toBe('materialize');
     expect(events).toContain('run:rebase-branch');
     expect(run.stageRun(Stage.Build).tasks.map(task => task.id)).toEqual(expect.arrayContaining(['T-001', 'rebase-branch']));
+  });
+
+  it('blocks Build on recorded missing source evidence before selecting health check', async () => {
+    const issue = makeIssue(Stage.Build);
+    const definitions = DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Plan
+      ? { ...definition, requiresApproval: false }
+      : definition);
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions });
+
+    for (const task of run.stageRun(Stage.Plan).tasks) {
+      run.completeTask(Stage.Plan, task.id, { status: 'completed' });
+    }
+    for (const check of run.stageRun(Stage.Plan).checks) {
+      run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
+    }
+
+    const service: WorkflowApplicationRuntime = {
+      startWorkflow: vi.fn(() => ({ run, decision: { events: [], nextWork: run.nextWork() } })),
+      resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
+      completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
+      recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
+      materializeTasks: vi.fn(({ stage, tasks, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, buildWorkSourceState) })),
+      approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+      retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
+    };
+
+    const runner: StageRunner = {
+      canHandle: stage => stage === Stage.Build,
+      materializeWork: vi.fn(ctx => {
+        if (ctx.issue.stage !== Stage.Build) return false;
+        service.materializeTasks({
+          issueId: issue.id,
+          stage: Stage.Build,
+          tasks: [],
+          buildWorkSourceState: 'missing',
+        });
+        return true;
+      }),
+      run: async () => ({ success: true, output: null, checkResults: [] }),
+    };
+
+    const workflowRunService = {
+      getActiveRunForIssue: vi.fn(() => run.snapshot()),
+      getLatestRunForIssue: vi.fn(() => run.snapshot()),
+    };
+    const engine = makeEngine(issue, service, [runner], workflowRunService);
+
+    const result = await engine.run(issue, { cwd: '/tmp' });
+
+    expect(result).toEqual({ completed: false, stage: Stage.Build, message: 'dynamic-source-missing: build' });
+    expect(runner.materializeWork).toHaveBeenCalledWith(expect.objectContaining({
+      issue: expect.objectContaining({ stage: Stage.Build }),
+    }));
+    expect(service.materializeTasks).toHaveBeenCalledWith(expect.objectContaining({
+      issueId: issue.id,
+      stage: Stage.Build,
+      tasks: [],
+      buildWorkSourceState: 'missing',
+    }));
+  });
+
+  it('returns a blocked result when aggregate completion evidence is missing', async () => {
+    const issue = makeIssue(Stage.Build);
+    const definitions = DEFAULT_STAGE_DEFINITIONS.map(definition => {
+      if (definition.stage === Stage.Plan) return { ...definition, requiresApproval: false };
+      if (definition.stage === Stage.Build) return { ...definition, checks: [] };
+      return definition;
+    });
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions });
+
+    for (const task of run.stageRun(Stage.Plan).tasks) {
+      run.completeTask(Stage.Plan, task.id, { status: 'completed' });
+    }
+    for (const check of run.stageRun(Stage.Plan).checks) {
+      run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
+    }
+
+    const service: WorkflowApplicationRuntime = {
+      startWorkflow: vi.fn(() => ({ run, decision: { events: [], nextWork: run.nextWork() } })),
+      resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
+      completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
+      recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
+      materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
+      approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
+      retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
+    };
+
+    const runner: StageRunner = {
+      canHandle: () => true,
+      materializeWork: vi.fn(() => false),
+      run: vi.fn(async () => ({ success: true, output: null, checkResults: [] })),
+    };
+
+    const engine = makeEngine(issue, service, [runner]);
+
+    const result = await engine.run(issue, { cwd: '/tmp' });
+
+    expect(result).toEqual({
+      completed: false,
+      stage: Stage.Build,
+      message: 'dynamic-source-not-evaluated: build',
+    });
+    expect(runner.run).not.toHaveBeenCalled();
   });
 });

@@ -44,6 +44,14 @@ function makeChange(tempDir: string, tasks: Array<Record<string, unknown>>): Ope
   };
 }
 
+function makeChangeDirWithoutTasks(tempDir: string): string {
+  const changePath = path.join(tempDir, 'openspec', 'changes', '188-build');
+  fs.mkdirSync(path.join(changePath, 'session-memories'), { recursive: true });
+  fs.writeFileSync(path.join(changePath, 'proposal.md'), '# Proposal');
+  fs.writeFileSync(path.join(changePath, 'design.md'), '# Design');
+  return changePath;
+}
+
 function startBuildRun(issue: Issue): ReturnType<typeof WorkflowRun.startWorkflow>['run'] {
   const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
   for (const task of run.stageRun(Stage.Plan).tasks.map(task => task.id)) {
@@ -60,7 +68,7 @@ function makeService(run: ReturnType<typeof startBuildRun>): WorkflowApplication
   return {
     startWorkflow: vi.fn(),
     resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
-    materializeTasks: vi.fn(({ stage, tasks }) => ({ run, decision: run.materializeTasks(stage, tasks) })),
+    materializeTasks: vi.fn(({ stage, tasks, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, buildWorkSourceState) })),
     completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
     recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
     approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
@@ -188,6 +196,128 @@ describe('Build aggregate-backed task runtime', () => {
     }));
     expect(execute).toHaveBeenCalledWith(change, expect.objectContaining({ ignoreTaskFileProgress: true }));
     expect((runner as any).gitCommitter.commitBuildChanges).toHaveBeenCalledWith(issue);
+  });
+
+  it('legacy BuildStageRunner records missing tasks.json as missing source evidence', async () => {
+    const issue = makeIssue();
+    const changePath = makeChangeDirWithoutTasks(tempDir);
+    const run = startBuildRun(issue);
+    const service = makeService(run);
+    const ralphModule = await import('../src/openspec/ralph-executor');
+    const execute = vi.fn();
+    vi.spyOn(ralphModule.RalphExecutor.prototype, 'execute').mockImplementation(execute);
+    const runner = new BuildStageRunner({ worktreePath: tempDir, projectId: 'project-1' });
+    (runner as any).gitCommitter = { commitBuildChanges: vi.fn().mockResolvedValue(undefined) };
+
+    const result = await runner.run({
+      issue,
+      acpOptions: { cwd: tempDir },
+      artifactManager: {
+        getChangeDir: vi.fn().mockReturnValue(changePath),
+        createChangeDir: vi.fn(),
+        readArtifact: vi.fn(),
+        writeArtifact: vi.fn(),
+        exists: vi.fn().mockReturnValue(false),
+        readTasks: vi.fn(),
+        updateTaskPasses: vi.fn(),
+        syncTasksToStageState: vi.fn(),
+        archiveChange: vi.fn(),
+      } as never,
+      worktreeManager: {} as never,
+      projectRepo: {} as never,
+      eventBus: { emit: vi.fn() } as never,
+      checkpointManager: {
+        getResumeSteps: vi.fn().mockReturnValue([]),
+        markStepComplete: vi.fn(),
+        delete: vi.fn(),
+      } as never,
+      issueRepo: { updateStage: vi.fn(), setApprovalState: vi.fn(), clearApprovalState: vi.fn(), updateStatus: vi.fn(), findById: vi.fn() },
+      workflowApplicationService: service,
+      emit: vi.fn(),
+      log: vi.fn(),
+    } as never);
+
+    expect(result.success).toBe(false);
+    expect(service.materializeTasks).toHaveBeenCalledWith(expect.objectContaining({
+      issueId: issue.id,
+      stage: Stage.Build,
+      tasks: [],
+      tasksPath: path.join(changePath, 'tasks.json'),
+      buildWorkSourceState: 'missing',
+    }));
+    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({ evaluated: true, missing: true });
+    expect(run.nextWork()).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('legacy BuildStageRunner records invalid tasks.json as invalid source evidence', async () => {
+    const issue = makeIssue();
+    const changePath = makeChangeDirWithoutTasks(tempDir);
+    const tasksPath = path.join(changePath, 'tasks.json');
+    fs.writeFileSync(tasksPath, '{ not-json');
+    const change: OpenSpecChange = {
+      changePath,
+      tasksPath,
+      sessionMemoriesPath: path.join(changePath, 'session-memories'),
+      proposalPath: path.join(changePath, 'proposal.md'),
+      designPath: path.join(changePath, 'design.md'),
+      specsPath: path.join(changePath, 'specs'),
+    };
+    const run = startBuildRun(issue);
+    const service = makeService(run);
+    const detectModule = await import('../src/openspec/detector');
+    vi.spyOn(detectModule, 'detectOpenSpecChange').mockReturnValue(change);
+    const ralphModule = await import('../src/openspec/ralph-executor');
+    const execute = vi.fn().mockResolvedValue({ completed: 0, failed: 0, skipped: 0, total: 0, taskResults: [], success: true });
+    vi.spyOn(ralphModule.RalphExecutor.prototype, 'execute').mockImplementation(execute);
+    const runner = new BuildStageRunner({ worktreePath: tempDir, projectId: 'project-1' });
+    (runner as any).gitCommitter = { commitBuildChanges: vi.fn().mockResolvedValue(undefined) };
+
+    await runner.run({
+      issue,
+      acpOptions: { cwd: tempDir },
+      artifactManager: {
+        getChangeDir: vi.fn().mockReturnValue(changePath),
+        createChangeDir: vi.fn(),
+        readArtifact: vi.fn(),
+        writeArtifact: vi.fn(),
+        exists: vi.fn().mockReturnValue(true),
+        readTasks: vi.fn(),
+        updateTaskPasses: vi.fn(),
+        syncTasksToStageState: vi.fn(),
+        archiveChange: vi.fn(),
+      } as never,
+      worktreeManager: {} as never,
+      projectRepo: {} as never,
+      eventBus: { emit: vi.fn() } as never,
+      checkpointManager: {
+        getResumeSteps: vi.fn().mockReturnValue([]),
+        markStepComplete: vi.fn(),
+        delete: vi.fn(),
+      } as never,
+      issueRepo: { updateStage: vi.fn(), setApprovalState: vi.fn(), clearApprovalState: vi.fn(), updateStatus: vi.fn(), findById: vi.fn() },
+      workflowApplicationService: service,
+      emit: vi.fn(),
+      log: vi.fn(),
+    } as never);
+
+    expect(service.materializeTasks).toHaveBeenCalledWith(expect.objectContaining({
+      issueId: issue.id,
+      stage: Stage.Build,
+      tasks: [],
+      tasksPath,
+      buildWorkSourceState: 'invalid',
+    }));
+    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({ evaluated: true, invalid: true });
+    expect(run.nextWork()).toEqual({
+      kind: 'blocked',
+      stage: Stage.Build,
+      reason: { complete: false, reason: 'dynamic-source-invalid', stage: Stage.Build },
+    });
   });
 
   it('does not replay legacy checkpoint skips while executing an aggregate requested task', async () => {
