@@ -588,16 +588,23 @@ export class ConfigDrivenStageRunner implements StageRunner {
   }
 
   private resolveRuntimeTask(stageDefinition: StageDefinition, taskId: string): ExecutableTask | null {
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
     const task = stageDefinition.tasks.find(candidate => candidate.id === taskId)
-      ?? this.buildRuntimeTaskDefinition(taskId);
+      ?? this.buildRuntimeTaskDefinition(taskId)
+      ?? (baseTaskId !== taskId ? this.buildRuntimeTaskDefinition(baseTaskId) : null);
     if (!task) return null;
-    const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, 'runtime');
+    const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, 'runtime')
+      ?? (baseTaskId !== taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, 'runtime') : undefined);
     if (!policy) return null;
     return {
-      taskId: task.id,
+      taskId,
       title: task.title,
       kind: this.toHandlerKind(policy.kind),
     };
+  }
+
+  private baseRuntimeTaskId(taskId: string): string {
+    return taskId.replace(/:\d+$/, '');
   }
 
   private buildRuntimeTaskDefinition(taskId: string): { id: string; title: string } | null {
@@ -628,7 +635,10 @@ export class ConfigDrivenStageRunner implements StageRunner {
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
     if (!stageDefinition) return null;
     const attempt = options.attempt ?? 1;
-    const policy = this.resolveTaskExecutionPolicy(stageDefinition, task.taskId, this.taskWorkSourceKind(ctx, stageDefinition, task.taskId));
+    const workSourceKind = this.taskWorkSourceKind(ctx, stageDefinition, task.taskId);
+    const baseTaskId = this.baseRuntimeTaskId(task.taskId);
+    const policy = this.resolveTaskExecutionPolicy(stageDefinition, task.taskId, workSourceKind)
+      ?? (baseTaskId !== task.taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, workSourceKind) : undefined);
     const executionKind = policy?.kind ?? task.kind;
 
     return this.taskDispatchFactoryRegistry.build({

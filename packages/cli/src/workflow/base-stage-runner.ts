@@ -7,8 +7,26 @@ import type { StageExecutionStatus } from '../db/stage-execution-repo';
 import { normalizeCheckStatus, normalizeTaskStatus, type StageStateStatus } from '../services/stage-state-service';
 import { Log } from '../util/log';
 import { parseVerdict, parseDimensions, readReportFile } from './utils';
+import type { StageCompletionGuard, WorkflowWork } from './domain';
 
 const log = Log.create({ service: 'base-stage-runner' });
+
+function formatBlockedWork(stage: Stage, reason: StageCompletionGuard): string {
+  if (reason.complete) return `Blocked at ${stage}`;
+  const subject = 'taskId' in reason
+    ? reason.taskId
+    : 'checkName' in reason
+      ? reason.checkName
+      : 'stage' in reason
+        ? reason.stage
+        : stage;
+  return `${reason.reason}: ${subject}`;
+}
+
+function formatApprovalDecision(stage: Stage, nextWork: WorkflowWork): string | null {
+  if (nextWork.kind !== 'blocked') return null;
+  return `Stage ${stage} cannot be approved: ${formatBlockedWork(nextWork.stage, nextWork.reason)}`;
+}
 
 export abstract class BaseStageRunner implements StageRunner {
   abstract canHandle(stage: Stage): boolean;
@@ -68,11 +86,15 @@ export abstract class BaseStageRunner implements StageRunner {
       if (output && typeof output === 'object' && 'error' in output) {
         return { name: checkName, status: 'fail', message: String((output as { error: unknown }).error) };
       }
-      ctx.workflowApplicationService.approveStage({
+      const { decision } = ctx.workflowApplicationService.approveStage({
         issueId: ctx.issue.id,
         stage: ctx.issue.stage,
         approval: { output },
       });
+      const blockedMessage = formatApprovalDecision(ctx.issue.stage, decision.nextWork);
+      if (blockedMessage) {
+        return { name: checkName, status: 'fail', message: blockedMessage };
+      }
       return { name: checkName, status: 'pass', output };
     }
 

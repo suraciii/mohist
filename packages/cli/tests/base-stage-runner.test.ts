@@ -447,6 +447,47 @@ describe('BaseStageRunner', () => {
 
       expect(callOrder).toEqual(['setApprovalState', 'emit']);
     });
+
+    it('surfaces workflow approval guard blockers instead of passing approval check', async () => {
+      const approvalCheck = new FailCheck(
+        'user-approval',
+        undefined,
+        async () => ({ name: 'user-approval', status: 'pending', message: 'Waiting for approval' }),
+      );
+
+      const runner = new TestStageRunner({
+        checks: [approvalCheck],
+        nextStage: Stage.Done,
+        approvalCheckNames: ['user-approval'],
+      });
+      const workflowApplicationService = {
+        recordCheckResult: vi.fn(),
+        approveStage: vi.fn().mockReturnValue({
+          run: {},
+          decision: {
+            events: [],
+            nextWork: {
+              kind: 'blocked',
+              stage: Stage.Plan,
+              reason: { complete: false, reason: 'missing-static-check', checkName: 'design-complete' },
+            },
+          },
+        }),
+      } as unknown as StageContext['workflowApplicationService'];
+
+      const result = await runner.run(makeContext({
+        workflowApplicationService,
+        requestedWork: { kind: 'check', stage: Stage.Plan, checkName: 'user-approval' },
+      }));
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Stage plan cannot be approved: missing-static-check: design-complete');
+      expect(result.checkResults?.[0]).toMatchObject({
+        name: 'user-approval',
+        status: 'fail',
+        message: 'Stage plan cannot be approved: missing-static-check: design-complete',
+      });
+    });
   });
 
   describe('task execution failure', () => {

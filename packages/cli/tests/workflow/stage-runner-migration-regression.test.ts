@@ -1196,6 +1196,60 @@ describe('StageRunner migration regression coverage', () => {
       }));
     });
 
+    it('config-driven Check resolves suffixed review repair tasks as executable runtime repair tasks', () => {
+      const runner = new ConfigDrivenStageRunner({
+        taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        checkRegistry: createBasicCheckRegistry({}),
+        getStageDefinition: createStageDefinition,
+        worktreePath: '/tmp',
+      });
+
+      const ctx = makeMockContext(Stage.Check, {
+        requestedTask: {
+          id: 'fix-review-findings:1',
+          taskId: 'fix-review-findings:1',
+          title: 'Fix review findings',
+          status: 'pending',
+          attempts: 0,
+          order: 3,
+          artifacts: [],
+          output: null,
+          reason: 'Review failed',
+          causedBy: { type: 'check-failure', checkName: 'review-passed', message: 'Review failed' },
+        } as any,
+        workflowRun: {
+          stageRuns: [{
+            stage: Stage.Check,
+            tasks: [
+              { id: 'ai-review', taskId: 'ai-review', title: 'AI review', status: 'completed' },
+              { id: 'fix-review-findings', taskId: 'fix-review-findings', title: 'Fix review findings', status: 'completed' },
+              { id: 'fix-review-findings:1', taskId: 'fix-review-findings:1', title: 'Fix review findings', status: 'pending' },
+            ],
+            checks: [{ name: 'review-passed', status: 'pending', message: 'Review failed' }],
+          }],
+        } as any,
+      });
+      ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings:1' };
+
+      const stageDefinition = createStageDefinition(Stage.Check);
+      const task = (runner as any).resolveRuntimeTask(stageDefinition, 'fix-review-findings:1');
+      const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
+        failedCheck: { name: 'review-passed', status: 'fail', message: 'Review failed' },
+        attempt: 1,
+      });
+
+      expect(task).toEqual(expect.objectContaining({
+        taskId: 'fix-review-findings:1',
+        kind: 'agent-session',
+      }));
+      expect(dispatchable).toEqual(expect.objectContaining({
+        taskId: 'fix-review-findings:1',
+        kind: 'service-call',
+        stage: Stage.Check,
+      }));
+    });
+
     it('Plan self-review commit failure reports failed task state instead of completed state', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-plan-commit-fail-'));
       const changeDir = path.join(tmpDir, 'openspec', 'changes', '1-test');
