@@ -305,6 +305,32 @@ describe('WorkflowEngine aggregate retry startup', () => {
     });
     expect(runner.capturedContexts[0].rejectionFeedback).toBe('Please rewrite the plan');
   });
+
+  it('surfaces aggregate blocked work instead of running the stage again', async () => {
+    const issue = makeIssue(Stage.Build);
+    const runner = new CapturingRunner(Stage.Build, Stage.Check);
+    const service = makeSequencedWorkflowService(issue, [
+      {
+        kind: 'blocked',
+        stage: Stage.Build,
+        reason: { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build },
+      },
+    ]);
+
+    const engine = makeEngine({
+      runners: [runner],
+      workflowApplicationService: service,
+    });
+
+    const result = await engine.run(issue, { cwd: '/tmp' });
+
+    expect(result).toEqual({
+      completed: false,
+      stage: Stage.Build,
+      message: 'dynamic-source-missing: build',
+    });
+    expect(runner.capturedContexts).toHaveLength(0);
+  });
 });
 
 describe('WorkflowEngine merge-gated completion', () => {
