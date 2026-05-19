@@ -216,6 +216,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
         {
           name: 'health:check',
           title: 'Check health gate',
+          with: { approvalEvidence: { role: 'verification', snapshotField: 'candidateHeadSha' } },
           onFailure: {
             retry: {
               limit: 1,
@@ -226,6 +227,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
         {
           name: 'review-passed',
           title: 'Review passed',
+          with: { approvalEvidence: { role: 'verdict', snapshotField: 'snapshotSha' } },
           onFailure: {
             retry: {
               limit: 1,
@@ -242,6 +244,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
         {
           name: 'merge-ready',
           title: 'Merge ready',
+          with: { approvalEvidence: { role: 'candidate', snapshotField: 'candidateHeadSha' } },
           onFailure: {
             retry: {
               limit: 1,
