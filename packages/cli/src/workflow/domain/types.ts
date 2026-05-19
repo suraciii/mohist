@@ -139,12 +139,6 @@ export interface InvalidationPolicy {
   entries: InvalidationEntry[];
 }
 
-export interface EvidenceRequirement {
-  taskId?: string;
-  checkName?: string;
-  uses?: string;
-}
-
 export interface StageDefinition {
   stage: Stage;
   tasks: TaskDefinition[];
@@ -158,7 +152,6 @@ export interface StageDefinition {
   approvalPolicy?: ApprovalPolicy;
   repairPolicies?: RepairPolicy[];
   invalidationPolicy?: InvalidationPolicy;
-  evidenceRequirements?: EvidenceRequirement[];
 }
 
 export interface WorkflowDefinition {

@@ -347,10 +347,12 @@ It should validate:
 snapshot.status == passed
 currentStage == last stage in stageOrder
 last stage status == passed
-delivery evidence is valid only for declared delivery-producing uses
+all completed tasks satisfy their uses contract
 ```
 
 If a workflow declares no delivery-producing uses, completion is still valid.
+If a workflow declares `mohist/merge`, that task cannot be marked completed
+unless the merge use contract has valid landed-commit evidence.
 
 ### Generalize Stage Completion Guards
 
@@ -358,8 +360,12 @@ Domain `WorkflowRun.evaluateStageCompletionGuard()` currently has special guards
 
 Short-term:
 
-- keep default workflow behavior by encoding default Check/Integrate evidence requirements in `mohist/default`
-- for full custom workflow, use generic completion unless the stage declares special evidence requirements
+- keep default workflow behavior by making default delivery work explicit
+  tasks/checks
+- use task `uses` contracts to decide whether a completed task has enough
+  output evidence
+- use checks for any read-only verification, including cross-task or external
+  state verification
 
 Long-term:
 
@@ -367,9 +373,11 @@ Long-term:
 checks:
   - id: review-passed
     uses: mohist/verdict
-    requiresEvidence:
-      snapshotSha: candidateHeadSha
+  - id: merge-landed
+    uses: mohist/merge-landed
 ```
+
+No third category is needed between task and check.
 
 ### Move Delivery Metadata Extraction to Use Outputs
 
@@ -466,7 +474,7 @@ UseDefinition
   idempotency
   deliveryRole?
   locksCode?
-  evidenceRequirements?
+  evidence?
 ```
 
 Initial delivery roles:
@@ -504,13 +512,13 @@ workflow passed = terminal stage passed
 issue completed = workflow passed and completion projection accepts snapshot
 ```
 
-Projection should validate structural truth:
+Projection should validate structural truth and task contract truth:
 
 ```text
 currentStage == terminalStage
 terminalStage.status == passed
 all terminal tasks/checks/approval are terminal according to the run snapshot
-declared delivery-producing uses have valid evidence if they completed
+every completed task with a uses evidence contract has valid output
 ```
 
 Projection should not require:
@@ -521,7 +529,7 @@ integrate:merge exists
 landedSha exists when no local merge use is declared
 ```
 
-### Step 3: Preserve Default Strictness Through Definition, Not Engine Magic
+### Step 3: Preserve Default Strictness Through Tasks, Checks, and Uses
 
 The built-in workflow should still require:
 
@@ -532,20 +540,22 @@ integrate:merge
 health:integrate
 ```
 
-But this should be expressed as the default workflow's own tasks/checks and
-completion evidence requirements. The engine should see it as:
+But this should be expressed as normal tasks/checks:
 
 ```text
-Default workflow declares local delivery.
-Local delivery requires merge evidence.
+integrate:merge is a task using mohist/merge.
+mohist/merge says completed output must include landedSha.
 Therefore default workflow cannot complete without landedSha.
+
+health:integrate is a check using mohist/health-gate.
+The stage cannot pass unless that check passes.
 ```
 
 For a custom workflow:
 
 ```text
 Custom workflow declares no delivery-producing uses.
-Therefore it may complete without merge evidence.
+Therefore it may complete without merge evidence after its tasks/checks pass.
 ```
 
 For a PR workflow:
@@ -565,11 +575,14 @@ generic stage guard
   all checks passed/skipped according to policy
   approval approved if required
 
-evidence guard
-  reads explicit evidence requirements from workflow definition or use contract
+task contract guard
+  each completed task satisfies its uses evidence contract
 
-default workflow compatibility guard
-  exists only as default definition metadata, not as stage-name logic
+check guard
+  checks are read-only verification and must pass according to policy
+
+default workflow compatibility
+  exists only as explicit default tasks/checks/uses, not as stage-name logic
 ```
 
 This keeps Check and Integrate from being permanently special. A stage named
@@ -650,8 +663,7 @@ This slice should not change runtime behavior yet.
 ### Slice B: Terminal Completion
 
 - Replace Integrate-only completion projection with terminal-stage projection.
-- Keep default workflow strict by adding a compatibility evidence requirement
-  for the default local delivery path.
+- Keep default workflow strict through task uses evidence contracts and checks.
 - Add tests for:
   - custom workflow without Integrate completes
   - custom workflow with Integrate but without merge completes
