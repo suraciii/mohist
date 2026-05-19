@@ -315,6 +315,9 @@ workflow:
       on:
         code.changed:
           reset: checks-and-approval
+          tasks: [ai-review]
+          checks: all
+          approval: true
       tasks:
         - id: ai-review
           uses: mohist/agent
@@ -324,8 +327,15 @@ workflow:
       checks:
         - id: health:check
           uses: mohist/health-gate
+          with:
+            approvalEvidence:
+              role: verification
         - id: review-passed
           uses: mohist/verdict
+          with:
+            approvalEvidence:
+              role: verdict
+              snapshotField: snapshotSha
           onFailure:
             retry:
               limit: 2
@@ -340,6 +350,10 @@ workflow:
                       Fix findings in {{ openspec.changeDir }}/review.md
         - id: merge-ready
           uses: mohist/merge-ready
+          with:
+            approvalEvidence:
+              role: candidate
+              snapshotField: candidateHeadSha
 `, 'utf-8');
 
     try {
@@ -371,7 +385,7 @@ workflow:
     }
   });
 
-  it('rejects unsupported custom check stage shapes before runtime', () => {
+  it('rejects custom check stage shapes without approval evidence roles before runtime', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-check-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));
     fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
@@ -395,7 +409,7 @@ workflow:
       expect(diagnostics).toEqual([
         expect.objectContaining({
           severity: 'error',
-          message: 'Custom Check stage v1 must include ai-review, health:check, review-passed, and merge-ready until Check evidence guards are generalized',
+          message: 'Custom Check stage must declare approval evidence checks for verdict, verification, and candidate roles',
         }),
       ]);
     } finally {

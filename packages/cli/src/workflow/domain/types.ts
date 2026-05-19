@@ -166,6 +166,9 @@ export type StageResetTarget = 'checks-and-approval' | 'checks' | 'approval';
 
 export interface StageEventPolicy {
   reset: StageResetTarget;
+  tasks?: string[];
+  checks?: 'all' | string[];
+  approval?: boolean;
 }
 
 export type WorkflowTasksFromSource = 'mohist/ralph-tasks';

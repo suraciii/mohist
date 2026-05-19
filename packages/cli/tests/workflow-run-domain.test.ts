@@ -1938,6 +1938,56 @@ describe('WorkflowRun domain aggregate', () => {
     }));
   });
 
+  it('uses check approval evidence roles instead of hard-coded Check names', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'custom-check-evidence',
+      stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Check
+        ? {
+          stage: Stage.Check,
+          tasks: [{ id: 'custom-review', title: 'Custom review', uses: 'mohist/agent' }],
+          checks: [
+            {
+              name: 'verify-command',
+              title: 'Verify command',
+              uses: 'mohist/health-gate',
+              with: { approvalEvidence: { role: 'verification' } },
+            },
+            {
+              name: 'review-verdict',
+              title: 'Review verdict',
+              uses: 'mohist/verdict',
+              with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
+            },
+            {
+              name: 'candidate-ready',
+              title: 'Candidate ready',
+              uses: 'mohist/merge-ready',
+              with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
+            },
+          ],
+          requiresApproval: true,
+        }
+        : definition),
+    });
+    const run = startRun(definitions);
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+
+    run.completeTask(Stage.Check, 'custom-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'verify-command', status: 'pass', output: { command: 'npm test', candidateHeadSha: 'custom-sha' } });
+    run.recordCheckResult(Stage.Check, { name: 'review-verdict', status: 'pass', output: { verdict: 'PASS', reviewedSha: 'custom-sha' } });
+    const decision = run.recordCheckResult(Stage.Check, { name: 'candidate-ready', status: 'pass', output: { headSha: 'custom-sha' } });
+
+    expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
+    expect(run.stageRun(Stage.Check).approval?.output).toMatchObject({
+      result: 'PASS',
+      snapshotSha: 'custom-sha',
+      verificationEvidence: expect.objectContaining({ checkName: 'verify-command' }),
+    });
+  });
+
   it('Integrate post-delivery check failure remains non-repairable after merge freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);

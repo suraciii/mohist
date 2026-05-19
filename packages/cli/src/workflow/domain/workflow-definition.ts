@@ -107,7 +107,11 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
     checks: stage.checks.map(cloneOnFailure),
-    on: stage.on ? Object.fromEntries(Object.entries(stage.on).map(([event, policy]) => [event, { ...policy }])) : undefined,
+    on: stage.on ? Object.fromEntries(Object.entries(stage.on).map(([event, policy]) => [event, {
+      ...policy,
+      tasks: policy.tasks ? [...policy.tasks] : undefined,
+      checks: Array.isArray(policy.checks) ? [...policy.checks] : policy.checks,
+    }])) : undefined,
   };
 }
 
@@ -284,6 +288,13 @@ function allCheckNames(stage: StageDefinition, checkPolicies?: CheckPolicy[]): s
     ?? stage.checks.map(check => check.name);
 }
 
+function checkNamesForEventPolicy(stage: StageDefinition, eventPolicy: NonNullable<StageDefinition['on']>[string], checkPolicies?: CheckPolicy[]): string[] | undefined {
+  if (Array.isArray(eventPolicy.checks)) return [...eventPolicy.checks];
+  if (eventPolicy.checks === 'all') return allCheckNames(stage, checkPolicies);
+  if (eventPolicy.reset === 'checks' || eventPolicy.reset === 'checks-and-approval') return allCheckNames(stage, checkPolicies);
+  return undefined;
+}
+
 function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkPolicies?: CheckPolicy[]): InvalidationPolicy | undefined {
   const eventPolicies = stage.on ? Object.entries(stage.on) : [];
   if (eventPolicies.length === 0) return undefined;
@@ -299,13 +310,14 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkP
       const eventPolicy = stage.on?.[eventName];
       if (!eventPolicy) continue;
       const invalidates: InvalidationPolicy['entries'][number]['invalidates'] = {};
-      if (eventPolicy.reset === 'checks' || eventPolicy.reset === 'checks-and-approval') {
-        if (stage.stage === Stage.Check && eventName === 'code.changed') {
-          invalidates.tasks = ['ai-review'];
-        }
-        invalidates.checks = allCheckNames(stage, checkPolicies);
+      if (eventPolicy.tasks?.length) {
+        invalidates.tasks = [...eventPolicy.tasks];
       }
-      if (eventPolicy.reset === 'approval' || eventPolicy.reset === 'checks-and-approval') {
+      const checks = checkNamesForEventPolicy(stage, eventPolicy, checkPolicies);
+      if (checks?.length) {
+        invalidates.checks = checks;
+      }
+      if (eventPolicy.approval || eventPolicy.reset === 'approval' || eventPolicy.reset === 'checks-and-approval') {
         invalidates.approval = true;
       }
       entries.push({
@@ -322,6 +334,8 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkP
 
 function compileRuntimeInvalidationPolicy(stage: StageDefinition, checkPolicies?: CheckPolicy[]): InvalidationPolicy | undefined {
   if (stage.stage !== Stage.Check || !stage.on?.['code.changed']) return undefined;
+  const codeChangedPolicy = stage.on['code.changed'];
+  const checks = checkNamesForEventPolicy(stage, codeChangedPolicy, checkPolicies);
   return {
     entries: [
       {
@@ -330,9 +344,9 @@ function compileRuntimeInvalidationPolicy(stage: StageDefinition, checkPolicies?
         when: { shaChanged: true },
         reason: 'code.changed reset checks-and-approval',
         invalidates: {
-          tasks: ['ai-review'],
-          checks: allCheckNames(stage, checkPolicies),
-          approval: stage.on['code.changed'].reset === 'approval' || stage.on['code.changed'].reset === 'checks-and-approval',
+          tasks: codeChangedPolicy.tasks ? [...codeChangedPolicy.tasks] : undefined,
+          checks,
+          approval: codeChangedPolicy.approval || codeChangedPolicy.reset === 'approval' || codeChangedPolicy.reset === 'checks-and-approval',
         },
       },
     ],
