@@ -1,5 +1,5 @@
 import { useState, useMemo, useContext, createContext, useEffect, useRef } from 'react'
-import type { FileBlock } from '../../lib/diffModel'
+import { getFileBlockIdentity, type FileBlock } from '../../lib/diffModel'
 
 interface DirectoryNode {
   name: string
@@ -184,9 +184,9 @@ function DirectoryGroup({ name, node, expandState, depth = 0 }: { name: string; 
 function FileTreeEntry({ block, depth }: { block: FileBlock; depth: number }) {
   const { selectedFile, setSelectedFile } = useContext(FileFilterContext)
 
-  const displayName = block.newPath || block.oldPath
+  const displayName = getFileBlockIdentity(block)
   const fileName = displayName.split('/').pop() || displayName
-  const isSelected = selectedFile?.newPath === block.newPath
+  const isSelected = selectedFile ? getFileBlockIdentity(selectedFile) === displayName : false
 
   return (
     <button

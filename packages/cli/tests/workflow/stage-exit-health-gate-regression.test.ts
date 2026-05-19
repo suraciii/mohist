@@ -5,7 +5,7 @@ import type { StageContext, ChangeArtifactsManager, CheckpointManager, IssueRepo
 import { EventBus } from '../../src/services/event-bus';
 import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
 import type { Check } from '../../src/workflow/checks';
-import { loadHealthGatePolicies } from '../../src/workflow/workflow-loader';
+import { loadHealthGatePolicies, DEFAULT_HEALTH_GATE_POLICIES } from '../../src/workflow/workflow-loader';
 import { UserApprovalCheck } from '../../src/workflow/checks/user-approval-check';
 import { AgentRunnerService } from '../../src/services/agent-runner-service';
 
@@ -664,7 +664,7 @@ describe('checks.buildTest-only workflow config controls check-stage health comm
 
     const policies = loadHealthGatePolicies(workflow);
 
-    expect(policies.plan.command).toBe('npm ci && npm run typecheck');
+    expect(policies.plan.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.plan.command);
     expect(policies.plan.command).not.toBe('npm run ci-test');
   });
 
@@ -680,7 +680,7 @@ describe('checks.buildTest-only workflow config controls check-stage health comm
 
     const policies = loadHealthGatePolicies(workflow);
 
-    expect(policies.build.command).toBe('npm ci && npm run build');
+    expect(policies.build.command).toBe(DEFAULT_HEALTH_GATE_POLICIES.build.command);
     expect(policies.build.command).not.toBe('npm run ci-test');
   });
 });

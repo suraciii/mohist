@@ -180,27 +180,9 @@ describe('IntegrateStageRunner', () => {
     fs.writeFileSync(
       path.join(tmpDir, 'package.json'),
       JSON.stringify({
-        name: 'mohist-integrate-test',
-        version: '0.0.0',
         scripts: {
           build: 'node -e "process.exit(0)"',
           test: 'node -e "process.exit(0)"',
-        },
-      }),
-      'utf-8',
-    );
-    fs.writeFileSync(
-      path.join(tmpDir, 'package-lock.json'),
-      JSON.stringify({
-        name: 'mohist-integrate-test',
-        version: '0.0.0',
-        lockfileVersion: 3,
-        requires: true,
-        packages: {
-          '': {
-            name: 'mohist-integrate-test',
-            version: '0.0.0',
-          },
         },
       }),
       'utf-8',

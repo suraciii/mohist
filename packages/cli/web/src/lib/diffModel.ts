@@ -32,6 +32,10 @@ export interface FileBlock {
   rawPatch?: string
 }
 
+export function getFileBlockIdentity(block: Pick<FileBlock, 'oldPath' | 'newPath'>): string {
+  return block.newPath || block.oldPath
+}
+
 function parseHunkHeader(line: string): { oldStart: number; oldCount: number; newStart: number; newCount: number } | null {
   const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
   if (!match) return null
@@ -55,6 +59,53 @@ export interface ParseOptions {
   includeContext?: boolean
 }
 
+export interface DiffFileMetadata {
+  file: string
+  oldFile?: string
+  additions?: number
+  deletions?: number
+  diff?: string
+  isBinary?: boolean
+}
+
+export function fileBlockFromMetadata(file: DiffFileMetadata): FileBlock {
+  const oldPath = file.oldFile ?? file.file
+  const newPath = file.file
+  const isBinary = file.isBinary === true
+  const additions = file.additions ?? 0
+  const deletions = file.deletions ?? 0
+
+  return {
+    oldPath,
+    newPath,
+    status: inferFileStatus(oldPath, newPath, isBinary),
+    isBinary,
+    additions,
+    deletions,
+    hunks: [],
+    lines: [],
+    changedLineCount: additions + deletions,
+    hunkCount: 0,
+    rawPatch: file.diff ?? '',
+  }
+}
+
+export function parseDiffFiles(files: DiffFileMetadata[]): FileBlock[] {
+  return files.flatMap(file => {
+    const parsed = parseDiff(file.diff ?? '')
+    if (parsed.length > 0) {
+      return parsed.map(block => ({
+        ...block,
+        isBinary: block.isBinary || file.isBinary === true,
+        additions: block.additions || file.additions || 0,
+        deletions: block.deletions || file.deletions || 0,
+        changedLineCount: (block.additions || file.additions || 0) + (block.deletions || file.deletions || 0),
+      }))
+    }
+    return [fileBlockFromMetadata(file)]
+  })
+}
+
 export function parseDiff(diffText: string, _options?: ParseOptions): FileBlock[] {
   if (!diffText.trim()) return []
 
@@ -69,17 +120,26 @@ export function parseDiff(diffText: string, _options?: ParseOptions): FileBlock[
   const flushHunk = () => {
     if (currentHunk && current) {
       current.hunks.push(currentHunk)
-      current.lines.push(...currentHunk.lines)
       currentHunk = null
     }
   }
 
+  const finalizeCurrentBlock = () => {
+    if (!current) return
+    flushHunk()
+    current.rawPatch = currentRawPatch
+    current.changedLineCount = current.additions + current.deletions
+    current.hunkCount = current.hunks.length
+    if (current.status === 'modified') {
+      current.status = inferFileStatus(current.oldPath, current.newPath, current.isBinary)
+    }
+    blocks.push(current)
+  }
+
   for (const rawLine of lines) {
     if (rawLine.startsWith('diff --git')) {
-      flushHunk()
       if (current) {
-        current.rawPatch = currentRawPatch
-        blocks.push(current)
+        finalizeCurrentBlock()
       }
       const match = rawLine.match(/^diff --git a\/(.*) b\/(.*)$/)
       current = {
@@ -184,15 +244,8 @@ export function parseDiff(diffText: string, _options?: ParseOptions): FileBlock[
     }
   }
 
-  flushHunk()
   if (current) {
-    current.rawPatch = currentRawPatch
-    current.changedLineCount = current.additions + current.deletions
-    current.hunkCount = current.hunks.length
-    if (current.status === 'modified') {
-      current.status = inferFileStatus(current.oldPath, current.newPath, current.isBinary)
-    }
-    blocks.push(current)
+    finalizeCurrentBlock()
   }
 
   return blocks
@@ -202,6 +255,94 @@ export const DEFAULT_LARGE_DIFF_THRESHOLD = 300
 
 export function isLargeDiff(block: FileBlock, threshold: number = DEFAULT_LARGE_DIFF_THRESHOLD): boolean {
   return block.changedLineCount > threshold
+}
+
+const GENERATED_PATTERNS = [
+  /^[^/]*\/node_modules\//,
+  /^node_modules\//,
+  /\.lock$/,
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)yarn\.lock$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)composer\.lock$/,
+  /(^|\/)Cargo\.lock$/,
+  /(^|\/)Gemfile\.lock$/,
+  /(^|\/) Pipfile\.lock$/,
+  /\.min\.(js|css)$/,
+  /\.bundle\.(js|css)$/,
+  /\.map$/,
+  /(^|\/)dist\//,
+  /(^|\/)build\//,
+  /(^|\/)coverage\//,
+  /(^|\/)\.next\//,
+  /(^|\/)\.nuxt\//,
+  /(^|\/)__pycache__\//,
+  /\.pyc$/,
+]
+
+export function isGeneratedFile(path: string): boolean {
+  return GENERATED_PATTERNS.some(pattern => pattern.test(path))
+}
+
+export function isLockfile(path: string): boolean {
+  return /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|Cargo\.lock|Gemfile\.lock|Pipfile\.lock)$/.test(path)
+}
+
+export function isDependencyHeavy(path: string): boolean {
+  return isLockfile(path) || /\.lock$/.test(path)
+}
+
+export function isBinaryFile(block: FileBlock): boolean {
+  return block.isBinary
+}
+
+export type CollapseReason = 'generated' | 'lockfile' | 'dependency' | 'large' | null
+
+export interface ClassifiedFile {
+  block: FileBlock
+  isReadable: boolean
+  isCollapsed: boolean
+  collapseReason: CollapseReason
+  displayPath: string
+}
+
+export function classifyFile(block: FileBlock, threshold: number = DEFAULT_LARGE_DIFF_THRESHOLD): ClassifiedFile {
+  const displayPath = getFileBlockIdentity(block)
+  const isGen = isGeneratedFile(displayPath)
+  const isLock = isLockfile(displayPath)
+  const isDep = isDependencyHeavy(displayPath)
+  const isLarge = isLargeDiff(block, threshold)
+  const isBin = isBinaryFile(block)
+
+  let collapseReason: CollapseReason = null
+  if (isBin) collapseReason = null
+  else if (isLock) collapseReason = 'lockfile'
+  else if (isDep) collapseReason = 'dependency'
+  else if (isGen) collapseReason = 'generated'
+  else if (isLarge) collapseReason = 'large'
+
+  const isCollapsible = collapseReason !== null
+
+  return {
+    block,
+    isReadable: !isBin && !isCollapsible,
+    isCollapsed: isCollapsible,
+    collapseReason,
+    displayPath,
+  }
+}
+
+export function selectFirstReadableFile(
+  blocks: FileBlock[],
+  threshold: number = DEFAULT_LARGE_DIFF_THRESHOLD
+): FileBlock | null {
+  for (const block of blocks) {
+    const classified = classifyFile(block, threshold)
+    if (classified.isReadable) {
+      return block
+    }
+  }
+  return null
 }
 
 export function getDiffStats(blocks: FileBlock[]) {

@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Centralize changed-file classification",
+      "description": "Add shared client-side diff classification for large, generated, lockfile, dependency, binary, and normally readable changed files. The classifier should expose stable per-file metadata that later reader flows can use to choose an initial file and decide whether to show a collapsed placeholder instead of rendering expensive content.",
+      "acceptanceCriteria": [
+        "Normal source files are classified as readable and not collapsed by default",
+        "Lockfiles such as package-lock.json are classified as generated or dependency-heavy and collapsed by default",
+        "Files over the large-diff changed-line threshold expose a collapse reason and changed-line count",
+        "Binary files are not selected as readable source files by the default selection heuristic",
+        "Existing merge-base diff API semantics remain unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/lib/diffModel.ts",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Input: parsed diff blocks and file paths. Output: reusable file metadata and selection/collapse helpers consumed by the files page and panes. Covers issue-changed-files-reader large-diff protection and lightweight file-focused reading requirements.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        173517
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Harden the files route data boundary",
+      "description": "Make /issue/:number/files explicitly handle invalid route params and all issue, diff, commits, and commit-diff query states. Direct URL loads, browser refreshes, and SPA navigation should follow the same component path and render loading, content, empty, unavailable, or recoverable error UI instead of leaving a blank React root.",
+      "acceptanceCriteria": [
+        "Direct load of /issue/:number/files renders a visible page when diff data is available",
+        "Browser refresh of /issue/:number/files renders the same visible page state as SPA navigation",
+        "Invalid route params render a visible recoverable error state",
+        "Issue, diff, commits, or commit-diff API failures render a visible error state with a link or button back to the issue detail page when the issue number is known",
+        "The files route does not introduce approval, review comment, or merge actions",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueChangedFilesPage.tsx",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Consumes the file metadata from T-001 so route success states can safely derive readable defaults without render-time exceptions. Expected touch points may include App.tsx, useQueries.ts, and API response typing only where needed for reliable page rendering.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        368156
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Replace eager all-files initial rendering",
+      "description": "Change the default reader state from rendering every parsed diff block to rendering either one sensible selected file or a lightweight summary prompt. Keep the changed-files tree visible as the orientation surface and validate any restored selection against the current parsed blocks before rendering it.",
+      "acceptanceCriteria": [
+        "Initial load of a multi-file diff does not render every line of every changed file into the DOM",
+        "When a readable non-generated non-large file exists, the initial reader selects that file or otherwise shows a lightweight choose-a-file summary",
+        "When all files are generated, large, or binary, the reader shows a lightweight summary instead of rendering a full patch stream",
+        "The changed-files tree remains visible and usable before and after file selection",
+        "Missing or stale restored file selections fall back to the current readable-file heuristic or summary state",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/IssueChangedFilesPage.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "Consumes the route/query boundary from T-002 and classification/selection helpers from T-001. The outcome is a reader view model for issue-level diffs and commit-scoped diffs rather than an all-files-first patch stream.",
+      "attempts": 3,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        461554
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Apply collapse and header rules across reader modes",
+      "description": "Use the shared classification metadata to show collapsed placeholders for large generated or dependency-heavy files across selected diff, split, raw patch, search, and full-file reading modes where applicable. Ensure each visible file has one clear file header by removing obsolete wrapper headers or making pane header ownership explicit.",
+      "acceptanceCriteria": [
+        "Large generated files and lockfiles show a collapsed placeholder by default with changed-line count and a Render anyway action",
+        "Render anyway reveals the selected file content without disabling collapse protection for unrelated files",
+        "Large-diff protection applies in the default selected-file flow and in single-file, split, search, raw patch, and full-file modes where applicable",
+        "Commit-scoped reading reuses the same classification, selection, and collapse behavior as issue-level reading",
+        "Each rendered file block shows only one sticky file header",
+        "Existing merge-base diff semantics remain unchanged",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components/issue-changed-files",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Consumes the shared metadata from T-001, the reliable page state from T-002, and the selected-file reader model from T-003. Expected touch points include UnifiedDiffPane, SplitDiffPane, RawPatchPane, FullFilePane, DiffSearchPane, and any shared file-header or collapse placeholder component.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        736997
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Add files page regression coverage",
+      "description": "Add automated regression tests that prove the fixed route and reader behavior on realistic changed-file data. Cover direct-route rendering, refresh-equivalent initial routing, recoverable error UI, non-eager default rendering, generated or lockfile collapse with override, and duplicate-header prevention.",
+      "acceptanceCriteria": [
+        "Tests cover direct loading /issue/:number/files with available diff data and assert the page is not blank",
+        "Tests cover refresh-equivalent routing or initial router entry behavior for the files route",
+        "Tests cover visible recoverable error UI with a path back to issue detail for route or API failures",
+        "Tests prove the initial state does not render all changed-file lines for a multi-file diff",
+        "Tests cover lockfile or generated large-diff collapse by default and Render anyway behavior",
+        "Tests assert file headers are not duplicated for a rendered file",
+        "Existing web tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/web/src/components/IssueChangedFilesPage.test.tsx",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003",
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Consumes all implemented behavior from T-001 through T-004. Prefer existing React/router test patterns in the web test suite and realistic fixture diffs that include a normal source file plus a large lockfile.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        864573
+      ]
+    }
+  ]
+}
