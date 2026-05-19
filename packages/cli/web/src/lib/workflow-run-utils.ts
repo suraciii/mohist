@@ -103,6 +103,7 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
       updatedAt: new Date().toISOString(),
       reason: t.reason ?? undefined,
       causedBy: convertCause(t.causedBy),
+      origin: t.origin ?? null,
     }))
     const checks: StageCheckState[] = sr.checks.map((c) => ({
       checkName: c.checkName,
@@ -113,6 +114,7 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
       runCount: c.runCount,
       lastRunAt: c.lastRunAt,
       updatedAt: new Date().toISOString(),
+      origin: c.origin ?? null,
     }))
 
     const approval: StageApprovalState | null = sr.approvalStatus

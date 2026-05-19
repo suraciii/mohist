@@ -953,11 +953,17 @@ export interface StageTaskCause {
   message?: string;
 }
 
+export interface WorkItemOrigin {
+  source: 'builtin' | 'project' | 'runtime'
+  uses: string
+}
+
 export interface StageTaskState {
   taskId: string
   title: string
   status: StageTaskStatus
   source?: 'static' | 'dynamic'
+  origin?: WorkItemOrigin | null
   order: number
   attempts: number
   duration: number
@@ -978,6 +984,7 @@ export interface StageCheckState {
   output: unknown
   runCount: number
   lastRunAt: string | null
+  origin?: WorkItemOrigin | null
   updatedAt: string
 }
 
@@ -1052,6 +1059,7 @@ export interface WorkflowTask {
   taskId: string
   title: string
   status: WorkflowTaskStatus
+  origin?: WorkItemOrigin | null
   taskOrder: number
   attempts: number
   duration: number
@@ -1071,6 +1079,7 @@ export interface WorkflowCheck {
   output: unknown
   runCount: number
   lastRunAt: string | null
+  origin?: WorkItemOrigin | null
 }
 
 export interface WorkflowStageRun {
