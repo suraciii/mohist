@@ -423,7 +423,6 @@ export class WorkflowApplicationService {
   }
 
   rerunStage(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    this.reconcileIssueWorkflow(input.issueId, input);
     const run = this.repo.loadRunningAggregate
       ? this.repo.loadRunningAggregate(input.issueId, { tasksPath: input.tasksPath })
       : this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
