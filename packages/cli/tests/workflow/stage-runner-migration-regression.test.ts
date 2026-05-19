@@ -262,6 +262,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { taskId: 'fix-review-findings', kind: 'agent-session', workSourceKind: 'runtime' },
         { taskId: 'fix-merge-readiness', kind: 'rebase-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'agent-session', workSourceKind: 'runtime' },
+        { taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' },
       ],
       checkPolicies: [
         { checkName: 'health:check', phase: 'post-task' },
@@ -269,6 +270,13 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { checkName: 'merge-ready', phase: 'post-task' },
       ],
       approvalPolicy: { checkName: 'user-approval' },
+      approvalEvidencePolicy: {
+        verdictCheckName: 'review-passed',
+        verificationCheckName: 'health:check',
+        candidateCheckName: 'merge-ready',
+        convergenceTaskId: 'check:converge-review-snapshot',
+        convergenceTaskTitle: 'Converge review snapshot',
+      },
       repairPolicies: [
         { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
         { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },

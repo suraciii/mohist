@@ -126,6 +126,14 @@ export interface ApprovalPolicy {
   checkName: string;
 }
 
+export interface ApprovalEvidencePolicy {
+  verdictCheckName: string;
+  verificationCheckName: string;
+  candidateCheckName: string;
+  convergenceTaskId?: string;
+  convergenceTaskTitle?: string;
+}
+
 export type ReactionInputSelector =
   | { type: 'failed-check-output' }
   | { type: 'check-items'; filter?: 'blocking' | 'all' }
@@ -191,6 +199,7 @@ export type CompiledStageDefinition = StageDefinition & {
   taskExecutionPolicies?: TaskExecutionPolicy[];
   checkPolicies: CheckPolicy[];
   approvalPolicy?: ApprovalPolicy;
+  approvalEvidencePolicy?: ApprovalEvidencePolicy;
   repairPolicies?: RepairPolicy[];
   invalidationPolicy?: InvalidationPolicy;
 };
