@@ -932,8 +932,8 @@ export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'pa
 export type CheckRepairStatus = 'not-needed' | 'available' | 'pending' | 'running' | 'completed' | 'exhausted'
 
 export interface CheckRepairState {
-  checkName: 'review-passed'
-  fixTaskId: 'fix-review-findings'
+  checkName: string
+  fixTaskId: string
   status: CheckRepairStatus
   attemptsUsed: number
   attemptsMax: number
@@ -942,7 +942,7 @@ export interface CheckRepairState {
   lastRepairTask: StageTaskState | null
   lastRepairStatus: StageTaskStatus | null
   followUpReviewStatus: StageCheckStatus | null
-  stopReason: 'review-passed' | 'repair-pending' | 'repair-running' | 'max-repair-attempts-reached' | 'manual-rerun-required' | null
+  stopReason: string | null
   unresolvedSummary: string | null
 }
 
