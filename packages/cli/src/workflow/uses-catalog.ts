@@ -2,6 +2,7 @@ export type WorkflowUsePlacement = 'task' | 'check' | 'both';
 export type WorkflowUseSideEffect = 'none' | 'worktree' | 'spec-state' | 'archive' | 'branch' | 'remote-pr' | 'merge';
 export type WorkflowUseIdempotency = 'idempotent' | 'checkpointed' | 'irreversible' | 'unknown';
 export type WorkflowDeliveryRole = 'none' | 'spec-sync' | 'archive' | 'local-merge' | 'remote-pr' | 'remote-merge';
+export type WorkflowTaskSourceKind = 'ralph';
 
 export interface WorkflowUseEvidenceRequirement {
   requiredFields?: string[];
@@ -16,6 +17,7 @@ export interface WorkflowUseDefinition {
   idempotency: WorkflowUseIdempotency;
   deliveryRole: WorkflowDeliveryRole;
   locksCode?: boolean;
+  sourceKind?: WorkflowTaskSourceKind;
   evidence?: WorkflowUseEvidenceRequirement;
   description: string;
   inputs: string[];
@@ -96,6 +98,7 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     sideEffect: 'worktree',
     idempotency: 'checkpointed',
     deliveryRole: 'none',
+    sourceKind: 'ralph',
     description: 'Executes generated OpenSpec tasks through Mohist task runtime.',
     inputs: ['tasksPath'],
     outputContract: 'Task completion evidence and artifacts.',

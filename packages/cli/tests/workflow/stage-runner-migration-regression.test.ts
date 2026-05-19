@@ -2470,6 +2470,13 @@ describe('StageRunner migration regression coverage', () => {
           { name: 'custom-verdict', title: 'Custom verdict', with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } } },
           { name: 'custom-candidate', title: 'Custom candidate', with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } } },
         ],
+        approvalEvidencePolicy: {
+          verificationCheckName: 'verify-custom',
+          verdictCheckName: 'custom-verdict',
+          candidateCheckName: 'custom-candidate',
+          convergenceTaskId: 'check:converge-review-snapshot',
+          convergenceTaskTitle: 'Converge review snapshot',
+        },
         repairPolicies: [{ checkName: 'custom-verdict', fixTaskId: 'fix-custom-review', fixTaskTitle: 'Fix custom review', maxAttempts: 1 }],
         invalidationPolicy: {
           entries: [

@@ -8,12 +8,13 @@ import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
+import { CheckSuiteRepo } from '../src/db/check-suite-repo';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 import { WorkflowRunProjection } from '../src/services/workflow-run-projection';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { IssueStatus, MergeState, Stage } from '../src/types';
-import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/domain';
+import { createWorkflowDefinitionSnapshot, DEFAULT_STAGE_DEFINITIONS, WorkflowRun } from '../src/workflow/domain';
 
 describe('WorkflowRun aggregate end-to-end regressions', () => {
   let db: DatabaseManager;
@@ -317,6 +318,59 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     const check = stageStateService.getIssueStageStateFromWorkflowRun(run).find(stage => stage.stage === Stage.Check)!;
     expect(check.deliveryMetadata?.remoteMerge).toMatchObject({ status: 'passed', mergedSha: 'remote-landed' });
     expect(check.deliveryMetadata?.frozen).toBe(true);
+  });
+
+  it('projects check suite checks from approval evidence policy without a fixed Check stage', () => {
+    const snapshot = createWorkflowDefinitionSnapshot({
+      definition: {
+        id: 'project/plan-review-suite',
+        stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Plan
+          ? {
+            stage: Stage.Plan,
+            tasks: [{ id: 'plan-review', title: 'Plan review', uses: 'mohist/agent' }],
+            checks: [
+              {
+                name: 'verify-plan',
+                title: 'Verify plan',
+                uses: 'mohist/health-gate',
+                with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } },
+              },
+              {
+                name: 'plan-verdict',
+                title: 'Plan verdict',
+                uses: 'mohist/verdict',
+                with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
+              },
+              {
+                name: 'plan-candidate',
+                title: 'Plan candidate',
+                uses: 'mohist/merge-ready',
+                with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
+              },
+            ],
+            requiresApproval: true,
+          }
+          : definition),
+      },
+      source: { type: 'project', path: '.mohist/workflows/plan-review-suite.yaml' },
+      capturedAt: '2026-05-19T00:00:00.000Z',
+    });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_plan_review_suite', issueId, issueNumber, workflowDefinitionSnapshot: snapshot });
+    const suite = new CheckSuiteRepo(db).create({ issueId, snapshotSha: 'old-sha' });
+
+    run.completeTask(Stage.Plan, 'plan-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'verify-plan', status: 'pass', output: { headSha: 'plan-sha' } });
+    run.recordCheckResult(Stage.Plan, { name: 'plan-verdict', status: 'pass', output: { verdict: 'PASS', reviewedSha: 'plan-sha' } });
+    run.recordCheckResult(Stage.Plan, { name: 'plan-candidate', status: 'pass', output: { headSha: 'plan-sha' } });
+    applyProjection(run);
+
+    const projected = new CheckSuiteRepo(db).findById(suite.id)!;
+    expect(projected.status).toBe('awaiting-approval');
+    expect(projected.checks).toMatchObject({
+      'verify-plan': { status: 'passed', output: { headSha: 'plan-sha' } },
+      'plan-verdict': { status: 'passed', output: { verdict: 'PASS', reviewedSha: 'plan-sha' } },
+      'plan-candidate': { status: 'passed', output: { headSha: 'plan-sha' } },
+    });
   });
 
   it('rejects mergeState-only Done projection without terminal stage task/check completion', () => {

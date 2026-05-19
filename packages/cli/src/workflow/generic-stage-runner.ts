@@ -345,15 +345,15 @@ export class GenericStageRunner implements StageRunner {
     }
   }
 
-  private approvalEvidenceCheck(stageDefinition: CompiledStageDefinition, role: string): CheckDefinition | null {
-    return stageDefinition.checks.find(check => this.approvalEvidenceRole(check) === role) ?? null;
-  }
-
-  private approvalEvidenceRole(check: CheckDefinition): string | null {
-    const evidence = check.with?.approvalEvidence;
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-    const role = (evidence as Record<string, unknown>).role;
-    return typeof role === 'string' ? role : null;
+  private approvalEvidenceCheck(stageDefinition: CompiledStageDefinition, role: 'verdict' | 'verification' | 'candidate'): CheckDefinition | null {
+    const policy = stageDefinition.approvalEvidencePolicy;
+    if (!policy) return null;
+    const checkNameByRole = {
+      verdict: policy.verdictCheckName,
+      verification: policy.verificationCheckName,
+      candidate: policy.candidateCheckName,
+    };
+    return stageDefinition.checks.find(check => check.name === checkNameByRole[role]) ?? null;
   }
 
   private reviewProducerTask(stageDefinition: CompiledStageDefinition): TaskDefinition | null {

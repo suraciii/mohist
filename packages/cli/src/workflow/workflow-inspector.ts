@@ -225,11 +225,14 @@ function compileTasksFrom(
   diagnostics: WorkflowDiagnostic[],
 ): WorkflowSourceDefinition['stages'][number]['tasksFrom'] | undefined {
   if (rawTasksFrom === undefined) return undefined;
-  if (rawTasksFrom === 'mohist/ralph-tasks') return rawTasksFrom;
+  if (typeof rawTasksFrom === 'string') {
+    const use = getWorkflowUseDefinition(rawTasksFrom);
+    if (use && use.allowedPlacement === 'task' && use.sourceKind) return rawTasksFrom;
+  }
   diagnostics.push({
     severity: 'error',
     path: `${stagePath}.tasksFrom`,
-    message: 'tasksFrom must be mohist/ralph-tasks',
+    message: 'tasksFrom must reference a workflow task source use',
   });
   return undefined;
 }
@@ -686,11 +689,11 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
       }
     }
 
-    if (isFullCustomWorkflow && stage.stage === Stage.Check && isProjectDefinedStage(stage) && !hasApprovalEvidenceShape(stage)) {
+    if (isFullCustomWorkflow && stage.requiresApproval && isProjectDefinedStage(stage) && hasAnyApprovalEvidence(stage) && !hasApprovalEvidenceShape(stage)) {
       diagnostics.push({
         severity: 'error',
         path: stagePath,
-        message: 'Custom Check stage must declare approval evidence checks for verdict, verification, and candidate roles',
+        message: 'Custom approval stage must declare complete approval evidence checks for verdict, verification, and candidate roles',
         suggestion: 'Set check.with.approvalEvidence.role to verdict, verification, and candidate; verdict/candidate roles also need snapshotField.',
       });
     }
@@ -778,6 +781,13 @@ function hasApprovalEvidenceShape(stage: CompiledStageDefinition): boolean {
     roles.add(role);
   }
   return roles.has('verdict') && roles.has('verification') && roles.has('candidate');
+}
+
+function hasAnyApprovalEvidence(stage: CompiledStageDefinition): boolean {
+  return stage.checks.some(check => {
+    const evidence = check.with?.approvalEvidence;
+    return Boolean(evidence && typeof evidence === 'object' && !Array.isArray(evidence));
+  });
 }
 
 function isProjectDefinedStage(stage: CompiledStageDefinition): boolean {

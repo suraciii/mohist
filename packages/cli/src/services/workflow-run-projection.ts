@@ -2,7 +2,7 @@ import { CheckSuiteRepo } from '../db/check-suite-repo';
 import { DatabaseManager } from '../db/database';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { IssueRepo } from '../db/issue-repo';
-import { Stage, IssueStatus, type CheckState, type CheckSuiteStatus } from '../types';
+import { IssueStatus, Stage, type CheckState, type CheckSuiteStatus } from '../types';
 import { eventBus, type EventBus } from './event-bus';
 import { StageStateService, type StageCheckStatus, type StageStateStatus, type StageTaskStatus } from './stage-state-service';
 import type { WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/domain';
@@ -226,12 +226,14 @@ export class WorkflowRunProjection {
 
   private projectCheckSuite(run: WorkflowRun): void {
     const snapshot = run.snapshot();
-    const checkStage = snapshot.stageRuns.find(stage => stage.stage === Stage.Check);
     const suite = this.checkSuiteRepo.findActiveByIssueId(snapshot.issueId);
-    if (!checkStage || !suite) return;
+    if (!suite) return;
+    const checkStage = this.checkSuiteStage(snapshot);
+    if (!checkStage) return;
+    const checkNames = this.checkSuiteCheckNames(snapshot, checkStage.stage);
 
     for (const check of checkStage.checks) {
-      if (check.name !== 'health:check' && check.name !== 'review-passed' && check.name !== 'merge-ready' && check.name !== 'user-approval') continue;
+      if (!checkNames.has(check.name)) continue;
       this.checkSuiteRepo.updateChecks(suite.id, check.name, {
         status: this.toCheckSuiteCheckStatus(check.status),
         output: check.output ?? check.message ?? undefined,
@@ -241,6 +243,27 @@ export class WorkflowRunProjection {
 
     const status = this.toCheckSuiteStatus(checkStage.status);
     if (status) this.checkSuiteRepo.updateStatus(suite.id, status);
+  }
+
+  private checkSuiteStage(snapshot: WorkflowRunSnapshot): WorkflowRunSnapshot['stageRuns'][number] | undefined {
+    const current = snapshot.stageRuns.find(stageRun => stageRun.stage === snapshot.currentStage);
+    if (current && this.checkSuiteCheckNames(snapshot, current.stage).size > 0) return current;
+    return snapshot.stageRuns.find(stageRun => this.checkSuiteCheckNames(snapshot, stageRun.stage).size > 0);
+  }
+
+  private checkSuiteCheckNames(snapshot: WorkflowRunSnapshot, stage: Stage): Set<string> {
+    const stageDefinition = snapshot.workflowDefinitionSnapshot.compiledStageDefinitions.find(definition => definition.stage === stage);
+    const names = new Set<string>();
+    const evidencePolicy = stageDefinition?.approvalEvidencePolicy;
+    if (evidencePolicy) {
+      names.add(evidencePolicy.verificationCheckName);
+      names.add(evidencePolicy.verdictCheckName);
+      names.add(evidencePolicy.candidateCheckName);
+    }
+    if (stageDefinition?.approvalPolicy) {
+      names.add(stageDefinition.approvalPolicy.checkName);
+    }
+    return names;
   }
 
   private projectWorkflowLog(issueId: string, sessionId: string | null, events: WorkflowEvent[]): void {
