@@ -291,12 +291,6 @@ describe('T-010: Integrate stage regression tests', () => {
       expect(mockRepo.updateStage).not.toHaveBeenCalled();
     });
 
-    it('CheckStageRunner.getNextStage() returns Stage.Integrate', async () => {
-      const { CheckStageRunner } = await import('../src/workflow/legacy/check-stage-runner');
-      const runner = new CheckStageRunner({ worktreePath: tmpDir });
-      expect(runner.getNextStage()).toBe(Stage.Integrate);
-    });
-
     it('Check approval via workflow transitions Plan->Build->Check->Integrate->Done (Integrate is visited before Done)', async () => {
       const planRunner = new class implements StageRunner {
         canHandle(s: Stage): boolean { return s === Stage.Plan; }
@@ -869,75 +863,11 @@ New scenario content.`);
   });
 
   describe('AC-5: Check does not archive changes or trigger Done-side merge/finalization side effects', () => {
-    it('CheckStageRunner does not call archiveChange', async () => {
-      const { CheckStageRunner } = await import('../src/workflow/legacy/check-stage-runner');
-
-      const worktreePath = path.join(tmpDir, 'worktree-check');
-      fs.mkdirSync(worktreePath, { recursive: true });
-      const workflowYaml = path.join(worktreePath, 'workflow.yaml');
-      fs.writeFileSync(workflowYaml, `
-stages:
-  - stage: check
-    prompt: check
-healthGates:
-  check:
-    enabled: false
-    command: npm run build
-    timeout: 300000
-    autoFix: false
-    maxFixAttempts: 0
-    fallbackReaction:
-      type: escalate
-`);
-
-      const issueNumber = 130;
-      const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issueNumber}-test`);
-      fs.mkdirSync(path.join(changeDir, 'specs'), { recursive: true });
-
-      createMainSpec(tmpDir, 'cap-n', [
-        '### Requirement: ExistingN\n\nExisting content.\n\n#### Scenario: Existing scenario\n\nExisting scenario content.',
-      ]);
-
-      createChangeSpec(changeDir, 'cap-n', `## ADDED Requirements
-
-### Requirement: NewN
-
-New requirement content.
-
-#### Scenario: New scenario
-New scenario content.`);
-
-      const archiveChangeSpy = vi.fn();
-      const ctx = createMockContext(tmpDir, issueNumber, {
-        artifactManager: {
-          getChangeDir: vi.fn().mockReturnValue(changeDir),
-          createChangeDir: vi.fn(),
-          readArtifact: vi.fn().mockReturnValue(null),
-          writeArtifact: vi.fn().mockReturnValue(true),
-          exists: vi.fn().mockReturnValue(true),
-          readTasks: vi.fn(),
-          updateTaskPasses: vi.fn(),
-          archiveChange: archiveChangeSpy,
-        } as any,
-        issue: {
-          id: `issue-${issueNumber}`,
-          number: issueNumber,
-          title: 'Test Issue',
-          body: '',
-          stage: Stage.Check,
-          status: IssueStatus.Active,
-          projectId: 'test-project',
-          labels: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      });
-
-      const runner = new CheckStageRunner({ worktreePath });
-      const result = await runner.run(ctx);
-
-      expect(result.success).toBe(false);
-      expect(archiveChangeSpy).not.toHaveBeenCalled();
+    it('default Check stage definition has no archive task', async () => {
+      const { DEFAULT_STAGE_DEFINITIONS } = await import('../src/workflow/domain');
+      const checkDefinition = DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check)!;
+      expect(checkDefinition.tasks.map(task => task.id)).not.toContain('integrate:archive-change');
+      expect(checkDefinition.tasks.map(task => task.uses)).not.toContain('mohist/archive-change');
     });
   });
 

@@ -5,6 +5,7 @@ import * as os from 'os';
 import { OpenSpecSyncDryRunCheck } from '../../src/workflow/checks/openspec-sync-dry-run-check';
 import { MergeReadinessCheck } from '../../src/workflow/checks/merge-readiness-check';
 import { IntegrationHealthGatePreviewCheck } from '../../src/workflow/checks/integration-health-gate-preview-check';
+import { Stage } from '../../src/types';
 
 function makeCheckContext(overrides?: Partial<{
   changeDir: string;
@@ -367,22 +368,14 @@ Content.`, 'utf-8');
     expect(conflicts[0].type).toBe('missing_source');
   });
 
-  it('CheckStageRunner default postTaskChecks are review-passed, merge-ready, user-approval', async () => {
-    const worktreePath = tmpDir;
-    fs.mkdirSync(worktreePath, { recursive: true });
-    fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), 'stages:\n  - stage: check\n', 'utf-8');
+  it('default Check stage definition contains review and merge checks without openspec sync dry-run', async () => {
+    const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/domain');
+    const checkDefinition = DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check)!;
+    const checkNames = checkDefinition.checks.map(check => check.name);
 
-    const { CheckStageRunner } = await import('../../src/workflow/legacy/check-stage-runner');
-    const runner = new CheckStageRunner({ worktreePath });
-    const preChecks = runner.getPreTaskChecks();
-    const postChecks = runner.getChecks();
-
-    expect(preChecks).toHaveLength(1);
-    expect(preChecks.map((c: any) => c.name)).toContain('health:check');
-    const postCheckNames = postChecks.map((c: any) => c.name);
-    expect(postCheckNames).not.toContain('openspec-sync-dry-run');
-    expect(postCheckNames).toContain('review-passed');
-    expect(postCheckNames).toContain('merge-ready');
-    expect(postCheckNames).toContain('user-approval');
+    expect(checkNames).toContain('health:check');
+    expect(checkNames).not.toContain('openspec-sync-dry-run');
+    expect(checkNames).toContain('review-passed');
+    expect(checkNames).toContain('merge-ready');
   });
 });

@@ -3,17 +3,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { ChangeArtifactsManager } from '../src/artifacts/change-artifacts-manager';
-import { CheckStageRunner } from '../src/workflow/legacy/check-stage-runner';
-import type { StageContext, StageRunResult, ReactionConfig } from '../src/workflow/stage-context';
-import type { Check, CheckContext, CheckResult } from '../src/workflow/checks';
-import { Stage, IssueStatus } from '../src/types';
+import { Stage } from '../src/types';
 import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
 import { CommentRepo } from '../src/db/comment-repo';
 import { IssueService } from '../src/services/issue-service';
-import { EventBus } from '../src/services/event-bus';
 
 function setupChangeDir(tmpDir: string, issueNumber: number, slug: string): string {
   const changesDir = path.join(tmpDir, 'openspec', 'changes');
@@ -193,126 +189,6 @@ describe('ChangeArtifactsManager.restoreChange', () => {
     fs.mkdirSync(archiveDir, { recursive: true });
 
     await expect(manager.restoreChange(999)).rejects.toThrow('not found');
-  });
-});
-
-describe('CheckStageRunner archive integration', () => {
-  const passReaction: ReactionConfig = { type: 'escalate', escalateTarget: Stage.Build };
-
-  function createPassingCheck(name: string): Check {
-    return {
-      name,
-      reaction: passReaction,
-      async run(): Promise<CheckResult> {
-        return { name, status: 'pass', message: `${name} passed` };
-      },
-    };
-  }
-
-  function createFailingCheck(name: string): Check {
-    return {
-      name,
-      reaction: passReaction,
-      async run(): Promise<CheckResult> {
-        return { name, status: 'fail', message: `${name} failed` };
-      },
-    };
-  }
-
-  function createMockContext(archiveChangeFn: (n: number) => Promise<void>): StageContext {
-    return {
-      issue: {
-        id: 'test-issue-id',
-        number: 42,
-        title: 'Test Issue',
-        body: '',
-        stage: Stage.Check,
-        status: IssueStatus.Active,
-        projectId: 'test-project',
-        labels: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      acpOptions: {} as any,
-      artifactManager: {
-        getChangeDir: vi.fn().mockReturnValue('/tmp/change-42'),
-        createChangeDir: vi.fn(),
-        readArtifact: vi.fn(),
-        writeArtifact: vi.fn(),
-        exists: vi.fn().mockReturnValue(true),
-        readTasks: vi.fn(),
-        updateTaskPasses: vi.fn(),
-        archiveChange: archiveChangeFn,
-      },
-      worktreeManager: {} as any,
-      projectRepo: {} as any,
-      eventBus: new EventBus() as any,
-      checkpointManager: {
-        save: vi.fn(),
-        load: vi.fn(),
-        deleteAll: vi.fn(),
-      } as any,
-      issueRepo: {
-        updateStage: vi.fn(),
-        setApprovalState: vi.fn(),
-        clearApprovalState: vi.fn(),
-        updateStatus: vi.fn(),
-      } as any,
-    };
-  }
-
-  it('should call archiveChange after all checks pass', async () => {
-    const archiveChange = vi.fn().mockResolvedValue(undefined);
-    const runner = new CheckStageRunner({
-      worktreePath: '/tmp/worktree',
-      checks: [
-        createPassingCheck('build-test'),
-        createPassingCheck('ai-review'),
-      ],
-    });
-    const ctx = createMockContext(archiveChange);
-
-    const result = await runner.run(ctx);
-
-    expect(result.success).toBe(true);
-    expect(result).not.toHaveProperty('nextStage');
-    expect(archiveChange).not.toHaveBeenCalled();
-  });
-
-  it('should not call archiveChange when checks fail', async () => {
-    const archiveChange = vi.fn().mockResolvedValue(undefined);
-    const runner = new CheckStageRunner({
-      worktreePath: '/tmp/worktree',
-      checks: [
-        createFailingCheck('build-test'),
-      ],
-    });
-    const ctx = createMockContext(archiveChange);
-
-    const result = await runner.run(ctx);
-
-    expect(result.success).toBe(false);
-    expect(archiveChange).not.toHaveBeenCalled();
-  });
-
-  it('should not block check stage when archive error occurs', async () => {
-    const archiveError = new Error('Permission denied');
-    const archiveChange = vi.fn().mockRejectedValue(archiveError);
-
-    const runner = new CheckStageRunner({
-      worktreePath: '/tmp/worktree',
-      checks: [
-        createPassingCheck('build-test'),
-        createPassingCheck('ai-review'),
-      ],
-    });
-    const ctx = createMockContext(archiveChange);
-
-    const result = await runner.run(ctx);
-
-    expect(result.success).toBe(true);
-    expect(result).not.toHaveProperty('nextStage');
-    expect(archiveChange).not.toHaveBeenCalled();
   });
 });
 
