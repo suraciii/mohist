@@ -412,7 +412,7 @@ function isRealTask(stage: Stage, taskId: string): boolean {
   if (!allowed) {
     return taskId.startsWith('repair-') || taskId.startsWith('fix-');
   }
-  if (allowed.has(taskId)) {
+  if ([...allowed].some(baseTaskId => isTaskAttemptForBase(taskId, baseTaskId))) {
     return true;
   }
   if (stage === Stage.Build && /^T-\d+$/.test(taskId)) {
