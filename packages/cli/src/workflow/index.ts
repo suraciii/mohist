@@ -13,10 +13,6 @@ export {
 } from './stage-runner';
 
 export {
-  CheckStageRunner,
-} from './check-stage-runner';
-
-export {
   type StageContext,
   type StageRunResult,
   type CheckResult,

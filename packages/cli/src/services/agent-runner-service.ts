@@ -12,9 +12,9 @@ import {
   GenericStageRunner,
   PlanStageRunner,
   BuildStageRunner,
-  CheckStageRunner,
   IntegrateStageRunner,
 } from '../workflow';
+import { CheckStageRunner as LegacyCheckStageRunner } from '../workflow/legacy/check-stage-runner';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue, MergeState } from '../types';
@@ -1421,15 +1421,14 @@ export class AgentRunnerService {
         enabledStages: genericStageRunnerStagesFromEnv(),
       });
 
-      const legacyRunners = [
-        new PlanStageRunner(worktreePath),
-        new BuildStageRunner({ worktreePath, projectId }),
-        new CheckStageRunner({ worktreePath }),
-        new IntegrateStageRunner({ worktreePath }),
-      ];
       const runners = process.env.MOHIST_USE_LEGACY_STAGE_RUNNERS === '1'
-        ? legacyRunners
-        : [unifiedRunner, ...legacyRunners];
+        ? [
+            new LegacyCheckStageRunner({ worktreePath }),
+            new PlanStageRunner(worktreePath),
+            new BuildStageRunner({ worktreePath, projectId }),
+            new IntegrateStageRunner({ worktreePath }),
+          ]
+        : [unifiedRunner];
       const workflowApplicationService = this.workflowRunService
         ? new WorkflowApplicationService(this.workflowRunService.getDatabaseManager())
         : undefined;

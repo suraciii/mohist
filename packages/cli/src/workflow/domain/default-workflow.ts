@@ -1,14 +1,15 @@
 import { Stage } from '../../types';
 import { REVIEW_RESULT_CONTRACT, REVIEW_SELF_REPAIR_POLICY, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
 import type { StageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
+import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './workflow-definition-parser';
 import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
 
-export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
+export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
   id: 'mohist/default',
   name: 'Mohist default issue delivery workflow',
   stages: [
     {
-      stage: Stage.Plan,
+      id: Stage.Plan,
       tasks: [
         { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } } },
         { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/specs' } } },
@@ -17,12 +18,12 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/self-review' } }, resultContract: SELF_REVIEW_RESULT_CONTRACT },
       ],
       checks: [
-        { name: 'proposal-complete', title: 'Proposal complete' },
-        { name: 'specs-complete', title: 'Specs complete' },
-        { name: 'design-complete', title: 'Design complete' },
-        { name: 'tasks-valid', title: 'Tasks valid' },
+        { id: 'proposal-complete', title: 'Proposal complete' },
+        { id: 'specs-complete', title: 'Specs complete' },
+        { id: 'design-complete', title: 'Design complete' },
+        { id: 'tasks-valid', title: 'Tasks valid' },
         {
-          name: 'self-review-passed',
+          id: 'self-review-passed',
           title: 'Self review passed',
           onFailure: {
             retry: {
@@ -36,35 +37,16 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
             },
           },
         },
-        { name: 'health:plan', title: 'Plan health gate' },
+        { id: 'health:plan', title: 'Plan health gate' },
       ],
-      requiresApproval: true,
-      approvalCheckName: 'user-approval',
-      workSources: [
-        { kind: 'static', taskIds: ['proposal', 'specs', 'design', 'tasks', 'self-review'] },
-      ],
-      taskExecutionPolicies: [
-        { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
-      ],
-      checkPolicies: [
-        { checkName: 'proposal-complete', phase: 'post-task' },
-        { checkName: 'specs-complete', phase: 'post-task' },
-        { checkName: 'design-complete', phase: 'post-task' },
-        { checkName: 'tasks-valid', phase: 'post-task' },
-        { checkName: 'self-review-passed', phase: 'post-task' },
-        { checkName: 'health:plan', phase: 'post-task' },
-      ],
-      approvalPolicy: { checkName: 'user-approval' },
-      invalidationPolicy: {
-        entries: [],
-      },
+      approval: true,
     },
     {
-      stage: Stage.Build,
-      tasks: [],
+      id: Stage.Build,
+      tasksFrom: 'mohist/ralph-tasks',
       checks: [
         {
-          name: 'health:build',
+          id: 'health:build',
           title: 'Build health gate',
           onFailure: {
             retry: {
@@ -79,23 +61,9 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
           },
         },
       ],
-      workSources: [
-        { kind: 'ralph' },
-        { kind: 'runtime' },
-      ],
-      taskExecutionPolicies: [
-        { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
-        { taskId: '*', kind: 'ralph-task', workSourceKind: 'ralph' },
-      ],
-      checkPolicies: [
-        { checkName: 'health:build', phase: 'post-task' },
-      ],
-      invalidationPolicy: {
-        entries: [],
-      },
     },
     {
-      stage: Stage.Check,
+      id: Stage.Check,
       on: {
         'code.changed': { reset: 'checks-and-approval' },
       },
@@ -111,7 +79,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
       ],
       checks: [
         {
-          name: 'health:check',
+          id: 'health:check',
           title: 'Check health gate',
           onFailure: {
             retry: {
@@ -127,7 +95,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
           },
         },
         {
-          name: 'review-passed',
+          id: 'review-passed',
           title: 'Review passed',
           onFailure: {
             retry: {
@@ -154,7 +122,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
           },
         },
         {
-          name: 'merge-ready',
+          id: 'merge-ready',
           title: 'Merge ready',
           onFailure: {
             retry: {
@@ -169,73 +137,40 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
           },
         },
       ],
-      requiresApproval: true,
-      approvalCheckName: 'user-approval',
-      workSources: [
-        { kind: 'static', taskIds: ['ai-review'] },
-        { kind: 'runtime' },
-      ],
-      taskExecutionPolicies: [
-        { taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' },
-        { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
-      ],
-      checkPolicies: [
-        { checkName: 'health:check', phase: 'post-task' },
-        { checkName: 'review-passed', phase: 'post-task' },
-        { checkName: 'merge-ready', phase: 'post-task' },
-      ],
-      approvalPolicy: { checkName: 'user-approval' },
-      invalidationPolicy: {
-        entries: [
-          {
-            trigger: 'task-completion',
-            triggerTaskId: 'rebase-branch',
-            when: { shaChanged: true },
-            reason: 'Rebase changed the candidate snapshot; re-run review checks',
-            invalidates: {
-              tasks: ['ai-review'],
-              checks: ['health:check', 'review-passed', 'merge-ready'],
-              approval: true,
-            },
-          },
-        ],
-      },
+      approval: true,
     },
     {
-      stage: Stage.Integrate,
+      id: Stage.Integrate,
       tasks: [
         { id: 'integrate:spec-sync', title: 'Sync specs', uses: 'mohist/openspec-sync' },
         { id: 'integrate:archive-change', title: 'Archive change', uses: 'mohist/archive-change' },
         { id: 'integrate:merge', title: 'Merge branch', uses: 'mohist/merge' },
       ],
       checks: [
-        { name: 'health:integrate', title: 'Post-merge health check' },
-      ],
-      checkFailurePolicies: [
         {
-          checkName: 'health:integrate',
-          fixTaskId: 'fix-integrate-health',
-          fixTaskTitle: 'Fix integrate health',
-          maxAttempts: 1,
+          id: 'health:integrate',
+          title: 'Post-merge health check',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'fix-integrate-health',
+                title: 'Fix integrate health',
+                uses: 'mohist/agent',
+                with: { prompt: { ref: 'mohist/integrate/fix-health' } },
+              },
+            },
+          },
         },
       ],
-      workSources: [
-        { kind: 'static', taskIds: ['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge'] },
-      ],
-      taskExecutionPolicies: [
-        { taskId: 'fix-integrate-health', kind: 'repair-task', workSourceKind: 'runtime' },
-        { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
-      ],
-      checkPolicies: [
-        { checkName: 'health:integrate', phase: 'post-task' },
-      ],
-      repairPolicies: [],
-      invalidationPolicy: {
-        entries: [],
-      },
     },
   ],
 };
+
+export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = parseWorkflowDefinitionSource(
+  MOHIST_DEFAULT_WORKFLOW_SOURCE,
+  { taskSource: 'builtin', checkSource: 'builtin' },
+);
 
 export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
 

@@ -292,7 +292,7 @@ describe('T-010: Integrate stage regression tests', () => {
     });
 
     it('CheckStageRunner.getNextStage() returns Stage.Integrate', async () => {
-      const { CheckStageRunner } = await import('../src/workflow/check-stage-runner');
+      const { CheckStageRunner } = await import('../src/workflow/legacy/check-stage-runner');
       const runner = new CheckStageRunner({ worktreePath: tmpDir });
       expect(runner.getNextStage()).toBe(Stage.Integrate);
     });
@@ -870,7 +870,7 @@ New scenario content.`);
 
   describe('AC-5: Check does not archive changes or trigger Done-side merge/finalization side effects', () => {
     it('CheckStageRunner does not call archiveChange', async () => {
-      const { CheckStageRunner } = await import('../src/workflow/check-stage-runner');
+      const { CheckStageRunner } = await import('../src/workflow/legacy/check-stage-runner');
 
       const worktreePath = path.join(tmpDir, 'worktree-check');
       fs.mkdirSync(worktreePath, { recursive: true });

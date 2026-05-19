@@ -6,3 +6,4 @@ export * from './persistence';
 export * from './runtime';
 export * from './types';
 export * from './workflow-definition';
+export * from './workflow-definition-parser';

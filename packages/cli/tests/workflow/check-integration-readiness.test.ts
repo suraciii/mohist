@@ -372,7 +372,7 @@ Content.`, 'utf-8');
     fs.mkdirSync(worktreePath, { recursive: true });
     fs.writeFileSync(path.join(worktreePath, 'workflow.yaml'), 'stages:\n  - stage: check\n', 'utf-8');
 
-    const { CheckStageRunner } = await import('../../src/workflow/check-stage-runner');
+    const { CheckStageRunner } = await import('../../src/workflow/legacy/check-stage-runner');
     const runner = new CheckStageRunner({ worktreePath });
     const preChecks = runner.getPreTaskChecks();
     const postChecks = runner.getChecks();

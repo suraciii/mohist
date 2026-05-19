@@ -2419,8 +2419,8 @@ describe('StageRunner migration regression coverage', () => {
       expect(runner.canHandle(Stage.Plan)).toBe(false);
     });
 
-    it('CheckStageRunner can be constructed with worktreePath', async () => {
-      const { CheckStageRunner } = await import('../../src/workflow/check-stage-runner');
+    it('legacy CheckStageRunner can be constructed with worktreePath', async () => {
+      const { CheckStageRunner } = await import('../../src/workflow/legacy/check-stage-runner');
       const runner = new CheckStageRunner({ worktreePath: tmpDir });
       expect(runner.canHandle(Stage.Check)).toBe(true);
       expect(runner.canHandle(Stage.Plan)).toBe(false);
@@ -2433,9 +2433,9 @@ describe('StageRunner migration regression coverage', () => {
       expect(runner.canHandle(Stage.Plan)).toBe(false);
     });
 
-    it('GenericStageRunner and legacy runner can coexist in runner list', async () => {
+    it('GenericStageRunner and legacy runners can coexist in explicit compatibility lists', async () => {
       const { PlanStageRunner } = await import('../../src/workflow/plan-stage-runner');
-      const { CheckStageRunner } = await import('../../src/workflow/check-stage-runner');
+      const { CheckStageRunner } = await import('../../src/workflow/legacy/check-stage-runner');
       const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
       const { BuildStageRunner } = await import('../../src/workflow/build-stage-runner');
 

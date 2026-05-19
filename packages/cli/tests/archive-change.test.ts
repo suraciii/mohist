@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { ChangeArtifactsManager } from '../src/artifacts/change-artifacts-manager';
-import { CheckStageRunner } from '../src/workflow/check-stage-runner';
+import { CheckStageRunner } from '../src/workflow/legacy/check-stage-runner';
 import type { StageContext, StageRunResult, ReactionConfig } from '../src/workflow/stage-context';
 import type { Check, CheckContext, CheckResult } from '../src/workflow/checks';
 import { Stage, IssueStatus } from '../src/types';

@@ -1,22 +1,22 @@
-import { Stage } from '../types';
-import type { CheckFailurePolicy, StageContext, StageTaskResult } from './stage-context';
-import type { StageRunner } from './stage-runner';
-import { buildAuthoritativeAiReviewResult, emitStageTaskUpdate } from './stage-context';
-import { BaseStageRunner } from './base-stage-runner';
-import type { Check } from './checks';
-import { ReviewPassedCheck } from './checks/review-passed-check';
-import { MergeReadyCheck } from './checks/merge-ready-check';
-import { UserApprovalCheck } from './checks/user-approval-check';
-import { HealthGateCheck } from './checks/health-gate-check';
-import { buildReviewerPrompt } from '../agents/artifact-prompt';
-import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
-import { validateReviewArtifact } from './utils';
-import { Log } from '../util/log';
-import { createWorkflowSessionObservers } from '../agent-runtime';
-import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
-import { buildFailedCheckContext, getCheckFailurePolicy, type ReactionInputSelector } from './domain';
-import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
-import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
+import { Stage } from '../../types';
+import type { CheckFailurePolicy, StageContext, StageTaskResult } from '../stage-context';
+import type { StageRunner } from '../stage-runner';
+import { buildAuthoritativeAiReviewResult, emitStageTaskUpdate } from '../stage-context';
+import { BaseStageRunner } from '../base-stage-runner';
+import type { Check } from '../checks';
+import { ReviewPassedCheck } from '../checks/review-passed-check';
+import { MergeReadyCheck } from '../checks/merge-ready-check';
+import { UserApprovalCheck } from '../checks/user-approval-check';
+import { HealthGateCheck } from '../checks/health-gate-check';
+import { buildReviewerPrompt } from '../../agents/artifact-prompt';
+import { AgentSession, type AgentSessionOptions } from '../../agent-runtime/agent-session';
+import { validateReviewArtifact } from '../utils';
+import { Log } from '../../util/log';
+import { createWorkflowSessionObservers } from '../../agent-runtime';
+import { createRepairFixAdapter } from '../task-runtime/repair-fix-adapter';
+import { buildFailedCheckContext, getCheckFailurePolicy, type ReactionInputSelector } from '../domain';
+import { executeRebaseBranchTask } from '../task-runtime/rebase-task-handler';
+import { loadHealthGatePolicies, loadWorkflow } from '../workflow-loader';
 import {
   extractReactionOutput,
   buildVerificationContextFromReaction,
@@ -24,7 +24,7 @@ import {
   loadVerificationContext,
   clearVerificationContext,
   buildVerificationPromptSuffix,
-} from './convergence';
+} from '../convergence';
 import * as fs from 'node:fs';
 
 const log = Log.create({ service: 'check-stage-runner' });
@@ -39,14 +39,14 @@ type ReactionInputStageRun = {
 export interface CheckStageRunnerOptions {
   worktreePath: string;
   checks?: Check[];
-  healthGatePolicy?: import('./workflow-loader').HealthGatePolicy;
+  healthGatePolicy?: import('../workflow-loader').HealthGatePolicy;
 }
 
 export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   private postTaskChecks: Check[];
   private usesDefaultChecks: boolean;
   private worktreePath: string;
-  private checkHealthGatePolicy: import('./workflow-loader').HealthGatePolicy;
+  private checkHealthGatePolicy: import('../workflow-loader').HealthGatePolicy;
 
   constructor(options: CheckStageRunnerOptions) {
     super();
@@ -93,9 +93,9 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   protected async runFixTask(
     ctx: StageContext,
     _taskId: string,
-    failedCheck: import('./stage-context').CheckResult,
+    failedCheck: import('../stage-context').CheckResult,
     attempt: number,
-  ): Promise<import('./stage-context').StageTaskResult | null> {
+  ): Promise<import('../stage-context').StageTaskResult | null> {
     const adapter = createRepairFixAdapter();
     const project = ctx.projectRepo?.findById(ctx.issue.projectId);
     const worktreePath = project
@@ -198,7 +198,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
       label: 'ai-review',
       outputPath: changeDir + '/' + reviewOutputPath,
       verifyArtifact: () => validateReviewArtifact(changeDir, reviewOutputPath).valid,
-      buildPrompt: (issue: import('../types').Issue, dir: string) => buildReviewerPrompt(issue, dir),
+      buildPrompt: (issue: import('../../types').Issue, dir: string) => buildReviewerPrompt(issue, dir),
     };
 
     const resumeSteps = ctx.checkpointManager
@@ -209,7 +209,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     const roundState = { type: '', index: 0 };
 
     const checkBridgeObserver = {
-      onRawNotification(_ctx: import('../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
+      onRawNotification(_ctx: import('../../agent-runtime/session-observer').SessionContext, notification: import('@agentclientprotocol/sdk').SessionNotification) {
         ctx.emit('plan_session_update', {
           issueId: String(ctx.acpOptions.issueNumber ?? ctx.acpOptions.issueId ?? ''),
           projectId: ctx.issue.projectId,
@@ -432,7 +432,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
   protected async executeReportedTask(
     ctx: StageContext,
     taskId: string,
-    failedCheck: import('./stage-context').CheckResult | undefined,
+    failedCheck: import('../stage-context').CheckResult | undefined,
     attempt: number,
   ): Promise<StageTaskResult | null> {
     if (taskId === 'ai-review') {
@@ -557,7 +557,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     }
   }
 
-  private latestReviewPassedFromAggregate(ctx: StageContext): import('./stage-context').CheckResult | undefined {
+  private latestReviewPassedFromAggregate(ctx: StageContext): import('../stage-context').CheckResult | undefined {
     const checkStage = ctx.workflowRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
     const review = checkStage?.checks.find(check => check.checkName === 'review-passed');
     if (!review?.output) return undefined;
@@ -595,7 +595,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
     });
 
     const verificationCtx = buildVerificationContextFromReaction(
-      failedCheck as import('./stage-context').CheckResult,
+      failedCheck as import('../stage-context').CheckResult,
       reactionOutput,
       attempt,
     );
@@ -608,7 +608,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   private buildRepairFailedCheckContext(
     ctx: StageContext,
-    failedCheck: import('./stage-context').CheckResult,
+    failedCheck: import('../stage-context').CheckResult,
   ) {
     const priorTaskOutputs = this.resolveReactionInputs(ctx, failedCheck);
     return buildFailedCheckContext(failedCheck, priorTaskOutputs);
@@ -616,7 +616,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   private resolveReactionInputs(
     ctx: StageContext,
-    failedCheck: import('./stage-context').CheckResult,
+    failedCheck: import('../stage-context').CheckResult,
   ): Record<string, unknown>[] {
     const policy = getCheckFailurePolicy(Stage.Check, failedCheck.name);
     const selectors = policy?.inputFrom ?? [];
@@ -637,7 +637,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   private resolveReactionInputSelector(
     selector: ReactionInputSelector,
-    failedCheck: import('./stage-context').CheckResult,
+    failedCheck: import('../stage-context').CheckResult,
     stageRun: ReactionInputStageRun | undefined,
   ): Record<string, unknown>[] | null {
     const failedOutput = (failedCheck.output && typeof failedCheck.output === 'object')
