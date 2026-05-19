@@ -51,9 +51,10 @@ describe('workflow inspector', () => {
     expect(explainWorkflowItem('ai-review')).toMatchObject({
       kind: 'task',
       stage: Stage.Check,
-      uses: 'agent-session',
+      uses: 'mohist/agent',
       source: 'builtin',
       selfRepair: true,
+      useDescription: expect.stringContaining('ACP session'),
     });
     expect(explainWorkflowItem('merge-ready')).toMatchObject({
       kind: 'check',
@@ -136,6 +137,31 @@ extends: other/workflow
         expect.objectContaining({
           severity: 'error',
           message: 'Only extends: mohist/default is supported',
+        }),
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects mutation-only catalog uses when declared as checks', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-invalid-use-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+extends: mohist/default
+stages:
+  check:
+    checks:
+      - id: unsafe-merge
+        uses: mohist/merge
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          message: "Use 'mohist/merge' is not allowed as a check",
         }),
       ]);
     } finally {

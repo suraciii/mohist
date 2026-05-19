@@ -13,6 +13,7 @@ import {
   type WorkflowDefinition,
   type WorkflowDefinitionSnapshot,
 } from './domain';
+import { getWorkflowUseDefinition, isWorkflowUseAllowed } from './uses-catalog';
 
 export type WorkflowDiagnosticSeverity = 'error' | 'warning';
 
@@ -40,6 +41,7 @@ export type ExplainedWorkflowItem =
     dependsOn: string[];
     resultContract?: string;
     selfRepair?: boolean;
+    useDescription?: string;
   }
   | {
     kind: 'check';
@@ -52,6 +54,7 @@ export type ExplainedWorkflowItem =
     blocking: boolean;
     reaction?: CheckFailurePolicy;
     inputs?: Record<string, unknown>;
+    useDescription?: string;
   };
 
 type WorkflowOverrideDocument = Record<string, unknown>;
@@ -293,8 +296,8 @@ function applyStageChecks(
       diagnostics.push({ severity: 'error', path: checkPath, message: 'project check requires id and uses' });
       continue;
     }
-    if (raw.uses !== 'mohist/shell') {
-      diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: 'Only mohist/shell checks are supported in overrides' });
+    if (!isWorkflowUseAllowed(raw.uses, 'check')) {
+      diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${raw.uses}' is not allowed as a check` });
       continue;
     }
     stage.checks.push({
@@ -318,8 +321,8 @@ function applyCheckOverride(
   checkPath: string,
   diagnostics: WorkflowDiagnostic[],
 ): void {
-  if (raw.uses !== undefined && raw.uses !== 'mohist/shell') {
-    diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: 'Only mohist/shell check overrides are supported' });
+  if (raw.uses !== undefined && (typeof raw.uses !== 'string' || !isWorkflowUseAllowed(raw.uses, 'check'))) {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${String(raw.uses)}' is not allowed as a check` });
     return;
   }
   check.source = 'project';
@@ -372,7 +375,15 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
 
     const checkNames = new Set(stage.checks.map(check => check.name));
     for (const [checkIndex, check] of stage.checks.entries()) {
-      if (check.uses === 'mohist/shell' && (!check.with || typeof check.with.command !== 'string' || check.with.command.length === 0)) {
+      const uses = check.uses ?? inferCheckUses(check.name);
+      if (!isWorkflowUseAllowed(uses, 'check')) {
+        diagnostics.push({
+          severity: 'error',
+          path: `${stagePath}.checks[${checkIndex}].uses`,
+          message: `Use '${uses}' is not allowed as a check`,
+        });
+      }
+      if (uses === 'mohist/shell' && (!check.with || typeof check.with.command !== 'string' || check.with.command.length === 0)) {
         diagnostics.push({
           severity: 'error',
           path: `${stagePath}.checks[${checkIndex}].with.command`,
@@ -412,16 +423,19 @@ export function explainWorkflowItem(
 function explainTask(stage: StageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
   const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
     ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
+  const uses = inferTaskUses(task.id, policy?.kind);
+  const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'task',
     stage: stage.stage,
     id: task.id,
     title: task.title,
     source: task.source ?? 'builtin',
-    uses: policy?.kind ?? 'agent-session',
+    uses,
     dependsOn: task.dependsOn ?? [],
     resultContract: task.resultContract?.kind,
     selfRepair: task.selfRepairPolicy?.enabled,
+    useDescription: useDefinition?.description,
   };
 }
 
@@ -429,17 +443,20 @@ function explainCheck(stage: StageDefinition, check: CheckDefinition): Explained
   const phase = stage.checkPolicies?.find(candidate => candidate.checkName === check.name)?.phase ?? 'post-task';
   const reaction = stage.repairPolicies?.find(candidate => candidate.checkName === check.name)
     ?? stage.checkFailurePolicies?.find(candidate => candidate.checkName === check.name);
+  const uses = check.uses ?? inferCheckUses(check.name);
+  const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'check',
     stage: stage.stage,
     id: check.name,
     title: check.title,
     source: check.source ?? 'builtin',
-    uses: check.uses ?? inferCheckUses(check.name),
+    uses,
     phase,
     blocking: true,
     reaction,
     inputs: check.with,
+    useDescription: useDefinition?.description,
   };
 }
 
@@ -455,7 +472,17 @@ function inferCheckUses(checkName: string): string {
   if (checkName.startsWith('health:')) return 'mohist/health-gate';
   if (checkName === 'review-passed' || checkName === 'self-review-passed') return 'mohist/verdict';
   if (checkName === 'merge-ready') return 'mohist/merge-ready';
-  return 'mohist/check';
+  return 'mohist/artifact-exists';
+}
+
+function inferTaskUses(taskId: string, executionKind?: string): string {
+  if (taskId === 'integrate:spec-sync') return 'mohist/openspec-sync';
+  if (taskId === 'integrate:archive-change') return 'mohist/archive-change';
+  if (taskId === 'integrate:merge') return 'mohist/merge';
+  if (taskId === 'rebase-branch') return 'mohist/rebase';
+  if (executionKind === 'ralph-task') return 'mohist/ralph-tasks';
+  if (executionKind === 'service-call') return 'mohist/agent';
+  return 'mohist/agent';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
