@@ -262,7 +262,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
-  it('rejects mergeState-only Done projection without Integrate delivery evidence', () => {
+  it('rejects mergeState-only Done projection without terminal stage task/check completion', () => {
     issueRepo.update(issueId, { mergeState: MergeState.Merged });
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_merge_only_done', issueId, issueNumber });
     run.status = 'passed';
@@ -277,7 +277,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
       stage: Stage.Integrate,
       status: IssueStatus.Blocked,
       mergeState: MergeState.Merged,
-      blockedReason: expect.stringContaining('integrate:spec-sync evidence is missing'),
+      blockedReason: expect.stringContaining('integrate:spec-sync task is pending'),
     });
   });
 

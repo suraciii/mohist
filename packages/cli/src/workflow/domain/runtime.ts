@@ -1343,31 +1343,12 @@ export class WorkflowRun {
   }
 
   private evaluateDeliveryEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
-    for (const requirement of stageRun.definition.evidenceRequirements ?? []) {
-      const taskRun = requirement.taskId ? stageRun.tasks.find(task => task.id === requirement.taskId) : null;
-      if (requirement.taskId && taskRun?.status !== 'completed') {
-        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: requirement.taskId, uses: requirement.uses };
-      }
-      if (taskRun) {
-        const evidence = validateWorkflowUseEvidence(requirement.uses ?? this.taskUse(stageRun, taskRun.id), taskRun.output);
-        if (!evidence.ok) {
-          return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: taskRun.id, uses: requirement.uses };
-        }
-      }
-
-      const checkRun = requirement.checkName ? stageRun.checks.find(check => check.name === requirement.checkName) : null;
-      if (requirement.checkName && checkRun?.status !== 'passed') {
-        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, checkName: requirement.checkName, uses: requirement.uses };
-      }
-      if (!requirement.taskId && !requirement.checkName && requirement.uses) {
-        const matchingTask = stageRun.tasks.find(task => this.taskUse(stageRun, task.id) === requirement.uses);
-        if (!matchingTask || matchingTask.status !== 'completed') {
-          return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, uses: requirement.uses };
-        }
-        const evidence = validateWorkflowUseEvidence(requirement.uses, matchingTask.output);
-        if (!evidence.ok) {
-          return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: matchingTask.id, uses: requirement.uses };
-        }
+    for (const taskRun of stageRun.tasks) {
+      if (taskRun.status !== 'completed') continue;
+      const uses = this.taskUse(stageRun, taskRun.id);
+      const evidence = validateWorkflowUseEvidence(uses, taskRun.output);
+      if (!evidence.ok) {
+        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: taskRun.id, uses };
       }
     }
     return { complete: true };

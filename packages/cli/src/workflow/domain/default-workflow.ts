@@ -247,12 +247,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
       checkPolicies: [
         { checkName: 'health:integrate', phase: 'post-task' },
       ],
-      evidenceRequirements: [
-        { taskId: 'integrate:spec-sync', uses: 'mohist/openspec-sync' },
-        { taskId: 'integrate:archive-change', uses: 'mohist/archive-change' },
-        { taskId: 'integrate:merge', uses: 'mohist/merge' },
-        { checkName: 'health:integrate', uses: 'mohist/health-gate' },
-      ],
       repairPolicies: [],
       invalidationPolicy: {
         entries: [],
