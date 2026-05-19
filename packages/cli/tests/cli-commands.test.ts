@@ -6,6 +6,7 @@ vi.mock('../src/cli/server-check', () => ({ requireServer: vi.fn().mockResolvedV
 import { setupProjectCommands } from '../src/cli/commands/project';
 import { setupIssueCommands } from '../src/cli/commands/issue';
 import { setupQuickCommands } from '../src/cli/commands/quick';
+import { setupWorkflowCommands } from '../src/cli/commands/workflow';
 import { apiClient } from '../src/cli/api-client';
 
 describe('CLI Commands', () => {
@@ -275,6 +276,61 @@ describe('CLI Commands', () => {
       const commands = program.commands;
       expect(commands.some(cmd => cmd.name() === 'status')).toBe(true);
       expect(commands.some(cmd => cmd.name() === 'config')).toBe(true);
+    });
+  });
+
+  describe('Workflow Commands', () => {
+    it('should setup workflow inspection commands', () => {
+      const program = new Command();
+      setupWorkflowCommands(program);
+
+      const workflowCmd = program.commands.find(cmd => cmd.name() === 'workflow');
+      expect(workflowCmd).toBeDefined();
+      expect(workflowCmd?.commands.some(cmd => cmd.name() === 'show')).toBe(true);
+      expect(workflowCmd?.commands.some(cmd => cmd.name() === 'validate')).toBe(true);
+      expect(workflowCmd?.commands.some(cmd => cmd.name() === 'explain')).toBe(true);
+    });
+
+    it('workflow show renders the expanded default workflow', async () => {
+      const lines: string[] = [];
+      const program = new Command();
+      setupWorkflowCommands(program, { write: line => lines.push(line ?? ''), error: line => lines.push(line) });
+
+      await program.parseAsync(['node', 'test', 'workflow', 'show']);
+
+      const output = lines.join('\n');
+      expect(output).toContain('Workflow: mohist/default');
+      expect(output).toContain('Task   proposal');
+      expect(output).toContain('Check  merge-ready');
+      expect(output).toContain('Gate   user-approval');
+    });
+
+    it('workflow validate succeeds for the default workflow', async () => {
+      const lines: string[] = [];
+      const program = new Command();
+      setupWorkflowCommands(program, { write: line => lines.push(line ?? ''), error: line => lines.push(line) });
+
+      await program.parseAsync(['node', 'test', 'workflow', 'validate']);
+
+      const output = lines.join('\n');
+      expect(output).toContain('Workflow is valid');
+      expect(process.exitCode).not.toBe(1);
+    });
+
+    it('workflow explain describes a task and a check', async () => {
+      const lines: string[] = [];
+      const program = new Command();
+      setupWorkflowCommands(program, { write: line => lines.push(line ?? ''), error: line => lines.push(line) });
+
+      await program.parseAsync(['node', 'test', 'workflow', 'explain', 'ai-review']);
+      await program.parseAsync(['node', 'test', 'workflow', 'explain', 'merge-ready']);
+
+      const output = lines.join('\n');
+      expect(output).toContain('Task: ai-review');
+      expect(output).toContain('Uses: agent-session');
+      expect(output).toContain('Check: merge-ready');
+      expect(output).toContain('Uses: mohist/merge-ready');
+      expect(output).toContain('Blocking: yes');
     });
   });
   
