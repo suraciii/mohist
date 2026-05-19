@@ -19,7 +19,6 @@ import type {
 import type { Check, CheckContext } from '../../src/workflow/checks';
 import { EventBus } from '../../src/services/event-bus';
 import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
-import { CheckStageRunner } from '../../src/workflow/legacy/check-stage-runner';
 import {
   getLatestCheckResult,
   replaceCurrentAiReviewTruth,
@@ -172,7 +171,17 @@ describe('Check-stage re-review convergence regressions', () => {
       fs.writeFileSync(reviewPath, reviewBody);
 
       const checkpointDeletes: Array<{ stage: string; step: string }> = [];
-      const runner = new CheckStageRunner({ worktreePath: tmpRoot });
+      const runner = new TestStageRunner({
+        checks: [],
+        nextStage: Stage.Integrate,
+        beforeRecheckFn: async (ctx, _checkName, _fixTaskId) => {
+          const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+          if (!changeDir) return;
+          const staleReviewPath = path.join(changeDir, `review.stale-${Date.now()}.md`);
+          fs.renameSync(path.join(changeDir, 'review.md'), staleReviewPath);
+          ctx.checkpointManager?.deleteStep?.(ctx.issue.number, 'check', 'ai-review');
+        },
+      });
       const localCtx = makeContext({
         artifactManager: {
           ...ctx.artifactManager,
@@ -204,7 +213,17 @@ describe('Check-stage re-review convergence regressions', () => {
       fs.writeFileSync(reviewPath, reviewBody);
 
       const checkpointDeletes: Array<{ stage: string; step: string }> = [];
-      const runner = new CheckStageRunner({ worktreePath: tmpRoot });
+      const runner = new TestStageRunner({
+        checks: [],
+        nextStage: Stage.Integrate,
+        beforeRecheckFn: async (ctx, _checkName, _fixTaskId) => {
+          const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+          if (!changeDir) return;
+          const staleReviewPath = path.join(changeDir, `review.stale-${Date.now()}.md`);
+          fs.renameSync(path.join(changeDir, 'review.md'), staleReviewPath);
+          ctx.checkpointManager?.deleteStep?.(ctx.issue.number, 'check', 'ai-review');
+        },
+      });
       const localCtx = makeContext({
         artifactManager: {
           ...ctx.artifactManager,

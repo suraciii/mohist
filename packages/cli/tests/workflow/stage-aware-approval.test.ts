@@ -169,8 +169,8 @@ describe('UserApprovalCheck stage-awareness', () => {
   });
 });
 
-describe('CheckStageRunner stage-aware approval', () => {
-  it('UserApprovalCheck is constructed with Stage.Check for check runner', () => {
+describe('UserApprovalCheck stage-aware approval', () => {
+  it('UserApprovalCheck is constructed with Stage.Check for check stage', () => {
     const check = new UserApprovalCheck(Stage.Check);
     expect(check.name).toBe('user-approval');
   });

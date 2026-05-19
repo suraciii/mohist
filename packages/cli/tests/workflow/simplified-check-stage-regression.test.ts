@@ -175,7 +175,7 @@ class TestStageRunner extends BaseStageRunner {
 
 describe('Simplified check-stage regression tests', () => {
   describe('AC-1: initial visible task is ai-review, visible checks are review-passed, merge-ready, user-approval', () => {
-    it('CheckStageRunner default post-task checks are review-passed, merge-ready, user-approval', () => {
+    it('default post-task checks are review-passed, merge-ready, user-approval', () => {
       const runner = new TestStageRunner({
         checks: [
           { name: 'review-passed', run: async () => ({ name: 'review-passed', status: 'pass' }) } as Check,
