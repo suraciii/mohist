@@ -83,9 +83,10 @@ async function rebaseServiceFn(ctx: StageContext): Promise<RebaseTaskOutput> {
 export async function executeRebaseBranchTask(
   ctx: StageContext,
   attempt: number,
+  options?: { taskId?: string; title?: string },
 ): Promise<StageTaskResult> {
-  const taskId = 'rebase-branch';
-  const title = 'Rebase branch';
+  const taskId = options?.taskId ?? 'rebase-branch';
+  const title = options?.title ?? 'Rebase branch';
   const startedAt = Date.now();
 
   emitStageTaskUpdate(

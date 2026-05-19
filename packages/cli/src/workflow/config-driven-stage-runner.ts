@@ -735,7 +735,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
 
   private resolveRuntimeTask(stageDefinition: StageDefinition, taskId: string): ExecutableTask | null {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
-    const task = stageDefinition.tasks.find(candidate => candidate.id === taskId)
+    const task = this.sourceTaskDefinition(stageDefinition, taskId)
       ?? this.buildRuntimeTaskDefinition(taskId)
       ?? (baseTaskId !== taskId ? this.buildRuntimeTaskDefinition(baseTaskId) : null);
     if (!task) return null;
@@ -795,8 +795,16 @@ export class ConfigDrivenStageRunner implements StageRunner {
       failedCheck: options.failedCheck,
       worktreePath: this.worktreePath,
       agentSessionRef: executionKind === 'agent-session' ? policy?.agentSessionRef : undefined,
-      sourceTask: stageDefinition.tasks.find(candidate => candidate.id === task.taskId || candidate.id === baseTaskId),
+      sourceTask: this.sourceTaskDefinition(stageDefinition, task.taskId),
     });
+  }
+
+  private sourceTaskDefinition(stageDefinition: StageDefinition, taskId: string): import('./domain').TaskDefinition | undefined {
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    return stageDefinition.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
+      ?? stageDefinition.checks
+        .map(check => check.onFailure?.retry?.task)
+        .find((task): task is import('./domain').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
   private taskWorkSourceKind(ctx: StageContext, stageDefinition: StageDefinition, taskId: string): WorkSourceKind | undefined {
