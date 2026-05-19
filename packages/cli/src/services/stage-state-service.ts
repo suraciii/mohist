@@ -3,13 +3,15 @@ import * as path from 'path';
 import { DatabaseManager } from '../db/database';
 import { findChangeDir } from '../openspec/detector';
 import { Stage } from '../types';
-import { getCheckFailurePolicy } from '../workflow/domain';
+import { getCheckFailurePolicy, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
 import type { CheckState, CheckSuiteChecks } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { CheckResult, StageTaskResult } from '../workflow/stage-context';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/convergence';
+import type { StageDefinition } from '../workflow/domain';
+import { getWorkflowUseDefinition, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
@@ -94,6 +96,19 @@ export interface StageDeliveryMetadata {
     candidateHeadSha: string | null;
     landedSha: string | null;
     rebased: boolean | null;
+  } | null;
+  remotePr?: {
+    status: StageTaskStatus;
+    output: unknown;
+    prUrl: string | null;
+    base: string | null;
+    branch: string | null;
+    headSha: string | null;
+  } | null;
+  remoteMerge?: {
+    status: StageTaskStatus;
+    output: unknown;
+    mergedSha: string | null;
   } | null;
   health: { status: StageCheckStatus; message: string | null; output: unknown } | null;
   frozen: boolean;
@@ -912,7 +927,9 @@ export class StageStateService {
   }
 
   getIssueStageStateFromWorkflowRun(run: WorkflowRunWithStageRuns): StageStateRead[] {
+    const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(run.workflowDefinition);
     return run.stageRuns.map(stageRun => {
+      const stageDefinition = workflowDefinitionSnapshot?.compiledStageDefinitions.find(definition => definition.stage === stageRun.stage);
       const tasks: StageTaskState[] = stageRun.tasks.map(task => ({
         taskId: task.taskId,
         title: task.title,
@@ -977,7 +994,7 @@ export class StageStateService {
         completedAt: stageRun.completedAt,
         updatedAt: stageRun.updatedAt,
         failure: this.workflowRunFailureDetails(stageRun, tasks, checks),
-        deliveryMetadata: this.workflowRunDeliveryMetadata(stageRun, tasks, checks),
+        deliveryMetadata: this.workflowRunDeliveryMetadata(tasks, checks, stageDefinition),
         ...(checkRepairRaw !== null ? { checkRepair: checkRepairRaw } : {}),
         ...(convergenceRaw !== null ? { convergence: convergenceRaw } : {}),
       };
@@ -985,18 +1002,24 @@ export class StageStateService {
   }
 
   private workflowRunDeliveryMetadata(
-    stageRun: WorkflowRunWithStageRuns['stageRuns'][number],
     tasks: StageTaskState[],
     checks: StageCheckState[],
+    stageDefinition?: StageDefinition,
   ): StageDeliveryMetadata | null {
-    if (stageRun.stage !== Stage.Integrate) return null;
-    const specSync = tasks.find(task => task.taskId === 'integrate:spec-sync');
-    const archive = tasks.find(task => task.taskId === 'integrate:archive-change');
-    const merge = tasks.find(task => task.taskId === 'integrate:merge');
+    const deliveryTasks = tasks
+      .map(task => ({ task, use: this.workflowTaskUse(stageDefinition, task.taskId) }))
+      .filter(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole !== 'none');
+    const specSync = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'spec-sync')?.task ?? null;
+    const archive = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'archive')?.task ?? null;
+    const merge = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'local-merge')?.task ?? null;
+    const remotePr = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'remote-pr')?.task ?? null;
+    const remoteMerge = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'remote-merge')?.task ?? null;
     const health = checks.find(check => check.checkName === 'health:integrate');
-    const mergeOutput = merge?.output && typeof merge.output === 'object' ? merge.output as Record<string, unknown> : {};
+    const mergeOutput = unwrapWorkflowUseOutput(merge?.output) ?? {};
+    const remotePrOutput = unwrapWorkflowUseOutput(remotePr?.output) ?? {};
+    const remoteMergeOutput = unwrapWorkflowUseOutput(remoteMerge?.output) ?? {};
 
-    if (!specSync && !archive && !merge && !health) return null;
+    if (!specSync && !archive && !merge && !remotePr && !remoteMerge && !health) return null;
     return {
       specSync: specSync ? { status: specSync.status, output: specSync.output } : null,
       archive: archive ? { status: archive.status, output: archive.output } : null,
@@ -1009,9 +1032,29 @@ export class StageStateService {
         landedSha: typeof mergeOutput.landedSha === 'string' ? mergeOutput.landedSha : null,
         rebased: typeof mergeOutput.rebased === 'boolean' ? mergeOutput.rebased : null,
       } : null,
+      remotePr: remotePr ? {
+        status: remotePr.status,
+        output: remotePr.output,
+        prUrl: typeof remotePrOutput.prUrl === 'string' ? remotePrOutput.prUrl : null,
+        base: typeof remotePrOutput.base === 'string' ? remotePrOutput.base : null,
+        branch: typeof remotePrOutput.branch === 'string' ? remotePrOutput.branch : null,
+        headSha: typeof remotePrOutput.headSha === 'string' ? remotePrOutput.headSha : null,
+      } : null,
+      remoteMerge: remoteMerge ? {
+        status: remoteMerge.status,
+        output: remoteMerge.output,
+        mergedSha: typeof remoteMergeOutput.mergedSha === 'string' ? remoteMergeOutput.mergedSha : null,
+      } : null,
       health: health ? { status: health.status, message: health.message, output: health.output } : null,
-      frozen: merge?.status === 'completed',
+      frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed',
     };
+  }
+
+  private workflowTaskUse(stageDefinition: StageDefinition | undefined, taskId: string): string {
+    const taskDefinition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
+    const policy = stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
+      ?? stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
+    return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
   }
 
   private workflowRunFailureDetails(

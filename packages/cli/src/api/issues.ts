@@ -36,7 +36,7 @@ import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageC
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
-import { inferWorkflowCheckUse, inferWorkflowTaskUse } from '../workflow/uses-catalog';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 type IncompleteStageCompletionGuard = Extract<StageCompletionGuard, { complete: false }>;
@@ -384,15 +384,21 @@ function taskCause(task: { causedByType: string | null; causedByCheckName: strin
   };
 }
 
-function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks) {
-  if (stageRun.stage !== Stage.Integrate) return null;
-  const specSync = stageRun.tasks.find(task => task.taskId === 'integrate:spec-sync');
-  const archive = stageRun.tasks.find(task => task.taskId === 'integrate:archive-change');
-  const merge = stageRun.tasks.find(task => task.taskId === 'integrate:merge');
-  const health = stageRun.checks.find(check => check.checkName === 'health:integrate');
-  const mergeOutput = merge?.output && typeof merge.output === 'object' ? merge.output as Record<string, unknown> : {};
+function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: StageDefinition) {
+  const deliveryTasks = stageRun.tasks
+    .map(task => ({ task, origin: taskOrigin(stageDefinition, task.taskId) }))
+    .filter(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole !== 'none');
+  const specSync = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'spec-sync')?.task ?? null;
+  const archive = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'archive')?.task ?? null;
+  const merge = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'local-merge')?.task ?? null;
+  const remotePr = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'remote-pr')?.task ?? null;
+  const remoteMerge = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'remote-merge')?.task ?? null;
+  const health = stageRun.checks.find(check => check.checkName === 'health:integrate') ?? null;
+  const mergeOutput = unwrapWorkflowUseOutput(merge?.output) ?? {};
+  const remotePrOutput = unwrapWorkflowUseOutput(remotePr?.output) ?? {};
+  const remoteMergeOutput = unwrapWorkflowUseOutput(remoteMerge?.output) ?? {};
 
-  if (!specSync && !archive && !merge && !health) return null;
+  if (!specSync && !archive && !merge && !remotePr && !remoteMerge && !health) return null;
   return {
     specSync: specSync ? { status: specSync.status, output: specSync.output } : null,
     archive: archive ? { status: archive.status, output: archive.output } : null,
@@ -405,8 +411,21 @@ function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks) {
       landedSha: typeof mergeOutput.landedSha === 'string' ? mergeOutput.landedSha : null,
       rebased: typeof mergeOutput.rebased === 'boolean' ? mergeOutput.rebased : null,
     } : null,
+    remotePr: remotePr ? {
+      status: remotePr.status,
+      output: remotePr.output,
+      prUrl: typeof remotePrOutput.prUrl === 'string' ? remotePrOutput.prUrl : null,
+      base: typeof remotePrOutput.base === 'string' ? remotePrOutput.base : null,
+      branch: typeof remotePrOutput.branch === 'string' ? remotePrOutput.branch : null,
+      headSha: typeof remotePrOutput.headSha === 'string' ? remotePrOutput.headSha : null,
+    } : null,
+    remoteMerge: remoteMerge ? {
+      status: remoteMerge.status,
+      output: remoteMerge.output,
+      mergedSha: typeof remoteMergeOutput.mergedSha === 'string' ? remoteMergeOutput.mergedSha : null,
+    } : null,
     health: health ? { status: health.status, message: health.message, output: health.output } : null,
-    frozen: merge?.status === 'completed',
+    frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed',
   };
 }
 
@@ -443,9 +462,9 @@ function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks) {
 function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
   const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(run.workflowDefinition);
   const stageRuns = run.stageRuns.map(stageRun => {
-    const failure = failureDetails(stageRun);
-    const delivery = deliveryMetadata(stageRun);
     const stageDefinition = workflowDefinitionSnapshot?.compiledStageDefinitions.find(definition => definition.stage === stageRun.stage);
+    const failure = failureDetails(stageRun);
+    const delivery = deliveryMetadata(stageRun, stageDefinition);
     return {
       id: stageRun.id,
       workflowRunId: stageRun.workflowRunId,

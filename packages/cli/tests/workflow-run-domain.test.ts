@@ -1147,6 +1147,63 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 
+  it('allows a custom workflow to complete without an Integrate stage', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'project/no-local-merge',
+      stages: [
+        {
+          stage: Stage.Plan,
+          tasks: [{ id: 'design', title: 'Design', uses: 'mohist/agent' }],
+          checks: [{ name: 'design-file', title: 'Design file', uses: 'mohist/artifact-exists' }],
+        },
+        {
+          stage: Stage.Build,
+          tasks: [{ id: 'implement', title: 'Implement', uses: 'mohist/agent' }],
+          checks: [{ name: 'tests', title: 'Tests', uses: 'mohist/shell' }],
+        },
+      ],
+    });
+    const run = startRun(definitions);
+
+    run.completeTask(Stage.Plan, 'design', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'design-file', status: 'pass' });
+    run.completeTask(Stage.Build, 'implement', { status: 'completed' });
+    const decision = run.recordCheckResult(Stage.Build, { name: 'tests', status: 'pass' });
+
+    expect(run.status).toBe('passed');
+    expect(run.currentStage).toBe(Stage.Build);
+    expect(decision.nextWork).toEqual({ kind: 'complete' });
+  });
+
+  it('allows a custom Integrate stage to complete without local merge evidence', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'project/report-integrate',
+      stages: [
+        {
+          stage: Stage.Build,
+          tasks: [{ id: 'implement', title: 'Implement', uses: 'mohist/agent' }],
+          checks: [{ name: 'tests', title: 'Tests', uses: 'mohist/shell' }],
+        },
+        {
+          stage: Stage.Integrate,
+          tasks: [{ id: 'handoff-report', title: 'Write handoff report', uses: 'mohist/agent' }],
+          checks: [{ name: 'report-exists', title: 'Report exists', uses: 'mohist/artifact-exists' }],
+        },
+      ],
+    });
+    const run = startRun(definitions);
+
+    run.completeTask(Stage.Build, 'implement', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'tests', status: 'pass' });
+    run.completeTask(Stage.Integrate, 'handoff-report', { status: 'completed' });
+    const decision = run.recordCheckResult(Stage.Integrate, { name: 'report-exists', status: 'pass' });
+
+    expect(run.status).toBe('passed');
+    expect(run.currentStage).toBe(Stage.Integrate);
+    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(decision.nextWork).toEqual({ kind: 'complete' });
+  });
+
   it('accepts explicit archive success evidence for already archived changes', () => {
     const run = startRun();
     advanceToIntegrate(run);
@@ -1207,7 +1264,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({
       kind: 'blocked',
       stage: Stage.Integrate,
-      reason: { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' },
+      reason: { complete: false, reason: 'delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change', uses: 'mohist/archive-change' },
     });
   });
 
@@ -1223,7 +1280,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({
       kind: 'blocked',
       stage: Stage.Integrate,
-      reason: { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' },
+      reason: { complete: false, reason: 'delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge', uses: 'mohist/merge' },
     });
   });
 
@@ -1242,7 +1299,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({
       kind: 'blocked',
       stage: Stage.Integrate,
-      reason: { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' },
+      reason: { complete: false, reason: 'delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge', uses: 'mohist/merge' },
     });
   });
 

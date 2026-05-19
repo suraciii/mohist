@@ -2,6 +2,7 @@ import { Stage } from '../../types';
 import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from './default-workflow';
 import { WorkflowDomainError } from './errors';
 import { cloneWorkflowDefinitionSnapshot, createWorkflowDefinitionSnapshot } from './workflow-definition';
+import { getWorkflowUseDefinition, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
 import type {
   ApprovalInput,
   ApprovalSnapshot,
@@ -786,7 +787,7 @@ export class WorkflowRun {
       }
     }
 
-    if (stage === Stage.Integrate && taskId === 'integrate:merge' && result.status === 'completed') {
+    if (this.taskLocksCode(stageRun, taskId) && result.status === 'completed') {
       stageRun.freezePoint = {
         taskId,
         delivery: this.extractDeliveryMetadata(result.output),
@@ -863,7 +864,7 @@ export class WorkflowRun {
       return this.maybeCompleteStage(stageRun, events);
     }
 
-    if (stage === Stage.Integrate && result.name === 'health:integrate' && stageRun.freezePoint) {
+    if (stageRun.freezePoint) {
       return this.fail(stageRun, {
         reason: 'post-merge-health-failed',
         stage,
@@ -1327,10 +1328,8 @@ export class WorkflowRun {
       if (!checkEvidenceGuard.complete) return checkEvidenceGuard;
     }
 
-    if (stageRun.stage === Stage.Integrate) {
-      const integrateEvidenceGuard = this.evaluateIntegrateDeliveryEvidenceGuard(stageRun);
-      if (!integrateEvidenceGuard.complete) return integrateEvidenceGuard;
-    }
+    const deliveryEvidenceGuard = this.evaluateDeliveryEvidenceGuard(stageRun);
+    if (!deliveryEvidenceGuard.complete) return deliveryEvidenceGuard;
 
     for (const taskRun of stageRun.tasks) {
       if (!taskRun.terminal) return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
@@ -1343,37 +1342,47 @@ export class WorkflowRun {
     return { complete: true };
   }
 
-  private evaluateIntegrateDeliveryEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
-    const specSync = stageRun.tasks.find(task => task.id === 'integrate:spec-sync');
-    const archive = stageRun.tasks.find(task => task.id === 'integrate:archive-change');
-    const merge = stageRun.tasks.find(task => task.id === 'integrate:merge');
-    const health = stageRun.checks.find(check => check.name === 'health:integrate');
-    if (specSync?.status !== 'completed') {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:spec-sync' };
-    }
-    if (archive?.status !== 'completed' || !archive.output || typeof archive.output !== 'object') {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
-    }
-    const archiveOutput = this.unwrapTaskOutput(archive.output);
-    if (!archiveOutput) {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
-    }
-    const hasArchivePath = typeof archiveOutput.archivePath === 'string' && archiveOutput.archivePath.length > 0;
-    const hasArchiveSuccess = archiveOutput.success === true;
-    if (!hasArchivePath && !hasArchiveSuccess) {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change' };
-    }
-    if (merge?.status !== 'completed') {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' };
-    }
-    const delivery = stageRun.freezePoint?.delivery ?? {};
-    if (!delivery.landedSha) {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge' };
-    }
-    if (health?.status !== 'passed') {
-      return { complete: false, reason: 'integrate-delivery-evidence-missing', stage: Stage.Integrate, checkName: 'health:integrate' };
+  private evaluateDeliveryEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
+    for (const requirement of stageRun.definition.evidenceRequirements ?? []) {
+      const taskRun = requirement.taskId ? stageRun.tasks.find(task => task.id === requirement.taskId) : null;
+      if (requirement.taskId && taskRun?.status !== 'completed') {
+        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: requirement.taskId, uses: requirement.uses };
+      }
+      if (taskRun) {
+        const evidence = validateWorkflowUseEvidence(requirement.uses ?? this.taskUse(stageRun, taskRun.id), taskRun.output);
+        if (!evidence.ok) {
+          return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: taskRun.id, uses: requirement.uses };
+        }
+      }
+
+      const checkRun = requirement.checkName ? stageRun.checks.find(check => check.name === requirement.checkName) : null;
+      if (requirement.checkName && checkRun?.status !== 'passed') {
+        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, checkName: requirement.checkName, uses: requirement.uses };
+      }
+      if (!requirement.taskId && !requirement.checkName && requirement.uses) {
+        const matchingTask = stageRun.tasks.find(task => this.taskUse(stageRun, task.id) === requirement.uses);
+        if (!matchingTask || matchingTask.status !== 'completed') {
+          return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, uses: requirement.uses };
+        }
+        const evidence = validateWorkflowUseEvidence(requirement.uses, matchingTask.output);
+        if (!evidence.ok) {
+          return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: matchingTask.id, uses: requirement.uses };
+        }
+      }
     }
     return { complete: true };
+  }
+
+  private taskUse(stageRun: StageRun, taskId: string): string {
+    const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId);
+    const policy = stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
+      ?? stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
+    return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
+  }
+
+  private taskLocksCode(stageRun: StageRun, taskId: string): boolean {
+    const use = getWorkflowUseDefinition(this.taskUse(stageRun, taskId));
+    return use?.locksCode === true;
   }
 
   private evaluateCheckReviewEvidenceGuard(stageRun: StageRun): StageCompletionGuard {

@@ -5,7 +5,8 @@ import { IssueRepo } from '../db/issue-repo';
 import { Stage, IssueStatus, type CheckState, type CheckSuiteStatus } from '../types';
 import { eventBus, type EventBus } from './event-bus';
 import { StageStateService, type StageCheckStatus, type StageStateStatus, type StageTaskStatus } from './stage-state-service';
-import type { StageRunSnapshot, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/domain';
+import type { WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/domain';
+import { validateWorkflowUseEvidence } from '../workflow/uses-catalog';
 
 interface IssueProjectionRow {
   id: string;
@@ -117,58 +118,39 @@ export class WorkflowRunProjection {
 
   private validateCompletionProjection(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
     if (snapshot.status !== 'passed') return { ok: true };
-    if (snapshot.stageOrder[snapshot.stageOrder.length - 1] !== Stage.Integrate) {
-      return { ok: false, reason: 'final stage is not integrate' };
+    const terminalStage = snapshot.stageOrder[snapshot.stageOrder.length - 1];
+    if (!terminalStage) {
+      return { ok: false, reason: 'terminal stage is missing' };
     }
-    if (snapshot.currentStage !== Stage.Integrate) {
-      return { ok: false, reason: `current stage is ${snapshot.currentStage}, expected integrate` };
+    if (snapshot.currentStage !== terminalStage) {
+      return { ok: false, reason: `current stage is ${snapshot.currentStage}, expected terminal stage ${terminalStage}` };
     }
-
-    const integrate = snapshot.stageRuns.find(stageRun => stageRun.stage === Stage.Integrate);
-    if (!integrate) return { ok: false, reason: 'integrate stage run is missing' };
-    if (integrate.status !== 'passed') return { ok: false, reason: `integrate stage is ${integrate.status}` };
-
-    return this.validateIntegrateDeliveryEvidence(integrate);
+    const terminal = snapshot.stageRuns.find(stageRun => stageRun.stage === terminalStage);
+    if (!terminal) return { ok: false, reason: `terminal stage ${terminalStage} run is missing` };
+    if (terminal.status !== 'passed') return { ok: false, reason: `terminal stage ${terminalStage} is ${terminal.status}` };
+    return this.validateDeclaredDeliveryEvidence(snapshot);
   }
 
-  private validateIntegrateDeliveryEvidence(stageRun: StageRunSnapshot): { ok: true } | { ok: false; reason: string } {
-    const specSync = stageRun.tasks.find(task => task.id === 'integrate:spec-sync');
-    if (specSync?.status !== 'completed') return { ok: false, reason: 'integrate:spec-sync evidence is missing' };
-
-    const archive = stageRun.tasks.find(task => task.id === 'integrate:archive-change');
-    if (archive?.status !== 'completed' || !archive.output || typeof archive.output !== 'object') {
-      return { ok: false, reason: 'integrate:archive-change evidence is missing' };
+  private validateDeclaredDeliveryEvidence(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
+    for (const stageDefinition of snapshot.workflowDefinitionSnapshot.compiledStageDefinitions) {
+      const stageRun = snapshot.stageRuns.find(candidate => candidate.stage === stageDefinition.stage);
+      if (!stageRun) continue;
+      for (const requirement of stageDefinition.evidenceRequirements ?? []) {
+        const task = requirement.taskId ? stageRun.tasks.find(candidate => candidate.id === requirement.taskId) : null;
+        if (requirement.taskId && task?.status !== 'completed') {
+          return { ok: false, reason: `${requirement.taskId} evidence is missing` };
+        }
+        if (task) {
+          const evidence = validateWorkflowUseEvidence(requirement.uses, task.output);
+          if (!evidence.ok) return { ok: false, reason: `${requirement.taskId} ${evidence.field ?? 'delivery'} evidence is missing` };
+        }
+        const check = requirement.checkName ? stageRun.checks.find(candidate => candidate.name === requirement.checkName) : null;
+        if (requirement.checkName && check?.status !== 'passed') {
+          return { ok: false, reason: `${requirement.checkName} evidence is missing` };
+        }
+      }
     }
-    const archiveOutput = this.unwrapTaskOutput(archive.output);
-    if (!archiveOutput) {
-      return { ok: false, reason: 'integrate:archive-change evidence is missing' };
-    }
-    const hasArchivePath = typeof archiveOutput.archivePath === 'string' && archiveOutput.archivePath.length > 0;
-    const hasArchiveSuccess = archiveOutput.success === true;
-    if (!hasArchivePath && !hasArchiveSuccess) {
-      return { ok: false, reason: 'integrate:archive-change archivePath is missing' };
-    }
-
-    const merge = stageRun.tasks.find(task => task.id === 'integrate:merge');
-    if (merge?.status !== 'completed') return { ok: false, reason: 'integrate:merge evidence is missing' };
-    const delivery = stageRun.freezePoint?.delivery ?? {};
-    if (!delivery.landedSha) {
-      return { ok: false, reason: 'integrate merge landedSha evidence is missing' };
-    }
-
-    const health = stageRun.checks.find(check => check.name === 'health:integrate');
-    if (health?.status !== 'passed') return { ok: false, reason: 'health:integrate evidence is missing' };
-
     return { ok: true };
-  }
-
-  private unwrapTaskOutput(output: unknown): Record<string, unknown> | null {
-    if (!output || typeof output !== 'object') return null;
-    const data = output as Record<string, unknown>;
-    if (data.kind === 'service-call-task' && data.result && typeof data.result === 'object') {
-      return data.result as Record<string, unknown>;
-    }
-    return data;
   }
 
   private projectStageStates(run: WorkflowRun): void {

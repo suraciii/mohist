@@ -641,14 +641,6 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
         suggestion: 'Keep the default Check stage through extends: mohist/default, or include the default check evidence items.',
       });
     }
-    if (isFullCustomWorkflow && stage.stage === Stage.Integrate && isProjectDefinedStage(stage) && !hasDefaultIntegrateEvidenceShape(stage)) {
-      diagnostics.push({
-        severity: 'error',
-        path: stagePath,
-        message: 'Custom Integrate stage v1 must include integrate:spec-sync, integrate:archive-change, integrate:merge, and health:integrate until delivery guards are generalized',
-        suggestion: 'Keep the default Integrate stage through extends: mohist/default, or include the default delivery items.',
-      });
-    }
   }
 
   return diagnostics;
@@ -729,15 +721,6 @@ function hasDefaultCheckEvidenceShape(stage: StageDefinition): boolean {
     && checkNames.has('health:check')
     && checkNames.has('review-passed')
     && checkNames.has('merge-ready');
-}
-
-function hasDefaultIntegrateEvidenceShape(stage: StageDefinition): boolean {
-  const taskIds = new Set(stage.tasks.map(task => task.id));
-  const checkNames = new Set(stage.checks.map(check => check.name));
-  return taskIds.has('integrate:spec-sync')
-    && taskIds.has('integrate:archive-change')
-    && taskIds.has('integrate:merge')
-    && checkNames.has('health:integrate');
 }
 
 function isProjectDefinedStage(stage: StageDefinition): boolean {

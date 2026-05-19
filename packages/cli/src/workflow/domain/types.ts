@@ -139,6 +139,12 @@ export interface InvalidationPolicy {
   entries: InvalidationEntry[];
 }
 
+export interface EvidenceRequirement {
+  taskId?: string;
+  checkName?: string;
+  uses?: string;
+}
+
 export interface StageDefinition {
   stage: Stage;
   tasks: TaskDefinition[];
@@ -152,6 +158,7 @@ export interface StageDefinition {
   approvalPolicy?: ApprovalPolicy;
   repairPolicies?: RepairPolicy[];
   invalidationPolicy?: InvalidationPolicy;
+  evidenceRequirements?: EvidenceRequirement[];
 }
 
 export interface WorkflowDefinition {
@@ -270,7 +277,7 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'dynamic-source-empty'; stage: Stage }
   | { complete: false; reason: 'check-review-evidence-missing'; stage: Stage }
   | { complete: false; reason: 'check-review-evidence-stale'; stage: Stage }
-  | { complete: false; reason: 'integrate-delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string }
+  | { complete: false; reason: 'delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string; uses?: string }
   | { complete: false; reason: 'approval-required'; stage: Stage };
 
 export interface WorkflowDecision {
