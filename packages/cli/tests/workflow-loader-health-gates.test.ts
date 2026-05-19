@@ -199,6 +199,74 @@ checks:
       expect(result.check.maxFixAttempts).toBe(1);
     });
 
+    it('loads compatibility health gates from new full custom workflow yaml', () => {
+      fs.mkdirSync(path.join(tempDir, '.mohist'));
+      fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/custom
+  stages:
+    - id: build
+      tasks: []
+      checks: []
+healthGates:
+  build:
+    command: npm run custom-build
+checks:
+  buildTest:
+    command: npm run custom-ci
+    timeout: 600000
+`, 'utf-8');
+
+      const workflow = loadWorkflow(tempDir);
+      expect(typeof workflow).not.toBe('string');
+      expect((workflow as any).source).toContain('.mohist/workflow.yaml');
+
+      const result = loadHealthGatePolicies(workflow as any);
+      expect(result.build.command).toBe('npm run custom-build');
+      expect(result.check.command).toBe('npm run custom-ci');
+      expect(result.check.timeout).toBe(600000);
+    });
+
+    it('loads compatibility health gates from extends workflow yaml', () => {
+      fs.mkdirSync(path.join(tempDir, '.mohist'));
+      fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+extends: mohist/default
+healthGates:
+  check:
+    command: npm run verify
+`, 'utf-8');
+
+      const workflow = loadWorkflow(tempDir);
+      expect(typeof workflow).not.toBe('string');
+
+      const result = loadHealthGatePolicies(workflow as any);
+      expect(result.check.command).toBe('npm run verify');
+    });
+
+    it('prefers .mohist/workflow.yaml over workflow.yaml for compatibility config', () => {
+      fs.mkdirSync(path.join(tempDir, '.mohist'));
+      fs.writeFileSync(path.join(tempDir, 'workflow.yaml'), `
+stages:
+  - stage: check
+healthGates:
+  check:
+    command: npm run root
+`, 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+extends: mohist/default
+healthGates:
+  check:
+    command: npm run dot-mohist
+`, 'utf-8');
+
+      const workflow = loadWorkflow(tempDir);
+      expect(typeof workflow).not.toBe('string');
+      expect((workflow as any).source).toContain('.mohist/workflow.yaml');
+
+      const result = loadHealthGatePolicies(workflow as any);
+      expect(result.check.command).toBe('npm run dot-mohist');
+    });
+
     it('maps checks.buildTest to check health gate when healthGates.check is absent', () => {
       const workflow = parseYamlWorkflow(`
 stages:

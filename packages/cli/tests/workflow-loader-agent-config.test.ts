@@ -106,7 +106,7 @@ agent: {}
     expect(result.context).toBe('Hello from .mohist');
   });
 
-  it('prefers workflow.yaml over .mohist/workflow.yaml', () => {
+  it('prefers .mohist/workflow.yaml over workflow.yaml', () => {
     const mohistDir = path.join(tempDir, '.mohist');
     fs.mkdirSync(mohistDir);
     fs.writeFileSync(
@@ -118,7 +118,7 @@ agent: {}
       `agent:\n  context: from-root\n`,
     );
     const result = loadAgentConfig(tempDir);
-    expect(result.context).toBe('from-root');
+    expect(result.context).toBe('from-dot-mohist');
   });
 
   it('ignores non-string context values', () => {
