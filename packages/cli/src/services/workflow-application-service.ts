@@ -159,7 +159,7 @@ export class WorkflowApplicationService {
       ?? this.repo.loadActiveAggregate(issueId, { tasksPath: options.tasksPath });
     if (!run) return null;
 
-    const workflowSummaryState = run.workflowRecoverySummary();
+    let workflowSummaryState = run.workflowRecoverySummary();
     const stageRun = run.currentStageRun();
 
     if (!stageRun) {
@@ -172,6 +172,12 @@ export class WorkflowApplicationService {
     }
 
     const blocking = this.findCurrentWorkItem(stageRun);
+    if (!blocking && workflowSummaryState === 'running') {
+      const nextWork = run.nextWork();
+      if (nextWork.kind === 'blocked') {
+        workflowSummaryState = 'waiting-for-recovery';
+      }
+    }
     return {
       currentWorkItem: blocking ? { type: blocking.type, id: blocking.id, title: blocking.title } : null,
       latestAttemptState: blocking?.attemptState ?? null,

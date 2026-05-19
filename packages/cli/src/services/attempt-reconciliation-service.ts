@@ -129,7 +129,9 @@ export class AttemptReconciliationService {
   }
 
   private isAttemptEvidenceLive(attempt: WorkItemAttempt, issueId: string): boolean {
-    if (!this.hasStrongAttemptSpecificEvidence(attempt) && this.evidencePort.hasActiveQueueTask(issueId)) {
+    const generatedCheckExecutionId = this.isGeneratedCheckExecutionId(attempt.executionId);
+
+    if (!generatedCheckExecutionId && !this.hasStrongAttemptSpecificEvidence(attempt) && this.evidencePort.hasActiveQueueTask(issueId)) {
       return true;
     }
 
@@ -152,7 +154,11 @@ export class AttemptReconciliationService {
       return false;
     }
 
-    return this.evidencePort.hasActiveQueueTask(issueId);
+    return generatedCheckExecutionId ? false : this.evidencePort.hasActiveQueueTask(issueId);
+  }
+
+  private isGeneratedCheckExecutionId(executionId: string | null): boolean {
+    return typeof executionId === 'string' && executionId.endsWith('-check');
   }
 
   private hasStrongAttemptSpecificEvidence(attempt: WorkItemAttempt): boolean {

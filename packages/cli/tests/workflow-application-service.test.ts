@@ -881,4 +881,71 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     const retry = service.checkRetryAvailability({ issueId: 'issue-1', stage: Stage.Plan });
     expect(retry.available).toBe(false);
   });
+
+  it('projects blocked terminal check evidence as recoverable so the stage can be rerun', () => {
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'specs', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'design', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'tasks', { status: 'completed' });
+    run.completeTask(Stage.Plan, 'self-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'proposal-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'specs-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'design-complete', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, { name: 'tasks-valid', status: 'pass' });
+    run.recordCheckResult(Stage.Plan, {
+      name: 'self-review-passed',
+      status: 'pass',
+      output: { verdict: 'PASS', selfReviewNotes: 'ok', dimensions: [] },
+    });
+    run.recordCheckResult(Stage.Plan, { name: 'health:plan', status: 'pass' });
+    run.approveStage(Stage.Plan, { output: { approved: true } });
+
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass', output: { candidateHeadSha: 'candidate-new' } });
+    run.recordCheckResult(Stage.Check, {
+      name: 'review-passed',
+      status: 'pass',
+      output: { verdict: 'PASS', reviewReport: 'PASS report', snapshotSha: 'candidate-old' },
+    });
+    run.recordCheckResult(Stage.Check, {
+      name: 'merge-ready',
+      status: 'pass',
+      output: {
+        kind: 'merge-ready',
+        targetBranch: 'master',
+        strategy: 'squash',
+        baseSha: 'base-sha',
+        candidateHeadSha: 'candidate-new',
+        mergeBaseSha: 'base-sha',
+        canMerge: true,
+        conflictFiles: [],
+      },
+    });
+
+    expect(run.nextWork()).toEqual({
+      kind: 'blocked',
+      stage: Stage.Check,
+      reason: { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check },
+    });
+    expect(run.workflowRecoverySummary()).toBe('running');
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const recovery = service.getRecoveryProjection('issue-1');
+    expect(recovery?.currentWorkItem).toBeNull();
+    expect(recovery?.workflowSummaryState).toBe('waiting-for-recovery');
+    expect(recovery?.allowedActions).toContain('rerun');
+  });
 });

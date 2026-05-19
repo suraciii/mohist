@@ -121,7 +121,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
     const taskId = work.taskId;
     this.ensureStageExecution(ctx);
 
-    if (ctx.workflowApplicationService) {
+    if (typeof ctx.workflowApplicationService?.startTaskAttempt === 'function') {
       try {
         const executionId = `${ctx.issue.stage}-${ctx.issue.number}-${taskId}-${(ctx.requestedTask?.attempts ?? 0) + 1}`;
         ctx.workflowApplicationService.startTaskAttempt({
@@ -323,7 +323,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
     }
 
     const checkCtx = this.buildCheckContext(ctx);
-    if (ctx.workflowApplicationService) {
+    if (typeof ctx.workflowApplicationService?.startCheckAttempt === 'function') {
       try {
         ctx.workflowApplicationService.startCheckAttempt({
           issueId: ctx.issue.id,
