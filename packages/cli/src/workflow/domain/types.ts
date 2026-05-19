@@ -68,6 +68,17 @@ export interface CheckDefinition {
   source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
+  onFailure?: CheckFailureAction;
+}
+
+export interface CheckFailureRetry {
+  limit: number;
+  task: TaskDefinition;
+  inputFrom?: ReactionInputSelector[];
+}
+
+export interface CheckFailureAction {
+  retry?: CheckFailureRetry;
 }
 
 export interface CheckFailurePolicy {

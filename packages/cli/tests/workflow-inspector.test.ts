@@ -290,6 +290,70 @@ workflow:
     }
   });
 
+  it('compiles check-local onFailure retry into repair policies', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-on-failure-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/on-failure
+  stages:
+    - id: check
+      tasks:
+        - id: ai-review
+          uses: mohist/agent
+          with:
+            prompt:
+              inline: Review the change.
+      checks:
+        - id: health:check
+          uses: mohist/health-gate
+        - id: review-passed
+          uses: mohist/verdict
+          onFailure:
+            retry:
+              limit: 2
+              task:
+                id: fix-review-findings
+                title: Fix review findings
+                uses: mohist/agent
+                with:
+                  prompt:
+                    inline: Fix review findings.
+              inputFrom:
+                - type: failed-check-output
+                - type: check-items
+                  filter: blocking
+                - type: snapshot
+        - id: merge-ready
+          uses: mohist/merge-ready
+`, 'utf-8');
+
+    try {
+      const resolved = resolveWorkflowDefinition(tempDir);
+      const diagnostics = validateWorkflowDefinition(resolved);
+      const check = resolved.snapshot.compiledStageDefinitions[0];
+
+      expect(diagnostics).toEqual([]);
+      expect(check.checks.find(candidate => candidate.name === 'review-passed')?.onFailure?.retry?.limit).toBe(2);
+      expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
+        fixTaskId: 'fix-review-findings',
+        fixTaskTitle: 'Fix review findings',
+        maxAttempts: 2,
+        inputFrom: [
+          { type: 'failed-check-output' },
+          { type: 'check-items', filter: 'blocking' },
+          { type: 'snapshot' },
+        ],
+      });
+      expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
+        kind: 'repair-task',
+        workSourceKind: 'runtime',
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects unsupported custom check stage shapes before runtime', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-check-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));

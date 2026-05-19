@@ -513,7 +513,7 @@ export class StageRun {
   }
 
   appendFixTask(policy: CheckFailurePolicy, causedBy: CausedByMetadata): TaskRun {
-    const suffix = this.scheduledFixCount(policy.checkName) + 1;
+    const suffix = this.scheduledFixCount(policy.checkName);
     const id = this.tasks.some(task => task.id === policy.fixTaskId) ? `${policy.fixTaskId}:${suffix}` : policy.fixTaskId;
     const task = new TaskRun(id, policy.fixTaskTitle, this.tasks.length);
     task.reason = causedBy.message ?? `Repair ${policy.checkName}`;

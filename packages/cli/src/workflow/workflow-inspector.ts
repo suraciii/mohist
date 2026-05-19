@@ -246,15 +246,54 @@ function compileCustomChecks(
     if (rawCheck.uses === 'mohist/artifact-exists' && (!isRecord(rawCheck.with) || typeof rawCheck.with.path !== 'string')) {
       diagnostics.push({ severity: 'error', path: `${checkPath}.with.path`, message: `Artifact check '${rawCheck.id}' requires with.path` });
     }
-    checks.push({
+    const check: CheckDefinition = {
       name: rawCheck.id,
       title: typeof rawCheck.title === 'string' ? rawCheck.title : rawCheck.id,
       source: 'project',
       uses: rawCheck.uses,
       with: isRecord(rawCheck.with) ? { ...rawCheck.with } : undefined,
-    });
+    };
+    const onFailure = compileCheckOnFailure(rawCheck.onFailure, checkPath, diagnostics);
+    if (onFailure) check.onFailure = onFailure;
+    checks.push(check);
   }
   return checks;
+}
+
+function compileCheckOnFailure(
+  rawOnFailure: unknown,
+  checkPath: string,
+  diagnostics: WorkflowDiagnostic[],
+): CheckDefinition['onFailure'] | undefined {
+  if (rawOnFailure === undefined) return undefined;
+  if (!isRecord(rawOnFailure) || !isRecord(rawOnFailure.retry)) {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure`, message: 'onFailure requires retry' });
+    return undefined;
+  }
+  const retry = rawOnFailure.retry;
+  const rawTask = retry.task;
+  if (typeof retry.limit !== 'number') {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.limit`, message: 'retry.limit must be a number' });
+    return undefined;
+  }
+  if (!isRecord(rawTask) || typeof rawTask.id !== 'string') {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.task`, message: 'retry.task requires id' });
+    return undefined;
+  }
+  const task: TaskDefinition = {
+    id: rawTask.id,
+    title: typeof rawTask.title === 'string' ? rawTask.title : rawTask.id,
+    source: 'project',
+    uses: typeof rawTask.uses === 'string' ? rawTask.uses : 'mohist/agent',
+    with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
+  };
+  return {
+    retry: {
+      limit: retry.limit,
+      task,
+      inputFrom: compileReactionInputs(retry.inputFrom),
+    },
+  };
 }
 
 function compileCustomReactions(
@@ -285,9 +324,17 @@ function compileCustomReactions(
       fixTaskId: repair.task,
       fixTaskTitle: typeof repair.title === 'string' ? repair.title : repair.task,
       maxAttempts: typeof repair.maxAttempts === 'number' ? repair.maxAttempts : 1,
+      inputFrom: compileReactionInputs(repair.inputFrom),
     });
   }
   return policies;
+}
+
+function compileReactionInputs(rawInputs: unknown): CheckFailurePolicy['inputFrom'] {
+  if (!Array.isArray(rawInputs)) return undefined;
+  return rawInputs
+    .filter(isRecord)
+    .map(input => ({ ...input })) as CheckFailurePolicy['inputFrom'];
 }
 
 function parseStageId(value: unknown): Stage | null {
@@ -477,6 +524,11 @@ function applyRepairOverrides(
       continue;
     }
     let changed = false;
+    const check = stage.checks.find(candidate => candidate.name === checkName);
+    if (check?.onFailure?.retry) {
+      check.onFailure.retry.limit = raw.maxAttempts;
+      changed = true;
+    }
     for (const policy of [...(stage.repairPolicies ?? []), ...(stage.checkFailurePolicies ?? [])]) {
       if (policy.checkName === checkName) {
         policy.maxAttempts = raw.maxAttempts;
@@ -543,6 +595,9 @@ function applyCheckOverride(
     if (typeof maxAttempts !== 'number') {
       diagnostics.push({ severity: 'error', path: `${checkPath}.maxAttempts`, message: 'repair maxAttempts must be a number' });
     } else {
+      if (check.onFailure?.retry) {
+        check.onFailure.retry.limit = maxAttempts;
+      }
       for (const policy of [...(stage.repairPolicies ?? []), ...(stage.checkFailurePolicies ?? [])]) {
         if (policy.checkName === check.name) policy.maxAttempts = maxAttempts;
       }
