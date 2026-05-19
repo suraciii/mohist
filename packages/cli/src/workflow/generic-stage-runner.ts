@@ -8,7 +8,7 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, CompiledStageDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkSourceKind } from './domain';
+import type { CheckDefinition, CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkSourceKind } from './domain';
 import { Log } from '../util/log';
 import {
   extractReactionOutput,
@@ -253,17 +253,21 @@ export class GenericStageRunner implements StageRunner {
   }
 
   private applyAcceptedTaskSideEffects(ctx: StageContext, events: WorkflowEvent[]): void {
-    if (ctx.issue.stage !== Stage.Check) return;
+    const stageDefinition = this.getStageDefinition(ctx.issue.stage);
+    if (!stageDefinition) return;
+    const reviewTask = this.reviewProducerTask(stageDefinition);
+    const verdictCheck = this.approvalEvidenceCheck(stageDefinition, 'verdict');
+    if (!reviewTask || !verdictCheck) return;
 
     const fixReviewEvents = events.filter(
-      event => event.type === 'task-completed' && event.taskId?.startsWith('fix-review-findings'),
+      event => event.type === 'task-completed' && this.taskInvalidatesCheck(stageDefinition, event.taskId, verdictCheck.name),
     );
     if (fixReviewEvents.length > 0) {
-      this.persistReactionConvergenceFromWorkflow(ctx);
+      this.persistReactionConvergenceFromWorkflow(ctx, stageDefinition, verdictCheck);
     }
 
     const aiReviewCompleted = events.some(
-      event => event.type === 'task-completed' && event.taskId === 'ai-review',
+      event => event.type === 'task-completed' && event.taskId === reviewTask.id,
     );
     if (aiReviewCompleted) {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
@@ -272,22 +276,27 @@ export class GenericStageRunner implements StageRunner {
       }
     }
 
-    if (!events.some(event => event.type === 'task-invalidated' && event.taskId === 'ai-review')) return;
-    this.invalidateReviewArtifactForRereview(ctx);
+    if (!events.some(event => event.type === 'task-invalidated' && event.taskId === reviewTask.id)) return;
+    this.invalidateReviewArtifactForRereview(ctx, reviewTask.id);
   }
 
-  private persistReactionConvergenceFromWorkflow(ctx: StageContext): void {
-    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === Stage.Check);
+  private persistReactionConvergenceFromWorkflow(ctx: StageContext, stageDefinition: CompiledStageDefinition, verdictCheckDefinition: CheckDefinition): void {
+    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
     if (!stageRun) return;
 
+    const repairTaskIds = new Set(
+      (stageDefinition.repairPolicies ?? [])
+        .filter(policy => policy.checkName === verdictCheckDefinition.name)
+        .map(policy => policy.fixTaskId),
+    );
     const fixTask = [...stageRun.tasks].reverse().find(
-      t => t.id.startsWith('fix-review-findings') && t.status === 'completed',
+      t => repairTaskIds.has(this.baseRuntimeTaskId(t.id)) && t.status === 'completed',
     );
     if (!fixTask?.output) return;
 
     const reactionOutput = extractReactionOutput({
       taskId: fixTask.id,
-      title: 'Fix review findings',
+      title: fixTask.title,
       status: 'completed',
       artifacts: [],
       attempts: fixTask.attempts,
@@ -296,9 +305,9 @@ export class GenericStageRunner implements StageRunner {
     });
     if (!reactionOutput) return;
 
-    const reviewCheck = stageRun.checks.find(c => c.checkName === 'review-passed');
+    const reviewCheck = stageRun.checks.find(c => c.checkName === verdictCheckDefinition.name);
     const failedCheck: import('./stage-context').CheckResult = {
-      name: 'review-passed',
+      name: verdictCheckDefinition.name,
       status: 'fail',
       output: reviewCheck?.output ?? { verdict: 'FAIL' },
     };
@@ -315,7 +324,7 @@ export class GenericStageRunner implements StageRunner {
     }
   }
 
-  private invalidateReviewArtifactForRereview(ctx: StageContext): void {
+  private invalidateReviewArtifactForRereview(ctx: StageContext, reviewTaskId: string): void {
     const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
     if (!changeDir) return;
 
@@ -326,14 +335,50 @@ export class GenericStageRunner implements StageRunner {
         fs.renameSync(reviewPath, staleReviewPath);
         log.info('Renamed stale review.md before generic stage re-review', { issueNumber: ctx.issue.number, staleReviewPath });
       }
-      ctx.checkpointManager?.deleteStep?.(ctx.issue.number, 'check', 'ai-review');
-      log.info('Invalidated ai-review checkpoint for generic stage re-review', { issueNumber: ctx.issue.number });
+      ctx.checkpointManager?.deleteStep?.(ctx.issue.number, ctx.issue.stage, reviewTaskId);
+      log.info('Invalidated review checkpoint for generic stage re-review', { issueNumber: ctx.issue.number, stage: ctx.issue.stage, taskId: reviewTaskId });
     } catch (err) {
       log.warn('Failed to invalidate review artifact before generic stage re-review', {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  private approvalEvidenceCheck(stageDefinition: CompiledStageDefinition, role: string): CheckDefinition | null {
+    return stageDefinition.checks.find(check => this.approvalEvidenceRole(check) === role) ?? null;
+  }
+
+  private approvalEvidenceRole(check: CheckDefinition): string | null {
+    const evidence = check.with?.approvalEvidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+    const role = (evidence as Record<string, unknown>).role;
+    return typeof role === 'string' ? role : null;
+  }
+
+  private reviewProducerTask(stageDefinition: CompiledStageDefinition): TaskDefinition | null {
+    const verdictRepairTaskIds = new Set(
+      (stageDefinition.repairPolicies ?? [])
+        .filter(policy => this.approvalEvidenceCheck(stageDefinition, 'verdict')?.name === policy.checkName)
+        .map(policy => policy.fixTaskId),
+    );
+    const eventInvalidatedTaskIds = new Set(
+      (stageDefinition.invalidationPolicy?.entries ?? [])
+        .filter(entry => entry.invalidates.tasks?.length)
+        .flatMap(entry => entry.invalidates.tasks ?? []),
+    );
+    return stageDefinition.tasks.find(task => eventInvalidatedTaskIds.has(task.id) && !verdictRepairTaskIds.has(task.id))
+      ?? stageDefinition.tasks.find(task => task.uses === 'mohist/agent')
+      ?? null;
+  }
+
+  private taskInvalidatesCheck(stageDefinition: CompiledStageDefinition, taskId: string, checkName: string): boolean {
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    return (stageDefinition.invalidationPolicy?.entries ?? []).some(entry => {
+      if (entry.trigger !== 'task-completion') return false;
+      if (entry.triggerTaskId !== taskId && entry.triggerTaskId !== baseTaskId) return false;
+      return entry.invalidates.checks?.includes(checkName) ?? false;
+    });
   }
 
   private async runRequestedCheck(ctx: StageContext): Promise<StageRunResult> {
