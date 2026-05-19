@@ -168,8 +168,6 @@ describe('WorkflowApplicationService', () => {
     expect(calls).toEqual([
       'repo.loadRunningAggregate',
       'repo.loadLatestAggregate',
-      'repo.loadRunningAggregate',
-      'repo.loadLatestAggregate',
       'repo.saveAggregate:running',
       'projection.apply:running:task',
     ]);
