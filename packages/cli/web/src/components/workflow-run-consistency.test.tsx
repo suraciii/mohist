@@ -50,15 +50,22 @@ function makeWorkflowRun(stageRuns: WorkflowStageRun[]): WorkflowRun {
     issueNumber: 1,
     status: 'running',
     currentStage: Stage.Build,
+    workflowDefinition: {
+      workflowId: 'project/custom',
+      source: { type: 'project', path: '.mohist/workflow.yaml' },
+      capturedAt: '2026-01-01T00:00:00Z',
+      stageOrder: [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate],
+    },
     stageRuns,
   }
 }
 
-function makeWorkflowTasks(overrides: { taskId: string; title: string; status: string; reason?: string; causedBy?: unknown }[]): any[] {
+function makeWorkflowTasks(overrides: { taskId: string; title: string; status: string; reason?: string; causedBy?: unknown; origin?: unknown }[]): any[] {
   return overrides.map((t, i) => ({
     taskId: t.taskId,
     title: t.title,
     status: t.status,
+    origin: t.origin ?? null,
     taskOrder: i + 1,
     attempts: 1,
     duration: t.status === 'completed' ? 5000 : 0,
@@ -103,11 +110,12 @@ function setupWorkflowRunMocks(workflowRunData: WorkflowRun) {
   } as unknown as ReturnType<typeof useIssueExecutions>)
 }
 
-function makeWorkflowChecks(overrides: { checkName: string; title: string; status: string }[]): any[] {
+function makeWorkflowChecks(overrides: { checkName: string; title: string; status: string; origin?: unknown }[]): any[] {
   return overrides.map((c) => ({
     checkName: c.checkName,
     title: c.title,
     status: c.status,
+    origin: c.origin ?? null,
     message: null,
     output: c.checkName.startsWith('health:') ? { kind: 'health-gate' } : null,
     runCount: 1,
@@ -157,6 +165,33 @@ describe('WorkflowRun-backed task and check data consistency', () => {
     within(progressPanel as HTMLElement).getByText('Add persistence')
     within(progressPanel as HTMLElement).getByText('Expose API')
     within(progressPanel as HTMLElement).getByText('Add tests')
+  })
+
+  it('PipelineView shows workflow definition source and work item origins', () => {
+    const workflowRun = makeWorkflowRun([
+      makeWorkflowStageRun(
+        Stage.Build,
+        makeWorkflowTasks([
+          { taskId: 'T-001', title: 'WorkflowRun task', status: 'completed', origin: { source: 'project', uses: 'mohist/shell' } },
+        ]),
+        makeWorkflowChecks([
+          { checkName: 'health:build', title: 'Build verification', status: 'passed', origin: { source: 'builtin', uses: 'mohist/health-gate' } },
+        ]),
+      ),
+    ])
+    setupWorkflowRunMocks(workflowRun)
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PipelineView issue={makeIssue()} />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByText('Workflow')).toBeTruthy()
+    expect(screen.getByText('project/custom')).toBeTruthy()
+    expect(screen.getByText('.mohist/workflow.yaml')).toBeTruthy()
+    expect(screen.getByText('project:shell')).toBeTruthy()
+    expect(screen.getByText('built-in:health-gate')).toBeTruthy()
   })
 
   it('TaskProgressPanel prefers WorkflowRun data over stage-state fallback', () => {

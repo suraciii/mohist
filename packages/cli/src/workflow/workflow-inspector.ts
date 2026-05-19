@@ -13,7 +13,12 @@ import {
   type WorkflowDefinition,
   type WorkflowDefinitionSnapshot,
 } from './domain';
-import { getWorkflowUseDefinition, isWorkflowUseAllowed } from './uses-catalog';
+import {
+  getWorkflowUseDefinition,
+  inferWorkflowCheckUse,
+  inferWorkflowTaskUse,
+  isWorkflowUseAllowed,
+} from './uses-catalog';
 
 export type WorkflowDiagnosticSeverity = 'error' | 'warning';
 
@@ -375,7 +380,7 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
 
     const checkNames = new Set(stage.checks.map(check => check.name));
     for (const [checkIndex, check] of stage.checks.entries()) {
-      const uses = check.uses ?? inferCheckUses(check.name);
+      const uses = check.uses ?? inferWorkflowCheckUse(check.name);
       if (!isWorkflowUseAllowed(uses, 'check')) {
         diagnostics.push({
           severity: 'error',
@@ -423,7 +428,7 @@ export function explainWorkflowItem(
 function explainTask(stage: StageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
   const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
     ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-  const uses = inferTaskUses(task.id, policy?.kind);
+  const uses = inferWorkflowTaskUse(task.id, policy?.kind);
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'task',
@@ -443,7 +448,7 @@ function explainCheck(stage: StageDefinition, check: CheckDefinition): Explained
   const phase = stage.checkPolicies?.find(candidate => candidate.checkName === check.name)?.phase ?? 'post-task';
   const reaction = stage.repairPolicies?.find(candidate => candidate.checkName === check.name)
     ?? stage.checkFailurePolicies?.find(candidate => candidate.checkName === check.name);
-  const uses = check.uses ?? inferCheckUses(check.name);
+  const uses = check.uses ?? inferWorkflowCheckUse(check.name);
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'check',
@@ -466,23 +471,6 @@ function findCheck(definition: WorkflowDefinition, checkName: string): { stage: 
     if (check) return { stage, check };
   }
   return null;
-}
-
-function inferCheckUses(checkName: string): string {
-  if (checkName.startsWith('health:')) return 'mohist/health-gate';
-  if (checkName === 'review-passed' || checkName === 'self-review-passed') return 'mohist/verdict';
-  if (checkName === 'merge-ready') return 'mohist/merge-ready';
-  return 'mohist/artifact-exists';
-}
-
-function inferTaskUses(taskId: string, executionKind?: string): string {
-  if (taskId === 'integrate:spec-sync') return 'mohist/openspec-sync';
-  if (taskId === 'integrate:archive-change') return 'mohist/archive-change';
-  if (taskId === 'integrate:merge') return 'mohist/merge';
-  if (taskId === 'rebase-branch') return 'mohist/rebase';
-  if (executionKind === 'ralph-task') return 'mohist/ralph-tasks';
-  if (executionKind === 'service-call') return 'mohist/agent';
-  return 'mohist/agent';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -585,6 +585,14 @@ describe('API Routes', () => {
         expect(integrate.deliveryMetadata.merge).toMatchObject({ targetBranch: 'main', candidateHeadSha: 'head-sha', landedSha: 'landed-sha' });
         expect(integrate.deliveryMetadata.health).toMatchObject({ status: 'failed', message: 'typecheck failed' });
         expect(integrate.failure).toMatchObject({ reason: 'post-merge-health-failed', checkName: 'health:integrate' });
+        expect(response.body.data.workflowDefinition).toMatchObject({
+          workflowId: 'mohist/default',
+          source: { type: 'builtin', id: 'mohist/default' },
+        });
+        const proposal = plan.tasks.find((task: any) => task.taskId === 'proposal');
+        expect(proposal.origin).toEqual({ source: 'builtin', uses: 'mohist/agent' });
+        const integrateHealth = integrate.checks.find((check: any) => check.checkName === 'health:integrate');
+        expect(integrateHealth.origin).toEqual({ source: 'builtin', uses: 'mohist/health-gate' });
       });
 
       it('stage-state projects from WorkflowRun and ignores legacy evidence when a run exists', async () => {

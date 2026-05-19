@@ -4,7 +4,7 @@ import { api } from '../lib/api'
 import { useIssueStageState, useWorkflowRun, useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
-import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy, CheckRepairState, CheckRepairStatus } from '../lib/types'
+import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy, CheckRepairState, CheckRepairStatus, WorkflowDefinitionMetadata, WorkItemOrigin } from '../lib/types'
 import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
@@ -271,6 +271,8 @@ function TaskItem({
       : liveElapsed
 
   const hasReason = task.reason != null
+  const originLabel = formatOriginLabel(task.origin)
+  const originTitle = formatOriginTitle(task.origin)
 
   return (
     <div
@@ -285,6 +287,9 @@ function TaskItem({
         <span className="text-sm text-gray-900 flex-1 truncate">{task.title}</span>
         {hasReason && (
           <span className="text-xs text-amber-500 flex-shrink-0" title={task.reason}>reason</span>
+        )}
+        {originLabel && (
+          <span className="text-[11px] text-gray-400 flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
         )}
         {duration != null && duration > 0 && (
           <span className="text-xs text-gray-400 flex-shrink-0">{formatDuration(duration)}</span>
@@ -359,6 +364,8 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
   const fallbackName = isHealthGate ? `Health Gate: ${check.checkName.replace('health:', '')}` : check.checkName
   const baseName = check.title?.trim() || fallbackName
   const displayName = attemptLabel ? `${baseName} (${attemptLabel})` : baseName
+  const originLabel = formatOriginLabel(check.origin)
+  const originTitle = formatOriginTitle(check.origin)
 
   return (
     <div
@@ -368,6 +375,9 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
       <span className="text-sm text-gray-900 flex-1 truncate">{displayName}</span>
       {isFailed && check.message && (
         <span className="text-xs text-red-500 flex-shrink-0 truncate max-w-48">{check.message}</span>
+      )}
+      {originLabel && (
+        <span className="text-[11px] text-gray-400 flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
       )}
       {isHealthGate && healthOutput && (
         <>
@@ -382,6 +392,40 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function formatOriginLabel(origin?: WorkItemOrigin | null): string | null {
+  if (!origin) return null
+  const source = origin.source === 'builtin' ? 'built-in' : origin.source
+  return `${source}:${origin.uses.replace(/^mohist\//, '')}`
+}
+
+function formatOriginTitle(origin?: WorkItemOrigin | null): string | undefined {
+  if (!origin) return undefined
+  return `${origin.source} workflow item using ${origin.uses}`
+}
+
+function formatWorkflowDefinitionSource(source: WorkflowDefinitionMetadata['source']): string {
+  if (source.type === 'builtin') return source.id
+  if (source.type === 'project') return source.path
+  return source.id
+}
+
+function WorkflowDefinitionSummary({ definition }: { definition?: WorkflowDefinitionMetadata | null }) {
+  if (!definition) return null
+  const source = definition.source.type === 'builtin' ? 'built-in' : definition.source.type
+  const capturedAt = new Date(definition.capturedAt)
+  const capturedLabel = Number.isNaN(capturedAt.getTime()) ? definition.capturedAt : capturedAt.toLocaleString()
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+      <span className="font-medium text-gray-700">Workflow</span>
+      <span className="font-mono text-gray-700">{definition.workflowId}</span>
+      <span>{source}</span>
+      <span className="font-mono">{formatWorkflowDefinitionSource(definition.source)}</span>
+      <span>captured {capturedLabel}</span>
     </div>
   )
 }
@@ -1420,6 +1464,8 @@ export function PipelineView({ issue }: { issue: Issue }) {
 
   return (
     <div className="space-y-4">
+      <WorkflowDefinitionSummary definition={workflowRun?.workflowDefinition} />
+
       <StageBar
         stageStateMap={stageStateMap}
         issue={issue}

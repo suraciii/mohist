@@ -32,13 +32,19 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type WorkflowRunSnapshot } from '../workflow/domain';
+import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type StageDefinition, type WorkflowRunSnapshot } from '../workflow/domain';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
+import { inferWorkflowCheckUse, inferWorkflowTaskUse } from '../workflow/uses-catalog';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 type IncompleteStageCompletionGuard = Extract<StageCompletionGuard, { complete: false }>;
+
+type WorkItemOrigin = {
+  source: 'builtin' | 'project' | 'runtime';
+  uses: string;
+};
 
 function hasStageCompletionGuardDetails(error: unknown): error is { message: string; details: { stageCompletionGuard: IncompleteStageCompletionGuard } } {
   if (!error || typeof error !== 'object' || !('details' in error)) return false;
@@ -439,6 +445,7 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
   const stageRuns = run.stageRuns.map(stageRun => {
     const failure = failureDetails(stageRun);
     const delivery = deliveryMetadata(stageRun);
+    const stageDefinition = workflowDefinitionSnapshot?.compiledStageDefinitions.find(definition => definition.stage === stageRun.stage);
     return {
       id: stageRun.id,
       workflowRunId: stageRun.workflowRunId,
@@ -457,6 +464,7 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
         output: task.output,
         reason: task.reason,
         causedBy: taskCause(task),
+        origin: taskOrigin(stageDefinition, task.taskId),
         startedAt: task.startedAt,
         completedAt: task.completedAt,
         updatedAt: task.updatedAt,
@@ -470,6 +478,7 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
         output: check.output,
         runCount: check.runCount,
         lastRunAt: check.lastRunAt,
+        origin: checkOrigin(stageDefinition, check.checkName),
         updatedAt: check.updatedAt,
       })),
       approval: stageRun.approvalStatus ? {
@@ -506,6 +515,26 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
     } : null,
     stageRuns,
     failure: stageRuns.find(stageRun => stageRun.failure)?.failure ?? null,
+  };
+}
+
+function taskOrigin(stageDefinition: StageDefinition | undefined, taskId: string): WorkItemOrigin {
+  const definition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
+  const policy = stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
+    ?? stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
+
+  return {
+    source: definition ? (definition.source ?? 'builtin') : (stageDefinition ? 'runtime' : 'builtin'),
+    uses: inferWorkflowTaskUse(taskId, policy?.kind),
+  };
+}
+
+function checkOrigin(stageDefinition: StageDefinition | undefined, checkName: string): WorkItemOrigin {
+  const definition = stageDefinition?.checks.find(candidate => candidate.name === checkName);
+
+  return {
+    source: definition ? (definition.source ?? 'builtin') : (stageDefinition ? 'runtime' : 'builtin'),
+    uses: definition?.uses ?? inferWorkflowCheckUse(checkName),
   };
 }
 
