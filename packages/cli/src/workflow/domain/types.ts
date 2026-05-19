@@ -194,7 +194,8 @@ export interface DeliveryMetadata {
 }
 
 export interface FreezePoint {
-  taskId: string;
+  taskId?: string;
+  checkName?: string;
   delivery: DeliveryMetadata;
   frozenAt: string;
 }

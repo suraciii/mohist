@@ -6,7 +6,7 @@ import { Stage, IssueStatus, type CheckState, type CheckSuiteStatus } from '../t
 import { eventBus, type EventBus } from './event-bus';
 import { StageStateService, type StageCheckStatus, type StageStateStatus, type StageTaskStatus } from './stage-state-service';
 import type { WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/domain';
-import { inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../workflow/uses-catalog';
+import { inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../workflow/uses-catalog';
 
 interface IssueProjectionRow {
   id: string;
@@ -125,24 +125,39 @@ export class WorkflowRunProjection {
     if (snapshot.currentStage !== terminalStage) {
       return { ok: false, reason: `current stage is ${snapshot.currentStage}, expected terminal stage ${terminalStage}` };
     }
-    const terminal = snapshot.stageRuns.find(stageRun => stageRun.stage === terminalStage);
-    if (!terminal) return { ok: false, reason: `terminal stage ${terminalStage} run is missing` };
-    if (terminal.status !== 'passed') return { ok: false, reason: `terminal stage ${terminalStage} is ${terminal.status}` };
-    const terminalDefinition = snapshot.workflowDefinitionSnapshot.compiledStageDefinitions.find(definition => definition.stage === terminalStage);
-    if (terminalDefinition) {
-      for (const taskDefinition of terminalDefinition.tasks) {
-        const task = terminal.tasks.find(candidate => candidate.id === taskDefinition.id);
-        if (task?.status !== 'completed') return { ok: false, reason: `${taskDefinition.id} task is ${task?.status ?? 'missing'}` };
-      }
-      for (const checkDefinition of terminalDefinition.checks) {
-        const check = terminal.checks.find(candidate => candidate.name === checkDefinition.name);
-        if (check?.status !== 'passed') return { ok: false, reason: `${checkDefinition.name} check is ${check?.status ?? 'missing'}` };
-      }
-    }
-    return this.validateCompletedTaskEvidence(snapshot);
+    const stageProjection = this.validateStageStructuralCompletion(snapshot);
+    if (!stageProjection.ok) return stageProjection;
+    return this.validateCompletedWorkEvidence(snapshot);
   }
 
-  private validateCompletedTaskEvidence(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
+  private validateStageStructuralCompletion(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
+    for (const stageName of snapshot.stageOrder) {
+      const stageDefinition = snapshot.workflowDefinitionSnapshot.compiledStageDefinitions.find(definition => definition.stage === stageName);
+      const stageRun = snapshot.stageRuns.find(candidate => candidate.stage === stageName);
+      if (!stageRun) return { ok: false, reason: `stage ${stageName} run is missing` };
+      if (stageRun.status !== 'passed') return { ok: false, reason: `stage ${stageName} is ${stageRun.status}` };
+      if (!stageDefinition) continue;
+      for (const taskDefinition of stageDefinition.tasks) {
+        const task = stageRun.tasks.find(candidate => candidate.id === taskDefinition.id);
+        if (task?.status !== 'completed') return { ok: false, reason: `${taskDefinition.id} task is ${task?.status ?? 'missing'}` };
+      }
+      for (const checkDefinition of stageDefinition.checks) {
+        const check = stageRun.checks.find(candidate => candidate.name === checkDefinition.name);
+        if (check?.status !== 'passed') return { ok: false, reason: `${checkDefinition.name} check is ${check?.status ?? 'missing'}` };
+      }
+      if (this.stageRequiresApproval(stageDefinition) && stageRun.approval?.status !== 'approved') {
+        return { ok: false, reason: `stage ${stageName} approval is ${stageRun.approval?.status ?? 'missing'}` };
+      }
+    }
+    return { ok: true };
+  }
+
+  private stageRequiresApproval(stageDefinition: WorkflowRunSnapshot['workflowDefinitionSnapshot']['compiledStageDefinitions'][number]): boolean {
+    if (stageDefinition.requiresApproval === false) return false;
+    return Boolean(stageDefinition.requiresApproval ?? stageDefinition.approvalPolicy);
+  }
+
+  private validateCompletedWorkEvidence(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
     for (const stageDefinition of snapshot.workflowDefinitionSnapshot.compiledStageDefinitions) {
       const stageRun = snapshot.stageRuns.find(candidate => candidate.stage === stageDefinition.stage);
       if (!stageRun) continue;
@@ -154,6 +169,13 @@ export class WorkflowRunProjection {
         const uses = taskDefinition?.uses ?? inferWorkflowTaskUse(task.id, policy?.kind);
         const evidence = validateWorkflowUseEvidence(uses, task.output);
         if (!evidence.ok) return { ok: false, reason: `${task.id} ${evidence.field ?? 'delivery'} evidence is missing` };
+      }
+      for (const check of stageRun.checks) {
+        if (check.status !== 'passed') continue;
+        const checkDefinition = stageDefinition.checks.find(candidate => candidate.name === check.name);
+        const uses = checkDefinition?.uses ?? inferWorkflowCheckUse(check.name);
+        const evidence = validateWorkflowUseEvidence(uses, check.output);
+        if (!evidence.ok) return { ok: false, reason: `${check.name} ${evidence.field ?? 'delivery'} evidence is missing` };
       }
     }
     return { ok: true };

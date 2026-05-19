@@ -249,7 +249,13 @@ export function validateWorkflowUseEvidence(
   const evidence = use.evidence;
   if (!evidence) return { ok: true };
   const data = unwrapWorkflowUseOutput(output);
-  if (!data) return { ok: false, reason: 'evidence-missing' };
+  if (!data) {
+    return {
+      ok: false,
+      reason: 'evidence-missing',
+      field: evidence.requiredFields?.[0] ?? evidence.anyOfFields?.join('|'),
+    };
+  }
   for (const field of evidence.requiredFields ?? []) {
     if (!hasMeaningfulEvidenceValue(field, data[field])) {
       return { ok: false, reason: 'evidence-missing', field };

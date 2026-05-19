@@ -106,6 +106,31 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   }
 
+  function forgeCompletedDefaultStagesBeforeIntegrate(run: WorkflowRun): void {
+    for (const task of run.stageRun(Stage.Plan).tasks) task.status = 'completed';
+    for (const check of run.stageRun(Stage.Plan).checks) check.status = 'passed';
+    run.stageRun(Stage.Plan).approval = {
+      status: 'approved',
+      output: { approved: true },
+      requestedAt: '2026-05-18T00:00:00.000Z',
+      respondedAt: '2026-05-18T00:01:00.000Z',
+    };
+    for (const task of run.stageRun(Stage.Build).tasks) task.status = 'completed';
+    for (const check of run.stageRun(Stage.Build).checks) check.status = 'passed';
+    for (const task of run.stageRun(Stage.Check).tasks) task.status = 'completed';
+    for (const check of run.stageRun(Stage.Check).checks) {
+      check.status = 'passed';
+      if (check.name === 'review-passed') check.output = { verdict: 'PASS', snapshotSha: 'head' };
+      if (check.name === 'merge-ready') check.output = { candidateHeadSha: 'head' };
+    }
+    run.stageRun(Stage.Check).approval = {
+      status: 'approved',
+      output: { approved: true },
+      requestedAt: '2026-05-18T00:02:00.000Z',
+      respondedAt: '2026-05-18T00:03:00.000Z',
+    };
+  }
+
   it('advances Plan to Done by WorkflowRun stageOrder and projects issue stage/status', () => {
     startWorkflow();
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Plan, status: IssueStatus.Active });
@@ -277,7 +302,36 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
       stage: Stage.Integrate,
       status: IssueStatus.Blocked,
       mergeState: MergeState.Merged,
-      blockedReason: expect.stringContaining('integrate:spec-sync task is pending'),
+      blockedReason: expect.stringContaining('proposal task is pending'),
+    });
+  });
+
+  it('rejects a passed projection when an earlier declared stage was not completed', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_incomplete_earlier_stage', issueId, issueNumber });
+    run.status = 'passed';
+    run.currentStage = Stage.Integrate;
+    for (const stageRun of run.stageRuns) {
+      stageRun.status = 'passed';
+    }
+
+    const integrate = run.stageRun(Stage.Integrate);
+    const specSync = integrate.tasks.find(task => task.id === 'integrate:spec-sync')!;
+    specSync.status = 'completed';
+    const archive = integrate.tasks.find(task => task.id === 'integrate:archive-change')!;
+    archive.status = 'completed';
+    archive.output = { archivePath: 'openspec/changes/archive/188-workflowrun' };
+    const merge = integrate.tasks.find(task => task.id === 'integrate:merge')!;
+    merge.status = 'completed';
+    merge.output = { landedSha: 'landed' };
+    const health = integrate.checks.find(check => check.name === 'health:integrate')!;
+    health.status = 'passed';
+
+    applyProjection(run);
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Integrate,
+      status: IssueStatus.Blocked,
+      blockedReason: expect.stringContaining('proposal task is pending'),
     });
   });
 
@@ -288,6 +342,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     for (const stageRun of run.stageRuns) {
       stageRun.status = 'passed';
     }
+    forgeCompletedDefaultStagesBeforeIntegrate(run);
 
     const integrate = run.stageRun(Stage.Integrate);
     const specSync = integrate.tasks.find(task => task.id === 'integrate:spec-sync')!;
@@ -326,6 +381,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     for (const stageRun of run.stageRuns) {
       stageRun.status = 'passed';
     }
+    forgeCompletedDefaultStagesBeforeIntegrate(run);
 
     const integrate = run.stageRun(Stage.Integrate);
     const specSync = integrate.tasks.find(task => task.id === 'integrate:spec-sync')!;

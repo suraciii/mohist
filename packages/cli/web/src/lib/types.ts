@@ -1059,7 +1059,7 @@ export interface WorkflowDeliveryMetadata {
     headSha: string | null
   } | null
   remoteMerge?: {
-    status: WorkflowTaskStatus
+    status: WorkflowTaskStatus | WorkflowCheckStatus
     output: unknown
     mergedSha: string | null
   } | null

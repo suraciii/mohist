@@ -1223,7 +1223,7 @@ describe('WorkflowRun domain aggregate', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
     const decision = run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
       output: {
@@ -1252,62 +1252,102 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
-  it('does not complete Integrate when archive delivery evidence is missing', () => {
+  it('fails archive task immediately when delivery evidence is missing', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'landed' } });
-    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
+    const decision = run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
 
-    expect(run.status).toBe('running');
+    expect(run.status).toBe('failed');
+    expect(run.stageRun(Stage.Integrate).tasks.find(task => task.id === 'integrate:archive-change')).toMatchObject({
+      status: 'failed',
+      reason: 'Missing required evidence for mohist/archive-change: archivePath|success',
+    });
+    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
     expect(decision.nextWork).toEqual({
-      kind: 'blocked',
-      stage: Stage.Integrate,
-      reason: { complete: false, reason: 'delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:archive-change', uses: 'mohist/archive-change' },
+      kind: 'failed',
+      reason: run.failure,
     });
   });
 
-  it('does not complete Integrate when merge delivery evidence is missing', () => {
+  it('fails merge task immediately when delivery evidence is missing', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
     run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
-    run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed' });
-    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
+    const decision = run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed' });
 
-    expect(run.status).toBe('running');
+    expect(run.status).toBe('failed');
+    expect(run.stageRun(Stage.Integrate).tasks.find(task => task.id === 'integrate:merge')).toMatchObject({
+      status: 'failed',
+      reason: 'Missing required evidence for mohist/merge: landedSha',
+    });
+    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
     expect(decision.nextWork).toEqual({
-      kind: 'blocked',
-      stage: Stage.Integrate,
-      reason: { complete: false, reason: 'delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge', uses: 'mohist/merge' },
+      kind: 'failed',
+      reason: run.failure,
     });
   });
 
-  it('does not complete Integrate when merge delivery only records the target branch', () => {
+  it('fails merge task immediately when delivery only records the target branch', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
     run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
-    run.completeTask(Stage.Integrate, 'integrate:merge', {
+    const decision = run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
       output: { targetBranch: 'main' },
     });
-    const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'pass' });
 
-    expect(run.status).toBe('running');
-    expect(decision.nextWork).toEqual({
-      kind: 'blocked',
-      stage: Stage.Integrate,
-      reason: { complete: false, reason: 'delivery-evidence-missing', stage: Stage.Integrate, taskId: 'integrate:merge', uses: 'mohist/merge' },
+    expect(run.status).toBe('failed');
+    expect(run.stageRun(Stage.Integrate).tasks.find(task => task.id === 'integrate:merge')).toMatchObject({
+      status: 'failed',
+      reason: 'Missing required evidence for mohist/merge: landedSha',
     });
+    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(decision.nextWork).toEqual({
+      kind: 'failed',
+      reason: run.failure,
+    });
+  });
+
+  it('validates check uses evidence before passing and freezing remote merge checks', () => {
+    const definitions: StageDefinition[] = [{
+      stage: Stage.Integrate,
+      tasks: [],
+      checks: [{ name: 'pr-merged', phase: 'post-task', uses: 'mohist/pr-merged' }],
+      requiresApproval: false,
+    }];
+    const missing = startRun(definitions);
+    let decision = missing.recordCheckResult(Stage.Integrate, { name: 'pr-merged', status: 'pass' });
+
+    expect(missing.status).toBe('failed');
+    expect(missing.stageRun(Stage.Integrate).checks.find(check => check.name === 'pr-merged')).toMatchObject({
+      status: 'failed',
+      message: 'Missing required evidence for mohist/pr-merged: mergedSha',
+    });
+    expect(missing.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(decision.nextWork).toEqual({ kind: 'failed', reason: missing.failure });
+
+    const passed = startRun(definitions);
+    decision = passed.recordCheckResult(Stage.Integrate, {
+      name: 'pr-merged',
+      status: 'pass',
+      output: { mergedSha: 'remote-landed' },
+    });
+
+    expect(passed.stageRun(Stage.Integrate).freezePoint).toMatchObject({
+      checkName: 'pr-merged',
+      delivery: { landedSha: 'remote-landed' },
+    });
+    expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 
   it('fails post-merge health with post-merge-health-failed and does not schedule fixes after freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
     run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
       output: { landedSha: 'landed' },
@@ -1625,7 +1665,7 @@ describe('WorkflowRun domain aggregate', () => {
     advanceToIntegrate(run);
 
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
     run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
       output: {
@@ -1850,7 +1890,7 @@ describe('WorkflowRun domain aggregate', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
     run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'sha' } });
     run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'tests failed' });
 

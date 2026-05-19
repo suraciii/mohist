@@ -25,7 +25,7 @@ function extractDeliveryMetadata(output: unknown): FreezePoint['delivery'] {
     targetBranch: typeof data.targetBranch === 'string' ? data.targetBranch : undefined,
     baseSha: typeof data.baseSha === 'string' ? data.baseSha : undefined,
     candidateHeadSha: typeof data.candidateHeadSha === 'string' ? data.candidateHeadSha : undefined,
-    landedSha: typeof data.landedSha === 'string' ? data.landedSha : undefined,
+    landedSha: typeof data.landedSha === 'string' ? data.landedSha : typeof data.mergedSha === 'string' ? data.mergedSha : undefined,
     rebased: typeof data.rebased === 'boolean' ? data.rebased : undefined,
   };
 }
