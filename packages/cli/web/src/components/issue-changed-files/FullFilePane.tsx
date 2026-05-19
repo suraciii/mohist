@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import type { FileBlock } from '../../lib/diffModel'
+import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../../lib/diffModel'
 
 interface FullFilePaneProps {
   block: FileBlock | null
   issueNumber: number
   onClose?: () => void
+  threshold?: number
+  renderAnyway?: boolean
+  onRenderAnyway?: () => void
 }
 
 interface FileContent {
@@ -13,15 +17,24 @@ interface FileContent {
   head: string
 }
 
-export function FullFilePane({ block, issueNumber }: FullFilePaneProps) {
+export function FullFilePane({ block, issueNumber, threshold = DEFAULT_LARGE_DIFF_THRESHOLD, renderAnyway = false, onRenderAnyway }: FullFilePaneProps) {
   const [content, setContent] = useState<FileContent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const classified = block ? classifyFile(block, threshold) : null
+  const showCollapsedPlaceholder = !!classified?.isCollapsed && !renderAnyway
 
   useEffect(() => {
     if (!block || block.status === 'binary') {
       setContent(null)
+      return
+    }
+
+    if (showCollapsedPlaceholder) {
+      setContent(null)
+      setLoading(false)
+      setError(null)
       return
     }
 
@@ -40,7 +53,7 @@ export function FullFilePane({ block, issueNumber }: FullFilePaneProps) {
         setError(err instanceof Error ? err.message : 'Failed to load file content')
         setLoading(false)
       })
-  }, [block, issueNumber])
+  }, [block, issueNumber, showCollapsedPlaceholder])
 
   if (!block) {
     return (
@@ -54,6 +67,34 @@ export function FullFilePane({ block, issueNumber }: FullFilePaneProps) {
     return (
       <div className="flex items-center justify-center h-full text-gray-400 text-sm">
         Binary file, no diff available
+      </div>
+    )
+  }
+
+  if (showCollapsedPlaceholder) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center gap-3 text-xs font-mono">
+          <span className="font-medium text-gray-800 truncate flex-1">{block.newPath || block.oldPath}</span>
+          <FileStatusBadge status={block.status} />
+          <span className="text-green-600">+{block.additions}</span>
+          <span className="text-red-500">-{block.deletions}</span>
+        </div>
+        <div className="flex flex-col items-center justify-center py-12 px-4 flex-1">
+          <div className="text-sm text-gray-500 mb-2">
+            {classified.collapseReason === 'lockfile' && 'Lockfile'}
+            {classified.collapseReason === 'generated' && 'Generated file'}
+            {classified.collapseReason === 'dependency' && 'Dependency file'}
+            {classified.collapseReason === 'large' && 'Large diff'}
+            {' — '}{block.changedLineCount} lines changed
+          </div>
+          <button
+            onClick={onRenderAnyway}
+            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors"
+          >
+            Render anyway
+          </button>
+        </div>
       </div>
     )
   }

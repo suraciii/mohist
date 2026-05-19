@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import type { FileBlock } from '../../lib/diffModel'
-import { isLargeDiff, DEFAULT_LARGE_DIFF_THRESHOLD } from '../../lib/diffModel'
+import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../../lib/diffModel'
 
 interface UnifiedDiffPaneProps {
   block: FileBlock | null
@@ -8,6 +8,8 @@ interface UnifiedDiffPaneProps {
   activeHunkIndex?: number
   onActiveHunkChange?: (index: number) => void
   totalHunks?: number
+  renderAnyway?: boolean
+  onRenderAnyway?: () => void
 }
 
 export function UnifiedDiffPane({
@@ -16,8 +18,9 @@ export function UnifiedDiffPane({
   activeHunkIndex = 0,
   onActiveHunkChange,
   totalHunks = 0,
+  renderAnyway = false,
+  onRenderAnyway,
 }: UnifiedDiffPaneProps) {
-  const [renderAnyway, setRenderAnyway] = useState<Set<string>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -55,8 +58,8 @@ export function UnifiedDiffPane({
     )
   }
 
-  const large = isLargeDiff(block, threshold)
-  const showLargePlaceholder = large && !renderAnyway.has(block.newPath)
+  const classified = classifyFile(block, threshold)
+  const showCollapsedPlaceholder = classified.isCollapsed && !renderAnyway
 
   return (
     <div className="flex flex-col h-full">
@@ -70,13 +73,17 @@ export function UnifiedDiffPane({
       <div className="flex-1 overflow-auto" ref={containerRef}>
         {block.isBinary ? (
           <div className="px-4 py-3 text-sm text-gray-500 italic">Binary file, no diff available</div>
-        ) : showLargePlaceholder ? (
+        ) : showCollapsedPlaceholder ? (
           <div className="flex flex-col items-center justify-center py-12 px-4">
             <div className="text-sm text-gray-500 mb-2">
-              Large diff — {block.changedLineCount} lines changed
+              {classified.collapseReason === 'lockfile' && 'Lockfile'}
+              {classified.collapseReason === 'generated' && 'Generated file'}
+              {classified.collapseReason === 'dependency' && 'Dependency file'}
+              {classified.collapseReason === 'large' && 'Large diff'}
+              {' — '}{block.changedLineCount} lines changed
             </div>
             <button
-              onClick={() => setRenderAnyway(prev => new Set(prev).add(block.newPath))}
+              onClick={onRenderAnyway}
               className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors"
             >
               Render anyway
