@@ -65,6 +65,7 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
     approvalPolicy: stage.approvalPolicy ? { ...stage.approvalPolicy } : undefined,
     repairPolicies: stage.repairPolicies?.map(cloneRepairPolicy),
     invalidationPolicy: stage.invalidationPolicy ? cloneInvalidationPolicy(stage.invalidationPolicy) : undefined,
+    evidenceRequirements: stage.evidenceRequirements?.map(requirement => ({ ...requirement })),
   };
 }
 
@@ -102,6 +103,24 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Stage
     for (const policy of stage.checkPolicies ?? []) {
       if (!checkNames.has(policy.checkName)) {
         throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} check policy references unknown check ${stage.stage}:${policy.checkName}`);
+      }
+    }
+
+    for (const repair of stage.repairPolicies ?? []) {
+      if (!checkNames.has(repair.checkName)) {
+        throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} repair policy references unknown check ${stage.stage}:${repair.checkName}`);
+      }
+    }
+
+    for (const requirement of stage.evidenceRequirements ?? []) {
+      if (requirement.taskId && !taskIds.has(requirement.taskId)) {
+        throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} evidence requirement references unknown task ${stage.stage}:${requirement.taskId}`);
+      }
+      if (requirement.checkName && !checkNames.has(requirement.checkName)) {
+        throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} evidence requirement references unknown check ${stage.stage}:${requirement.checkName}`);
+      }
+      if (!requirement.taskId && !requirement.checkName && !requirement.uses) {
+        throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} evidence requirement for ${stage.stage} must reference taskId, checkName, or uses`);
       }
     }
 

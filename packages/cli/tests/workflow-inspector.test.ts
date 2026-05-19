@@ -277,4 +277,43 @@ workflow:
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('allows full custom Integrate stages without default local merge tasks', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-integrate-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/report-integrate
+  stages:
+    - id: build
+      tasks:
+        - id: implement
+          uses: mohist/agent
+          with:
+            prompt: Implement the issue.
+      checks:
+        - id: tests
+          uses: mohist/shell
+          with:
+            command: npm test
+    - id: integrate
+      tasks:
+        - id: handoff-report
+          uses: mohist/agent
+          with:
+            prompt: Write handoff report.
+      checks:
+        - id: report-file
+          uses: mohist/artifact-exists
+          with:
+            path: handoff.md
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

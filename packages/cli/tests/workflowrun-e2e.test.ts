@@ -13,7 +13,7 @@ import { WorkflowRunProjection } from '../src/services/workflow-run-projection';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { IssueStatus, MergeState, Stage } from '../src/types';
-import { WorkflowRun } from '../src/workflow/domain';
+import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/domain';
 
 describe('WorkflowRun aggregate end-to-end regressions', () => {
   let db: DatabaseManager;
@@ -207,7 +207,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
-  it('rejects a passed projection that did not reach final Integrate stage', () => {
+  it('rejects a passed projection that did not reach the workflow terminal stage', () => {
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_impossible_check', issueId, issueNumber });
     run.status = 'passed';
     run.currentStage = Stage.Check;
@@ -222,7 +222,43 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(issueRepo.findById(issueId)).toMatchObject({
       stage: Stage.Check,
       status: IssueStatus.Blocked,
-      blockedReason: expect.stringContaining('current stage is check, expected integrate'),
+      blockedReason: expect.stringContaining('current stage is check, expected terminal stage integrate'),
+    });
+  });
+
+  it('projects a custom workflow as completed without an Integrate stage or merge delivery', () => {
+    const snapshot = createWorkflowDefinitionSnapshot({
+      definition: {
+        id: 'project/no-local-merge',
+        stages: [
+          {
+            stage: Stage.Plan,
+            tasks: [{ id: 'design', title: 'Design', uses: 'mohist/agent' }],
+            checks: [{ name: 'design-file', title: 'Design file', uses: 'mohist/artifact-exists' }],
+          },
+          {
+            stage: Stage.Build,
+            tasks: [{ id: 'implement', title: 'Implement', uses: 'mohist/agent' }],
+            checks: [{ name: 'tests', title: 'Tests', uses: 'mohist/shell' }],
+          },
+        ],
+      },
+      source: { type: 'project', path: '.mohist/workflows/no-local-merge.yaml' },
+      capturedAt: '2026-05-19T00:00:00.000Z',
+    });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_custom_done', issueId, issueNumber, workflowDefinitionSnapshot: snapshot });
+
+    run.completeTask(Stage.Plan, 'design', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'design-file', status: 'pass' });
+    run.completeTask(Stage.Build, 'implement', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'tests', status: 'pass' });
+    applyProjection(run);
+
+    expect(issueRepo.findById(issueId)).toMatchObject({
+      stage: Stage.Done,
+      status: IssueStatus.Completed,
+      mergeState: undefined,
+      blockedReason: undefined,
     });
   });
 
@@ -314,7 +350,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(issueRepo.findById(issueId)).toMatchObject({
       stage: Stage.Integrate,
       status: IssueStatus.Blocked,
-      blockedReason: expect.stringContaining('integrate merge landedSha evidence is missing'),
+      blockedReason: expect.stringContaining('integrate:merge landedSha evidence is missing'),
     });
   });
 

@@ -1050,6 +1050,19 @@ export interface WorkflowDeliveryMetadata {
     landedSha: string | null
     rebased: boolean | null
   } | null
+  remotePr?: {
+    status: WorkflowTaskStatus
+    output: unknown
+    prUrl: string | null
+    base: string | null
+    branch: string | null
+    headSha: string | null
+  } | null
+  remoteMerge?: {
+    status: WorkflowTaskStatus
+    output: unknown
+    mergedSha: string | null
+  } | null
   health: { status: WorkflowCheckStatus; message: string | null; output: unknown } | null
   frozen: boolean
 }
