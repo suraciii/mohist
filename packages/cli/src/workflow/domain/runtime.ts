@@ -6,7 +6,6 @@ import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, 
 import type {
   ApprovalInput,
   ApprovalSnapshot,
-  BuildWorkSourceState,
   CausedByMetadata,
   CheckDefinition,
   CheckFailurePolicy,
@@ -29,6 +28,7 @@ import type {
   TaskRunStatus,
   VerificationEvidence,
   WorkItemAttempt,
+  WorkSourceState,
   WorkflowDecision,
   WorkflowDefinitionSnapshot,
   WorkflowEvent,
@@ -368,7 +368,7 @@ export class StageRun {
   approval: ApprovalSnapshot | null = null;
   failure: FailureDetails | null = null;
   freezePoint: FreezePoint | null = null;
-  buildWorkSourceState: BuildWorkSourceState = { evaluated: false };
+  workSourceState: WorkSourceState = { evaluated: false };
 
   constructor(
     readonly definition: CompiledStageDefinition,
@@ -394,9 +394,6 @@ export class StageRun {
   }
 
   materializeTasks(tasks: MaterializedTaskInput[]): void {
-    if (this.stage !== Stage.Build) {
-      throw new WorkflowDomainError('Only the build stage can materialize tasks');
-    }
     for (const task of [...tasks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
       const existing = this.tasks.find(candidate => candidate.id === task.id);
       if (existing) {
@@ -408,6 +405,14 @@ export class StageRun {
       this.tasks.push(taskRun);
     }
     this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  }
+
+  get buildWorkSourceState(): WorkSourceState {
+    return this.workSourceState;
+  }
+
+  set buildWorkSourceState(state: WorkSourceState) {
+    this.workSourceState = state;
   }
 
   nextTask(): TaskRun | null {
@@ -561,29 +566,44 @@ export class StageRun {
     }
   }
 
+  recordWorkSourceEvaluated(tasks: MaterializedTaskInput[]): void {
+    this.workSourceState = { evaluated: true, tasks };
+  }
+
+  recordWorkSourceMissing(): void {
+    this.workSourceState = { evaluated: true, missing: true };
+  }
+
+  recordWorkSourceInvalid(): void {
+    this.workSourceState = { evaluated: true, invalid: true };
+  }
+
+  recordWorkSourceEmpty(): void {
+    this.workSourceState = { evaluated: true, empty: true };
+  }
+
+  resetWorkSourceState(): void {
+    this.workSourceState = { evaluated: false };
+  }
+
   recordBuildWorkSourceEvaluated(tasks: MaterializedTaskInput[]): void {
-    if (this.stage !== Stage.Build) return;
-    this.buildWorkSourceState = { evaluated: true, tasks };
+    this.recordWorkSourceEvaluated(tasks);
   }
 
   recordBuildWorkSourceMissing(): void {
-    if (this.stage !== Stage.Build) return;
-    this.buildWorkSourceState = { evaluated: true, missing: true };
+    this.recordWorkSourceMissing();
   }
 
   recordBuildWorkSourceInvalid(): void {
-    if (this.stage !== Stage.Build) return;
-    this.buildWorkSourceState = { evaluated: true, invalid: true };
+    this.recordWorkSourceInvalid();
   }
 
   recordBuildWorkSourceEmpty(): void {
-    if (this.stage !== Stage.Build) return;
-    this.buildWorkSourceState = { evaluated: true, empty: true };
+    this.recordWorkSourceEmpty();
   }
 
   resetBuildWorkSourceState(): void {
-    if (this.stage !== Stage.Build) return;
-    this.buildWorkSourceState = { evaluated: false };
+    this.resetWorkSourceState();
   }
 
   materializeTaskForPersistence(id: string, title: string, order: number): TaskRun {
@@ -631,8 +651,13 @@ export class StageRun {
       approval: this.approval ? { ...this.approval } : null,
       failure: this.failure,
       freezePoint: this.freezePoint,
-      buildWorkSourceState: this.stage === Stage.Build ? this.buildWorkSourceState : undefined,
+      workSourceState: this.hasDynamicWorkSource() ? this.workSourceState : undefined,
+      buildWorkSourceState: this.stage === Stage.Build ? this.workSourceState : undefined,
     };
+  }
+
+  hasDynamicWorkSource(): boolean {
+    return (this.definition.workSources ?? []).some(source => source.kind !== 'static' && source.kind !== 'runtime');
   }
 }
 
@@ -711,22 +736,22 @@ export class WorkflowRun {
     return stageRun;
   }
 
-  materializeTasks(stage: Stage, tasks: MaterializedTaskInput[], buildWorkSourceState?: 'missing' | 'invalid' | 'empty'): WorkflowDecision {
+  materializeTasks(stage: Stage, tasks: MaterializedTaskInput[], workSourceState?: 'missing' | 'invalid' | 'empty'): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
     stageRun.materializeTasks(tasks);
-    if (stage === Stage.Build) {
-      if (buildWorkSourceState === 'missing') {
-        stageRun.recordBuildWorkSourceMissing();
-      } else if (buildWorkSourceState === 'invalid') {
-        stageRun.recordBuildWorkSourceInvalid();
-      } else if (buildWorkSourceState === 'empty') {
-        stageRun.recordBuildWorkSourceEmpty();
+    if (stageRun.hasDynamicWorkSource()) {
+      if (workSourceState === 'missing') {
+        stageRun.recordWorkSourceMissing();
+      } else if (workSourceState === 'invalid') {
+        stageRun.recordWorkSourceInvalid();
+      } else if (workSourceState === 'empty') {
+        stageRun.recordWorkSourceEmpty();
       } else if (tasks.length === 0) {
-        stageRun.recordBuildWorkSourceEmpty();
+        stageRun.recordWorkSourceEmpty();
       } else {
-        stageRun.recordBuildWorkSourceEvaluated(tasks);
+        stageRun.recordWorkSourceEvaluated(tasks);
       }
     }
     return this.decision([]);
@@ -1188,9 +1213,9 @@ export class WorkflowRun {
     stageRun.approval = null;
 
     stageRun.removeGeneratedTasks();
-    if (stage === Stage.Build) {
+    if (stageRun.hasDynamicWorkSource()) {
       stageRun.removeNonStaticTasks();
-      stageRun.resetBuildWorkSourceState();
+      stageRun.resetWorkSourceState();
     }
 
     for (const task of stageRun.tasks) {
@@ -1224,8 +1249,8 @@ export class WorkflowRun {
     if (preTaskCheck) return { kind: 'check', stage: stageRun.stage, checkName: preTaskCheck.name };
     const task = stageRun.nextTask();
     if (task) return { kind: 'task', stage: stageRun.stage, taskId: task.id };
-    const buildWorkSourceFailure = this.evaluateBuildWorkSourceFailureGuard(stageRun);
-    if (buildWorkSourceFailure) return { kind: 'blocked', stage: stageRun.stage, reason: buildWorkSourceFailure };
+    const workSourceFailure = this.evaluateWorkSourceFailureGuard(stageRun);
+    if (workSourceFailure) return { kind: 'blocked', stage: stageRun.stage, reason: workSourceFailure };
     const check = stageRun.nextCheck('post-task');
     if (check) return { kind: 'check', stage: stageRun.stage, checkName: check.name };
     const guard = this.evaluateStageCompletionGuard(stageRun);
@@ -1347,14 +1372,13 @@ export class WorkflowRun {
     return this.completeStage(stageRun, events);
   }
 
-  private evaluateBuildWorkSourceFailureGuard(stageRun: StageRun): StageCompletionGuard | null {
-    if (stageRun.stage !== Stage.Build) return null;
-    if (!(stageRun.definition.workSources ?? []).some(source => source.kind !== 'static' && source.kind !== 'runtime')) return null;
-    const state: BuildWorkSourceState = stageRun.buildWorkSourceState;
-    if (!state.evaluated) return { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build };
-    if ('missing' in state && state.missing) return { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build };
-    if ('invalid' in state && state.invalid) return { complete: false, reason: 'dynamic-source-invalid', stage: Stage.Build };
-    if ('empty' in state && state.empty) return { complete: false, reason: 'dynamic-source-empty', stage: Stage.Build };
+  private evaluateWorkSourceFailureGuard(stageRun: StageRun): StageCompletionGuard | null {
+    if (!stageRun.hasDynamicWorkSource()) return null;
+    const state: WorkSourceState = stageRun.workSourceState;
+    if (!state.evaluated) return { complete: false, reason: 'dynamic-source-not-evaluated', stage: stageRun.stage };
+    if ('missing' in state && state.missing) return { complete: false, reason: 'dynamic-source-missing', stage: stageRun.stage };
+    if ('invalid' in state && state.invalid) return { complete: false, reason: 'dynamic-source-invalid', stage: stageRun.stage };
+    if ('empty' in state && state.empty) return { complete: false, reason: 'dynamic-source-empty', stage: stageRun.stage };
     return null;
   }
 
@@ -1374,13 +1398,8 @@ export class WorkflowRun {
       if (checkRun.status !== 'passed') return { complete: false, reason: 'static-check-not-passed', checkName: checkDef.name };
     }
 
-    if (stageRun.stage === Stage.Build && (stageRun.definition.workSources ?? []).some(source => source.kind !== 'static' && source.kind !== 'runtime')) {
-      const state: BuildWorkSourceState = stageRun.buildWorkSourceState;
-      if (!state.evaluated) return { complete: false, reason: 'dynamic-source-not-evaluated', stage: Stage.Build };
-      if ('missing' in state && state.missing) return { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build };
-      if ('invalid' in state && state.invalid) return { complete: false, reason: 'dynamic-source-invalid', stage: Stage.Build };
-      if ('empty' in state && state.empty) return { complete: false, reason: 'dynamic-source-empty', stage: Stage.Build };
-    }
+    const workSourceGuard = this.evaluateWorkSourceFailureGuard(stageRun);
+    if (workSourceGuard) return workSourceGuard;
 
     if (stageRun.stage === Stage.Check) {
       const checkEvidenceGuard = this.evaluateCheckReviewEvidenceGuard(stageRun);

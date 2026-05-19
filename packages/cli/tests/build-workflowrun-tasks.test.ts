@@ -68,7 +68,7 @@ function makeService(run: ReturnType<typeof startBuildRun>): WorkflowApplication
   return {
     startWorkflow: vi.fn(),
     resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
-    materializeTasks: vi.fn(({ stage, tasks, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, buildWorkSourceState) })),
+    materializeTasks: vi.fn(({ stage, tasks, workSourceState, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, workSourceState ?? buildWorkSourceState) })),
     startTaskAttempt: vi.fn(({ stage, taskId, evidence }) => {
       run.startTaskAttempt(stage, taskId, new Date().toISOString(), evidence);
     }),
@@ -281,7 +281,7 @@ describe('Build aggregate-backed task runtime', () => {
       stage: Stage.Build,
       tasks: [],
       tasksPath: path.join(changePath, 'tasks.json'),
-      buildWorkSourceState: 'missing',
+      workSourceState: 'missing',
     }));
     expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({ evaluated: true, missing: true });
     expect(run.nextWork()).toEqual({
@@ -348,7 +348,7 @@ describe('Build aggregate-backed task runtime', () => {
       stage: Stage.Build,
       tasks: [],
       tasksPath,
-      buildWorkSourceState: 'invalid',
+      workSourceState: 'invalid',
     }));
     expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({ evaluated: true, invalid: true });
     expect(run.nextWork()).toEqual({

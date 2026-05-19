@@ -90,11 +90,15 @@ describe('Migration v16', () => {
     expect(row?.archived_at).toBeNull();
   });
 
-  it('should have schema version 36', () => {
+  it('should have schema version 37', () => {
     const row = db.get<{ value: string }>(
       "SELECT value FROM config WHERE key = 'schema_version'"
     );
-    expect(row?.value).toBe('36');
+    expect(row?.value).toBe('37');
+    const workSourceStateColumn = db.get<{ name: string }>(
+      "SELECT name FROM pragma_table_info('workflow_stage_runs') WHERE name = 'work_source_state'"
+    );
+    expect(workSourceStateColumn?.name).toBe('work_source_state');
   });
 });
 

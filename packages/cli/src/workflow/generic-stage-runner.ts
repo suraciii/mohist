@@ -625,10 +625,9 @@ export class GenericStageRunner implements StageRunner {
     const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
     if (!stageRun) return false;
 
-    if (stageRun.stage === Stage.Build) {
-      const buildWorkSourceState = (stageRun as { buildWorkSourceState?: { evaluated?: boolean } }).buildWorkSourceState;
-      if (!buildWorkSourceState?.evaluated) return true;
-    }
+    const workSourceState = (stageRun as { workSourceState?: { evaluated?: boolean }; buildWorkSourceState?: { evaluated?: boolean } }).workSourceState
+      ?? (stageRun as { buildWorkSourceState?: { evaluated?: boolean } }).buildWorkSourceState;
+    if (!workSourceState?.evaluated) return true;
 
     const existingTaskIds = new Set(stageRun.tasks.map(task => this.persistedTaskId(task)));
     return (stageDefinition?.workSources ?? []).some(workSource => {
@@ -660,12 +659,12 @@ export class GenericStageRunner implements StageRunner {
 
       const change = detectOpenSpecChange(ctx.acpOptions.cwd, ctx.issue);
       if (!change) {
-        if (stageRun?.stage === Stage.Build && ctx.workflowApplicationService) {
+        if (ctx.workflowApplicationService) {
           ctx.workflowApplicationService.materializeTasks({
             issueId: ctx.issue.id,
             stage: ctx.issue.stage,
             tasks: [],
-            buildWorkSourceState: 'missing',
+            workSourceState: 'missing',
           });
           materialized = true;
         }
@@ -676,12 +675,12 @@ export class GenericStageRunner implements StageRunner {
       try {
         tasks = this.materializeLoadedTasks(ctx, workSource.kind, change);
       } catch {
-        if (stageRun?.stage === Stage.Build && ctx.workflowApplicationService) {
+        if (ctx.workflowApplicationService) {
           ctx.workflowApplicationService.materializeTasks({
             issueId: ctx.issue.id,
             stage: ctx.issue.stage,
             tasks: [],
-            buildWorkSourceState: 'invalid',
+            workSourceState: 'invalid',
           });
           materialized = true;
         }
@@ -692,7 +691,7 @@ export class GenericStageRunner implements StageRunner {
         issueId: ctx.issue.id,
         stage: ctx.issue.stage,
         tasks,
-        buildWorkSourceState: tasks.length === 0 ? 'empty' : undefined,
+        workSourceState: tasks.length === 0 ? 'empty' : undefined,
       });
       materialized = true;
       if (tasks.length > 0) {

@@ -65,7 +65,7 @@ export class BuildStageRunner extends BaseStageRunner {
             stage: Stage.Build,
             tasks: [],
             tasksPath: path.join(changeDir, 'tasks.json'),
-            buildWorkSourceState: 'missing',
+            workSourceState: 'missing',
           });
         }
       }
@@ -128,7 +128,7 @@ export class BuildStageRunner extends BaseStageRunner {
           dependsOn: task.dependsOn ?? [],
         })),
         tasksPath: change.tasksPath,
-        buildWorkSourceState: buildTaskSource.state,
+        workSourceState: buildTaskSource.state,
       });
       if (buildTaskSource.state) {
         throw new Error(`Build tasks source is ${buildTaskSource.state}`);
