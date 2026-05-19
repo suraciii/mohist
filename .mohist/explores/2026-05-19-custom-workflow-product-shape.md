@@ -71,7 +71,7 @@ Builtin semantic source / project workflow.yaml
   -> parseWorkflowDefinitionSource
   -> WorkflowDefinition
   -> compileWorkflowDefinition
-  -> ExecutableWorkflowDefinition
+  -> WorkflowDefinitionSnapshot.compiledStageDefinitions
   -> WorkflowRun / GenericStageRunner
 ```
 
@@ -83,13 +83,15 @@ Builtin semantic source / project workflow.yaml
 
 ```
 Allowed:
-  definition -> compiler/loader -> executable definition -> engine runs it
+  definition -> compiler/loader -> compiled definition snapshot -> engine runs it
 
 Not allowed:
   definition -> runner/runtime heuristics infer hidden behavior while running
 ```
 
-如果当前代码里仍有 `taskExecutionPolicies` / `checkPolicies` / `repairPolicies` / `invalidationPolicy`，它们最多只能被视为迁移期的 executable-definition 内部结构或 legacy compatibility，不是用户 workflow 模型，也不是长期运行前提。长期目标是让 executable definition 的结构直接表达执行图、失败收敛、事件重置、approval 和动态 task source，而不是把这些行为塞进若干 policy side table。
+如果当前代码里仍有 `taskExecutionPolicies` / `checkPolicies` / `repairPolicies` / `invalidationPolicy`，它们最多只能被视为迁移期的 compiled definition 内部结构或 legacy compatibility，不是用户 workflow 模型，也不是长期运行前提。
+
+这里不引入 `ExecutableWorkflowDefinition` 作为新领域概念。领域上只有 `WorkflowDefinition`；编译只是把同一份定义变成 `WorkflowDefinitionSnapshot` 中可直接运行的 `compiledStageDefinitions`。如果后续需要更强类型，也应优先命名为 `CompiledStageDefinition` / `CompiledWorkflowDefinition`，表达“同一份定义的编译形态”，而不是制造第二个业务对象。
 
 ## 用户旅程
 
@@ -752,7 +754,7 @@ Runner 收到的是已经 materialized 的 job message。`JobRunner` 初始化 j
 这给 Mohist 的启发：
 
 - YAML/parser/compiler 和 runner 必须有硬边界。
-- 运行时应执行 compiled/executable workflow definition，而不是边跑边从 YAML 或 task id 猜行为。
+- 运行时应执行 `WorkflowDefinitionSnapshot` 中的 compiled definition，而不是边跑边从 YAML 或 task id 猜行为。
 - `uses` 应该是 handler registry 的入口，类似 GitHub Actions 的 action handler factory。
 - full custom workflow 至少要能表达 builtin default workflow 中所有内置 `uses`；否则“默认 workflow 只是内置定义”这个产品承诺不成立。
 - composite action 的思路后续可借鉴为 Mohist reusable task/workflow snippet，但 v1 不应先复制 GitHub Actions 的 job/matrix/needs/service container 复杂度。
@@ -839,36 +841,36 @@ legacy runner code may still do something else
 
 这些字段必须由 `parseWorkflowDefinitionSource` 和 `compileWorkflowDefinition` 统一生成。项目 YAML 的 full custom workflow 也应复用同一个 parser，避免 builtin TS block 与用户 YAML 变成两套模型。
 
-### P0.7: Executable definition 取代 runtime policy side table
+### P0.7: Compiled definition 边界取代 runtime policy side table
 
-目标：运行时引擎可以直接运行一份 executable workflow definition，而不是依赖 runtime policy side table 和 runner heuristics。
+目标：运行时引擎可以直接运行 `WorkflowDefinitionSnapshot` 中的 compiled definition，而不是依赖 runtime policy side table 和 runner heuristics。
 
 原则：
 
 - workflow 的所有行为都来自定义。
-- 编译阶段可以把语义定义展开成可执行定义。
-- 运行时只执行可执行定义，不临场推导隐藏行为。
+- 编译阶段可以把语义定义展开成可运行的 compiled definition。
+- 运行时只执行 compiled definition，不临场推导隐藏行为。
 - `uses` catalog 可以提供 action/check 的执行能力和契约，但不能暗中增加用户没定义的 workflow 行为。
-- `onFailure.retry`、`task.emits`、`stage.on`、`approval`、`tasksFrom` 都应成为 executable definition 的直接结构。
+- `onFailure.retry`、`task.emits`、`stage.on`、`approval`、`tasksFrom` 都应成为 compiled definition 的直接结构或显式编译结果。
 
 迁移方向：
 
 - 保留现有 `taskExecutionPolicies/checkPolicies/repairPolicies/invalidationPolicy` 作为短期编译产物，保证兼容。
-- 新增或逐步演进到更直接的 executable shape，例如：
+- 新增或逐步演进到更直接的 compiled shape，例如：
 
 ```ts
-ExecutableStageDefinition {
+CompiledStageDefinition {
   stage
-  taskQueue: ExecutableTaskDefinition[]
+  taskQueue: CompiledTaskDefinition[]
   dynamicTaskSources: DynamicTaskSourceDefinition[]
-  checks: ExecutableCheckDefinition[]
+  checks: CompiledCheckDefinition[]
   approval?: ApprovalDefinition
   eventHandlers: EventHandlerDefinition[]
 }
 ```
 
-- `GenericStageRunner` 只读取 executable definition，不读取用户 source，也不从 task id 猜测行为。
-- 当 executable definition 足够完整后，移除 policy side table。
+- `GenericStageRunner` 只读取 compiled definition，不读取用户 source，也不从 task id 猜测行为。
+- 当 compiled definition 足够完整后，移除 policy side table。
 
 这一步比“runner runtime 推导”更符合用户目标：用户自定义 workflow 的关键不是运行时聪明，而是定义本身完整、可解释、可验证、可执行。
 
@@ -982,10 +984,10 @@ on:
 - 保持 `CheckDefinition` 简单，不增加 `source.task` / `staleWhen`。
 - `CheckFailureRetry.inputFrom` 保留为 optional advanced capability。
 
-### P2: Compiler 生成 executable definition
+### P2: Compiler 生成 compiled definition
 
-- `compileWorkflowDefinition` 将 `stage.on + task.emits` 编译成 executable definition 的 event handler。
-- `code.changed -> checks-and-approval` 在 executable definition 中显式表达为当前 stage checks reset + approval reset。
+- `compileWorkflowDefinition` 将 `stage.on + task.emits` 编译成 compiled definition 的 event handler。
+- `code.changed -> checks-and-approval` 在 compiled definition 中显式表达为当前 stage checks reset + approval reset。
 - 编译器不要求事件提前声明；从 `emits` 和 `stage.on` 收集事件。
 - 如果 task emits 了没有 stage policy 的 event，给 warning 或 explain 信息，不阻断 v1。
 - 现阶段可以继续生成 `InvalidationPolicy` 兼容旧 engine，但它只是过渡产物，不是长期模型。

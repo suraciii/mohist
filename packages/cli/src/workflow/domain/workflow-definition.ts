@@ -5,6 +5,7 @@ import type {
   AgentPromptSource,
   CheckDefinition,
   CheckFailurePolicy,
+  CompiledStageDefinition,
   InvalidationPolicy,
   RepairPolicy,
   StageDefinition,
@@ -115,6 +116,10 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
     repairPolicies: stage.repairPolicies?.map(cloneRepairPolicy),
     invalidationPolicy: stage.invalidationPolicy ? cloneInvalidationPolicy(stage.invalidationPolicy) : undefined,
   };
+}
+
+function cloneCompiledStageDefinition(stage: CompiledStageDefinition): CompiledStageDefinition {
+  return cloneStageDefinition(stage) as CompiledStageDefinition;
 }
 
 function compileWorkSources(stage: StageDefinition): WorkSourceDefinition[] | undefined {
@@ -329,7 +334,7 @@ function compileRuntimeInvalidationPolicy(stage: StageDefinition): InvalidationP
   };
 }
 
-export function compileWorkflowDefinition(definition: WorkflowDefinition): StageDefinition[] {
+export function compileWorkflowDefinition(definition: WorkflowDefinition): CompiledStageDefinition[] {
   if (!definition.id || definition.id.trim().length === 0) {
     throw new WorkflowDomainError('WorkflowDefinition requires an id');
   }
@@ -413,7 +418,7 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Stage
       };
     }
     compiled.taskExecutionPolicies = compileTaskExecutionPolicies(compiled);
-    return compiled;
+    return compiled as CompiledStageDefinition;
   });
 }
 
@@ -448,7 +453,7 @@ export function cloneWorkflowDefinitionSnapshot(snapshot: WorkflowDefinitionSnap
     name: snapshot.name,
     source: { ...snapshot.source },
     resolvedDefinition: cloneWorkflowDefinition(snapshot.resolvedDefinition),
-    compiledStageDefinitions: snapshot.compiledStageDefinitions.map(cloneStageDefinition),
+    compiledStageDefinitions: snapshot.compiledStageDefinitions.map(cloneCompiledStageDefinition),
     capturedAt: snapshot.capturedAt,
   };
 }
