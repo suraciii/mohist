@@ -11,7 +11,7 @@ import type {
   StageContext,
   StageRunResult,
 } from '../src/workflow/stage-context';
-import type { StageRunner } from '../src/workflow/check-stage-runner';
+import type { StageRunner } from '../src/workflow/stage-runner';
 
 function makeIssue(stage: Stage = Stage.Backlog): Issue {
   return {
@@ -245,6 +245,9 @@ describe('WorkflowEngine aggregate progression', () => {
         ...DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Plan)!,
         tasks: [{ id: 'proposal', title: 'Generate proposal' }],
         checks: [{ name: 'health:plan', title: 'Plan health gate' }],
+        checkPolicies: [{ checkName: 'health:plan', phase: 'post-task' as const }],
+        repairPolicies: [],
+        checkFailurePolicies: [],
         requiresApproval: false,
       },
     ];
@@ -498,7 +501,7 @@ describe('WorkflowEngine aggregate progression', () => {
     const issue = makeIssue(Stage.Build);
     const definitions = DEFAULT_STAGE_DEFINITIONS.map(definition => {
       if (definition.stage === Stage.Plan) return { ...definition, requiresApproval: false };
-      if (definition.stage === Stage.Build) return { ...definition, checks: [] };
+      if (definition.stage === Stage.Build) return { ...definition, checks: [], checkPolicies: [], repairPolicies: [], checkFailurePolicies: [] };
       return definition;
     });
     const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions });

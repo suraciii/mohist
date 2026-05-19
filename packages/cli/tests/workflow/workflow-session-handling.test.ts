@@ -5,7 +5,7 @@ import * as os from 'os';
 import { Stage, IssueStatus } from '../../src/types';
 import type { IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, CheckpointManager } from '../../src/workflow/stage-context';
 import type { Check } from '../../src/workflow/checks';
-import type { StageRunner } from '../../src/workflow/check-stage-runner';
+import type { StageRunner } from '../../src/workflow/stage-runner';
 import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import { EventBus } from '../../src/services/event-bus';

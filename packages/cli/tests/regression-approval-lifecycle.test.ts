@@ -6,7 +6,7 @@ import type { StageContext } from '../src/workflow/stage-context';
 import type { ChangeArtifactsManager, CheckpointManager } from '../src/workflow/stage-context';
 import type { ProjectRepo } from '../src/workflow/stage-context';
 import type { WorktreeManager } from '../src/workflow/stage-context';
-import type { StageRunner } from '../src/workflow/check-stage-runner';
+import type { StageRunner } from '../src/workflow/stage-runner';
 import type { StageRunResult } from '../src/workflow/stage-context';
 import { EventBus } from '../src/services/event-bus';
 import { WorkflowEngine } from '../src/workflow/workflow-engine';
