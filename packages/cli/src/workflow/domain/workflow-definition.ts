@@ -50,7 +50,10 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
   return {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
-    checks: stage.checks.map(check => ({ ...check })),
+    checks: stage.checks.map(check => ({
+      ...check,
+      with: check.with ? { ...check.with } : undefined,
+    })),
     checkFailurePolicies: stage.checkFailurePolicies?.map(cloneCheckFailurePolicy),
     workSources: stage.workSources?.map(source => ({
       ...source,

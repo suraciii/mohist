@@ -43,6 +43,7 @@ export interface WorkItemAttempt {
 export interface TaskDefinition {
   id: string;
   title: string;
+  source?: 'builtin' | 'project';
   dependsOn?: string[];
   resultContract?: ResultContract;
   selfRepairPolicy?: SelfRepairPolicy;
@@ -51,6 +52,9 @@ export interface TaskDefinition {
 export interface CheckDefinition {
   name: string;
   title: string;
+  source?: 'builtin' | 'project';
+  uses?: string;
+  with?: Record<string, unknown>;
 }
 
 export interface CheckFailurePolicy {

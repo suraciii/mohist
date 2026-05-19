@@ -32,14 +32,14 @@ export function setupWorkflowCommands(program: Command, output: CliOutput = defa
     .command('show')
     .description('Show the resolved workflow definition')
     .action(() => {
-      renderWorkflowShow(resolveWorkflowDefinition(), output);
+      renderWorkflowShow(resolveWorkflowDefinition(process.cwd()), output);
     });
 
   workflowCmd
     .command('validate')
     .description('Validate the resolved workflow definition')
     .action(() => {
-      const resolved = resolveWorkflowDefinition();
+      const resolved = resolveWorkflowDefinition(process.cwd());
       const diagnostics = validateWorkflowDefinition(resolved);
       renderWorkflowValidation(diagnostics, output);
       if (diagnostics.some(diagnostic => diagnostic.severity === 'error')) {
@@ -52,7 +52,8 @@ export function setupWorkflowCommands(program: Command, output: CliOutput = defa
     .description('Explain why a workflow task or check exists')
     .argument('<task-or-check>', 'Task id or check name')
     .action((itemId: string) => {
-      const item = explainWorkflowItem(itemId);
+      const resolved = resolveWorkflowDefinition(process.cwd());
+      const item = explainWorkflowItem(itemId, resolved);
       if (!item) {
         output.error(chalk.red(`Workflow item not found: ${itemId}`));
         process.exitCode = 1;
@@ -72,10 +73,10 @@ export function renderWorkflowShow(resolved: ResolvedWorkflowDefinition, output:
     for (const task of stage.tasks) {
       const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
         ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(policy?.kind ?? 'agent-session').padEnd(18)} source: builtin`);
+      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(policy?.kind ?? 'agent-session').padEnd(18)} source: ${task.source ?? 'builtin'}`);
     }
     for (const check of stage.checks) {
-      output.write(`  Check  ${check.name.padEnd(28)} uses: ${inferCheckUses(check.name).padEnd(18)} source: builtin`);
+      output.write(`  Check  ${check.name.padEnd(28)} uses: ${(check.uses ?? inferCheckUses(check.name)).padEnd(18)} source: ${check.source ?? 'builtin'}`);
     }
     const approvalCheck = stage.approvalPolicy?.checkName ?? stage.approvalCheckName;
     if (approvalCheck) {
