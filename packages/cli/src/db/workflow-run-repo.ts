@@ -477,6 +477,8 @@ export class WorkflowRunRepo {
   }
 
   private snapshotFromRows(row: WorkflowRunRow): WorkflowRunSnapshot {
+    const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(safeParseJson(row.workflow_definition));
+    const stageDefinitions = workflowDefinitionSnapshot?.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS;
     const stageRows = this.db.all<WorkflowStageRunRow>(
       'SELECT * FROM workflow_stage_runs WHERE workflow_run_id = ? ORDER BY stage_order ASC',
       [row.id],
@@ -512,20 +514,19 @@ export class WorkflowRunRepo {
           ? safeParseJson(stageRow.build_work_source_state) as BuildWorkSourceState
           : undefined,
       };
-      stageSnapshot.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot);
+      const stageDefinition = stageDefinitions.find(definition => definition.stage === stageSnapshot.stage);
+      stageSnapshot.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
       return stageSnapshot;
     });
 
     const failureStage = stageRuns.find(stage => stage.status === 'failed');
-    const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(safeParseJson(row.workflow_definition));
     const snapshot: WorkflowRunSnapshot = {
       id: row.id,
       issueId: row.issue_id,
       issueNumber: row.issue_number,
       status: row.status as WorkflowRunStatus,
       currentStage: row.current_stage as Stage,
-      stageOrder: workflowDefinitionSnapshot?.compiledStageDefinitions.map(definition => definition.stage)
-        ?? DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage),
+      stageOrder: stageDefinitions.map(definition => definition.stage),
       workflowDefinitionSnapshot: workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot(),
       stageRuns,
       failure: failureStage?.failure ?? null,

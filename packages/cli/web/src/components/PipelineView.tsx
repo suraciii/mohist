@@ -954,65 +954,82 @@ function sha(value: string | null | undefined): string {
   return value ? value.slice(0, 7) : 'unknown'
 }
 
-function WorkflowRunIntegrationEvidencePanel({ stageStateMap }: { stageStateMap: Map<string, StageStateRead> }) {
-  const integrate = stageStateMap.get(Stage.Integrate)
-  const delivery = integrate?.deliveryMetadata
-  if (!integrate || !delivery) return null
-
-  const specSyncTask = integrate.tasks.find(t => t.taskId === 'integrate:spec-sync')
-  const archiveTask = integrate.tasks.find(t => t.taskId === 'integrate:archive-change')
-  const mergeTask = integrate.tasks.find(t => t.taskId === 'integrate:merge')
-  const healthCheck = integrate.checks.find(c => c.checkName === 'health:integrate')
-  const archiveOutput = archiveTask?.output as { archivePath?: string } | null | undefined
+function WorkflowRunDeliveryEvidencePanel({ stageStateMap }: { stageStateMap: Map<string, StageStateRead> }) {
+  const deliveryStages = Array.from(stageStateMap.values()).filter(stage => stage.deliveryMetadata)
+  if (deliveryStages.length === 0) return null
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-gray-700">Integration Evidence</h3>
+      <h3 className="text-sm font-semibold text-gray-700">Delivery Evidence</h3>
       <div className="space-y-3">
-        {specSyncTask && (
-          <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <StageStatusIcon status={specSyncTask.status === 'completed' ? 'completed' : specSyncTask.status} />
-              <span className="text-xs font-medium text-gray-800">Spec Sync</span>
-            </div>
-          </div>
-        )}
-        {archiveTask && (
-          <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <StageStatusIcon status={archiveTask.status === 'completed' ? 'completed' : archiveTask.status} />
-              <span className="text-xs font-medium text-gray-800">Archive OpenSpec Change</span>
-            </div>
-            {archiveOutput?.archivePath && (
-              <div className="text-xs text-gray-600 ml-7 font-mono">{archiveOutput.archivePath}</div>
-            )}
-          </div>
-        )}
-        {mergeTask && delivery.merge && (
-          <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <StageStatusIcon status={mergeTask.status === 'completed' ? 'completed' : mergeTask.status} />
-              <span className="text-xs font-medium text-gray-800">Merge to Target Branch</span>
-            </div>
-            {mergeTask.status === 'completed' && (
-              <div className="text-xs text-gray-600 ml-7 font-mono">
-                {delivery.merge.targetBranch ?? 'target'}: {sha(delivery.merge.baseSha)} → {sha(delivery.merge.candidateHeadSha)} → {sha(delivery.merge.landedSha)}
-              </div>
-            )}
-          </div>
-        )}
-        {healthCheck && (
-          <div className={`rounded-md border p-3 space-y-1.5 ${healthCheck.status === 'failed' || healthCheck.status === 'error' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-100'}`}>
-            <div className="flex items-center gap-2">
-              <StageStatusIcon status={healthCheck.status === 'passed' ? 'completed' : healthCheck.status} />
-              <span className="text-xs font-medium text-gray-800">Post-merge health check</span>
-            </div>
-            {healthCheck.message && (
-              <div className="text-xs text-red-600 ml-7">{healthCheck.message}</div>
-            )}
-          </div>
-        )}
+        {deliveryStages.map(stage => (
+          <WorkflowRunStageDeliveryEvidence key={stage.stage} stage={stage} />
+        ))}
       </div>
+    </div>
+  )
+}
+
+function WorkflowRunStageDeliveryEvidence({ stage }: { stage: StageStateRead }) {
+  const delivery = stage.deliveryMetadata
+  if (!delivery) return null
+  const archiveOutput = delivery.archive?.output as { archivePath?: string } | null | undefined
+
+  return (
+    <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-2">
+      <div className="text-xs font-semibold text-gray-700 capitalize">{stage.stage}</div>
+      {delivery.specSync && (
+        <WorkflowRunDeliveryRow label="Spec Sync" status={delivery.specSync.status} />
+      )}
+      {delivery.archive && (
+        <WorkflowRunDeliveryRow label="Archive OpenSpec Change" status={delivery.archive.status}>
+          {archiveOutput?.archivePath && <div className="text-xs text-gray-600 ml-7 font-mono">{archiveOutput.archivePath}</div>}
+        </WorkflowRunDeliveryRow>
+      )}
+      {delivery.merge && (
+        <WorkflowRunDeliveryRow label="Merge to Target Branch" status={delivery.merge.status}>
+          <div className="text-xs text-gray-600 ml-7 font-mono">
+            {delivery.merge.targetBranch ?? 'target'}: {sha(delivery.merge.baseSha)} -> {sha(delivery.merge.candidateHeadSha)} -> {sha(delivery.merge.landedSha)}
+          </div>
+        </WorkflowRunDeliveryRow>
+      )}
+      {delivery.remotePr && (
+        <WorkflowRunDeliveryRow label="Pull Request" status={delivery.remotePr.status}>
+          {delivery.remotePr.prUrl && <div className="text-xs text-gray-600 ml-7 font-mono">{delivery.remotePr.prUrl}</div>}
+        </WorkflowRunDeliveryRow>
+      )}
+      {delivery.remoteMerge && (
+        <WorkflowRunDeliveryRow label="Remote Merge" status={delivery.remoteMerge.status}>
+          <div className="text-xs text-gray-600 ml-7 font-mono">merged: {sha(delivery.remoteMerge.mergedSha)}</div>
+        </WorkflowRunDeliveryRow>
+      )}
+      {delivery.health && (
+        <WorkflowRunDeliveryRow label="Delivery health check" status={delivery.health.status} message={delivery.health.message} />
+      )}
+    </div>
+  )
+}
+
+function WorkflowRunDeliveryRow({
+  label,
+  status,
+  message,
+  children,
+}: {
+  label: string
+  status: WorkflowTaskStatus | WorkflowCheckStatus
+  message?: string | null
+  children?: React.ReactNode
+}) {
+  const failed = status === 'failed' || status === 'error'
+  return (
+    <div className={`rounded-md border p-3 space-y-1.5 ${failed ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
+      <div className="flex items-center gap-2">
+        <StageStatusIcon status={status === 'completed' || status === 'passed' ? 'completed' : status} />
+        <span className="text-xs font-medium text-gray-800">{label}</span>
+      </div>
+      {message && <div className="text-xs text-red-600 ml-7">{message}</div>}
+      {children}
     </div>
   )
 }
@@ -1360,11 +1377,10 @@ export function PipelineView({ issue }: { issue: Issue }) {
   const isClosed = issue.status === IssueStatus.Closed
   const isCompleted = issue.status === IssueStatus.Completed
   const isBacklog = issue.stage === Stage.Backlog
-  const hasIntegrateDeliveryMetadata = Boolean(stageStateMap.get(Stage.Integrate)?.deliveryMetadata)
-  const showWorkflowRunIntegrationEvidence = isCompleted || (
-    issue.stage === Stage.Integrate
-    && (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted)
-    && hasIntegrateDeliveryMetadata
+  const hasDeliveryMetadata = Array.from(stageStateMap.values()).some(stage => Boolean(stage.deliveryMetadata))
+  const showWorkflowRunDeliveryEvidence = isCompleted || (
+    (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted)
+    && hasDeliveryMetadata
   )
   const readOnly = isClosed
 
@@ -1489,11 +1505,11 @@ export function PipelineView({ issue }: { issue: Issue }) {
         />
       )}
 
-      {showWorkflowRunIntegrationEvidence && (
-        <WorkflowRunIntegrationEvidencePanel stageStateMap={stageStateMap} />
+      {showWorkflowRunDeliveryEvidence && (
+        <WorkflowRunDeliveryEvidencePanel stageStateMap={stageStateMap} />
       )}
 
-      {isCompleted && !hasIntegrateDeliveryMetadata && (
+      {isCompleted && !hasDeliveryMetadata && (
         <DoneEvidencePanel executions={executions} />
       )}
 

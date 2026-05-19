@@ -317,7 +317,9 @@ function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrato
       const baseBranch = project.baseBranch;
 
       if (ctx.issue.mergeState === MergeState.Merged) {
-        return { step: 'integrate:merge' as const, targetBranch: baseBranch, skipped: true, reason: 'already-merged' };
+        const delivery = recoverMergeDelivery(ctx, baseBranch);
+        if (!delivery) throw new Error('Issue is already marked merged but merge delivery evidence is missing');
+        return { step: 'integrate:merge' as const, ...delivery, skipped: true, reason: 'already-merged' };
       }
       if (!ctx.worktreeManager.mergeApprovedCandidate) throw new Error('worktreeManager.mergeApprovedCandidate is not available');
 
@@ -338,6 +340,32 @@ function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrato
   }
 
   throw new Error(`Unknown integrate task: ${taskId}`);
+}
+
+function recoverMergeDelivery(ctx: StageContext, targetBranch: string): { targetBranch: string; baseSha?: string; candidateHeadSha?: string; landedSha: string; rebased?: boolean } | null {
+  const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
+  const mergeTask = stageRun?.tasks.find(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+  const mergeOutput = unwrapWorkflowOutput(mergeTask?.output);
+  if (typeof mergeOutput?.landedSha === 'string' && mergeOutput.landedSha.length > 0) {
+    return {
+      targetBranch: typeof mergeOutput.targetBranch === 'string' ? mergeOutput.targetBranch : targetBranch,
+      baseSha: typeof mergeOutput.baseSha === 'string' ? mergeOutput.baseSha : undefined,
+      candidateHeadSha: typeof mergeOutput.candidateHeadSha === 'string' ? mergeOutput.candidateHeadSha : undefined,
+      landedSha: mergeOutput.landedSha,
+      rebased: typeof mergeOutput.rebased === 'boolean' ? mergeOutput.rebased : undefined,
+    };
+  }
+
+  return null;
+}
+
+function unwrapWorkflowOutput(output: unknown): Record<string, unknown> | null {
+  if (!output || typeof output !== 'object') return null;
+  const data = output as Record<string, unknown>;
+  if (data.kind === 'service-call-task' && data.result && typeof data.result === 'object') {
+    return data.result as Record<string, unknown>;
+  }
+  return data;
 }
 
 async function executeConvergeReviewSnapshotTask(ctx: StageContext): Promise<StageTaskResult> {
