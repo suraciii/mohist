@@ -5,6 +5,7 @@ import { createWorkflowSessionObservers } from '../agent-runtime';
 import { formatAgentPrompt } from '../agents/agent-prompt-schema';
 import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
 import { loadAgentConfig } from './workflow-loader';
+import { buildFailedCheckContext, type FailedCheckContext } from './domain';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'review-fix-task' });
@@ -15,12 +16,47 @@ export interface ReviewFixTaskOptions {
   attempt: number;
 }
 
+function buildStructuredItemsSection(ctx: FailedCheckContext): string {
+  if (ctx.blockingItems.length === 0) return '';
+
+  const itemsSection = ctx.blockingItems.map(item => {
+    const parts = [
+      `- [ID: ${item.id}]`,
+      `  Severity: ${item.severity}`,
+      item.scope ? `  Scope: ${item.scope}` : '',
+      `  Evidence: ${item.evidence}`,
+      item.suggestedAction ? `  SuggestedAction: ${item.suggestedAction}` : '',
+      item.verification ? `  Verification: ${item.verification}` : '',
+    ];
+    return parts.filter(Boolean).join('\n');
+  }).join('\n\n');
+
+  const nonBlockingSection = ctx.nonBlockingItems.length > 0
+    ? '\n\nNon-blocking / Follow-up Items (do NOT fix these unless they directly overlap with a blocking item):\n' +
+      ctx.nonBlockingItems.map(item =>
+        `- [ID: ${item.id}] Severity: ${item.severity} Status: ${item.status ?? 'open'} — ${item.evidence}`
+      ).join('\n')
+    : '';
+
+  const snapshotSection = ctx.snapshot?.sha
+    ? `\n\nCandidate Snapshot SHA: ${ctx.snapshot.sha}`
+    : '';
+
+  return [
+    `Blocking Items (${ctx.blockingItems.length}):`,
+    'You MUST resolve ALL of these items:',
+    '',
+    itemsSection,
+    nonBlockingSection,
+    snapshotSection,
+  ].join('\n');
+}
+
 function buildReviewFixPrompt(ctx: StageContext, options: ReviewFixTaskOptions, changeDir: string | null): string {
-  const output = options.failedCheck.output as { verdict?: string; reviewReport?: string; fixSuggestions?: string } | undefined;
-  const fixSuggestions = output?.fixSuggestions ?? '';
-  const reviewReport = output?.reviewReport ?? '';
-  const trimmedReport = reviewReport.length > 12000 ? reviewReport.slice(-12000) : reviewReport;
-  const trimmedSuggestions = fixSuggestions.length > 8000 ? fixSuggestions.slice(-8000) : fixSuggestions;
+  const failedCheckContext = buildFailedCheckContext(options.failedCheck);
+  const structuredItemsBlock = failedCheckContext.blockingItems.length > 0
+    ? buildStructuredItemsSection(failedCheckContext)
+    : null;
 
   const task = [
     `Change Directory: ${changeDir ?? options.worktreePath}`,
@@ -29,25 +65,43 @@ function buildReviewFixPrompt(ctx: StageContext, options: ReviewFixTaskOptions, 
     '',
     `Failed check: ${options.failedCheck.name}`,
     '',
-    'Review Report:',
-    trimmedReport,
-    '',
-    'Fix Suggestions:',
-    trimmedSuggestions || 'No structured fix suggestions found. Read the review report carefully and address all FAIL items.',
-  ].join('\n');
+  ];
+
+  if (structuredItemsBlock) {
+    task.push(
+      structuredItemsBlock,
+      '',
+    );
+  } else {
+    const output = options.failedCheck.output as { verdict?: string; reviewReport?: string; fixSuggestions?: string } | undefined;
+    const fixSuggestions = output?.fixSuggestions ?? '';
+    const reviewReport = output?.reviewReport ?? '';
+    const trimmedReport = reviewReport.length > 12000 ? reviewReport.slice(-12000) : reviewReport;
+    const trimmedSuggestions = fixSuggestions.length > 8000 ? fixSuggestions.slice(-8000) : fixSuggestions;
+
+    task.push(
+      'Review Report:',
+      trimmedReport,
+      '',
+      'Fix Suggestions:',
+      trimmedSuggestions || 'No structured fix suggestions found. Read the review report carefully and address all FAIL items.',
+      '',
+    );
+  }
 
   return formatAgentPrompt({
     role: 'Fix review findings for this issue',
     projectContext: loadAgentConfig(options.worktreePath).context,
     contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
-    task,
-    contract: 'Apply the minimal code or artifact changes required to resolve every FAIL item. Do not modify review.md or review-self-check.md.',
+    task: task.join('\n'),
+    contract: 'Apply the minimal code or artifact changes required to resolve every listed blocking item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
     instruction: [
       '1. Read the issue and every @file context reference before editing.',
-      '2. Read the review report and fix suggestions carefully.',
-      '3. Apply only the minimal changes required to resolve every FAIL item.',
+      '2. Read the blocking items carefully. You must address ALL listed blocking items.',
+      '3. Apply only the minimal changes required to resolve every blocking item.',
       '4. Do not make unrelated refactors.',
       '5. Add or update focused tests when the fix changes behavior.',
+      '6. Non-blocking follow-up items should be left for later unless they directly overlap with a blocking item.',
     ].join('\n'),
   });
 }

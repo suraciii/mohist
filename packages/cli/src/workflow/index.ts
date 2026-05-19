@@ -120,3 +120,9 @@ export {
   ConfigDrivenStageRunner,
   type ConfigDrivenStageRunnerOptions,
 } from './config-driven-stage-runner';
+
+export {
+  type FailedCheckContext,
+  type ReactionInputSelector,
+  buildFailedCheckContext,
+} from './domain';

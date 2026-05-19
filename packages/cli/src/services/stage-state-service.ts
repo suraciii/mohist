@@ -8,6 +8,8 @@ import type { CheckState, CheckSuiteChecks } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { CheckResult, StageTaskResult } from '../workflow/stage-context';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
+import type { WorkflowConvergenceState } from '../types';
+import { extractReactionOutput } from '../workflow/convergence';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
@@ -110,6 +112,7 @@ export interface StageStateRead {
   failure?: StageFailureDetails | null;
   deliveryMetadata?: StageDeliveryMetadata | null;
   checkRepair?: CheckRepairState;
+  convergence?: WorkflowConvergenceState;
 }
 
 interface StageTaskRow {
@@ -462,11 +465,14 @@ function extractUnresolvedSummary(output: unknown, message: string | null): stri
     return message ?? null;
   }
   const obj = output as Record<string, unknown>;
+  const source = obj.structuredResult && typeof obj.structuredResult === 'object'
+    ? obj.structuredResult as Record<string, unknown>
+    : obj;
   if (typeof obj.unresolvedSummary === 'string' && obj.unresolvedSummary.length > 0) {
     return obj.unresolvedSummary;
   }
-  if (typeof obj.verdict === 'string' && obj.verdict === 'FAIL' && typeof obj.summary === 'string' && obj.summary.length > 0) {
-    return obj.summary;
+  if (typeof source.verdict === 'string' && source.verdict === 'FAIL' && typeof source.summary === 'string' && source.summary.length > 0) {
+    return source.summary;
   }
   if (typeof obj.message === 'string' && obj.message.length > 0) {
     return obj.message;
@@ -542,6 +548,134 @@ function computeCheckRepairState(
     followUpReviewStatus,
     stopReason,
     unresolvedSummary,
+  };
+}
+
+function extractStructuredResult(output: unknown): {
+  verdict?: string;
+  marker?: string;
+  items?: Array<{ id: string; severity: string; status?: string; scope?: string; evidence: string; suggestedAction?: string; verification?: string }>;
+  evidence?: string;
+  repairedItemIds?: string[];
+  summary?: string;
+} | null {
+  if (!output || typeof output !== 'object') return null;
+  const obj = output as Record<string, unknown>;
+  const source = obj.structuredResult && typeof obj.structuredResult === 'object'
+    ? obj.structuredResult as Record<string, unknown>
+    : obj;
+  return {
+    verdict: typeof source.verdict === 'string' ? source.verdict : undefined,
+    marker: typeof source.marker === 'string' ? source.marker : undefined,
+    items: Array.isArray(source.items) ? source.items as Array<{ id: string; severity: string; status?: string; scope?: string; evidence: string; suggestedAction?: string; verification?: string }> : undefined,
+    evidence: typeof source.evidence === 'string' ? source.evidence : undefined,
+    repairedItemIds: Array.isArray(source.repairedItemIds) ? source.repairedItemIds as string[] : undefined,
+    summary: typeof source.summary === 'string' ? source.summary : undefined,
+  };
+}
+
+function computeConvergenceState(
+  tasks: StageTaskState[],
+  checks: StageCheckState[],
+): WorkflowConvergenceState | null {
+  const fixTasks = tasks.filter(task => isFixReviewFindingsTask(task.taskId));
+
+  const failedCheck = checks.find(c => c.status === 'failed' || c.status === 'error');
+
+  if (!failedCheck && fixTasks.length === 0) {
+    return null;
+  }
+
+  const blockingItems: string[] = [];
+  const nonBlockingItems: string[] = [];
+  let directlyRepairedCount = 0;
+  const attemptedItemIds: string[] = [];
+  const resolvedItemIds: string[] = [];
+  const unresolvedItemIds: string[] = [];
+  const newBlockingItemIds: string[] = [];
+
+  if (failedCheck) {
+    const structured = extractStructuredResult(failedCheck.output);
+    if (structured?.items) {
+      for (const item of structured.items) {
+        if (item.severity === 'blocking') {
+          blockingItems.push(item.id);
+        } else {
+          nonBlockingItems.push(item.id);
+        }
+      }
+    }
+  }
+
+  for (const task of tasks) {
+    const structured = extractStructuredResult(task.output);
+    if (structured?.repairedItemIds) {
+      directlyRepairedCount += structured.repairedItemIds.length;
+    }
+    if (isFixReviewFindingsTask(task.taskId) && task.status === 'completed') {
+      const reaction = extractReactionOutput({
+        taskId: task.taskId,
+        title: task.title,
+        status: 'completed',
+        artifacts: task.artifacts,
+        attempts: task.attempts,
+        duration: task.duration,
+        output: task.output,
+      });
+      if (reaction) {
+        for (const id of reaction.attemptedItemIds) {
+          if (!attemptedItemIds.includes(id)) attemptedItemIds.push(id);
+        }
+        for (const id of reaction.resolvedItemIds) {
+          if (!resolvedItemIds.includes(id)) resolvedItemIds.push(id);
+        }
+        for (const id of reaction.unresolvedItemIds) {
+          if (!unresolvedItemIds.includes(id)) unresolvedItemIds.push(id);
+        }
+        continue;
+      }
+      if (structured?.items) {
+        for (const item of structured.items) {
+          if (!attemptedItemIds.includes(item.id)) {
+            attemptedItemIds.push(item.id);
+          }
+          if (item.status === 'resolved') {
+            if (!resolvedItemIds.includes(item.id)) {
+              resolvedItemIds.push(item.id);
+            }
+          } else if (item.status === 'unresolved') {
+            if (!unresolvedItemIds.includes(item.id)) {
+              unresolvedItemIds.push(item.id);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (fixTasks.length > 0) {
+    for (const id of blockingItems) {
+      if (!attemptedItemIds.includes(id) && !resolvedItemIds.includes(id)) {
+        newBlockingItemIds.push(id);
+      }
+    }
+  }
+
+  const blockedReason = failedCheck
+    ? extractUnresolvedSummary(failedCheck.output, failedCheck.message)
+    : (fixTasks.length > 0 ? 'Reaction task completed but check not passed' : null) ?? undefined;
+
+  return {
+    failedCheck: failedCheck?.checkName,
+    blockingItemCount: blockingItems.length,
+    directlyRepairedCount,
+    reactionAttempts: fixTasks.length,
+    attemptedItemIds,
+    resolvedItemIds,
+    unresolvedItemIds,
+    newBlockingItemIds,
+    nonBlockingItemIds: nonBlockingItems,
+    blockedReason: blockedReason ?? undefined,
   };
 }
 
@@ -725,11 +859,20 @@ export class StageStateService {
 
     const allTasks = taskRows.map(rowToStageTask);
     const filteredTasks = allTasks.filter(t => isRealTask(stage, t.taskId));
-    return rowToStageStateRead(
+    const stageState = rowToStageStateRead(
       stateRow,
       filteredTasks,
       checkRows.map(rowToStageCheck),
     );
+
+    if (stage === Stage.Check) {
+      const convergence = computeConvergenceState(filteredTasks, stageState.checks);
+      if (convergence) {
+        stageState.convergence = convergence;
+      }
+    }
+
+    return stageState;
   }
 
   getIssueStageState(issueId: string): StageStateRead[] {
@@ -760,6 +903,8 @@ export class StageStateService {
       if (row.stage === Stage.Check) {
         const repair = computeCheckRepairState(filteredTasks, stageState.checks);
         stageState.checkRepair = repair === null ? undefined : repair;
+        const convergence = computeConvergenceState(filteredTasks, stageState.checks);
+        stageState.convergence = convergence === null ? undefined : convergence;
       }
 
       return stageState;
@@ -817,6 +962,10 @@ export class StageStateService {
         ? computeCheckRepairState(tasks, checks)
         : null;
 
+      const convergenceRaw = stageRun.stage === Stage.Check
+        ? computeConvergenceState(tasks, checks)
+        : null;
+
       return {
         stage: stageRun.stage,
         status,
@@ -830,6 +979,7 @@ export class StageStateService {
         failure: this.workflowRunFailureDetails(stageRun, tasks, checks),
         deliveryMetadata: this.workflowRunDeliveryMetadata(stageRun, tasks, checks),
         ...(checkRepairRaw !== null ? { checkRepair: checkRepairRaw } : {}),
+        ...(convergenceRaw !== null ? { convergence: convergenceRaw } : {}),
       };
     });
   }

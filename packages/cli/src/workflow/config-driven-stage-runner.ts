@@ -10,6 +10,12 @@ import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-di
 import type { CheckRegistry } from './checks/check-registry';
 import type { StageDefinition, TaskExecutionKind, TaskExecutionPolicy, WorkflowDecision, WorkflowEvent, WorkSourceKind } from './domain';
 import { Log } from '../util/log';
+import {
+  extractReactionOutput,
+  buildVerificationContextFromReaction,
+  saveVerificationContext,
+  clearVerificationContext,
+} from './convergence';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { readTasks } from '../openspec/ralph-executor';
 import { execFile } from 'child_process';
@@ -216,8 +222,65 @@ export class ConfigDrivenStageRunner implements StageRunner {
 
   private applyAcceptedTaskSideEffects(ctx: StageContext, events: WorkflowEvent[]): void {
     if (ctx.issue.stage !== Stage.Check) return;
+
+    const fixReviewEvents = events.filter(
+      event => event.type === 'task-completed' && event.taskId?.startsWith('fix-review-findings'),
+    );
+    if (fixReviewEvents.length > 0) {
+      this.persistReactionConvergenceFromWorkflow(ctx);
+    }
+
+    const aiReviewCompleted = events.some(
+      event => event.type === 'task-completed' && event.taskId === 'ai-review',
+    );
+    if (aiReviewCompleted) {
+      const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+      if (changeDir) {
+        clearVerificationContext(changeDir);
+      }
+    }
+
     if (!events.some(event => event.type === 'task-invalidated' && event.taskId === 'ai-review')) return;
     this.invalidateReviewArtifactForRereview(ctx);
+  }
+
+  private persistReactionConvergenceFromWorkflow(ctx: StageContext): void {
+    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === Stage.Check);
+    if (!stageRun) return;
+
+    const fixTask = [...stageRun.tasks].reverse().find(
+      t => t.id.startsWith('fix-review-findings') && t.status === 'completed',
+    );
+    if (!fixTask?.output) return;
+
+    const reactionOutput = extractReactionOutput({
+      taskId: fixTask.id,
+      title: 'Fix review findings',
+      status: 'completed',
+      artifacts: [],
+      attempts: fixTask.attempts,
+      duration: fixTask.duration,
+      output: fixTask.output,
+    });
+    if (!reactionOutput) return;
+
+    const reviewCheck = stageRun.checks.find(c => c.checkName === 'review-passed');
+    const failedCheck: import('./stage-context').CheckResult = {
+      name: 'review-passed',
+      status: 'fail',
+      output: reviewCheck?.output ?? { verdict: 'FAIL' },
+    };
+
+    const verificationCtx = buildVerificationContextFromReaction(
+      failedCheck,
+      reactionOutput,
+      fixTask.attempts,
+    );
+
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    if (changeDir) {
+      saveVerificationContext(changeDir, verificationCtx);
+    }
   }
 
   private invalidateReviewArtifactForRereview(ctx: StageContext): void {

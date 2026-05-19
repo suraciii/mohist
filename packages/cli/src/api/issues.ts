@@ -1398,6 +1398,26 @@ export function createIssueRoutes(
       );
       const driftResponse = buildDriftResponse(driftState);
 
+      let convergence;
+      if (stageStateService) {
+        let stageStates;
+        if (workflowRunService) {
+          const run = workflowRunService.getLatestRunForIssue(issue.id);
+          if (run) {
+            stageStates = stageStateService.getIssueStageStateFromWorkflowRun(run);
+          }
+        }
+        if (!stageStates) {
+          stageStates = stageStateService.getIssueStageState(issue.id);
+        }
+        const currentStageState = stageStates.find(s => s.stage === issue.stage);
+        convergence = currentStageState?.convergence;
+        if (!convergence) {
+          const stageWithConvergence = stageStates.find(s => s.convergence);
+          convergence = stageWithConvergence?.convergence;
+        }
+      }
+
       const response: ApiResponse = {
         success: true,
         data: {
@@ -1410,6 +1430,7 @@ export function createIssueRoutes(
           prerequisites,
           startEligibility,
           primaryEpic,
+          convergence,
           ...driftResponse,
           recovery,
         }

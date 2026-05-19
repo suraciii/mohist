@@ -92,6 +92,20 @@ export interface Issue {
   drift?: BaseDriftInfo | null
   primaryEpic?: { id: string; title: string; status: string; priority: string } | null
   recovery?: RecoveryProjection | null
+  convergence?: WorkflowConvergenceState | null
+}
+
+export interface WorkflowConvergenceState {
+  failedCheck?: string
+  blockingItemCount: number
+  directlyRepairedCount: number
+  reactionAttempts: number
+  attemptedItemIds: string[]
+  resolvedItemIds: string[]
+  unresolvedItemIds: string[]
+  newBlockingItemIds: string[]
+  nonBlockingItemIds: string[]
+  blockedReason?: string
 }
 
 export interface Project {

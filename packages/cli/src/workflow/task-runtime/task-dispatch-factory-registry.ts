@@ -9,6 +9,7 @@ import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
+import { loadVerificationContext, buildVerificationPromptSuffix } from '../convergence';
 
 interface PlanTaskConfig {
   type: string;
@@ -237,7 +238,7 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     taskId: input.task.taskId,
     title: input.task.title,
     kind: 'agent-session',
-    prompt: buildReviewerPrompt(input.ctx.issue, changeDir),
+    prompt: buildCheckReviewPrompt(input, changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: 'check',
     attempt: input.attempt,
@@ -245,6 +246,13 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     artifactVerification: () => fs.existsSync(path.join(changeDir, reviewOutputPath)) ? [reviewOutputPath] : [],
     input: { mode: 'ai-review' },
   };
+}
+
+function buildCheckReviewPrompt(input: TaskDispatchFactoryInput, changeDir: string): string {
+  const basePrompt = buildReviewerPrompt(input.ctx.issue, changeDir);
+  const verificationCtx = loadVerificationContext(changeDir);
+  if (!verificationCtx) return basePrompt;
+  return basePrompt + buildVerificationPromptSuffix(verificationCtx);
 }
 
 function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrator: OpenSpecIntegrator): (ctx: StageContext) => Promise<unknown> {
