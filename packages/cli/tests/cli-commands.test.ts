@@ -327,7 +327,8 @@ describe('CLI Commands', () => {
 
       const output = lines.join('\n');
       expect(output).toContain('Task: ai-review');
-      expect(output).toContain('Uses: agent-session');
+      expect(output).toContain('Uses: mohist/agent');
+      expect(output).toContain('About: Runs an agent task');
       expect(output).toContain('Check: merge-ready');
       expect(output).toContain('Uses: mohist/merge-ready');
       expect(output).toContain('Blocking: yes');

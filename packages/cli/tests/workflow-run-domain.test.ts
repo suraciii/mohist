@@ -91,6 +91,18 @@ describe('WorkflowRun domain aggregate', () => {
       'tasks',
       'self-review',
     ]);
+    const plan = compiled.find(definition => definition.stage === Stage.Plan)!;
+    const check = compiled.find(definition => definition.stage === Stage.Check)!;
+    expect(plan.taskExecutionPolicies?.filter(policy => policy.kind === 'agent-session').map(policy => policy.taskId)).toEqual([
+      'proposal',
+      'specs',
+      'design',
+      'tasks',
+      'self-review',
+    ]);
+    expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
+      kind: 'agent-session',
+    });
   });
 
   it('compiles WorkflowDefinition defensively so callers cannot mutate the source definition', () => {
