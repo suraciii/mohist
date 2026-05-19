@@ -755,13 +755,17 @@ export class IntegrateStageRunner extends BaseStageRunner {
     const baseBranch = project.baseBranch;
 
     if (ctx.issue.mergeState === MergeState.Merged) {
+      const delivery = this.recoverMergeDelivery(ctx, baseBranch);
+      if (!delivery) {
+        throw new Error('Issue is already marked merged but merge delivery evidence is missing');
+      }
       const duration = Date.now() - new Date(startedAt).getTime();
       const result: IntegrateStepResult = {
         step: 'integrate:merge',
         status: 'completed',
         output: {
           step: 'integrate:merge' as const,
-          targetBranch: baseBranch,
+          ...delivery,
           skipped: true,
           reason: 'already-merged',
         },
@@ -931,6 +935,32 @@ export class IntegrateStageRunner extends BaseStageRunner {
       });
       return result;
     }
+  }
+
+  private recoverMergeDelivery(ctx: StageContext, targetBranch: string): { targetBranch: string; baseSha?: string; candidateHeadSha?: string; landedSha: string; rebased?: boolean } | null {
+    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
+    const mergeTask = stageRun?.tasks.find(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+    const mergeOutput = this.unwrapWorkflowOutput(mergeTask?.output);
+    if (typeof mergeOutput?.landedSha === 'string' && mergeOutput.landedSha.length > 0) {
+      return {
+        targetBranch: typeof mergeOutput.targetBranch === 'string' ? mergeOutput.targetBranch : targetBranch,
+        baseSha: typeof mergeOutput.baseSha === 'string' ? mergeOutput.baseSha : undefined,
+        candidateHeadSha: typeof mergeOutput.candidateHeadSha === 'string' ? mergeOutput.candidateHeadSha : undefined,
+        landedSha: mergeOutput.landedSha,
+        rebased: typeof mergeOutput.rebased === 'boolean' ? mergeOutput.rebased : undefined,
+      };
+    }
+
+    return null;
+  }
+
+  private unwrapWorkflowOutput(output: unknown): Record<string, unknown> | null {
+    if (!output || typeof output !== 'object') return null;
+    const data = output as Record<string, unknown>;
+    if (data.kind === 'service-call-task' && data.result && typeof data.result === 'object') {
+      return data.result as Record<string, unknown>;
+    }
+    return data;
   }
 
   protected getChecks(): Check[] {

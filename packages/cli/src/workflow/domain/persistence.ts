@@ -13,6 +13,7 @@ import {
   type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
 } from './index';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
 
 function isCausedByMetadata(value: unknown): value is CausedByMetadata {
   return Boolean(value && typeof value === 'object' && 'type' in value && typeof (value as { type?: unknown }).type === 'string');
@@ -55,7 +56,7 @@ function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDet
   }
 
   const failedCheck = snapshot.checks.find(check => check.status === 'failed' || check.status === 'error');
-  if (failedCheck?.name === 'health:integrate' && snapshot.freezePoint) {
+  if (failedCheck && snapshot.freezePoint) {
     return {
       reason: 'post-merge-health-failed',
       stage,
@@ -107,8 +108,9 @@ export function hydrateWorkflowRun(
     stageRun.status = stageSnapshot.status;
     stageRun.attemptSequence = stageSnapshot.attemptSequence ?? 1;
     stageRun.approval = stageSnapshot.approval ? { ...stageSnapshot.approval } : null;
-    stageRun.failure = inferStageFailure(stageSnapshot.stage, stageSnapshot);
-    stageRun.freezePoint = stageSnapshot.freezePoint ? { ...stageSnapshot.freezePoint, delivery: { ...stageSnapshot.freezePoint.delivery } } : null;
+    const stageDefinition = definitions.find(definition => definition.stage === stageSnapshot.stage);
+    stageRun.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
+    stageRun.failure = inferStageFailure(stageSnapshot.stage, { ...stageSnapshot, freezePoint: stageRun.freezePoint });
     if (stageSnapshot.buildWorkSourceState) {
       stageRun.buildWorkSourceState = stageSnapshot.buildWorkSourceState;
     }
@@ -281,14 +283,39 @@ export function workflowDefinitionSnapshotFromUnknown(value: unknown): WorkflowD
   return snapshot as WorkflowDefinitionSnapshot;
 }
 
-export function freezePointFromStageSnapshot(stage: Stage, snapshot: StageRunSnapshot): FreezePoint | null {
+export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSnapshot, definition?: StageDefinition): FreezePoint | null {
   if (snapshot.freezePoint) return snapshot.freezePoint;
-  if (stage !== Stage.Integrate) return null;
-  const mergeTask = snapshot.tasks.find(task => task.id === 'integrate:merge' && task.status === 'completed');
-  if (!mergeTask) return null;
-  return {
-    taskId: 'integrate:merge',
-    delivery: extractDeliveryMetadata(mergeTask.output),
-    frozenAt: new Date().toISOString(),
-  };
+  for (const task of snapshot.tasks) {
+    if (task.status !== 'completed') continue;
+    const uses = workflowTaskUse(definition, task.id);
+    if (getWorkflowUseDefinition(uses)?.locksCode !== true) continue;
+    return {
+      taskId: task.id,
+      delivery: extractDeliveryMetadata(task.output),
+      frozenAt: new Date().toISOString(),
+    };
+  }
+  for (const check of snapshot.checks) {
+    if (check.status !== 'passed') continue;
+    const uses = workflowCheckUse(definition, check.name);
+    if (getWorkflowUseDefinition(uses)?.locksCode !== true) continue;
+    return {
+      checkName: check.name,
+      delivery: extractDeliveryMetadata(check.output),
+      frozenAt: new Date().toISOString(),
+    };
+  }
+  return null;
+}
+
+function workflowTaskUse(definition: StageDefinition | undefined, taskId: string): string {
+  const taskDefinition = definition?.tasks.find(task => task.id === taskId);
+  const policy = definition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
+    ?? definition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
+  return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
+}
+
+function workflowCheckUse(definition: StageDefinition | undefined, checkName: string): string {
+  const checkDefinition = definition?.checks.find(check => check.name === checkName);
+  return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
 }

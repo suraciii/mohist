@@ -271,20 +271,19 @@ describe('Integrate WorkflowRun aggregate delivery', () => {
     ]);
   });
 
-  it('fails already-merged task output when delivery evidence lacks landed sha', () => {
+  it('accepts already-merged task output when recovered delivery evidence includes landed sha', () => {
     const run = advanceToIntegrate();
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
     run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
     const decision = run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
-      output: { targetBranch: 'main', skipped: true, reason: MergeState.Merged },
+      output: { targetBranch: 'main', landedSha: 'landed-sha', skipped: true, reason: MergeState.Merged },
     });
 
     const mergeTask = integrateSnapshot(run).tasks.find(task => task.id === 'integrate:merge')!;
-    expect(mergeTask.output).toMatchObject({ targetBranch: 'main', skipped: true, reason: MergeState.Merged });
-    expect(mergeTask.status).toBe('failed');
-    expect(mergeTask.reason).toBe('Missing required evidence for mohist/merge: landedSha');
-    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
-    expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
+    expect(mergeTask.output).toMatchObject({ targetBranch: 'main', landedSha: 'landed-sha', skipped: true, reason: MergeState.Merged });
+    expect(mergeTask.status).toBe('completed');
+    expect(run.stageRun(Stage.Integrate).freezePoint?.delivery.landedSha).toBe('landed-sha');
+    expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Integrate, checkName: 'health:integrate' });
   });
 });

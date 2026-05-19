@@ -494,6 +494,65 @@ ArcFail added scenario content.`);
         worktreeManager: {
           mergeApprovedCandidate: mergeApprovedCandidateMock,
         } as any,
+        workflowRun: {
+          id: 'workflow-run-64',
+          issueId: baseCtx.issue.id,
+          issueNumber,
+          status: 'running',
+          currentStage: Stage.Integrate,
+          startedBy: 'test',
+          workflowDefinition: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          stageRuns: [
+            {
+              id: 'stage-run-integrate-64',
+              workflowRunId: 'workflow-run-64',
+              stage: Stage.Integrate,
+              status: 'running',
+              stageOrder: 4,
+              attemptSequence: 1,
+              approvalStatus: null,
+              approvalOutput: null,
+              approvalRequestedAt: null,
+              approvalRespondedAt: null,
+              startedAt: new Date().toISOString(),
+              completedAt: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              tasks: [
+                {
+                  id: 'task-integrate-merge-64',
+                  workflowRunId: 'workflow-run-64',
+                  stageRunId: 'stage-run-integrate-64',
+                  taskId: 'integrate:merge',
+                  title: 'Merge',
+                  status: 'completed',
+                  taskOrder: 2,
+                  attempts: 1,
+                  duration: 0,
+                  artifacts: [],
+                  output: {
+                    step: 'integrate:merge',
+                    targetBranch: 'main',
+                    baseSha: 'abc123',
+                    candidateHeadSha: 'def456',
+                    landedSha: 'ghi789',
+                  },
+                  reason: null,
+                  causedByType: null,
+                  causedByCheckName: null,
+                  causedByTaskId: null,
+                  startedAt: new Date().toISOString(),
+                  completedAt: new Date().toISOString(),
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                },
+              ],
+              checks: [],
+            },
+          ],
+        } as any,
       });
       fs.writeFileSync(path.join(tmpDir, 'workflow.yaml'), `
 stages:
@@ -528,6 +587,7 @@ healthGates:
         output: {
           skipped: true,
           reason: 'already-merged',
+          landedSha: 'ghi789',
         },
       });
 

@@ -311,6 +311,113 @@ describe('StageRunner migration regression coverage', () => {
       expect(taskHandler).toHaveBeenCalledTimes(1);
     });
 
+    it('ConfigDrivenStageRunner mirrors aggregate-rejected task completion as failed execution evidence', async () => {
+      const taskHandler = vi.fn().mockResolvedValue({
+        taskId: 'integrate:merge',
+        title: 'Merge to main',
+        status: 'completed',
+        artifacts: [],
+        attempts: 1,
+        duration: 100,
+        output: { targetBranch: 'main' },
+      });
+      const run = WorkflowRun.startWorkflow({
+        id: 'run-reject-task',
+        issueId: 'issue-1',
+        issueNumber: 1,
+        definitions: [createStageDefinition(Stage.Integrate)],
+      }).run;
+      run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
+      run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/1-test' } });
+      const stageExecutionRepo = {
+        create: vi.fn().mockReturnValue({ id: 'exec-1' }),
+        findById: vi.fn().mockReturnValue({ checkResults: [] }),
+        updateCheckResults: vi.fn(),
+        appendTaskResult: vi.fn(),
+        updateStatus: vi.fn(),
+      };
+      const runner = new ConfigDrivenStageRunner({
+        taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        checkRegistry: createBasicCheckRegistry({}),
+        getStageDefinition: createStageDefinition,
+        worktreePath: '/tmp',
+      });
+      const ctx = makeMockContext(Stage.Integrate, {
+        stageExecutionRepo: stageExecutionRepo as any,
+        workflowApplicationService: {
+          completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
+          recordCheckResult: vi.fn(),
+          approveStage: vi.fn(),
+          materializeTasks: vi.fn(),
+        } as any,
+      });
+      ctx.requestedWork = { kind: 'task', stage: Stage.Integrate, taskId: 'integrate:merge' };
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Missing required evidence for mohist/merge: landedSha');
+      expect(stageExecutionRepo.appendTaskResult).toHaveBeenCalledWith('exec-1', expect.objectContaining({
+        taskId: 'integrate:merge',
+        status: 'failed',
+        reason: 'Missing required evidence for mohist/merge: landedSha',
+      }));
+      expect(stageExecutionRepo.updateStatus).toHaveBeenCalledWith('exec-1', 'failed');
+    });
+
+    it('ConfigDrivenStageRunner mirrors aggregate-rejected check pass as failed execution evidence', async () => {
+      const checkHandler = vi.fn().mockReturnValue({ name: 'pr-merged', status: 'pass' as const });
+      const definition: StageDefinition = {
+        stage: Stage.Integrate,
+        tasks: [],
+        checks: [{ name: 'pr-merged', title: 'PR merged', uses: 'mohist/pr-merged' }],
+        checkPolicies: [{ checkName: 'pr-merged', phase: 'post-task' }],
+        requiresApproval: false,
+      };
+      const run = WorkflowRun.startWorkflow({
+        id: 'run-reject-check',
+        issueId: 'issue-1',
+        issueNumber: 1,
+        definitions: [definition],
+      }).run;
+      const stageExecutionRepo = {
+        create: vi.fn().mockReturnValue({ id: 'exec-1' }),
+        findById: vi.fn().mockReturnValue({ checkResults: [] }),
+        updateCheckResults: vi.fn(),
+        appendTaskResult: vi.fn(),
+        updateStatus: vi.fn(),
+      };
+      const runner = new ConfigDrivenStageRunner({
+        taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry({}),
+        checkRegistry: createBasicCheckRegistry({ 'pr-merged': checkHandler }),
+        getStageDefinition: stage => stage === Stage.Integrate ? definition : createStageDefinition(stage),
+        worktreePath: '/tmp',
+      });
+      const ctx = makeMockContext(Stage.Integrate, {
+        stageExecutionRepo: stageExecutionRepo as any,
+        workflowApplicationService: {
+          completeTask: vi.fn(),
+          recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
+          approveStage: vi.fn(),
+          materializeTasks: vi.fn(),
+        } as any,
+      });
+      ctx.requestedWork = { kind: 'check', stage: Stage.Integrate, checkName: 'pr-merged' };
+
+      const result = await runner.run(ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Missing required evidence for mohist/pr-merged: mergedSha');
+      expect(stageExecutionRepo.updateCheckResults).toHaveBeenCalledWith('exec-1', [expect.objectContaining({
+        name: 'pr-merged',
+        status: 'fail',
+        message: 'Missing required evidence for mohist/pr-merged: mergedSha',
+      })]);
+      expect(stageExecutionRepo.updateStatus).toHaveBeenCalledWith('exec-1', 'failed');
+    });
+
     it('ConfigDrivenStageRunner handles Plan stage with agent-session tasks', async () => {
       let tmpDir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'mohist-plan-test-'));
       require('fs').mkdirSync(require('path').join(tmpDir, 'change'), { recursive: true });

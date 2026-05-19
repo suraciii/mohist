@@ -1,4 +1,4 @@
-import { Stage, MergeState } from '../types';
+import { Stage } from '../types';
 import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from './stage-context';
 import type { StageRunner } from './check-stage-runner';
 import type { CheckContext } from './checks';
@@ -8,7 +8,7 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { StageDefinition, TaskExecutionKind, TaskExecutionPolicy, WorkflowDecision, WorkflowEvent, WorkSourceKind } from './domain';
+import type { CheckRunStatus, StageDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkSourceKind } from './domain';
 import { Log } from '../util/log';
 import {
   extractReactionOutput,
@@ -25,6 +25,13 @@ import * as fs from 'fs';
 
 const log = Log.create({ service: 'config-driven-stage-runner' });
 const execFileAsync = promisify(execFile);
+
+type PersistedCheckResult = {
+  name: string;
+  status: CheckResult['status'];
+  message?: string;
+  output?: unknown;
+};
 
 export interface ConfigDrivenStageRunnerOptions {
   taskLoaderRegistry: TaskLoaderRegistry;
@@ -84,15 +91,10 @@ export class ConfigDrivenStageRunner implements StageRunner {
     };
   }
 
-  private appendTaskResult(ctx: StageContext, result: StageTaskResult): WorkflowDecision | null {
+  private appendTaskResult(ctx: StageContext, result: StageTaskResult): { decision: WorkflowDecision | null; result: StageTaskResult } {
     const execId = this.ensureStageExecution(ctx);
-    if (execId && ctx.stageExecutionRepo) {
-      try {
-        ctx.stageExecutionRepo.appendTaskResult(execId, result);
-      } catch (e) {
-        log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
+    let acceptedResult = result;
+    let decision: WorkflowDecision | null = null;
     if (ctx.workflowApplicationService) {
       const completion = ctx.workflowApplicationService.completeTask({
         issueId: ctx.issue.id,
@@ -108,9 +110,17 @@ export class ConfigDrivenStageRunner implements StageRunner {
           causedBy: result.causedBy,
         },
       });
-      return completion?.decision ?? null;
+      decision = completion?.decision ?? null;
+      acceptedResult = this.acceptedTaskResult(completion?.run, ctx.issue.stage, result);
     }
-    return null;
+    if (execId && ctx.stageExecutionRepo) {
+      try {
+        ctx.stageExecutionRepo.appendTaskResult(execId, acceptedResult);
+      } catch (e) {
+        log.warn('appendTaskResult failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return { decision, result: acceptedResult };
   }
 
   private async runRequestedTask(ctx: StageContext): Promise<StageRunResult> {
@@ -192,17 +202,38 @@ export class ConfigDrivenStageRunner implements StageRunner {
       }
     }
 
-    const decision = result.alreadyReported ? null : this.appendTaskResult(ctx, result);
-    if (result.status === 'completed' && decision) {
-      this.applyAcceptedTaskSideEffects(ctx, decision.events);
+    const accepted = result.alreadyReported
+      ? { decision: null as WorkflowDecision | null, result }
+      : this.appendTaskResult(ctx, result);
+    if (accepted.result.status === 'completed' && accepted.decision) {
+      this.applyAcceptedTaskSideEffects(ctx, accepted.decision.events);
     }
-    if (result.status === 'failed') this.updateStageExecutionStatus(ctx, 'failed');
+    if (accepted.result.status === 'failed' || accepted.result.status === 'skipped') this.updateStageExecutionStatus(ctx, 'failed');
 
     return {
-      success: result.status !== 'failed',
-      output: result.output ?? null,
+      success: accepted.result.status !== 'failed' && accepted.result.status !== 'skipped' && accepted.decision?.nextWork.kind !== 'failed',
+      output: accepted.result.output ?? null,
       checkResults: [],
-      message: result.status === 'failed' ? result.reason ?? `Task ${taskId} failed` : undefined,
+      message: accepted.result.status === 'failed' || accepted.result.status === 'skipped'
+        ? accepted.result.reason ?? `Task ${taskId} failed`
+        : accepted.decision?.nextWork.kind === 'failed'
+          ? accepted.decision.nextWork.reason.message
+          : undefined,
+    };
+  }
+
+  private acceptedTaskResult(run: WorkflowRun | undefined, stage: Stage, result: StageTaskResult): StageTaskResult {
+    const task = run?.snapshot().stageRuns.find(candidate => candidate.stage === stage)?.tasks.find(candidate => candidate.id === result.taskId);
+    if (!task) return result;
+    return {
+      ...result,
+      status: task.status as Extract<TaskRunStatus, 'completed' | 'failed' | 'skipped'>,
+      attempts: task.attempts,
+      duration: task.duration,
+      artifacts: task.artifacts,
+      output: task.output ?? result.output,
+      reason: task.reason ?? result.reason,
+      causedBy: task.causedBy ?? result.causedBy,
     };
   }
 
@@ -337,32 +368,36 @@ export class ConfigDrivenStageRunner implements StageRunner {
     }
     const check = await resolveCheck(this.checkRegistry, checkCtx, checkName);
     const result = await check.run(checkCtx);
-    this.recordCheckResult(ctx, result);
-
-    const isPostMergeHealthFailure = ctx.issue.stage === Stage.Integrate
-      && checkName === 'health:integrate'
-      && result.status === 'fail'
-      && this.isPostMerge(ctx);
+    const accepted = this.recordCheckResult(ctx, result);
 
     return {
-      success: result.status === 'pass' || result.status === 'pending',
-      output: result.output ?? null,
-      checkResults: [result],
-      message: result.status === 'pass' || result.status === 'pending'
+      success: accepted.result.status === 'pass' || accepted.result.status === 'pending',
+      output: accepted.result.output ?? null,
+      checkResults: [accepted.result],
+      message: accepted.result.status === 'pass' || accepted.result.status === 'pending'
         ? undefined
-        : result.status === 'fail' && isPostMergeHealthFailure
-          ? 'post-merge-health-failed'
-          : result.message ?? `Check "${checkName}" ${result.status}`,
+        : accepted.decision?.nextWork.kind === 'failed'
+          ? accepted.decision.nextWork.reason.message ?? accepted.decision.nextWork.reason.reason
+          : accepted.result.message ?? `Check "${checkName}" ${accepted.result.status}`,
     };
   }
 
-  private recordCheckResult(ctx: StageContext, result: CheckResult): void {
-    const persistedResult = {
+  private recordCheckResult(ctx: StageContext, result: CheckResult): { decision: WorkflowDecision | null; result: CheckResult } {
+    let persistedResult: PersistedCheckResult = {
       name: result.name,
       status: result.status,
       message: result.message,
       output: result.output,
     };
+
+    const workflowUpdate = ctx.workflowApplicationService
+      ? ctx.workflowApplicationService.recordCheckResult({
+        issueId: ctx.issue.id,
+        stage: ctx.issue.stage,
+        result: persistedResult,
+      })
+      : null;
+    persistedResult = this.acceptedCheckResult(workflowUpdate?.run, ctx.issue.stage, persistedResult);
 
     const execId = this.ensureStageExecution(ctx);
     if (execId && ctx.stageExecutionRepo) {
@@ -375,15 +410,26 @@ export class ConfigDrivenStageRunner implements StageRunner {
       }
     }
 
-    const workflowUpdate = ctx.workflowApplicationService
-      ? ctx.workflowApplicationService.recordCheckResult({
-        issueId: ctx.issue.id,
-        stage: ctx.issue.stage,
-        result: persistedResult,
-      })
-      : null;
+    this.updateStageExecutionStatus(ctx, this.stageExecutionStatusAfterCheck(ctx, persistedResult, workflowUpdate?.decision));
+    return { decision: workflowUpdate?.decision ?? null, result: persistedResult };
+  }
 
-    this.updateStageExecutionStatus(ctx, this.stageExecutionStatusAfterCheck(ctx, result, workflowUpdate?.decision));
+  private acceptedCheckResult(run: WorkflowRun | undefined, stage: Stage, result: CheckResult): CheckResult {
+    const check = run?.snapshot().stageRuns.find(candidate => candidate.stage === stage)?.checks.find(candidate => candidate.name === result.name);
+    if (!check) return result;
+    return {
+      ...result,
+      status: this.toCheckResultStatus(check.status),
+      message: check.message ?? result.message,
+      output: check.output ?? result.output,
+    };
+  }
+
+  private toCheckResultStatus(status: CheckRunStatus): CheckResult['status'] {
+    if (status === 'passed') return 'pass';
+    if (status === 'failed') return 'fail';
+    if (status === 'running') return 'pending';
+    return status;
   }
 
   private ensureStageExecution(ctx: StageContext): string | undefined {
@@ -467,14 +513,6 @@ export class ConfigDrivenStageRunner implements StageRunner {
       const snapshot = stageRun?.checks.find(candidate => candidate.checkName === policy.checkName);
       return snapshot?.status === 'passed';
     });
-  }
-
-  private isPostMerge(ctx: StageContext): boolean {
-    if (ctx.issue.mergeState === MergeState.Merged) return true;
-    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
-    if (!stageRun) return false;
-    const freezePointExists = 'freezePoint' in stageRun && (stageRun as { freezePoint?: unknown }).freezePoint != null;
-    return freezePointExists;
   }
 
   private async executeTaskWork(
