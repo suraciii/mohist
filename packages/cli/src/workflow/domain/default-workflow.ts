@@ -10,11 +10,11 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
     {
       stage: Stage.Plan,
       tasks: [
-        { id: 'proposal', title: 'Generate proposal' },
-        { id: 'specs', title: 'Write specs' },
-        { id: 'design', title: 'Create design' },
-        { id: 'tasks', title: 'Generate tasks' },
-        { id: 'self-review', title: 'Self review', resultContract: SELF_REVIEW_RESULT_CONTRACT },
+        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
+        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
+        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
+        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
+        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { session: 'plan-artifacts' }, resultContract: SELF_REVIEW_RESULT_CONTRACT },
       ],
       checks: [
         { name: 'proposal-complete', title: 'Proposal complete' },
@@ -38,11 +38,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { kind: 'static', taskIds: ['proposal', 'specs', 'design', 'tasks', 'self-review'] },
       ],
       taskExecutionPolicies: [
-        { taskId: 'proposal', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
-        { taskId: 'specs', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
-        { taskId: 'design', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
-        { taskId: 'tasks', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
-        { taskId: 'self-review', kind: 'agent-session', agentSessionRef: 'plan-artifacts' },
         { taskId: 'fix-plan-review', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
       ],
@@ -111,6 +106,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         {
           id: 'ai-review',
           title: 'AI review',
+          uses: 'mohist/agent',
           resultContract: REVIEW_RESULT_CONTRACT,
           selfRepairPolicy: REVIEW_SELF_REPAIR_POLICY,
         },
@@ -152,7 +148,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { kind: 'runtime' },
       ],
       taskExecutionPolicies: [
-        { taskId: 'ai-review', kind: 'agent-session' },
         { taskId: 'fix-check-health', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'fix-review-findings', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'fix-merge-readiness', kind: 'repair-task', workSourceKind: 'runtime' },
@@ -219,9 +214,9 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
     {
       stage: Stage.Integrate,
       tasks: [
-        { id: 'integrate:spec-sync', title: 'Sync specs' },
-        { id: 'integrate:archive-change', title: 'Archive change' },
-        { id: 'integrate:merge', title: 'Merge branch' },
+        { id: 'integrate:spec-sync', title: 'Sync specs', uses: 'mohist/openspec-sync' },
+        { id: 'integrate:archive-change', title: 'Archive change', uses: 'mohist/archive-change' },
+        { id: 'integrate:merge', title: 'Merge branch', uses: 'mohist/merge' },
       ],
       checks: [
         { name: 'health:integrate', title: 'Post-merge health check' },
@@ -238,9 +233,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { kind: 'static', taskIds: ['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge'] },
       ],
       taskExecutionPolicies: [
-        { taskId: 'integrate:spec-sync', kind: 'service-call' },
-        { taskId: 'integrate:archive-change', kind: 'service-call' },
-        { taskId: 'integrate:merge', kind: 'service-call' },
         { taskId: 'fix-integrate-health', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
       ],
