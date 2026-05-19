@@ -1,6 +1,6 @@
 import { Stage } from '../../types';
 import { REVIEW_RESULT_CONTRACT, REVIEW_SELF_REPAIR_POLICY, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
-import type { StageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
+import type { CompiledStageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
 import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './workflow-definition-parser';
 import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
 
@@ -172,7 +172,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = parseWorkf
   { taskSource: 'builtin', checkSource: 'builtin' },
 );
 
-export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+export const DEFAULT_STAGE_DEFINITIONS: CompiledStageDefinition[] = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
 
 export function createDefaultWorkflowDefinitionSnapshot(capturedAt?: string): WorkflowDefinitionSnapshot {
   return createWorkflowDefinitionSnapshot({
