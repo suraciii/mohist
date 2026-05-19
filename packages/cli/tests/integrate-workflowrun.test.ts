@@ -259,7 +259,7 @@ describe('Integrate WorkflowRun aggregate delivery', () => {
   it('does not schedule automatic code-modifying tasks after freeze', () => {
     const run = advanceToIntegrate();
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
     run.completeTask(Stage.Integrate, 'integrate:merge', { status: 'completed', output: { landedSha: 'landed-sha' } });
     run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'health failed' });
 
@@ -271,17 +271,20 @@ describe('Integrate WorkflowRun aggregate delivery', () => {
     ]);
   });
 
-  it('uses already-merged task output as delivery freeze metadata when available', () => {
+  it('fails already-merged task output when delivery evidence lacks landed sha', () => {
     const run = advanceToIntegrate();
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed' });
-    run.completeTask(Stage.Integrate, 'integrate:merge', {
+    run.completeTask(Stage.Integrate, 'integrate:archive-change', { status: 'completed', output: { archivePath: 'openspec/changes/archive/188-workflowrun' } });
+    const decision = run.completeTask(Stage.Integrate, 'integrate:merge', {
       status: 'completed',
       output: { targetBranch: 'main', skipped: true, reason: MergeState.Merged },
     });
 
     const mergeTask = integrateSnapshot(run).tasks.find(task => task.id === 'integrate:merge')!;
     expect(mergeTask.output).toMatchObject({ targetBranch: 'main', skipped: true, reason: MergeState.Merged });
-    expect(run.stageRun(Stage.Integrate).freezePoint?.delivery.targetBranch).toBe('main');
+    expect(mergeTask.status).toBe('failed');
+    expect(mergeTask.reason).toBe('Missing required evidence for mohist/merge: landedSha');
+    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
 });

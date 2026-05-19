@@ -2,7 +2,7 @@ import { Stage } from '../../types';
 import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from './default-workflow';
 import { WorkflowDomainError } from './errors';
 import { cloneWorkflowDefinitionSnapshot, createWorkflowDefinitionSnapshot } from './workflow-definition';
-import { getWorkflowUseDefinition, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
 import type {
   ApprovalInput,
   ApprovalSnapshot,
@@ -770,38 +770,50 @@ export class WorkflowRun {
       throw new WorkflowDomainError(`Task ${taskId} cannot complete before earlier tasks are terminal`);
     }
 
-    task.status = result.status;
-    task.attempts = result.attempts ?? task.attempts + 1;
-    task.duration = result.duration ?? task.duration;
-    task.artifacts = result.artifacts ?? task.artifacts;
-    task.output = result.output ?? task.output;
-    task.reason = result.reason ?? task.reason;
-    task.causedBy = result.causedBy ?? task.causedBy;
+    const evidenceFailure = result.status === 'completed'
+      ? this.workflowUseEvidenceFailure(this.taskUse(stageRun, taskId), result.output)
+      : null;
+    const effectiveResult: TaskResultInput = evidenceFailure
+      ? {
+        ...result,
+        status: 'failed',
+        reason: evidenceFailure,
+        causedBy: result.causedBy ?? { type: 'system-policy', taskId, message: evidenceFailure },
+      }
+      : result;
+
+    task.status = effectiveResult.status;
+    task.attempts = effectiveResult.attempts ?? task.attempts + 1;
+    task.duration = effectiveResult.duration ?? task.duration;
+    task.artifacts = effectiveResult.artifacts ?? task.artifacts;
+    task.output = effectiveResult.output ?? task.output;
+    task.reason = effectiveResult.reason ?? task.reason;
+    task.causedBy = effectiveResult.causedBy ?? task.causedBy;
 
     if (task.latestAttempt?.state === 'running') {
       const attemptNow = new Date().toISOString();
-      if (result.status === 'completed') {
-        task.completeWorkAttempt({ output: result.output, artifacts: result.artifacts, duration: result.duration }, attemptNow);
-      } else if (result.status === 'failed' || result.status === 'skipped') {
-        task.failWorkAttempt(result.reason ?? 'Task failed', null, attemptNow);
+      if (effectiveResult.status === 'completed') {
+        task.completeWorkAttempt({ output: effectiveResult.output, artifacts: effectiveResult.artifacts, duration: effectiveResult.duration }, attemptNow);
+      } else if (effectiveResult.status === 'failed' || effectiveResult.status === 'skipped') {
+        task.failWorkAttempt(effectiveResult.reason ?? 'Task failed', null, attemptNow);
       }
     }
 
-    if (this.taskLocksCode(stageRun, taskId) && result.status === 'completed') {
+    if (this.taskLocksCode(stageRun, taskId) && effectiveResult.status === 'completed') {
       stageRun.freezePoint = {
         taskId,
-        delivery: this.extractDeliveryMetadata(result.output),
+        delivery: this.extractDeliveryMetadata(effectiveResult.output),
         frozenAt: new Date().toISOString(),
       };
     }
 
-    if (result.status === 'failed' || result.status === 'skipped') {
+    if (effectiveResult.status === 'failed' || effectiveResult.status === 'skipped') {
       const failure: FailureDetails = {
         reason: 'task-failed',
         stage,
         taskId,
-        message: result.reason,
-        causedBy: result.causedBy,
+        message: effectiveResult.reason,
+        causedBy: effectiveResult.causedBy,
       };
       return this.fail(stageRun, failure, [
         { type: 'task-failed', stage, taskId, reason: failure },
@@ -809,10 +821,10 @@ export class WorkflowRun {
     }
 
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
-    const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, result);
+    const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, effectiveResult);
     events.push(...invalidationEvents);
-    if (stage === Stage.Check && taskId === 'check:converge-review-snapshot' && result.status === 'completed') {
-      events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, result));
+    if (stage === Stage.Check && taskId === 'check:converge-review-snapshot' && effectiveResult.status === 'completed') {
+      events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, effectiveResult));
     }
     if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
     return this.maybeCompleteStage(stageRun, events);
@@ -834,22 +846,37 @@ export class WorkflowRun {
       throw new WorkflowDomainError(`Check ${result.name} cannot run before earlier checks pass`);
     }
 
-    check.status = this.toCheckStatus(result.status);
-    check.message = result.message ?? null;
-    check.output = this.normalizeCheckOutput(stageRun, result) ?? null;
-    if (result.status !== 'pending') check.runCount += 1;
+    const normalizedOutput = this.normalizeCheckOutput(stageRun, result) ?? null;
+    const evidenceFailure = result.status === 'pass'
+      ? this.workflowUseEvidenceFailure(this.checkUse(stageRun, result.name), normalizedOutput)
+      : null;
+    const effectiveStatus: CheckResultInput['status'] = evidenceFailure ? 'fail' : result.status;
+    const effectiveMessage = evidenceFailure ?? result.message;
+
+    check.status = this.toCheckStatus(effectiveStatus);
+    check.message = effectiveMessage ?? null;
+    check.output = normalizedOutput;
+    if (effectiveStatus !== 'pending') check.runCount += 1;
 
     if (check.latestAttempt?.state === 'running') {
       const attemptNow = new Date().toISOString();
-      if (result.status === 'pass') {
+      if (effectiveStatus === 'pass') {
         check.completeWorkAttempt(attemptNow);
-      } else if (result.status === 'fail' || result.status === 'error') {
-        check.failWorkAttempt(result.message ?? `Check ${result.name} failed`, null, attemptNow);
+      } else if (effectiveStatus === 'fail' || effectiveStatus === 'error') {
+        check.failWorkAttempt(effectiveMessage ?? `Check ${result.name} failed`, null, attemptNow);
       }
     }
 
+    if (this.checkLocksCode(stageRun, check.name) && effectiveStatus === 'pass') {
+      stageRun.freezePoint = {
+        checkName: check.name,
+        delivery: this.extractDeliveryMetadata(normalizedOutput),
+        frozenAt: new Date().toISOString(),
+      };
+    }
+
     const events: WorkflowEvent[] = [{ type: 'check-recorded', stage, checkName: check.name, status: check.status }];
-    if (this.needsCheckConvergenceTask(stageRun, result)) {
+    if (!evidenceFailure && this.needsCheckConvergenceTask(stageRun, result)) {
       const causedBy: CausedByMetadata = {
         type: 'system-policy',
         checkName: result.name,
@@ -860,7 +887,8 @@ export class WorkflowRun {
       events.push({ type: 'fix-task-scheduled', stage, taskId: task.id, causedBy });
       return this.decision(events);
     }
-    if (result.status === 'pending' || result.status === 'pass') {
+    if (effectiveStatus === 'pending' || effectiveStatus === 'pass') {
+      if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
       return this.maybeCompleteStage(stageRun, events);
     }
 
@@ -869,7 +897,7 @@ export class WorkflowRun {
         reason: 'post-merge-health-failed',
         stage,
         checkName: result.name,
-        message: result.message,
+        message: effectiveMessage,
       }, events);
     }
 
@@ -881,7 +909,7 @@ export class WorkflowRun {
       const causedBy: CausedByMetadata = {
         type: 'check-failure',
         checkName: result.name,
-        message: result.message,
+        message: effectiveMessage,
       };
       const fixTask = stageRun.appendFixTask(policy, causedBy);
       check.status = 'pending';
@@ -893,8 +921,8 @@ export class WorkflowRun {
       reason: 'check-unrepaired',
       stage,
       checkName: result.name,
-      message: result.message,
-      causedBy: { type: 'check-failure', checkName: result.name, message: result.message },
+      message: effectiveMessage,
+      causedBy: { type: 'check-failure', checkName: result.name, message: effectiveMessage },
     }, events);
   }
 
@@ -1351,7 +1379,22 @@ export class WorkflowRun {
         return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: taskRun.id, uses };
       }
     }
+    for (const checkRun of stageRun.checks) {
+      if (checkRun.status !== 'passed') continue;
+      const uses = this.checkUse(stageRun, checkRun.name);
+      const evidence = validateWorkflowUseEvidence(uses, checkRun.output);
+      if (!evidence.ok) {
+        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, checkName: checkRun.name, uses };
+      }
+    }
     return { complete: true };
+  }
+
+  private workflowUseEvidenceFailure(uses: string, output: unknown): string | null {
+    const evidence = validateWorkflowUseEvidence(uses, output);
+    if (evidence.ok) return null;
+    if (evidence.reason === 'unknown-use') return `Unknown workflow use ${uses}`;
+    return `Missing required evidence for ${uses}: ${evidence.field ?? 'output'}`;
   }
 
   private taskUse(stageRun: StageRun, taskId: string): string {
@@ -1363,6 +1406,16 @@ export class WorkflowRun {
 
   private taskLocksCode(stageRun: StageRun, taskId: string): boolean {
     const use = getWorkflowUseDefinition(this.taskUse(stageRun, taskId));
+    return use?.locksCode === true;
+  }
+
+  private checkUse(stageRun: StageRun, checkName: string): string {
+    const checkDefinition = stageRun.definition.checks.find(check => check.name === checkName);
+    return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
+  }
+
+  private checkLocksCode(stageRun: StageRun, checkName: string): boolean {
+    const use = getWorkflowUseDefinition(this.checkUse(stageRun, checkName));
     return use?.locksCode === true;
   }
 
@@ -1639,7 +1692,7 @@ export class WorkflowRun {
       targetBranch: typeof data.targetBranch === 'string' ? data.targetBranch : undefined,
       baseSha: typeof data.baseSha === 'string' ? data.baseSha : undefined,
       candidateHeadSha: typeof data.candidateHeadSha === 'string' ? data.candidateHeadSha : undefined,
-      landedSha: typeof data.landedSha === 'string' ? data.landedSha : undefined,
+      landedSha: typeof data.landedSha === 'string' ? data.landedSha : typeof data.mergedSha === 'string' ? data.mergedSha : undefined,
       rebased: typeof data.rebased === 'boolean' ? data.rebased : undefined,
     };
   }

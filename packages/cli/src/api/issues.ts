@@ -388,12 +388,22 @@ function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDef
   const deliveryTasks = stageRun.tasks
     .map(task => ({ task, origin: taskOrigin(stageDefinition, task.taskId) }))
     .filter(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole !== 'none');
+  const deliveryChecks = stageRun.checks
+    .map(check => ({ check, origin: checkOrigin(stageDefinition, check.checkName) }))
+    .filter(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole !== 'none');
   const specSync = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'spec-sync')?.task ?? null;
   const archive = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'archive')?.task ?? null;
   const merge = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'local-merge')?.task ?? null;
   const remotePr = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'remote-pr')?.task ?? null;
-  const remoteMerge = deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'remote-merge')?.task ?? null;
-  const health = stageRun.checks.find(check => check.checkName === 'health:integrate') ?? null;
+  const remoteMerge =
+    deliveryTasks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'remote-merge')?.task ??
+    deliveryChecks.find(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole === 'remote-merge')?.check ??
+    null;
+  const health = (specSync || archive || merge || remotePr || remoteMerge)
+    ? stageRun.checks
+      .map(check => ({ check, origin: checkOrigin(stageDefinition, check.checkName) }))
+      .find(({ origin }) => origin.uses === 'mohist/health-gate')?.check ?? null
+    : null;
   const mergeOutput = unwrapWorkflowUseOutput(merge?.output) ?? {};
   const remotePrOutput = unwrapWorkflowUseOutput(remotePr?.output) ?? {};
   const remoteMergeOutput = unwrapWorkflowUseOutput(remoteMerge?.output) ?? {};
@@ -425,11 +435,21 @@ function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDef
       mergedSha: typeof remoteMergeOutput.mergedSha === 'string' ? remoteMergeOutput.mergedSha : null,
     } : null,
     health: health ? { status: health.status, message: health.message, output: health.output } : null,
-    frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed',
+    frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed' || remoteMerge?.status === 'passed',
   };
 }
 
-function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks) {
+function hasCompletedLockingUse(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: StageDefinition): boolean {
+  return stageRun.tasks.some(task => {
+    if (task.status !== 'completed') return false;
+    return getWorkflowUseDefinition(taskOrigin(stageDefinition, task.taskId).uses)?.locksCode === true;
+  }) || stageRun.checks.some(check => {
+    if (check.status !== 'passed') return false;
+    return getWorkflowUseDefinition(checkOrigin(stageDefinition, check.checkName).uses)?.locksCode === true;
+  });
+}
+
+function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: StageDefinition) {
   if (stageRun.status !== 'failed') return null;
   const failedTask = stageRun.tasks.find(task => task.status === 'failed');
   if (failedTask) {
@@ -444,9 +464,9 @@ function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks) {
 
   const failedCheck = stageRun.checks.find(check => check.status === 'failed' || check.status === 'error');
   if (failedCheck) {
-    const merged = stageRun.stage === Stage.Integrate && stageRun.tasks.some(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+    const codeLocked = hasCompletedLockingUse(stageRun, stageDefinition);
     return {
-      reason: merged && failedCheck.checkName === 'health:integrate' ? 'post-merge-health-failed' : 'check-unrepaired',
+      reason: codeLocked ? 'post-merge-health-failed' : 'check-unrepaired',
       stage: stageRun.stage,
       checkName: failedCheck.checkName,
       message: failedCheck.message,
@@ -463,7 +483,7 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
   const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(run.workflowDefinition);
   const stageRuns = run.stageRuns.map(stageRun => {
     const stageDefinition = workflowDefinitionSnapshot?.compiledStageDefinitions.find(definition => definition.stage === stageRun.stage);
-    const failure = failureDetails(stageRun);
+    const failure = failureDetails(stageRun, stageDefinition);
     const delivery = deliveryMetadata(stageRun, stageDefinition);
     return {
       id: stageRun.id,

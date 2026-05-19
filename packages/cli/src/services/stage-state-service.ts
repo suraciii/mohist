@@ -11,7 +11,7 @@ import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/convergence';
 import type { StageDefinition } from '../workflow/domain';
-import { getWorkflowUseDefinition, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
@@ -106,7 +106,7 @@ export interface StageDeliveryMetadata {
     headSha: string | null;
   } | null;
   remoteMerge?: {
-    status: StageTaskStatus;
+    status: StageTaskStatus | StageCheckStatus;
     output: unknown;
     mergedSha: string | null;
   } | null;
@@ -993,7 +993,7 @@ export class StageStateService {
         startedAt: stageRun.startedAt,
         completedAt: stageRun.completedAt,
         updatedAt: stageRun.updatedAt,
-        failure: this.workflowRunFailureDetails(stageRun, tasks, checks),
+        failure: this.workflowRunFailureDetails(stageRun, tasks, checks, stageDefinition),
         deliveryMetadata: this.workflowRunDeliveryMetadata(tasks, checks, stageDefinition),
         ...(checkRepairRaw !== null ? { checkRepair: checkRepairRaw } : {}),
         ...(convergenceRaw !== null ? { convergence: convergenceRaw } : {}),
@@ -1009,12 +1009,22 @@ export class StageStateService {
     const deliveryTasks = tasks
       .map(task => ({ task, use: this.workflowTaskUse(stageDefinition, task.taskId) }))
       .filter(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole !== 'none');
+    const deliveryChecks = checks
+      .map(check => ({ check, use: this.workflowCheckUse(stageDefinition, check.checkName) }))
+      .filter(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole !== 'none');
     const specSync = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'spec-sync')?.task ?? null;
     const archive = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'archive')?.task ?? null;
     const merge = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'local-merge')?.task ?? null;
     const remotePr = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'remote-pr')?.task ?? null;
-    const remoteMerge = deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'remote-merge')?.task ?? null;
-    const health = checks.find(check => check.checkName === 'health:integrate');
+    const remoteMerge =
+      deliveryTasks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'remote-merge')?.task ??
+      deliveryChecks.find(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole === 'remote-merge')?.check ??
+      null;
+    const health = (specSync || archive || merge || remotePr || remoteMerge)
+      ? checks
+        .map(check => ({ check, use: this.workflowCheckUse(stageDefinition, check.checkName) }))
+        .find(({ use }) => use === 'mohist/health-gate')?.check ?? null
+      : null;
     const mergeOutput = unwrapWorkflowUseOutput(merge?.output) ?? {};
     const remotePrOutput = unwrapWorkflowUseOutput(remotePr?.output) ?? {};
     const remoteMergeOutput = unwrapWorkflowUseOutput(remoteMerge?.output) ?? {};
@@ -1046,7 +1056,7 @@ export class StageStateService {
         mergedSha: typeof remoteMergeOutput.mergedSha === 'string' ? remoteMergeOutput.mergedSha : null,
       } : null,
       health: health ? { status: health.status, message: health.message, output: health.output } : null,
-      frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed',
+      frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed' || remoteMerge?.status === 'passed',
     };
   }
 
@@ -1057,10 +1067,30 @@ export class StageStateService {
     return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
   }
 
+  private workflowCheckUse(stageDefinition: StageDefinition | undefined, checkName: string): string {
+    const checkDefinition = stageDefinition?.checks.find(candidate => candidate.name === checkName);
+    return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
+  }
+
+  private hasCompletedLockingUse(
+    tasks: StageTaskState[],
+    checks: StageCheckState[],
+    stageDefinition?: StageDefinition,
+  ): boolean {
+    return tasks.some(task => {
+      if (task.status !== 'completed') return false;
+      return getWorkflowUseDefinition(this.workflowTaskUse(stageDefinition, task.taskId))?.locksCode === true;
+    }) || checks.some(check => {
+      if (check.status !== 'passed') return false;
+      return getWorkflowUseDefinition(this.workflowCheckUse(stageDefinition, check.checkName))?.locksCode === true;
+    });
+  }
+
   private workflowRunFailureDetails(
     stageRun: WorkflowRunWithStageRuns['stageRuns'][number],
     tasks: StageTaskState[],
     checks: StageCheckState[],
+    stageDefinition?: StageDefinition,
   ): StageFailureDetails | null {
     if (stageRun.status !== 'failed') return null;
     const failedTask = tasks.find(task => task.status === 'failed');
@@ -1075,9 +1105,9 @@ export class StageStateService {
     }
     const failedCheck = checks.find(check => check.status === 'failed' || check.status === 'error');
     if (failedCheck) {
-      const merged = stageRun.stage === Stage.Integrate && tasks.some(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+      const codeLocked = this.hasCompletedLockingUse(tasks, checks, stageDefinition);
       return {
-        reason: merged && failedCheck.checkName === 'health:integrate' ? 'post-merge-health-failed' : 'check-unrepaired',
+        reason: codeLocked ? 'post-merge-health-failed' : 'check-unrepaired',
         stage: stageRun.stage,
         checkName: failedCheck.checkName,
         message: failedCheck.message,
