@@ -1,5 +1,6 @@
 import { Stage } from '../types';
-import type { CheckFailurePolicy, StageContext, StageRunResult, StageTaskResult } from './stage-context';
+import type { CheckFailurePolicy, StageContext, StageTaskResult } from './stage-context';
+import type { StageRunner } from './stage-runner';
 import { buildAuthoritativeAiReviewResult, emitStageTaskUpdate } from './stage-context';
 import { BaseStageRunner } from './base-stage-runner';
 import type { Check } from './checks';
@@ -34,12 +35,6 @@ type ReactionInputStageRun = {
     output: unknown | null;
   }>;
 };
-
-export interface StageRunner {
-  canHandle(stage: Stage): boolean;
-  materializeWork?(ctx: StageContext): Promise<boolean> | boolean;
-  run(ctx: StageContext): Promise<StageRunResult>;
-}
 
 export interface CheckStageRunnerOptions {
   worktreePath: string;

@@ -46,7 +46,7 @@ compileWorkflowDefinition
   materialize taskExecutionPolicies
         |
         v
-ConfigDrivenStageRunner
+GenericStageRunner
   execute compiled plan
 ```
 

@@ -9,7 +9,7 @@ import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskTyp
 import {
   WorkflowEngine,
   type PipelineResult,
-  ConfigDrivenStageRunner,
+  GenericStageRunner,
   PlanStageRunner,
   BuildStageRunner,
   CheckStageRunner,
@@ -63,13 +63,14 @@ import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workfl
 const execFileAsync = promisify(execFile);
 
 const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done];
-const CONFIG_DRIVEN_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate];
+const GENERIC_STAGE_RUNNER_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate];
 
-function configDrivenStagesFromEnv(): Stage[] | undefined {
-  const raw = process.env.MOHIST_CONFIG_DRIVEN_STAGES;
-  if (!raw) return CONFIG_DRIVEN_STAGES;
+function genericStageRunnerStagesFromEnv(): Stage[] | undefined {
+  // Keep the old env name as a temporary compatibility alias while the runner is renamed.
+  const raw = process.env.MOHIST_GENERIC_STAGE_RUNNER_STAGES ?? process.env.MOHIST_CONFIG_DRIVEN_STAGES;
+  if (!raw) return GENERIC_STAGE_RUNNER_STAGES;
   const requested = new Set(raw.split(',').map(stage => stage.trim().toLowerCase()).filter(Boolean));
-  return CONFIG_DRIVEN_STAGES.filter(stage => requested.has(stage));
+  return GENERIC_STAGE_RUNNER_STAGES.filter(stage => requested.has(stage));
 }
 
 export type TaskType = QueueTaskType;
@@ -1406,7 +1407,7 @@ export class AgentRunnerService {
       const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
       const checkRegistry = createDefaultCheckRegistry({ worktreePath, healthGatePolicies, workflowDefinitionSnapshot });
 
-      const unifiedRunner = new ConfigDrivenStageRunner({
+      const unifiedRunner = new GenericStageRunner({
         taskLoaderRegistry,
         taskHandlerRegistry,
         checkRegistry,
@@ -1417,7 +1418,7 @@ export class AgentRunnerService {
             ?? DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage);
         },
         worktreePath,
-        enabledStages: configDrivenStagesFromEnv(),
+        enabledStages: genericStageRunnerStagesFromEnv(),
       });
 
       const legacyRunners = [

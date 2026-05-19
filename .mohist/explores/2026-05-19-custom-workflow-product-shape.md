@@ -2,7 +2,7 @@
 
 ## 探索背景
 
-Mohist 当前 workflow 已经有 `WorkflowRun / StageRun / Task / Check` 的运行时模型，也有 `StageDefinition`、`ConfigDrivenStageRunner` 和 `workflow.yaml` 的早期入口。
+Mohist 当前 workflow 已经有 `WorkflowRun / StageRun / Task / Check` 的运行时模型，也有 `StageDefinition`、`GenericStageRunner` 和 `workflow.yaml` 的早期入口。
 
 但用户目标不是“让某几个命令可配置”，而是打造一个通用的、用户可定制的 workflow，就像 Azure DevOps Pipeline / GitHub Actions 一样：用户能把项目交付流程写成可读、可验证、可执行、可观察的 pipeline-as-code。
 
@@ -695,7 +695,7 @@ Mohist 应学习它们的产品直觉：
 - 将 builtin workflow 表达为 `WorkflowDefinition`
 - 增加 `WorkflowDefinition -> StageDefinition[]` compiler
 - `WorkflowRun.startWorkflow` 接收编译后的 definitions
-- `ConfigDrivenStageRunner` 不再直接依赖 `DEFAULT_STAGE_DEFINITIONS`
+- `GenericStageRunner` 不再直接依赖 `DEFAULT_STAGE_DEFINITIONS`
 - `mo workflow show` 展示展开后的定义
 - `mo workflow validate` 给出用户可理解的错误
 
@@ -776,7 +776,7 @@ Compiler
   ↓
 StageDefinition[]
   ↓
-WorkflowRun / ConfigDrivenStageRunner
+WorkflowRun / GenericStageRunner
   ↓
 Issue UI / CLI explainability
 ```

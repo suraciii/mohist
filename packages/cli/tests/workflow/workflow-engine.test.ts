@@ -8,7 +8,7 @@ import type {
   CheckpointManager,
   WorkflowApplicationRuntime,
 } from '../../src/workflow/stage-context';
-import type { StageRunner } from '../../src/workflow/check-stage-runner';
+import type { StageRunner } from '../../src/workflow/stage-runner';
 import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { ConfigInfo } from '../../src/config/config-schema';

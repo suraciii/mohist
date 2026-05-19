@@ -1,7 +1,7 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult, CheckResult, StageTaskResult, CheckFailurePolicy, AuthoritativeAiReviewResult, AuthoritativeAiReviewOptions } from './stage-context';
 import { getLatestCheckResult, buildAuthoritativeAiReviewResult } from './stage-context';
-import type { StageRunner } from './check-stage-runner';
+import type { StageRunner } from './stage-runner';
 import type { Check, CheckContext } from './checks';
 import type { StageExecutionStatus } from '../db/stage-execution-repo';
 import { normalizeCheckStatus, normalizeTaskStatus, type StageStateStatus } from '../services/stage-state-service';

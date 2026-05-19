@@ -1,6 +1,6 @@
 import { Stage } from '../types';
 import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from './stage-context';
-import type { StageRunner } from './check-stage-runner';
+import type { StageRunner } from './stage-runner';
 import type { CheckContext } from './checks';
 import { resolveCheck } from './checks/check-registry';
 import type { TaskHandlerRegistry, ExecutableTask, TaskKind } from './task-runtime';
@@ -23,8 +23,9 @@ import { promisify } from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
 
-const log = Log.create({ service: 'config-driven-stage-runner' });
+const log = Log.create({ service: 'generic-stage-runner' });
 const execFileAsync = promisify(execFile);
+export const GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE = 'Generic stage runner requires WorkflowRun requestedWork';
 
 type PersistedCheckResult = {
   name: string;
@@ -33,7 +34,7 @@ type PersistedCheckResult = {
   output?: unknown;
 };
 
-export interface ConfigDrivenStageRunnerOptions {
+export interface GenericStageRunnerOptions {
   taskLoaderRegistry: TaskLoaderRegistry;
   taskHandlerRegistry: TaskHandlerRegistry;
   checkRegistry: CheckRegistry;
@@ -43,7 +44,7 @@ export interface ConfigDrivenStageRunnerOptions {
   enabledStages?: Stage[];
 }
 
-export class ConfigDrivenStageRunner implements StageRunner {
+export class GenericStageRunner implements StageRunner {
   private taskLoaderRegistry: TaskLoaderRegistry;
   private taskHandlerRegistry: TaskHandlerRegistry;
   private taskDispatchFactoryRegistry: TaskDispatchFactoryRegistry;
@@ -54,7 +55,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
   private stageExecutionId?: string;
   private stageExecutionKey?: string;
 
-  constructor(options: ConfigDrivenStageRunnerOptions) {
+  constructor(options: GenericStageRunnerOptions) {
     this.taskLoaderRegistry = options.taskLoaderRegistry;
     this.taskHandlerRegistry = options.taskHandlerRegistry;
     this.taskDispatchFactoryRegistry = options.taskDispatchFactoryRegistry ?? createDefaultTaskDispatchFactoryRegistry();
@@ -87,7 +88,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
       success: false,
       output: null,
       checkResults: [],
-      message: 'ConfigDrivenStageRunner requires WorkflowRun requestedWork',
+      message: GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE,
     };
   }
 
@@ -178,7 +179,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
         success: false,
         output: null,
         checkResults: [],
-        message: `Task ${taskId} is not executable by ConfigDrivenStageRunner`,
+        message: `Task ${taskId} is not executable by generic stage runner`,
       };
     }
 
@@ -323,12 +324,12 @@ export class ConfigDrivenStageRunner implements StageRunner {
       if (fs.existsSync(reviewPath)) {
         const staleReviewPath = path.join(changeDir, `review.stale-${Date.now()}.md`);
         fs.renameSync(reviewPath, staleReviewPath);
-        log.info('Renamed stale review.md before config-driven re-review', { issueNumber: ctx.issue.number, staleReviewPath });
+        log.info('Renamed stale review.md before generic stage re-review', { issueNumber: ctx.issue.number, staleReviewPath });
       }
       ctx.checkpointManager?.deleteStep?.(ctx.issue.number, 'check', 'ai-review');
-      log.info('Invalidated ai-review checkpoint for config-driven re-review', { issueNumber: ctx.issue.number });
+      log.info('Invalidated ai-review checkpoint for generic stage re-review', { issueNumber: ctx.issue.number });
     } catch (err) {
-      log.warn('Failed to invalidate review artifact before config-driven re-review', {
+      log.warn('Failed to invalidate review artifact before generic stage re-review', {
         issueNumber: ctx.issue.number,
         error: err instanceof Error ? err.message : String(err),
       });

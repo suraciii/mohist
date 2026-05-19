@@ -1,5 +1,5 @@
 import { Stage, type Issue } from '../types';
-import type { StageRunner } from './check-stage-runner';
+import type { StageRunner } from './stage-runner';
 import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime, StageRunResult, AgentSessionRegistry } from './stage-context';
 import { InMemoryAgentSessionRegistry } from './stage-context';
 import type { CheckpointManager } from './checkpoint-manager';
@@ -15,6 +15,7 @@ import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import type { StageCompletionGuard, TaskRunSnapshot, WorkflowWork } from './domain';
+import { GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE } from './generic-stage-runner';
 
 export interface PipelineResult {
   completed: boolean;
@@ -465,7 +466,7 @@ export class WorkflowEngine {
       let result: StageRunResult | null = null;
       for (const runner of runners) {
         const stageResult = await runner.run(ctx);
-        if (stageResult.message === 'ConfigDrivenStageRunner requires WorkflowRun requestedWork') {
+        if (stageResult.message === GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE) {
           continue;
         }
         result = stageResult;

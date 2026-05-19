@@ -10,6 +10,9 @@ export {
 
 export {
   type StageRunner,
+} from './stage-runner';
+
+export {
   CheckStageRunner,
 } from './check-stage-runner';
 
@@ -117,9 +120,10 @@ export {
 } from './workflow-loader';
 
 export {
-  ConfigDrivenStageRunner,
-  type ConfigDrivenStageRunnerOptions,
-} from './config-driven-stage-runner';
+  GenericStageRunner,
+  type GenericStageRunnerOptions,
+  GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE,
+} from './generic-stage-runner';
 
 export {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
