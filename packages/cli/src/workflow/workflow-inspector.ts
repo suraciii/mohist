@@ -206,11 +206,11 @@ function compileCustomTasks(
       with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
       dependsOn: arrayValue(rawTask.needs).filter((value): value is string => typeof value === 'string'),
     };
-    if (task.uses === 'mohist/agent' && (!task.with || (typeof task.with.prompt !== 'string' && typeof task.with.promptFile !== 'string'))) {
+    if (task.uses === 'mohist/agent' && !hasAgentPromptSource(task.with)) {
       diagnostics.push({
         severity: 'error',
         path: `${taskPath}.with.prompt`,
-        message: `Agent task '${task.id}' requires with.prompt or with.promptFile`,
+        message: `Agent task '${task.id}' requires with.prompt ref/file/inline or with.promptFile`,
       });
     }
     tasks.push(task);
@@ -580,11 +580,11 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
           message: `Use '${uses}' is not allowed as a task`,
         });
       }
-      if (uses === 'mohist/agent' && task.source === 'project' && (!task.with || (typeof task.with.prompt !== 'string' && typeof task.with.promptFile !== 'string'))) {
+      if (uses === 'mohist/agent' && task.source === 'project' && !hasAgentPromptSource(task.with)) {
         diagnostics.push({
           severity: 'error',
           path: `${stagePath}.tasks[${taskIndex}].with.prompt`,
-          message: `Agent task '${task.id}' requires with.prompt or with.promptFile`,
+          message: `Agent task '${task.id}' requires with.prompt ref/file/inline or with.promptFile`,
         });
       }
       for (const dependency of task.dependsOn ?? []) {
@@ -720,6 +720,17 @@ function hasDefaultCheckEvidenceShape(stage: StageDefinition): boolean {
 
 function isProjectDefinedStage(stage: StageDefinition): boolean {
   return stage.tasks.some(task => task.source === 'project') || stage.checks.some(check => check.source === 'project');
+}
+
+function hasAgentPromptSource(withConfig: Record<string, unknown> | undefined): boolean {
+  if (!withConfig) return false;
+  if (typeof withConfig.promptFile === 'string' && withConfig.promptFile.trim().length > 0) return true;
+  if (typeof withConfig.prompt === 'string' && withConfig.prompt.trim().length > 0) return true;
+  if (!isRecord(withConfig.prompt)) return false;
+  const prompt = withConfig.prompt;
+  return (typeof prompt.ref === 'string' && prompt.ref.trim().length > 0)
+    || (typeof prompt.file === 'string' && prompt.file.trim().length > 0)
+    || (typeof prompt.inline === 'string' && prompt.inline.trim().length > 0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

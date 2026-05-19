@@ -96,7 +96,11 @@ describe('WorkflowRun domain aggregate', () => {
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.taskExecutionPolicies?.some(policy => policy.taskId === 'proposal')).toBe(false);
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.tasks.find(task => task.id === 'proposal')).toMatchObject({
       uses: 'mohist/agent',
-      with: { session: 'plan-artifacts' },
+      with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } },
+    });
+    expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Check)?.tasks.find(task => task.id === 'ai-review')).toMatchObject({
+      uses: 'mohist/agent',
+      with: { prompt: { ref: 'mohist/check/ai-review' } },
     });
     expect(plan.taskExecutionPolicies?.filter(policy => policy.kind === 'agent-session').map(policy => policy.taskId)).toEqual([
       'proposal',

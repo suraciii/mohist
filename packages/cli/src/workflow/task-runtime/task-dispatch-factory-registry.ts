@@ -4,7 +4,7 @@ import { Stage, MergeState } from '../../types';
 import type { StageContext, StageTaskResult, CheckResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
-import type { TaskExecutionKind } from '../domain';
+import type { AgentPromptSource, TaskDefinition, TaskExecutionKind } from '../domain';
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
@@ -13,9 +13,9 @@ import { loadVerificationContext, buildVerificationPromptSuffix } from '../conve
 
 interface PlanTaskConfig {
   type: string;
+  promptRef: string;
   label: string;
   verifyArtifact: () => boolean;
-  buildPrompt: (issue: import('../../types').Issue, changeDir: string) => string;
 }
 
 export type DispatchableTask = ExecutableTask | {
@@ -40,6 +40,7 @@ export interface TaskDispatchFactoryInput {
   failedCheck?: CheckResult;
   worktreePath: string;
   agentSessionRef?: string;
+  sourceTask?: TaskDefinition;
 }
 
 export interface TaskDispatchFactoryRegistry {
@@ -63,33 +64,33 @@ function createPlanTaskConfigs(changeDir: string): PlanTaskConfig[] {
   return [
     {
       type: 'proposal',
+      promptRef: 'mohist/plan/proposal',
       label: 'proposal.md',
       verifyArtifact: () => fs.existsSync(path.join(changeDir, 'proposal.md')),
-      buildPrompt: (issue, dir) => buildArtifactPrompt('proposal', issue, dir),
     },
     {
       type: 'specs',
+      promptRef: 'mohist/plan/specs',
       label: 'specs/',
       verifyArtifact: () => fs.existsSync(path.join(changeDir, 'specs')),
-      buildPrompt: (issue, dir) => buildArtifactPrompt('specs', issue, dir),
     },
     {
       type: 'design',
+      promptRef: 'mohist/plan/design',
       label: 'design.md',
       verifyArtifact: () => fs.existsSync(path.join(changeDir, 'design.md')),
-      buildPrompt: (issue, dir) => buildArtifactPrompt('design', issue, dir),
     },
     {
       type: 'tasks',
+      promptRef: 'mohist/plan/tasks',
       label: 'tasks.json',
       verifyArtifact: () => fs.existsSync(path.join(changeDir, 'tasks.json')),
-      buildPrompt: (issue, dir) => buildArtifactPrompt('tasks', issue, dir),
     },
     {
       type: 'self-review',
+      promptRef: 'mohist/plan/self-review',
       label: 'self-review.md',
       verifyArtifact: () => fs.existsSync(path.join(changeDir, 'self-review.md')),
-      buildPrompt: (issue, dir) => buildSelfReviewPrompt(issue, dir),
     },
   ];
 }
@@ -163,12 +164,46 @@ function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrat
 }
 
 function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask | null {
+  const promptSource = agentPromptSource(input.sourceTask);
+  if (promptSource && !isBuiltinAgentPromptRef(promptSource)) {
+    return createGenericAgentSessionDispatchTask(input, resolveCustomAgentPrompt(input, promptSource));
+  }
   if (typeof input.task.prompt === 'string' && input.task.prompt.trim().length > 0) {
     return createGenericAgentSessionDispatchTask(input, input.task.prompt);
   }
   if (input.ctx.issue.stage === Stage.Plan) return createPlanAgentSessionDispatchTask(input);
   if (input.ctx.issue.stage === Stage.Check && input.task.taskId === 'ai-review') return createCheckAiReviewDispatchTask(input);
   return { ...input.task, agentSessionRef: input.agentSessionRef };
+}
+
+function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource | null {
+  const rawPrompt = task?.with?.prompt;
+  if (typeof rawPrompt === 'string') return { inline: rawPrompt };
+  if (!rawPrompt || typeof rawPrompt !== 'object' || Array.isArray(rawPrompt)) return null;
+  const prompt = rawPrompt as Record<string, unknown>;
+  if (typeof prompt.ref === 'string') return { ref: prompt.ref };
+  if (typeof prompt.file === 'string') return { file: prompt.file };
+  if (typeof prompt.inline === 'string') return { inline: prompt.inline };
+  return null;
+}
+
+function isBuiltinAgentPromptRef(source: AgentPromptSource): boolean {
+  return 'ref' in source && source.ref.startsWith('mohist/');
+}
+
+function builtinAgentPromptRef(input: TaskDispatchFactoryInput, fallback: string): string {
+  const source = agentPromptSource(input.sourceTask);
+  if (source && 'ref' in source && source.ref.startsWith('mohist/')) return source.ref;
+  return fallback;
+}
+
+function resolveCustomAgentPrompt(input: TaskDispatchFactoryInput, source: AgentPromptSource): string {
+  if ('inline' in source) return source.inline;
+  if ('file' in source) {
+    const promptPath = path.isAbsolute(source.file) ? source.file : path.join(input.worktreePath, source.file);
+    return fs.readFileSync(promptPath, 'utf-8');
+  }
+  throw new Error(`Unknown agent prompt ref '${source.ref}' for task '${input.task.taskId}'`);
 }
 
 function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, prompt: string): DispatchableTask {
@@ -232,7 +267,7 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
     taskId: input.task.taskId,
     title: input.task.title,
     kind: 'agent-session',
-    prompt: taskConfig.buildPrompt(input.ctx.issue, changeDir),
+    prompt: buildBuiltinAgentPrompt(input, builtinAgentPromptRef(input, taskConfig.promptRef), changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: 'plan',
     attempt: input.attempt,
@@ -264,7 +299,7 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     taskId: input.task.taskId,
     title: input.task.title,
     kind: 'agent-session',
-    prompt: buildCheckReviewPrompt(input, changeDir),
+    prompt: buildBuiltinAgentPrompt(input, builtinAgentPromptRef(input, 'mohist/check/ai-review'), changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: 'check',
     attempt: input.attempt,
@@ -272,6 +307,25 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     artifactVerification: () => fs.existsSync(path.join(changeDir, reviewOutputPath)) ? [reviewOutputPath] : [],
     input: { mode: 'ai-review' },
   };
+}
+
+function buildBuiltinAgentPrompt(input: TaskDispatchFactoryInput, promptRef: string, changeDir: string): string {
+  switch (promptRef) {
+    case 'mohist/plan/proposal':
+      return buildArtifactPrompt('proposal', input.ctx.issue, changeDir);
+    case 'mohist/plan/specs':
+      return buildArtifactPrompt('specs', input.ctx.issue, changeDir);
+    case 'mohist/plan/design':
+      return buildArtifactPrompt('design', input.ctx.issue, changeDir);
+    case 'mohist/plan/tasks':
+      return buildArtifactPrompt('tasks', input.ctx.issue, changeDir);
+    case 'mohist/plan/self-review':
+      return buildSelfReviewPrompt(input.ctx.issue, changeDir);
+    case 'mohist/check/ai-review':
+      return buildCheckReviewPrompt(input, changeDir);
+    default:
+      throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
+  }
 }
 
 function buildCheckReviewPrompt(input: TaskDispatchFactoryInput, changeDir: string): string {

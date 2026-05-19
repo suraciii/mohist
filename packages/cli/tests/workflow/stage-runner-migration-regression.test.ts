@@ -653,6 +653,72 @@ describe('StageRunner migration regression coverage', () => {
       }
     });
 
+    it('custom agent task prompt file is resolved before ACP execution', async () => {
+      const execute = vi.fn().mockResolvedValue({ success: true, acpSessionId: 'session-1' });
+      const createSession = vi.fn().mockResolvedValue({
+        execute,
+        close: vi.fn().mockResolvedValue(undefined),
+      });
+      const genericHandler = createAgentSessionTaskHandler({
+        createSession,
+        createObservers: () => ({ onEvent: vi.fn(), close: vi.fn() }) as any,
+      });
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-custom-prompt-file-'));
+      try {
+        fs.mkdirSync(path.join(tmpDir, '.mohist', 'prompts'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.mohist', 'prompts', 'handoff.md'), 'Write a custom handoff report.', 'utf-8');
+        const customBuildStage: StageDefinition = {
+          stage: Stage.Build,
+          tasks: [
+            {
+              id: 'handoff',
+              title: 'Write handoff',
+              source: 'project',
+              uses: 'mohist/agent',
+              with: { prompt: { file: '.mohist/prompts/handoff.md' } },
+            },
+          ],
+          checks: [],
+          workSources: [{ kind: 'static', taskIds: ['handoff'] }],
+          taskExecutionPolicies: [{ taskId: 'handoff', kind: 'agent-session', workSourceKind: 'static' }],
+          checkPolicies: [],
+          repairPolicies: [],
+          invalidationPolicy: { entries: [] },
+        };
+
+        const runner = new ConfigDrivenStageRunner({
+          taskLoaderRegistry: {
+            get: vi.fn().mockImplementation((kind: string) => {
+              if (kind !== 'static') return undefined;
+              return {
+                kind: 'static' as const,
+                load: () => customBuildStage.tasks.map(task => ({
+                  taskId: task.id,
+                  title: task.title,
+                  kind: 'agent-session' as const,
+                })),
+              };
+            }),
+            list: vi.fn().mockReturnValue([]),
+          },
+          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': genericHandler as any }),
+          checkRegistry: createBasicCheckRegistry({}),
+          getStageDefinition: stage => stage === Stage.Build ? customBuildStage : createStageDefinition(stage),
+          worktreePath: tmpDir,
+        });
+        const ctx = makeMockContext(Stage.Build, { acpOptions: { cwd: tmpDir, worktreePath: tmpDir } as any });
+        ctx.requestedWork = { kind: 'task', stage: Stage.Build, taskId: 'handoff' };
+
+        const result = await runner.run(ctx);
+
+        expect(result.success).toBe(true);
+        expect(execute).toHaveBeenCalledWith('Write a custom handoff report.', { kind: 'task', title: 'Write handoff' });
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
     it('ConfigDrivenStageRunner handles Build stage with Ralph work source', async () => {
       const ralphHandler = vi.fn().mockImplementation(async (task: ExecutableTask, _ctx: StageContext) => {
         if (task.kind === 'ralph-task') {

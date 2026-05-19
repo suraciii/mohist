@@ -246,6 +246,50 @@ workflow:
     }
   });
 
+  it('accepts object prompt sources for custom agent tasks', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-prompt-source-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.mkdirSync(path.join(tempDir, '.mohist', 'prompts'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'prompts', 'handoff.md'), 'Write handoff.', 'utf-8');
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/prompt-source
+  stages:
+    - id: build
+      tasks:
+        - id: inline-report
+          uses: mohist/agent
+          with:
+            prompt:
+              inline: Write a short report.
+        - id: file-report
+          uses: mohist/agent
+          with:
+            prompt:
+              file: .mohist/prompts/handoff.md
+        - id: builtin-report
+          uses: mohist/agent
+          with:
+            prompt:
+              ref: mohist/check/ai-review
+      checks: []
+`, 'utf-8');
+
+    try {
+      const resolved = resolveWorkflowDefinition(tempDir);
+      const diagnostics = validateWorkflowDefinition(resolved);
+      const build = resolved.snapshot.compiledStageDefinitions[0];
+
+      expect(diagnostics).toEqual([]);
+      expect(build.tasks.map(task => task.id)).toEqual(['inline-report', 'file-report', 'builtin-report']);
+      expect(build.tasks[0].with).toMatchObject({ prompt: { inline: 'Write a short report.' } });
+      expect(build.tasks[1].with).toMatchObject({ prompt: { file: '.mohist/prompts/handoff.md' } });
+      expect(build.tasks[2].with).toMatchObject({ prompt: { ref: 'mohist/check/ai-review' } });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects unsupported custom check stage shapes before runtime', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-check-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));

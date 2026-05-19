@@ -2,6 +2,7 @@ import { Stage } from '../../types';
 import { WorkflowDomainError } from './errors';
 import { inferWorkflowTaskUse } from '../uses-catalog';
 import type {
+  AgentPromptSource,
   CheckFailurePolicy,
   InvalidationPolicy,
   RepairPolicy,
@@ -15,11 +16,37 @@ import type {
   TaskExecutionPolicy,
 } from './types';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function clonePromptSource(value: unknown): AgentPromptSource | string | undefined {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value)) return undefined;
+  if (typeof value.ref === 'string') return { ref: value.ref };
+  if (typeof value.file === 'string') return { file: value.file };
+  if (typeof value.inline === 'string') return { inline: value.inline };
+  return undefined;
+}
+
+function normalizeAgentPromptSource(task: TaskDefinition): TaskDefinition {
+  if (task.uses !== 'mohist/agent') return task;
+  const withConfig = task.with ? { ...task.with } : {};
+  const prompt = clonePromptSource(withConfig.prompt);
+  if (prompt !== undefined) withConfig.prompt = prompt;
+  if (typeof withConfig.promptFile === 'string' && prompt === undefined) {
+    withConfig.prompt = { file: withConfig.promptFile };
+    delete withConfig.promptFile;
+  }
+  return { ...task, with: Object.keys(withConfig).length > 0 ? withConfig : undefined };
+}
+
 function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
+  const normalized = normalizeAgentPromptSource(task);
   return {
-    ...task,
-    with: task.with ? { ...task.with } : undefined,
-    dependsOn: task.dependsOn ? [...task.dependsOn] : undefined,
+    ...normalized,
+    with: normalized.with ? { ...normalized.with } : undefined,
+    dependsOn: normalized.dependsOn ? [...normalized.dependsOn] : undefined,
   };
 }
 

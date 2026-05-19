@@ -795,6 +795,7 @@ export class ConfigDrivenStageRunner implements StageRunner {
       failedCheck: options.failedCheck,
       worktreePath: this.worktreePath,
       agentSessionRef: executionKind === 'agent-session' ? policy?.agentSessionRef : undefined,
+      sourceTask: stageDefinition.tasks.find(candidate => candidate.id === task.taskId || candidate.id === baseTaskId),
     });
   }
 
