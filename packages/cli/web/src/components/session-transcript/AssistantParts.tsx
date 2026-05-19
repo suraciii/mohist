@@ -599,10 +599,13 @@ function ToolRowView({ part }: ToolRowViewProps) {
   const isRunning = part.status === 'running' || part.status === 'pending'
   const toolLabel = getToolDisplayLabel(part.normalizedName, part.displayTitle, part.displaySubtitle, part.input)
   const toolArgs = getToolDisplayArgs(part.normalizedName, part.input)
-  const registrySubtitle = !part.displayTitle && !part.displaySubtitle ? getRegistrySubtitle(part.normalizedName, part.input) : undefined
-  const fallbackSubtitle = !registrySubtitle && !part.displayTitle && !part.displaySubtitle ? getFallbackSubtitle(part.input) : undefined
+  const registrySubtitleCandidate = !part.displayTitle && !part.displaySubtitle ? getRegistrySubtitle(part.normalizedName, part.input) : undefined
+  const registrySubtitle = registrySubtitleCandidate && registrySubtitleCandidate !== toolLabel ? registrySubtitleCandidate : undefined
+  const fallbackSubtitleCandidate = !registrySubtitle && !part.displayTitle && !part.displaySubtitle ? getFallbackSubtitle(part.input) : undefined
+  const fallbackSubtitle = fallbackSubtitleCandidate && fallbackSubtitleCandidate !== toolLabel ? fallbackSubtitleCandidate : undefined
   const hasChangedFiles = part.changedFiles && part.changedFiles.length > 0
   const displayType = getToolDisplayType(part.normalizedName)
+  const displayChangedFilesInline = hasChangedFiles && !(displayType === 'diff' && registrySubtitle)
 
   const showExpandableDetails = !isRunning && (part.input || part.output || part.error || hasChangedFiles)
 
@@ -620,7 +623,19 @@ function ToolRowView({ part }: ToolRowViewProps) {
     }
 
     if ((part.normalizedName === 'read' || part.normalizedName === 'read_file') && (part.input || part.output)) {
-      return <ReadContentView input={part.input} output={part.output} />
+      return (
+        <>
+          <ReadContentView input={part.input} output={part.output} />
+          {part.input && (
+            <div className="px-3 pb-2">
+              <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
+              <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                {part.input}
+              </pre>
+            </div>
+          )}
+        </>
+      )
     }
 
     if ((part.normalizedName === 'grep' || part.normalizedName === 'search' || part.normalizedName === 'search_files') && (part.input || part.output)) {
@@ -687,7 +702,7 @@ function ToolRowView({ part }: ToolRowViewProps) {
         {part.hasError && (
           <span className="text-xs text-red-500">failed</span>
         )}
-        {hasChangedFiles && (
+        {displayChangedFilesInline && (
           <span className="text-xs text-green-600">
             {part.changedFiles!.length === 1
               ? part.changedFiles![0].path.split('/').pop()
@@ -703,7 +718,7 @@ function ToolRowView({ part }: ToolRowViewProps) {
       {expanded && showExpandableDetails && (
         <div className="border-t border-gray-100">
           {renderSemanticContent()}
-          {hasChangedFiles && (
+          {displayChangedFilesInline && (
             <PatchDiffView changedFiles={part.changedFiles!} />
           )}
         </div>
@@ -720,6 +735,7 @@ interface ContextGroupViewProps {
 
 function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
   const [expanded, setExpanded] = useState(false)
+  const [titlePrefix, titleDetail] = title.split(' · ', 2)
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
@@ -730,7 +746,10 @@ function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
         <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
         </svg>
-        <span className="text-xs font-medium text-gray-700">{title}</span>
+        <span className="text-xs font-medium text-gray-700">{titlePrefix}</span>
+        {titleDetail && (
+          <span className="text-xs text-gray-500 truncate max-w-[240px]">{titleDetail}</span>
+        )}
         {hasError && (
           <span className="text-xs text-red-500">failed</span>
         )}

@@ -197,7 +197,7 @@ const ApplyPatchEntry: ToolRegistryEntry = {
     if (typeof patchText === 'string' && patchText.includes('*** ')) {
       const changes = parsePatchOperations(patchText)
       if (changes.length > 0) {
-        return `${changes.length} file${changes.length !== 1 ? 's' : ''} changed`
+        return changes.length === 1 ? '1 file changed' : `${changes.length} files changed`
       }
     }
     return undefined
@@ -215,7 +215,7 @@ const EditEntry: ToolRegistryEntry = {
   getTitle: (_toolName, rawInput) => {
     const parsed = parseEditInput(rawInput)
     if (parsed && parsed.filePath) {
-      return parsed.filePath.split('/').pop() ?? parsed.filePath
+      return parsed.filePath
     }
     const label = getToolLabel('edit', rawInput)
     return label ?? 'edit'
@@ -243,7 +243,7 @@ const WriteEntry: ToolRegistryEntry = {
   getTitle: (_toolName, rawInput) => {
     const parsed = parseEditInput(rawInput)
     if (parsed && parsed.filePath) {
-      return parsed.filePath.split('/').pop() ?? parsed.filePath
+      return parsed.filePath
     }
     const label = getToolLabel('write', rawInput)
     return label ?? 'write'
