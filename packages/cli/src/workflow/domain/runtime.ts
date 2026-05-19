@@ -824,7 +824,7 @@ export class WorkflowRun {
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
     const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, effectiveResult);
     events.push(...invalidationEvents);
-    if (stage === Stage.Check && taskId === 'check:converge-review-snapshot' && effectiveResult.status === 'completed') {
+    if (taskId === 'check:converge-review-snapshot' && effectiveResult.status === 'completed') {
       events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, effectiveResult));
     }
     if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
@@ -1579,21 +1579,23 @@ export class WorkflowRun {
   }
 
   private normalizeCheckOutput(stageRun: StageRun, result: CheckResultInput): unknown {
-    if (stageRun.stage !== Stage.Check || result.name !== 'review-passed' || result.status !== 'pass') return result.output;
+    const evidence = this.approvalEvidence(stageRun);
+    if (!evidence || result.name !== evidence.verdict.definition.name || result.status !== 'pass') return result.output;
     if (!result.output || typeof result.output !== 'object') return result.output;
-    const reviewOutput = result.output as Record<string, unknown>;
-    if (typeof reviewOutput.snapshotSha === 'string' && reviewOutput.snapshotSha.length > 0) return result.output;
+    if (this.approvalEvidenceSnapshot(evidence.verdict.definition, result.output)) return result.output;
     const convergenceTask = stageRun.tasks.find(task => task.id === 'check:converge-review-snapshot');
     const convergenceOutput = convergenceTask?.output as { snapshotSha?: unknown } | null;
     if (typeof convergenceOutput?.snapshotSha !== 'string' || convergenceOutput.snapshotSha.length === 0) return result.output;
-    return { ...reviewOutput, snapshotSha: convergenceOutput.snapshotSha };
+    const snapshotField = this.approvalEvidenceSnapshotField(evidence.verdict.definition);
+    if (!snapshotField) return result.output;
+    return { ...(result.output as Record<string, unknown>), [snapshotField]: convergenceOutput.snapshotSha };
   }
 
   private needsCheckConvergenceTask(stageRun: StageRun, result: CheckResultInput): boolean {
-    if (stageRun.stage !== Stage.Check || result.name !== 'review-passed' || result.status !== 'pass') return false;
+    const evidence = this.approvalEvidence(stageRun);
+    if (!evidence || result.name !== evidence.verdict.definition.name || result.status !== 'pass') return false;
     if (!result.output || typeof result.output !== 'object') return false;
-    const output = result.output as Record<string, unknown>;
-    if (typeof output.snapshotSha === 'string' && output.snapshotSha.length > 0) return false;
+    if (this.approvalEvidenceSnapshot(evidence.verdict.definition, result.output)) return false;
     return !stageRun.tasks.some(task => task.id === 'check:converge-review-snapshot');
   }
 
@@ -1603,16 +1605,17 @@ export class WorkflowRun {
     if (!snapshotSha) return [];
 
     const events: WorkflowEvent[] = [];
-    for (const checkName of ['health:check', 'merge-ready']) {
-      const check = stageRun.checks.find(candidate => candidate.name === checkName);
-      if (!check || check.status === 'pending') continue;
-      const output = check.output as Record<string, unknown> | null;
-      if (output?.candidateHeadSha === snapshotSha) continue;
-      stageRun.resetCheck(checkName);
+    const evidence = this.approvalEvidence(stageRun);
+    const checks = evidence ? [evidence.verification, evidence.candidate] : [];
+    for (const { definition, check } of checks) {
+      if (check.status === 'pending') continue;
+      const checkSnapshot = this.approvalEvidenceSnapshot(definition, check.output);
+      if (checkSnapshot === snapshotSha) continue;
+      stageRun.resetCheck(check.name);
       events.push({
         type: 'check-invalidated',
         stage: stageRun.stage,
-        checkName,
+        checkName: check.name,
         reason: 'Review convergence changed candidate snapshot; re-run verification evidence',
       });
     }
@@ -1645,13 +1648,18 @@ export class WorkflowRun {
   }
 
   private approvalEvidenceSnapshot(definition: CheckDefinition, output: unknown): string | null {
-    const evidence = definition.with?.approvalEvidence;
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-    const snapshotField = (evidence as Record<string, unknown>).snapshotField;
-    if (typeof snapshotField !== 'string' || snapshotField.length === 0) return null;
+    const snapshotField = this.approvalEvidenceSnapshotField(definition);
+    if (!snapshotField) return null;
     const data = this.unwrapTaskOutput(output);
     const value = data?.[snapshotField];
     return typeof value === 'string' && value.length > 0 ? value : null;
+  }
+
+  private approvalEvidenceSnapshotField(definition: CheckDefinition): string | null {
+    const evidence = definition.with?.approvalEvidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+    const snapshotField = (evidence as Record<string, unknown>).snapshotField;
+    return typeof snapshotField === 'string' && snapshotField.length > 0 ? snapshotField : null;
   }
 
   private toCheckStatus(status: CheckResultInput['status']): CheckRunStatus {

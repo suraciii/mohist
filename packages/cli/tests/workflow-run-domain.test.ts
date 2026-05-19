@@ -1988,6 +1988,69 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('converges custom verdict evidence using its configured snapshot field', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'custom-check-convergence',
+      stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Check
+        ? {
+          stage: Stage.Check,
+          tasks: [{ id: 'custom-review', title: 'Custom review', uses: 'mohist/agent' }],
+          checks: [
+            {
+              name: 'verify-command',
+              title: 'Verify command',
+              uses: 'mohist/health-gate',
+              with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } },
+            },
+            {
+              name: 'review-verdict',
+              title: 'Review verdict',
+              uses: 'mohist/verdict',
+              with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
+            },
+            {
+              name: 'candidate-ready',
+              title: 'Candidate ready',
+              uses: 'mohist/merge-ready',
+              with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
+            },
+          ],
+          requiresApproval: true,
+        }
+        : definition),
+    });
+    const run = startRun(definitions);
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+
+    run.completeTask(Stage.Check, 'custom-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'verify-command', status: 'pass', output: { headSha: 'old-sha' } });
+    const review = run.recordCheckResult(Stage.Check, { name: 'review-verdict', status: 'pass', output: { verdict: 'PASS' } });
+
+    expect(review.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'check:converge-review-snapshot' });
+
+    const convergence = run.completeTask(Stage.Check, 'check:converge-review-snapshot', {
+      status: 'completed',
+      output: { snapshotSha: 'new-sha' },
+    });
+
+    expect(convergence.events).toContainEqual(expect.objectContaining({
+      type: 'check-invalidated',
+      stage: Stage.Check,
+      checkName: 'verify-command',
+    }));
+
+    run.recordCheckResult(Stage.Check, { name: 'verify-command', status: 'pass', output: { headSha: 'new-sha' } });
+    run.recordCheckResult(Stage.Check, { name: 'review-verdict', status: 'pass', output: { verdict: 'PASS' } });
+
+    expect(run.stageRun(Stage.Check).findCheck('review-verdict')).toMatchObject({
+      status: 'passed',
+      output: { verdict: 'PASS', reviewedSha: 'new-sha' },
+    });
+  });
+
   it('Integrate post-delivery check failure remains non-repairable after merge freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);
