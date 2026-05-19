@@ -989,7 +989,7 @@ function WorkflowRunStageDeliveryEvidence({ stage }: { stage: StageStateRead }) 
       {delivery.merge && (
         <WorkflowRunDeliveryRow label="Merge to Target Branch" status={delivery.merge.status}>
           <div className="text-xs text-gray-600 ml-7 font-mono">
-            {delivery.merge.targetBranch ?? 'target'}: {sha(delivery.merge.baseSha)} -> {sha(delivery.merge.candidateHeadSha)} -> {sha(delivery.merge.landedSha)}
+            {`${delivery.merge.targetBranch ?? 'target'}: ${sha(delivery.merge.baseSha)} -> ${sha(delivery.merge.candidateHeadSha)} -> ${sha(delivery.merge.landedSha)}`}
           </div>
         </WorkflowRunDeliveryRow>
       )}
@@ -1059,7 +1059,7 @@ function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-gray-700">Integration Evidence</h3>
+      <h3 className="text-sm font-semibold text-gray-700">Delivery Evidence</h3>
 
       {(checkOutput || mergeReadinessOutput || healthGatePolicyOutput) && (
         <div className="space-y-3">
@@ -1123,7 +1123,7 @@ function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
 
       {integrateExecution && (
         <div className="space-y-3">
-          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Integrate Steps</h4>
+          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">Delivery Steps</h4>
           {specSyncResult && specSyncResult.status === 'completed' && (
             <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-1.5">
               <div className="flex items-center gap-2">

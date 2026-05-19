@@ -244,13 +244,13 @@ describe('Integrate WorkflowRun aggregate delivery', () => {
     expect(health.output).toEqual({ command: 'npm run build' });
   });
 
-  it('turns post-merge health failure into manual intervention and never schedules fix-integrate-health', async () => {
+  it('turns post-delivery check failure into manual intervention and never schedules fix-integrate-health', async () => {
     const { run, runner } = await runAggregateIntegrate('health-fail');
     const integrate = integrateSnapshot(run);
 
     expect(runner.executed).toEqual(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge', 'health:integrate']);
     expect(run.status).toBe('failed');
-    expect(run.failure).toMatchObject({ reason: 'post-merge-health-failed', stage: Stage.Integrate, checkName: 'health:integrate' });
+    expect(run.failure).toMatchObject({ reason: 'post-delivery-check-failed', stage: Stage.Integrate, checkName: 'health:integrate' });
     expect(integrate.freezePoint?.delivery.landedSha).toBe('landed-sha');
     expect(integrate.tasks.map(task => task.id)).not.toContain('fix-integrate-health');
     expect(integrate.checks.find(check => check.name === 'health:integrate')?.status).toBe('failed');

@@ -263,6 +263,27 @@ function rowToStageCheck(row: StageCheckRow): StageCheckState {
   };
 }
 
+function workflowTaskId(task: { taskId?: string; id?: string }): string {
+  return task.taskId ?? task.id ?? 'unknown-task';
+}
+
+function workflowTaskOrder(task: { taskOrder?: number; order?: number }): number {
+  return task.taskOrder ?? task.order ?? 0;
+}
+
+function workflowCheckName(check: { checkName?: string; name?: string }): string {
+  return check.checkName ?? check.name ?? 'unknown-check';
+}
+
+function workflowDefinitionSnapshotFromRun(run: WorkflowRunWithStageRuns): ReturnType<typeof workflowDefinitionSnapshotFromUnknown> {
+  const persisted = workflowDefinitionSnapshotFromUnknown(run.workflowDefinition);
+  if (persisted) return persisted;
+  if ('snapshot' in run && typeof run.snapshot === 'function') {
+    return workflowDefinitionSnapshotFromUnknown(run.snapshot().workflowDefinitionSnapshot);
+  }
+  return null;
+}
+
 function rowToStageStateRead(
   row: StageStateRow,
   tasks: StageTaskState[],
@@ -927,15 +948,15 @@ export class StageStateService {
   }
 
   getIssueStageStateFromWorkflowRun(run: WorkflowRunWithStageRuns): StageStateRead[] {
-    const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(run.workflowDefinition);
+    const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromRun(run);
     return run.stageRuns.map(stageRun => {
       const stageDefinition = workflowDefinitionSnapshot?.compiledStageDefinitions.find(definition => definition.stage === stageRun.stage);
       const tasks: StageTaskState[] = stageRun.tasks.map(task => ({
-        taskId: task.taskId,
+        taskId: workflowTaskId(task),
         title: task.title,
         status: task.status as StageTaskStatus,
         source: 'static' as const,
-        order: task.taskOrder,
+        order: workflowTaskOrder(task),
         attempts: task.attempts,
         duration: task.duration,
         artifacts: task.artifacts,
@@ -953,7 +974,7 @@ export class StageStateService {
       }));
 
       const checks: StageCheckState[] = stageRun.checks.map(check => ({
-        checkName: check.checkName,
+        checkName: workflowCheckName(check),
         status: check.status as StageCheckStatus,
         message: check.message,
         output: check.output,
@@ -1056,7 +1077,7 @@ export class StageStateService {
         mergedSha: typeof remoteMergeOutput.mergedSha === 'string' ? remoteMergeOutput.mergedSha : null,
       } : null,
       health: health ? { status: health.status, message: health.message, output: health.output } : null,
-      frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed' || remoteMerge?.status === 'passed',
+      frozen: this.hasCompletedLockingUse(tasks, checks, stageDefinition),
     };
   }
 
@@ -1107,7 +1128,7 @@ export class StageStateService {
     if (failedCheck) {
       const codeLocked = this.hasCompletedLockingUse(tasks, checks, stageDefinition);
       return {
-        reason: codeLocked ? 'post-merge-health-failed' : 'check-unrepaired',
+        reason: codeLocked ? 'post-delivery-check-failed' : 'check-unrepaired',
         stage: stageRun.stage,
         checkName: failedCheck.checkName,
         message: failedCheck.message,

@@ -207,8 +207,8 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     const integrate = snapshot.stageRuns.find(stage => stage.stage === Stage.Integrate)!;
 
     expect(snapshot.status).toBe('failed');
-    expect(snapshot.failure?.reason).toBe('post-merge-health-failed');
-    expect(integrate.failure?.reason).toBe('post-merge-health-failed');
+    expect(snapshot.failure?.reason).toBe('post-delivery-check-failed');
+    expect(integrate.failure?.reason).toBe('post-delivery-check-failed');
     expect(integrate.freezePoint?.delivery).toMatchObject({ landedSha: 'landed', targetBranch: 'main' });
     expect(integrate.checks.find(check => check.name === 'health:integrate')).toMatchObject({ status: 'failed', message: 'post merge failed' });
   });

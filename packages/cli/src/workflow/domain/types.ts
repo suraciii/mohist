@@ -7,7 +7,13 @@ export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'sk
 export type CheckRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
 export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted';
 export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed';
-export type FailureReason = 'task-failed' | 'check-unrepaired' | 'approval-rejected' | 'post-merge-health-failed' | 'work-interrupted';
+export type FailureReason =
+  | 'task-failed'
+  | 'check-unrepaired'
+  | 'approval-rejected'
+  | 'post-delivery-check-failed'
+  | 'post-merge-health-failed'
+  | 'work-interrupted';
 
 export interface CausedByMetadata {
   type: 'check-failure' | 'task-failure' | 'branch-changed' | 'conflict' | 'retry' | 'user-action' | 'system-policy';
@@ -246,6 +252,7 @@ export type WorkflowEvent =
   | { type: 'stage-failed'; stage: Stage; reason: FailureDetails }
   | { type: 'workflow-completed' }
   | { type: 'workflow-failed'; reason: FailureDetails }
+  | { type: 'delivery-frozen'; stage: Stage; freezePoint: FreezePoint }
   | { type: 'integrate-frozen'; stage: Stage; freezePoint: FreezePoint };
 
 export type WorkflowWork =

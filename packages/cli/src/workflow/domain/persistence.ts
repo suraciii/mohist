@@ -58,7 +58,7 @@ function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDet
   const failedCheck = snapshot.checks.find(check => check.status === 'failed' || check.status === 'error');
   if (failedCheck && snapshot.freezePoint) {
     return {
-      reason: 'post-merge-health-failed',
+      reason: 'post-delivery-check-failed',
       stage,
       checkName: failedCheck.name,
       message: failedCheck.message ?? undefined,

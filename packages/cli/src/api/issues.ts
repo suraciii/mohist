@@ -435,7 +435,7 @@ function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDef
       mergedSha: typeof remoteMergeOutput.mergedSha === 'string' ? remoteMergeOutput.mergedSha : null,
     } : null,
     health: health ? { status: health.status, message: health.message, output: health.output } : null,
-    frozen: merge?.status === 'completed' || remoteMerge?.status === 'completed' || remoteMerge?.status === 'passed',
+    frozen: hasCompletedLockingUse(stageRun, stageDefinition),
   };
 }
 
@@ -466,7 +466,7 @@ function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefin
   if (failedCheck) {
     const codeLocked = hasCompletedLockingUse(stageRun, stageDefinition);
     return {
-      reason: codeLocked ? 'post-merge-health-failed' : 'check-unrepaired',
+      reason: codeLocked ? 'post-delivery-check-failed' : 'check-unrepaired',
       stage: stageRun.stage,
       checkName: failedCheck.checkName,
       message: failedCheck.message,
