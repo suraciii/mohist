@@ -2517,7 +2517,7 @@ describe('StageRunner migration regression coverage', () => {
     });
   });
 
-  describe('AC-5: legacy runner construction for rollback', () => {
+  describe('AC-5: generic runner is the workflow execution path', () => {
     let tmpDir: string;
 
     beforeEach(() => {
@@ -2533,45 +2533,7 @@ describe('StageRunner migration regression coverage', () => {
       try { require('fs').rmSync(tmpDir, { recursive: true, force: true }); } catch { /* noop */ }
     });
 
-    it('PlanStageRunner can be constructed with worktreePath', async () => {
-      const { PlanStageRunner } = await import('../../src/workflow/plan-stage-runner');
-      const runner = new PlanStageRunner(tmpDir);
-      expect(runner.canHandle(Stage.Plan)).toBe(true);
-      expect(runner.canHandle(Stage.Build)).toBe(false);
-    });
-
-    it('BuildStageRunner can be constructed with worktreePath', async () => {
-      const { BuildStageRunner } = await import('../../src/workflow/build-stage-runner');
-      const runner = new BuildStageRunner({ worktreePath: tmpDir });
-      expect(runner.canHandle(Stage.Build)).toBe(true);
-      expect(runner.canHandle(Stage.Plan)).toBe(false);
-    });
-
-    it('legacy CheckStageRunner can be constructed with worktreePath', async () => {
-      const { CheckStageRunner } = await import('../../src/workflow/legacy/check-stage-runner');
-      const runner = new CheckStageRunner({ worktreePath: tmpDir });
-      expect(runner.canHandle(Stage.Check)).toBe(true);
-      expect(runner.canHandle(Stage.Plan)).toBe(false);
-    });
-
-    it('IntegrateStageRunner can be constructed with worktreePath', async () => {
-      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
-      const runner = new IntegrateStageRunner({ worktreePath: tmpDir });
-      expect(runner.canHandle(Stage.Integrate)).toBe(true);
-      expect(runner.canHandle(Stage.Plan)).toBe(false);
-    });
-
-    it('GenericStageRunner and legacy runners can coexist in explicit compatibility lists', async () => {
-      const { PlanStageRunner } = await import('../../src/workflow/plan-stage-runner');
-      const { CheckStageRunner } = await import('../../src/workflow/legacy/check-stage-runner');
-      const { IntegrateStageRunner } = await import('../../src/workflow/integrate-stage-runner');
-      const { BuildStageRunner } = await import('../../src/workflow/build-stage-runner');
-
-      const planRunner = new PlanStageRunner(tmpDir);
-      const integrateRunner = new IntegrateStageRunner({ worktreePath: tmpDir });
-      const buildRunner = new BuildStageRunner({ worktreePath: tmpDir });
-      const checkRunner = new CheckStageRunner({ worktreePath: tmpDir });
-
+    it('GenericStageRunner handles every compiled pipeline stage from the definition', async () => {
       const genericRunner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
         taskHandlerRegistry: createBasicTaskHandlerRegistry(),
@@ -2580,15 +2542,10 @@ describe('StageRunner migration regression coverage', () => {
         worktreePath: tmpDir,
       });
 
-      const allRunners: StageRunner[] = [genericRunner, planRunner, buildRunner, checkRunner, integrateRunner];
-
-      expect(allRunners.length).toBe(5);
-      expect(allRunners[0]).toBe(genericRunner);
-      expect(allRunners.some(r => r.canHandle(Stage.Plan))).toBe(true);
-      expect(allRunners.some(r => r.canHandle(Stage.Build))).toBe(true);
-      expect(allRunners.some(r => r.canHandle(Stage.Check))).toBe(true);
-      expect(allRunners.some(r => r.canHandle(Stage.Integrate))).toBe(true);
-      expect(allRunners.filter(r => r.canHandle(Stage.Plan)).length).toBeGreaterThan(1);
+      expect(genericRunner.canHandle(Stage.Plan)).toBe(true);
+      expect(genericRunner.canHandle(Stage.Build)).toBe(true);
+      expect(genericRunner.canHandle(Stage.Check)).toBe(true);
+      expect(genericRunner.canHandle(Stage.Integrate)).toBe(true);
     });
 
     it('GenericStageRunner can be enabled for only selected stages', () => {
