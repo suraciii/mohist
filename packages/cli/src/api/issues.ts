@@ -525,7 +525,7 @@ function taskOrigin(stageDefinition: StageDefinition | undefined, taskId: string
 
   return {
     source: definition ? (definition.source ?? 'builtin') : (stageDefinition ? 'runtime' : 'builtin'),
-    uses: inferWorkflowTaskUse(taskId, policy?.kind),
+    uses: definition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind),
   };
 }
 

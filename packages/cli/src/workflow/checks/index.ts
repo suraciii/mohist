@@ -14,3 +14,6 @@ export {
   resolveCheck,
   runCheck,
 } from './check-registry';
+
+export { ArtifactExistsCheck } from './artifact-exists-check';
+export { ShellCommandCheck } from './shell-command-check';

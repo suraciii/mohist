@@ -8,6 +8,7 @@ import {
   type StageRunSnapshot,
   type VerificationEvidence,
   type WorkItemAttempt,
+  type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
   WorkflowRun as DomainWorkflowRun,
 } from '../workflow/domain';
@@ -405,6 +406,7 @@ export class WorkflowRunRepo {
     issueNumber: number;
     startedBy?: string | null;
     tasksPath?: string;
+    workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
   }): DomainWorkflowRun {
     return this.db.transaction(() => {
       const existing = this.loadRunningAggregate(data.issueId, { tasksPath: data.tasksPath });
@@ -415,6 +417,7 @@ export class WorkflowRunRepo {
         id,
         issueId: data.issueId,
         issueNumber: data.issueNumber,
+        workflowDefinitionSnapshot: data.workflowDefinitionSnapshot,
       });
       this.saveAggregate(run, data.startedBy ?? null);
       return this.loadRunningAggregate(data.issueId, { tasksPath: data.tasksPath }) ?? run;

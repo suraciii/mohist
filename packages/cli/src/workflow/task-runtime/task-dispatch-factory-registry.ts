@@ -163,9 +163,35 @@ function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrat
 }
 
 function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask | null {
+  if (typeof input.task.prompt === 'string' && input.task.prompt.trim().length > 0) {
+    return createGenericAgentSessionDispatchTask(input, input.task.prompt);
+  }
   if (input.ctx.issue.stage === Stage.Plan) return createPlanAgentSessionDispatchTask(input);
   if (input.ctx.issue.stage === Stage.Check && input.task.taskId === 'ai-review') return createCheckAiReviewDispatchTask(input);
   return { ...input.task, agentSessionRef: input.agentSessionRef };
+}
+
+function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, prompt: string): DispatchableTask {
+  const declaredArtifacts = extractStringArray((input.task.input as { artifacts?: unknown; outputs?: unknown } | undefined)?.artifacts)
+    ?? extractStringArray((input.task.input as { outputs?: unknown } | undefined)?.outputs)
+    ?? [];
+  return {
+    taskId: input.task.taskId,
+    title: input.task.title,
+    kind: 'agent-session',
+    prompt,
+    cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
+    stage: input.ctx.issue.stage,
+    attempt: input.attempt,
+    agentSessionRef: input.agentSessionRef,
+    artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
+    input: input.task.input,
+  };
+}
+
+function extractStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.filter((item): item is string => typeof item === 'string');
 }
 
 function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {

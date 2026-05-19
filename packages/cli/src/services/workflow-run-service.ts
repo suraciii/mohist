@@ -1,6 +1,7 @@
 import { DatabaseManager } from '../db/database';
 import { WorkflowRunRepo, WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import { Stage } from '../types';
+import type { WorkflowDefinitionSnapshot } from '../workflow/domain';
 import { WorkflowApplicationService } from './workflow-application-service';
 
 export class WorkflowRunService {
@@ -16,8 +17,8 @@ export class WorkflowRunService {
     return this.db;
   }
 
-  startRun(issueId: string, issueNumber: number, startedBy?: string | null): WorkflowRunWithStageRuns {
-    new WorkflowApplicationService(this.db).startWorkflow({ issueId, issueNumber, startedBy });
+  startRun(issueId: string, issueNumber: number, startedBy?: string | null, workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot): WorkflowRunWithStageRuns {
+    new WorkflowApplicationService(this.db).startWorkflow({ issueId, issueNumber, startedBy, workflowDefinitionSnapshot });
     const run = this.repo.getActiveRunWithRelations(issueId);
     if (!run) throw new Error(`Failed to start WorkflowRun for issue ${issueId}`);
     return run;

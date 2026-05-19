@@ -168,4 +168,113 @@ stages:
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('resolves full custom workflow definitions into project sourced stages', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/custom
+  name: Project Custom
+  stages:
+    - id: plan
+      tasks:
+        - id: design
+          title: Design
+          uses: mohist/agent
+          with:
+            prompt: Write a compact design.
+            outputs:
+              - design.md
+      checks:
+        - id: design-file
+          title: Design file
+          uses: mohist/artifact-exists
+          with:
+            path: design.md
+      approval: true
+    - id: build
+      tasks:
+        - id: implement
+          uses: mohist/agent
+          with:
+            prompt: Implement the design.
+            session: build-agent
+      checks:
+        - id: build-clean
+          uses: mohist/shell
+          with:
+            command: npm run build
+`, 'utf-8');
+
+    try {
+      const resolved = resolveWorkflowDefinition(tempDir);
+      const diagnostics = validateWorkflowDefinition(resolved);
+      const plan = resolved.snapshot.compiledStageDefinitions[0];
+      const build = resolved.snapshot.compiledStageDefinitions[1];
+
+      expect(diagnostics).toEqual([]);
+      expect(resolved.sourceChain).toHaveLength(1);
+      expect(resolved.snapshot.workflowId).toBe('project/custom');
+      expect(resolved.snapshot.source).toMatchObject({ type: 'project' });
+      expect(plan.stage).toBe(Stage.Plan);
+      expect(plan.requiresApproval).toBe(true);
+      expect(plan.tasks[0]).toMatchObject({
+        id: 'design',
+        source: 'project',
+        uses: 'mohist/agent',
+        with: { prompt: 'Write a compact design.', outputs: ['design.md'] },
+      });
+      expect(plan.checks[0]).toMatchObject({
+        name: 'design-file',
+        source: 'project',
+        uses: 'mohist/artifact-exists',
+        with: { path: 'design.md' },
+      });
+      expect(build.taskExecutionPolicies?.find(policy => policy.taskId === 'implement')).toMatchObject({
+        kind: 'agent-session',
+        agentSessionRef: 'build-agent',
+      });
+      expect(explainWorkflowItem('build-clean', resolved)).toMatchObject({
+        kind: 'check',
+        source: 'project',
+        uses: 'mohist/shell',
+        inputs: { command: 'npm run build' },
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unsupported custom check stage shapes before runtime', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-check-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  stages:
+    - id: check
+      tasks:
+        - id: review
+          uses: mohist/agent
+          with:
+            prompt: Review the change.
+      checks:
+        - id: review-file
+          uses: mohist/artifact-exists
+          with:
+            path: review.md
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          message: 'Custom Check stage v1 must include ai-review, health:check, review-passed, and merge-ready until Check evidence guards are generalized',
+        }),
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -10,6 +10,7 @@ import {
   type WorkflowRun,
   type WorkflowWork,
   type WorkflowRecoverySummary,
+  type WorkflowDefinitionSnapshot,
   type WorkItemAttemptState,
 } from '../workflow/domain';
 import { WorkflowRunProjection } from './workflow-run-projection';
@@ -17,7 +18,7 @@ import type { WorkflowAttemptEvidencePort, AttemptReconciliationResult } from '.
 import { AttemptReconciliationService } from './attempt-reconciliation-service';
 
 export interface WorkflowRunRepositoryPort {
-  createOrLoadActiveAggregate(data: { issueId: string; issueNumber: number; startedBy?: string | null; tasksPath?: string }): WorkflowRun;
+  createOrLoadActiveAggregate(data: { issueId: string; issueNumber: number; startedBy?: string | null; tasksPath?: string; workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot }): WorkflowRun;
   loadActiveAggregate(issueId: string, options?: { tasksPath?: string }): WorkflowRun | null;
   loadRunningAggregate?(issueId: string, options?: { tasksPath?: string }): WorkflowRun | null;
   loadLatestAggregate?(issueId: string, options?: { tasksPath?: string }): WorkflowRun | null;
@@ -32,6 +33,7 @@ export interface WorkflowCommandOptions {
   tasksPath?: string;
   sessionId?: string | null;
   startedBy?: string | null;
+  workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
   buildWorkSourceState?: 'missing' | 'invalid' | 'empty';
 }
 
