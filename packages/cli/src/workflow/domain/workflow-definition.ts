@@ -1,5 +1,6 @@
 import { Stage } from '../../types';
 import { WorkflowDomainError } from './errors';
+import { inferWorkflowTaskUse } from '../uses-catalog';
 import type {
   CheckFailurePolicy,
   InvalidationPolicy,
@@ -9,6 +10,9 @@ import type {
   WorkflowDefinition,
   WorkflowDefinitionSnapshot,
   WorkflowDefinitionSource,
+  WorkSourceKind,
+  TaskExecutionKind,
+  TaskExecutionPolicy,
 } from './types';
 
 function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
@@ -68,6 +72,64 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
   };
 }
 
+function inferTaskExecutionKind(taskId: string, uses?: string): TaskExecutionKind {
+  const resolvedUses = uses ?? inferWorkflowTaskUse(taskId);
+  if (resolvedUses === 'mohist/ralph-tasks') return 'ralph-task';
+  if (
+    resolvedUses === 'mohist/openspec-sync'
+    || resolvedUses === 'mohist/archive-change'
+    || resolvedUses === 'mohist/merge'
+    || resolvedUses === 'mohist/github-pr'
+  ) {
+    return 'service-call';
+  }
+  if (resolvedUses === 'mohist/rebase') return 'rebase-task';
+  return 'agent-session';
+}
+
+function taskWorkSourceKind(stage: StageDefinition, taskId: string): WorkSourceKind | undefined {
+  for (const source of stage.workSources ?? []) {
+    if (source.kind === 'static') {
+      const taskIds = source.taskIds ?? stage.tasks.map(task => task.id);
+      if (taskIds.includes(taskId)) return source.kind;
+    }
+  }
+  return undefined;
+}
+
+function policyKey(policy: TaskExecutionPolicy): string {
+  return `${policy.taskId}:${policy.workSourceKind ?? '*'}`;
+}
+
+function compileTaskExecutionPolicies(stage: StageDefinition): TaskExecutionPolicy[] | undefined {
+  const policies = new Map<string, TaskExecutionPolicy>();
+
+  for (const policy of stage.taskExecutionPolicies ?? []) {
+    policies.set(policyKey(policy), { ...policy });
+  }
+
+  for (const task of stage.tasks) {
+    const workSourceKind = taskWorkSourceKind(stage, task.id);
+    const existing = stage.taskExecutionPolicies?.find(policy => policy.taskId === task.id && policy.workSourceKind === workSourceKind);
+    if (existing) continue;
+
+    const kind = inferTaskExecutionKind(task.id, task.uses);
+    const policy: TaskExecutionPolicy = {
+      taskId: task.id,
+      kind,
+      workSourceKind,
+    };
+
+    if (kind === 'agent-session' && task.with && typeof task.with.session === 'string') {
+      policy.agentSessionRef = task.with.session;
+    }
+
+    policies.set(policyKey(policy), policy);
+  }
+
+  return policies.size > 0 ? [...policies.values()] : undefined;
+}
+
 export function compileWorkflowDefinition(definition: WorkflowDefinition): StageDefinition[] {
   if (!definition.id || definition.id.trim().length === 0) {
     throw new WorkflowDomainError('WorkflowDefinition requires an id');
@@ -116,7 +178,11 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Stage
     }
   }
 
-  return definition.stages.map(cloneStageDefinition);
+  return definition.stages.map(stage => {
+    const compiled = cloneStageDefinition(stage);
+    compiled.taskExecutionPolicies = compileTaskExecutionPolicies(compiled);
+    return compiled;
+  });
 }
 
 export function cloneWorkflowDefinition(definition: WorkflowDefinition): WorkflowDefinition {

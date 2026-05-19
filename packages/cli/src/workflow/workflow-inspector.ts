@@ -151,11 +151,6 @@ function compileFullCustomWorkflow(
       approvalCheckName: approval ? 'user-approval' : undefined,
       workSources: tasks.length > 0 ? [{ kind: 'static', taskIds: tasks.map(task => task.id) }] : [{ kind: 'static', taskIds: [] }],
       taskExecutionPolicies: [
-        ...tasks.map(task => ({
-          taskId: task.id,
-          kind: task.uses === 'mohist/ralph-tasks' ? 'ralph-task' as const : 'agent-session' as const,
-          agentSessionRef: task.with && typeof task.with.session === 'string' ? task.with.session : undefined,
-        })),
         { taskId: 'rebase-branch', kind: 'rebase-task' as const, workSourceKind: 'runtime' as const },
         ...repairPolicies.map(policy => ({
           taskId: policy.fixTaskId,

@@ -93,6 +93,11 @@ describe('WorkflowRun domain aggregate', () => {
     ]);
     const plan = compiled.find(definition => definition.stage === Stage.Plan)!;
     const check = compiled.find(definition => definition.stage === Stage.Check)!;
+    expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.taskExecutionPolicies?.some(policy => policy.taskId === 'proposal')).toBe(false);
+    expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.tasks.find(task => task.id === 'proposal')).toMatchObject({
+      uses: 'mohist/agent',
+      with: { session: 'plan-artifacts' },
+    });
     expect(plan.taskExecutionPolicies?.filter(policy => policy.kind === 'agent-session').map(policy => policy.taskId)).toEqual([
       'proposal',
       'specs',
@@ -100,8 +105,14 @@ describe('WorkflowRun domain aggregate', () => {
       'tasks',
       'self-review',
     ]);
+    expect(plan.taskExecutionPolicies?.find(policy => policy.taskId === 'proposal')).toMatchObject({
+      kind: 'agent-session',
+      workSourceKind: 'static',
+      agentSessionRef: 'plan-artifacts',
+    });
     expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
       kind: 'agent-session',
+      workSourceKind: 'static',
     });
   });
 
