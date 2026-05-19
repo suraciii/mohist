@@ -114,9 +114,30 @@ describe('WorkflowRun domain aggregate', () => {
       workSourceKind: 'static',
       agentSessionRef: 'plan-artifacts',
     });
+    expect(plan.repairPolicies?.find(policy => policy.checkName === 'self-review-passed')).toMatchObject({
+      fixTaskId: 'fix-plan-review',
+      maxAttempts: 1,
+    });
+    expect(plan.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-plan-review')).toMatchObject({
+      kind: 'repair-task',
+      workSourceKind: 'runtime',
+    });
+    expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
+      fixTaskId: 'fix-review-findings',
+      maxAttempts: 2,
+      inputFrom: [
+        { type: 'failed-check-output' },
+        { type: 'check-items', filter: 'blocking' },
+        { type: 'snapshot' },
+      ],
+    });
     expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'static',
+    });
+    expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
+      kind: 'repair-task',
+      workSourceKind: 'runtime',
     });
   });
 
@@ -1408,6 +1429,15 @@ describe('WorkflowRun domain aggregate', () => {
       expect(fixTask.status).toBe('pending');
 
       run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+      run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+      run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+      run.recordCheckResult(Stage.Check, {
+        name: 'review-passed',
+        status: 'fail',
+        message: 'Review failed second time',
+        output: { verdict: 'FAIL' },
+      });
+      run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed' });
 
       const checkStage = run.stageRun(Stage.Check);
       checkStage.findTask('ai-review').status = 'completed';
@@ -1876,14 +1906,6 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed again' });
-    run.stageRun(Stage.Check).appendAdHocTask('fix-review-findings:1', 'Fix review findings', {
-      type: 'check-failure',
-      checkName: 'review-passed',
-      message: 'Review failed again',
-    });
-    run.stageRun(Stage.Check).reopenForRepair();
-    run.status = 'running';
-    run.failure = null;
 
     expect(run.stageRun(Stage.Check).findTask('fix-review-findings:1')).toMatchObject({ status: 'pending' });
     const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed' });

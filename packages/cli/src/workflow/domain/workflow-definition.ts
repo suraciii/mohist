@@ -3,6 +3,7 @@ import { WorkflowDomainError } from './errors';
 import { inferWorkflowTaskUse } from '../uses-catalog';
 import type {
   AgentPromptSource,
+  CheckDefinition,
   CheckFailurePolicy,
   InvalidationPolicy,
   RepairPolicy,
@@ -50,6 +51,20 @@ function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
   };
 }
 
+function cloneOnFailure(check: CheckDefinition): CheckDefinition {
+  if (!check.onFailure?.retry) return check;
+  return {
+    ...check,
+    onFailure: {
+      retry: {
+        limit: check.onFailure.retry.limit,
+        task: cloneTaskDefinition(check.onFailure.retry.task),
+        inputFrom: check.onFailure.retry.inputFrom?.map(input => ({ ...input })),
+      },
+    },
+  };
+}
+
 function cloneCheckFailurePolicy(policy: CheckFailurePolicy): CheckFailurePolicy {
   return {
     ...policy,
@@ -83,7 +98,7 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
     checks: stage.checks.map(check => ({
-      ...check,
+      ...cloneOnFailure(check),
       with: check.with ? { ...check.with } : undefined,
     })),
     checkFailurePolicies: stage.checkFailurePolicies?.map(cloneCheckFailurePolicy),
@@ -97,6 +112,20 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
     repairPolicies: stage.repairPolicies?.map(cloneRepairPolicy),
     invalidationPolicy: stage.invalidationPolicy ? cloneInvalidationPolicy(stage.invalidationPolicy) : undefined,
   };
+}
+
+function compileRepairPoliciesFromChecks(stage: StageDefinition): RepairPolicy[] {
+  return stage.checks.flatMap(check => {
+    const retry = check.onFailure?.retry;
+    if (!retry) return [];
+    return [{
+      checkName: check.name,
+      fixTaskId: retry.task.id,
+      fixTaskTitle: retry.task.title,
+      maxAttempts: retry.limit,
+      inputFrom: retry.inputFrom?.map(input => ({ ...input })),
+    }];
+  });
 }
 
 function inferTaskExecutionKind(taskId: string, uses?: string): TaskExecutionKind {
@@ -154,6 +183,19 @@ function compileTaskExecutionPolicies(stage: StageDefinition): TaskExecutionPoli
     policies.set(policyKey(policy), policy);
   }
 
+  for (const check of stage.checks) {
+    const task = check.onFailure?.retry?.task;
+    if (!task) continue;
+    const existing = [...policies.values()].some(policy => policy.taskId === task.id && policy.workSourceKind === 'runtime');
+    if (existing) continue;
+    const policy: TaskExecutionPolicy = {
+      taskId: task.id,
+      kind: 'repair-task',
+      workSourceKind: 'runtime',
+    };
+    policies.set(policyKey(policy), policy);
+  }
+
   return policies.size > 0 ? [...policies.values()] : undefined;
 }
 
@@ -207,6 +249,18 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Stage
 
   return definition.stages.map(stage => {
     const compiled = cloneStageDefinition(stage);
+    const repairPoliciesFromChecks = compileRepairPoliciesFromChecks(compiled);
+    if (repairPoliciesFromChecks.length > 0) {
+      const onFailureCheckNames = new Set(repairPoliciesFromChecks.map(policy => policy.checkName));
+      compiled.repairPolicies = [
+        ...(compiled.repairPolicies ?? []).filter(policy => !onFailureCheckNames.has(policy.checkName)),
+        ...repairPoliciesFromChecks,
+      ];
+      compiled.checkFailurePolicies = [
+        ...(compiled.checkFailurePolicies ?? []).filter(policy => !onFailureCheckNames.has(policy.checkName)),
+        ...repairPoliciesFromChecks.map(policy => ({ ...policy })),
+      ];
+    }
     compiled.taskExecutionPolicies = compileTaskExecutionPolicies(compiled);
     return compiled;
   });

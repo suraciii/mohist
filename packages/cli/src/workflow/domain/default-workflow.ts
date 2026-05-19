@@ -21,24 +21,29 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { name: 'specs-complete', title: 'Specs complete' },
         { name: 'design-complete', title: 'Design complete' },
         { name: 'tasks-valid', title: 'Tasks valid' },
-        { name: 'self-review-passed', title: 'Self review passed' },
+        {
+          name: 'self-review-passed',
+          title: 'Self review passed',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'fix-plan-review',
+                title: 'Fix plan review findings',
+                uses: 'mohist/agent',
+                with: { prompt: { ref: 'mohist/plan/fix-review' } },
+              },
+            },
+          },
+        },
         { name: 'health:plan', title: 'Plan health gate' },
       ],
       requiresApproval: true,
       approvalCheckName: 'user-approval',
-      checkFailurePolicies: [
-        {
-          checkName: 'self-review-passed',
-          fixTaskId: 'fix-plan-review',
-          fixTaskTitle: 'Fix plan review findings',
-          maxAttempts: 1,
-        },
-      ],
       workSources: [
         { kind: 'static', taskIds: ['proposal', 'specs', 'design', 'tasks', 'self-review'] },
       ],
       taskExecutionPolicies: [
-        { taskId: 'fix-plan-review', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
       ],
       checkPolicies: [
@@ -50,14 +55,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { checkName: 'health:plan', phase: 'post-task' },
       ],
       approvalPolicy: { checkName: 'user-approval' },
-      repairPolicies: [
-        {
-          checkName: 'self-review-passed',
-          fixTaskId: 'fix-plan-review',
-          fixTaskTitle: 'Fix plan review findings',
-          maxAttempts: 1,
-        },
-      ],
       invalidationPolicy: {
         entries: [],
       },
@@ -66,14 +63,20 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
       stage: Stage.Build,
       tasks: [],
       checks: [
-        { name: 'health:build', title: 'Build health gate' },
-      ],
-      checkFailurePolicies: [
         {
-          checkName: 'health:build',
-          fixTaskId: 'fix-build-health',
-          fixTaskTitle: 'Fix build health',
-          maxAttempts: 1,
+          name: 'health:build',
+          title: 'Build health gate',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'fix-build-health',
+                title: 'Fix build health',
+                uses: 'mohist/agent',
+                with: { prompt: { ref: 'mohist/build/fix-health' } },
+              },
+            },
+          },
         },
       ],
       workSources: [
@@ -81,20 +84,11 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { kind: 'runtime' },
       ],
       taskExecutionPolicies: [
-        { taskId: 'fix-build-health', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
         { taskId: '*', kind: 'ralph-task', workSourceKind: 'ralph' },
       ],
       checkPolicies: [
         { checkName: 'health:build', phase: 'post-task' },
-      ],
-      repairPolicies: [
-        {
-          checkName: 'health:build',
-          fixTaskId: 'fix-build-health',
-          fixTaskTitle: 'Fix build health',
-          maxAttempts: 1,
-        },
       ],
       invalidationPolicy: {
         entries: [],
@@ -113,45 +107,64 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         },
       ],
       checks: [
-        { name: 'health:check', title: 'Check health gate' },
-        { name: 'review-passed', title: 'Review passed' },
-        { name: 'merge-ready', title: 'Merge ready' },
+        {
+          name: 'health:check',
+          title: 'Check health gate',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'fix-check-health',
+                title: 'Fix check health',
+                uses: 'mohist/agent',
+                with: { prompt: { ref: 'mohist/check/fix-health' } },
+              },
+            },
+          },
+        },
+        {
+          name: 'review-passed',
+          title: 'Review passed',
+          onFailure: {
+            retry: {
+              limit: 2,
+              task: {
+                id: 'fix-review-findings',
+                title: 'Fix review findings',
+                uses: 'mohist/agent',
+                with: { prompt: { ref: 'mohist/check/fix-review-findings' } },
+              },
+              inputFrom: [
+                { type: 'failed-check-output' },
+                { type: 'check-items', filter: 'blocking' },
+                { type: 'snapshot' },
+              ],
+            },
+          },
+        },
+        {
+          name: 'merge-ready',
+          title: 'Merge ready',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'fix-merge-readiness',
+                title: 'Fix merge readiness',
+                uses: 'mohist/agent',
+                with: { prompt: { ref: 'mohist/check/fix-merge-readiness' } },
+              },
+            },
+          },
+        },
       ],
       requiresApproval: true,
       approvalCheckName: 'user-approval',
-      checkFailurePolicies: [
-        {
-          checkName: 'health:check',
-          fixTaskId: 'fix-check-health',
-          fixTaskTitle: 'Fix check health',
-          maxAttempts: 1,
-        },
-        {
-          checkName: 'review-passed',
-          fixTaskId: 'fix-review-findings',
-          fixTaskTitle: 'Fix review findings',
-          maxAttempts: 1,
-          inputFrom: [
-            { type: 'failed-check-output' },
-            { type: 'check-items', filter: 'blocking' },
-            { type: 'snapshot' },
-          ],
-        },
-        {
-          checkName: 'merge-ready',
-          fixTaskId: 'fix-merge-readiness',
-          fixTaskTitle: 'Fix merge readiness',
-          maxAttempts: 1,
-        },
-      ],
       workSources: [
         { kind: 'static', taskIds: ['ai-review'] },
         { kind: 'runtime' },
       ],
       taskExecutionPolicies: [
-        { taskId: 'fix-check-health', kind: 'repair-task', workSourceKind: 'runtime' },
-        { taskId: 'fix-review-findings', kind: 'repair-task', workSourceKind: 'runtime' },
-        { taskId: 'fix-merge-readiness', kind: 'repair-task', workSourceKind: 'runtime' },
         { taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
       ],
@@ -161,31 +174,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
         { checkName: 'merge-ready', phase: 'post-task' },
       ],
       approvalPolicy: { checkName: 'user-approval' },
-      repairPolicies: [
-        {
-          checkName: 'health:check',
-          fixTaskId: 'fix-check-health',
-          fixTaskTitle: 'Fix check health',
-          maxAttempts: 1,
-        },
-        {
-          checkName: 'review-passed',
-          fixTaskId: 'fix-review-findings',
-          fixTaskTitle: 'Fix review findings',
-          maxAttempts: 1,
-          inputFrom: [
-            { type: 'failed-check-output' },
-            { type: 'check-items', filter: 'blocking' },
-            { type: 'snapshot' },
-          ],
-        },
-        {
-          checkName: 'merge-ready',
-          fixTaskId: 'fix-merge-readiness',
-          fixTaskTitle: 'Fix merge readiness',
-          maxAttempts: 1,
-        },
-      ],
       invalidationPolicy: {
         entries: [
           {
