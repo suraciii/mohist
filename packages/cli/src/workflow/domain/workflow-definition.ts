@@ -5,6 +5,8 @@ import type {
   AgentPromptSource,
   CheckDefinition,
   CheckFailurePolicy,
+  ApprovalPolicy,
+  CheckPolicy,
   CompiledStageDefinition,
   InvalidationPolicy,
   RepairPolicy,
@@ -55,9 +57,13 @@ function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
 }
 
 function cloneOnFailure(check: CheckDefinition): CheckDefinition {
-  if (!check.onFailure?.retry) return check;
-  return {
+  const cloned = {
     ...check,
+    with: check.with ? { ...check.with } : undefined,
+  };
+  if (!check.onFailure?.retry) return cloned;
+  return {
+    ...cloned,
     onFailure: {
       retry: {
         limit: check.onFailure.retry.limit,
@@ -100,29 +106,28 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
   return {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
-    checks: stage.checks.map(check => ({
-      ...cloneOnFailure(check),
-      with: check.with ? { ...check.with } : undefined,
-    })),
+    checks: stage.checks.map(cloneOnFailure),
+    on: stage.on ? Object.fromEntries(Object.entries(stage.on).map(([event, policy]) => [event, { ...policy }])) : undefined,
+  };
+}
+
+function cloneCompiledStageDefinition(stage: CompiledStageDefinition): CompiledStageDefinition {
+  return {
+    ...cloneStageDefinition(stage),
     checkFailurePolicies: stage.checkFailurePolicies?.map(cloneCheckFailurePolicy),
     workSources: stage.workSources?.map(source => ({
       ...source,
       taskIds: source.taskIds ? [...source.taskIds] : undefined,
     })),
-    on: stage.on ? Object.fromEntries(Object.entries(stage.on).map(([event, policy]) => [event, { ...policy }])) : undefined,
     taskExecutionPolicies: stage.taskExecutionPolicies?.map(policy => ({ ...policy })),
-    checkPolicies: stage.checkPolicies?.map(policy => ({ ...policy })),
+    checkPolicies: stage.checkPolicies.map(policy => ({ ...policy })),
     approvalPolicy: stage.approvalPolicy ? { ...stage.approvalPolicy } : undefined,
     repairPolicies: stage.repairPolicies?.map(cloneRepairPolicy),
     invalidationPolicy: stage.invalidationPolicy ? cloneInvalidationPolicy(stage.invalidationPolicy) : undefined,
   };
 }
 
-function cloneCompiledStageDefinition(stage: CompiledStageDefinition): CompiledStageDefinition {
-  return cloneStageDefinition(stage) as CompiledStageDefinition;
-}
-
-function compileWorkSources(stage: StageDefinition): WorkSourceDefinition[] | undefined {
+function compileWorkSources(stage: StageDefinition, existingSources?: WorkSourceDefinition[]): WorkSourceDefinition[] | undefined {
   const workSources: WorkSourceDefinition[] = [];
   if (stage.tasks.length > 0) {
     workSources.push({ kind: 'static', taskIds: stage.tasks.map(task => task.id) });
@@ -130,7 +135,7 @@ function compileWorkSources(stage: StageDefinition): WorkSourceDefinition[] | un
   if (stage.tasksFrom === 'mohist/ralph-tasks') {
     workSources.push({ kind: 'ralph' });
   }
-  for (const source of stage.workSources ?? []) {
+  for (const source of existingSources ?? []) {
     if (workSources.some(candidate => candidate.kind === source.kind)) continue;
     workSources.push({
       ...source,
@@ -140,13 +145,13 @@ function compileWorkSources(stage: StageDefinition): WorkSourceDefinition[] | un
   return workSources.length > 0 ? workSources : undefined;
 }
 
-function compileCheckPolicies(stage: StageDefinition): StageDefinition['checkPolicies'] {
-  if (stage.checkPolicies) return stage.checkPolicies.map(policy => ({ ...policy }));
+function compileCheckPolicies(stage: StageDefinition, existingPolicies?: CheckPolicy[]): CheckPolicy[] {
+  if (existingPolicies) return existingPolicies.map(policy => ({ ...policy }));
   return stage.checks.map(check => ({ checkName: check.name, phase: 'post-task' as const }));
 }
 
-function compileApprovalPolicy(stage: StageDefinition): StageDefinition['approvalPolicy'] {
-  if (stage.approvalPolicy) return { ...stage.approvalPolicy };
+function compileApprovalPolicy(stage: StageDefinition, existingPolicy?: ApprovalPolicy): ApprovalPolicy | undefined {
+  if (existingPolicy) return { ...existingPolicy };
   if (stage.requiresApproval) return { checkName: stage.approvalCheckName ?? 'user-approval' };
   return undefined;
 }
@@ -200,8 +205,8 @@ function inferRepairTaskExecutionKind(task: TaskDefinition): TaskExecutionKind {
   return 'repair-task';
 }
 
-function taskWorkSourceKind(stage: StageDefinition, taskId: string): WorkSourceKind | undefined {
-  for (const source of stage.workSources ?? []) {
+function taskWorkSourceKind(stage: StageDefinition, taskId: string, workSources: WorkSourceDefinition[] | undefined): WorkSourceKind | undefined {
+  for (const source of workSources ?? []) {
     if (source.kind === 'static') {
       const taskIds = source.taskIds ?? stage.tasks.map(task => task.id);
       if (taskIds.includes(taskId)) return source.kind;
@@ -214,16 +219,16 @@ function policyKey(policy: TaskExecutionPolicy): string {
   return `${policy.taskId}:${policy.workSourceKind ?? '*'}`;
 }
 
-function compileTaskExecutionPolicies(stage: StageDefinition): TaskExecutionPolicy[] | undefined {
+function compileTaskExecutionPolicies(stage: StageDefinition, compiled: Partial<CompiledStageDefinition>): TaskExecutionPolicy[] | undefined {
   const policies = new Map<string, TaskExecutionPolicy>();
 
-  for (const policy of stage.taskExecutionPolicies ?? []) {
+  for (const policy of compiled.taskExecutionPolicies ?? []) {
     policies.set(policyKey(policy), { ...policy });
   }
 
   for (const task of stage.tasks) {
-    const workSourceKind = taskWorkSourceKind(stage, task.id);
-    const existing = stage.taskExecutionPolicies?.find(policy => policy.taskId === task.id && policy.workSourceKind === workSourceKind);
+    const workSourceKind = taskWorkSourceKind(stage, task.id, compiled.workSources);
+    const existing = compiled.taskExecutionPolicies?.find(policy => policy.taskId === task.id && policy.workSourceKind === workSourceKind);
     if (existing) continue;
 
     const kind = inferTaskExecutionKind(task.id, task.uses);
@@ -274,12 +279,12 @@ function compileRuntimeTaskExecutionPolicies(stage: StageDefinition): TaskExecut
   return policies;
 }
 
-function allCheckNames(stage: StageDefinition): string[] {
-  return stage.checkPolicies?.filter(policy => policy.phase !== 'approval').map(policy => policy.checkName)
+function allCheckNames(stage: StageDefinition, checkPolicies?: CheckPolicy[]): string[] {
+  return checkPolicies?.filter(policy => policy.phase !== 'approval').map(policy => policy.checkName)
     ?? stage.checks.map(check => check.name);
 }
 
-function compileInvalidationPolicyFromStageEvents(stage: StageDefinition): InvalidationPolicy | undefined {
+function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkPolicies?: CheckPolicy[]): InvalidationPolicy | undefined {
   const eventPolicies = stage.on ? Object.entries(stage.on) : [];
   if (eventPolicies.length === 0) return undefined;
 
@@ -298,7 +303,7 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition): Inval
         if (stage.stage === Stage.Check && eventName === 'code.changed') {
           invalidates.tasks = ['ai-review'];
         }
-        invalidates.checks = allCheckNames(stage);
+        invalidates.checks = allCheckNames(stage, checkPolicies);
       }
       if (eventPolicy.reset === 'approval' || eventPolicy.reset === 'checks-and-approval') {
         invalidates.approval = true;
@@ -315,7 +320,7 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition): Inval
   return entries.length > 0 ? { entries } : undefined;
 }
 
-function compileRuntimeInvalidationPolicy(stage: StageDefinition): InvalidationPolicy | undefined {
+function compileRuntimeInvalidationPolicy(stage: StageDefinition, checkPolicies?: CheckPolicy[]): InvalidationPolicy | undefined {
   if (stage.stage !== Stage.Check || !stage.on?.['code.changed']) return undefined;
   return {
     entries: [
@@ -326,7 +331,7 @@ function compileRuntimeInvalidationPolicy(stage: StageDefinition): InvalidationP
         reason: 'code.changed reset checks-and-approval',
         invalidates: {
           tasks: ['ai-review'],
-          checks: allCheckNames(stage),
+          checks: allCheckNames(stage, checkPolicies),
           approval: stage.on['code.changed'].reset === 'approval' || stage.on['code.changed'].reset === 'checks-and-approval',
         },
       },
@@ -365,41 +370,25 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
       checkNames.add(check.name);
     }
 
-    for (const policy of stage.checkPolicies ?? []) {
-      if (!checkNames.has(policy.checkName)) {
-        throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} check policy references unknown check ${stage.stage}:${policy.checkName}`);
-      }
-    }
-
-    for (const repair of stage.repairPolicies ?? []) {
-      if (!checkNames.has(repair.checkName)) {
-        throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} repair policy references unknown check ${stage.stage}:${repair.checkName}`);
-      }
-    }
-
-    if (stage.approvalPolicy && stage.approvalCheckName && stage.approvalPolicy.checkName !== stage.approvalCheckName) {
-      throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} has inconsistent approval check for ${stage.stage}`);
+    if (stage.approvalCheckName && stage.approvalCheckName !== 'user-approval' && !checkNames.has(stage.approvalCheckName)) {
+      throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} approval references unknown check ${stage.stage}:${stage.approvalCheckName}`);
     }
   }
 
   return definition.stages.map(stage => {
-    const compiled = cloneStageDefinition(stage);
-    compiled.workSources = compileWorkSources(compiled);
-    compiled.checkPolicies = compileCheckPolicies(compiled);
-    compiled.approvalPolicy = compileApprovalPolicy(compiled);
-    const repairPoliciesFromChecks = compileRepairPoliciesFromChecks(compiled);
+    const source = cloneStageDefinition(stage);
+    const compiled: CompiledStageDefinition = {
+      ...source,
+      workSources: compileWorkSources(source),
+      checkPolicies: compileCheckPolicies(source),
+      approvalPolicy: compileApprovalPolicy(source),
+    };
+    const repairPoliciesFromChecks = compileRepairPoliciesFromChecks(source);
     if (repairPoliciesFromChecks.length > 0) {
-      const onFailureCheckNames = new Set(repairPoliciesFromChecks.map(policy => policy.checkName));
-      compiled.repairPolicies = [
-        ...(compiled.repairPolicies ?? []).filter(policy => !onFailureCheckNames.has(policy.checkName)),
-        ...repairPoliciesFromChecks,
-      ];
-      compiled.checkFailurePolicies = [
-        ...(compiled.checkFailurePolicies ?? []).filter(policy => !onFailureCheckNames.has(policy.checkName)),
-        ...repairPoliciesFromChecks.map(policy => ({ ...policy })),
-      ];
+      compiled.repairPolicies = repairPoliciesFromChecks;
+      compiled.checkFailurePolicies = repairPoliciesFromChecks.map(policy => ({ ...policy }));
     }
-    const eventInvalidationPolicy = compileInvalidationPolicyFromStageEvents(compiled);
+    const eventInvalidationPolicy = compileInvalidationPolicyFromStageEvents(source, compiled.checkPolicies);
     if (eventInvalidationPolicy) {
       compiled.invalidationPolicy = {
         entries: [
@@ -408,7 +397,7 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
         ],
       };
     }
-    const runtimeInvalidationPolicy = compileRuntimeInvalidationPolicy(compiled);
+    const runtimeInvalidationPolicy = compileRuntimeInvalidationPolicy(source, compiled.checkPolicies);
     if (runtimeInvalidationPolicy) {
       compiled.invalidationPolicy = {
         entries: [
@@ -417,8 +406,8 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
         ],
       };
     }
-    compiled.taskExecutionPolicies = compileTaskExecutionPolicies(compiled);
-    return compiled as CompiledStageDefinition;
+    compiled.taskExecutionPolicies = compileTaskExecutionPolicies(source, compiled);
+    return compiled;
   });
 }
 

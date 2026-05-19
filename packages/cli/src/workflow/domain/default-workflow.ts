@@ -4,6 +4,11 @@ import type { CompiledStageDefinition, WorkflowDefinition, WorkflowDefinitionSna
 import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './workflow-definition-parser';
 import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
 
+const DEFAULT_PLAN_HEALTH_COMMAND = 'npm ci && npm run typecheck';
+const DEFAULT_BUILD_HEALTH_COMMAND = 'npm ci && npm run build';
+const DEFAULT_CHECK_HEALTH_COMMAND = 'npm ci && npm run build && npm test';
+const DEFAULT_HEALTH_TIMEOUT_MS = 5 * 60 * 1000;
+
 export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
   id: 'mohist/default',
   name: 'Mohist default issue delivery workflow',
@@ -37,7 +42,12 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
             },
           },
         },
-        { id: 'health:plan', title: 'Plan health gate' },
+        {
+          id: 'health:plan',
+          title: 'Plan health gate',
+          uses: 'mohist/health-gate',
+          with: { command: DEFAULT_PLAN_HEALTH_COMMAND, timeout: DEFAULT_HEALTH_TIMEOUT_MS },
+        },
       ],
       approval: true,
     },
@@ -48,6 +58,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'health:build',
           title: 'Build health gate',
+          uses: 'mohist/health-gate',
+          with: { command: DEFAULT_BUILD_HEALTH_COMMAND, timeout: DEFAULT_HEALTH_TIMEOUT_MS },
           onFailure: {
             retry: {
               limit: 1,
@@ -81,6 +93,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'health:check',
           title: 'Check health gate',
+          uses: 'mohist/health-gate',
+          with: { command: DEFAULT_CHECK_HEALTH_COMMAND, timeout: DEFAULT_HEALTH_TIMEOUT_MS },
           onFailure: {
             retry: {
               limit: 1,
@@ -150,6 +164,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'health:integrate',
           title: 'Post-merge health check',
+          uses: 'mohist/health-gate',
+          with: { command: DEFAULT_CHECK_HEALTH_COMMAND, timeout: DEFAULT_HEALTH_TIMEOUT_MS },
           onFailure: {
             retry: {
               limit: 1,

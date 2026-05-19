@@ -7,7 +7,7 @@ import {
   type CheckRunStatus,
   type FailureDetails,
   type FreezePoint,
-  type StageDefinition,
+  type CompiledStageDefinition,
   type StageRunSnapshot,
   type TaskRunStatus,
   type WorkflowDefinitionSnapshot,
@@ -169,7 +169,7 @@ export function repairWorkflowRunSnapshot(
   }> = [],
 ): WorkflowRunSnapshot {
   const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot();
-  const definitions: StageDefinition[] = workflowDefinitionSnapshot.compiledStageDefinitions.length > 0
+  const definitions: CompiledStageDefinition[] = workflowDefinitionSnapshot.compiledStageDefinitions.length > 0
     ? workflowDefinitionSnapshot.compiledStageDefinitions
     : DEFAULT_STAGE_DEFINITIONS;
   const stageSnapshots = new Map(snapshot.stageRuns.map(stageRun => [stageRun.stage, stageRun]));
@@ -283,7 +283,7 @@ export function workflowDefinitionSnapshotFromUnknown(value: unknown): WorkflowD
   return snapshot as WorkflowDefinitionSnapshot;
 }
 
-export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSnapshot, definition?: StageDefinition): FreezePoint | null {
+export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSnapshot, definition?: CompiledStageDefinition): FreezePoint | null {
   if (snapshot.freezePoint) return snapshot.freezePoint;
   for (const task of snapshot.tasks) {
     if (task.status !== 'completed') continue;
@@ -308,14 +308,14 @@ export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSn
   return null;
 }
 
-function workflowTaskUse(definition: StageDefinition | undefined, taskId: string): string {
+function workflowTaskUse(definition: CompiledStageDefinition | undefined, taskId: string): string {
   const taskDefinition = definition?.tasks.find(task => task.id === taskId);
   const policy = definition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
     ?? definition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
   return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
 }
 
-function workflowCheckUse(definition: StageDefinition | undefined, checkName: string): string {
+function workflowCheckUse(definition: CompiledStageDefinition | undefined, checkName: string): string {
   const checkDefinition = definition?.checks.find(check => check.name === checkName);
   return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
 }

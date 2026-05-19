@@ -138,6 +138,12 @@ export function createDefaultCheckRegistry(input: {
   workflowDefinitionSnapshot?: import('../workflow/domain').WorkflowDefinitionSnapshot;
 }) {
   const { worktreePath, healthGatePolicies, workflowDefinitionSnapshot } = input;
+  const defaultHealthGatePolicyByStage = {
+    plan: healthGatePolicies.plan,
+    build: healthGatePolicies.build,
+    check: healthGatePolicies.check,
+    integrate: healthGatePolicies.postMerge,
+  } as const;
   const registry = createCheckRegistry({
     'proposal-complete': () => Promise.resolve(new ProposalCompleteCheck()),
     'specs-complete': () => Promise.resolve(new SpecsCompleteCheck()),
@@ -158,6 +164,22 @@ export function createDefaultCheckRegistry(input: {
   });
   for (const stage of workflowDefinitionSnapshot?.compiledStageDefinitions ?? []) {
     for (const check of stage.checks) {
+      if (check.uses === 'mohist/health-gate') {
+        const stageName = stage.stage;
+        const fallbackPolicy = defaultHealthGatePolicyByStage[stageName as keyof typeof defaultHealthGatePolicyByStage];
+        registry.register(check.name, () => Promise.resolve(new HealthGateCheck({
+          worktreePath,
+          stage: stageName,
+          policy: {
+            enabled: typeof check.with?.enabled === 'boolean' ? check.with.enabled : fallbackPolicy?.enabled ?? true,
+            command: typeof check.with?.command === 'string' ? check.with.command : fallbackPolicy?.command ?? '',
+            timeout: typeof check.with?.timeout === 'number' ? check.with.timeout : fallbackPolicy?.timeout ?? 5 * 60 * 1000,
+            autoFix: typeof check.with?.autoFix === 'boolean' ? check.with.autoFix : fallbackPolicy?.autoFix ?? false,
+            maxFixAttempts: typeof check.with?.maxFixAttempts === 'number' ? check.with.maxFixAttempts : fallbackPolicy?.maxFixAttempts ?? 0,
+            fallbackReaction: fallbackPolicy?.fallbackReaction ?? { type: 'ask-user' },
+          },
+        })));
+      }
       if (check.uses === 'mohist/shell' && typeof check.with?.command === 'string') {
         registry.register(check.name, () => Promise.resolve(new ShellCommandCheck(check.name, {
           command: check.with!.command as string,
@@ -1398,13 +1420,14 @@ export class AgentRunnerService {
         createRalphTaskLoader(),
       ]);
 
-      const workflowConfig = loadWorkflow(worktreePath);
+      const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
+      const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
+      const needsLegacyHealthGatePolicy = !workflowDefinitionSnapshot?.compiledStageDefinitions
+        .some(stage => stage.checks.some(check => check.uses === 'mohist/health-gate'));
+      const workflowConfig = needsLegacyHealthGatePolicy ? loadWorkflow(worktreePath) : 'definition-health-gates';
       const healthGatePolicies = typeof workflowConfig === 'string'
         ? DEFAULT_HEALTH_GATE_POLICIES
         : loadHealthGatePolicies(workflowConfig);
-
-      const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-      const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
       const checkRegistry = createDefaultCheckRegistry({ worktreePath, healthGatePolicies, workflowDefinitionSnapshot });
 
       const unifiedRunner = new GenericStageRunner({

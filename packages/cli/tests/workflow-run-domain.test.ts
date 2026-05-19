@@ -180,13 +180,14 @@ describe('WorkflowRun domain aggregate', () => {
       ],
     })).toThrow(/duplicate stage/);
     expect(() => compileWorkflowDefinition({
-      id: 'invalid/check-policy',
+      id: 'invalid/approval-check',
       stages: [
         {
           stage: Stage.Build,
           tasks: [],
           checks: [],
-          checkPolicies: [{ checkName: 'missing-check', phase: 'post-task' }],
+          approvalCheckName: 'missing-check',
+          requiresApproval: true,
         },
       ],
     })).toThrow(/unknown check/);
