@@ -1,6 +1,7 @@
 import { Stage } from '../../types';
-import { DEFAULT_STAGE_DEFINITIONS } from './default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from './default-workflow';
 import { WorkflowDomainError } from './errors';
+import { cloneWorkflowDefinitionSnapshot, createWorkflowDefinitionSnapshot } from './workflow-definition';
 import type {
   ApprovalInput,
   ApprovalSnapshot,
@@ -27,6 +28,7 @@ import type {
   VerificationEvidence,
   WorkItemAttempt,
   WorkflowDecision,
+  WorkflowDefinitionSnapshot,
   WorkflowEvent,
   WorkflowRecoverySummary,
   WorkflowRunSnapshot,
@@ -645,6 +647,7 @@ export class WorkflowRun {
     readonly issueId: string,
     readonly issueNumber: number,
     readonly definitions: StageDefinition[],
+    readonly workflowDefinitionSnapshot: WorkflowDefinitionSnapshot,
   ) {
     if (definitions.length === 0) throw new WorkflowDomainError('WorkflowRun requires at least one stage definition');
     this.stageRuns = definitions.map((definition, index) => new StageRun(definition, index));
@@ -656,9 +659,29 @@ export class WorkflowRun {
     issueId: string;
     issueNumber: number;
     definitions?: StageDefinition[];
+    workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
     now?: string;
   }): { run: WorkflowRun; decision: WorkflowDecision } {
-    const run = new WorkflowRun(input.id, input.issueId, input.issueNumber, input.definitions ?? DEFAULT_STAGE_DEFINITIONS);
+    const workflowDefinitionSnapshot = input.workflowDefinitionSnapshot
+      ? cloneWorkflowDefinitionSnapshot(input.workflowDefinitionSnapshot)
+      : input.definitions
+        ? createWorkflowDefinitionSnapshot({
+          definition: {
+            id: 'runtime/custom',
+            name: 'Runtime custom workflow',
+            stages: input.definitions,
+          },
+          source: { type: 'runtime', id: 'runtime/custom' },
+          capturedAt: input.now,
+        })
+        : createDefaultWorkflowDefinitionSnapshot(input.now);
+    const run = new WorkflowRun(
+      input.id,
+      input.issueId,
+      input.issueNumber,
+      input.definitions ?? workflowDefinitionSnapshot.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS,
+      workflowDefinitionSnapshot,
+    );
     const firstStage = run.currentStageRun();
     firstStage.start();
     return {
@@ -1158,6 +1181,7 @@ export class WorkflowRun {
       status: this.status,
       currentStage: this.currentStage,
       stageOrder: this.stageOrder,
+      workflowDefinitionSnapshot: cloneWorkflowDefinitionSnapshot(this.workflowDefinitionSnapshot),
       stageRuns: this.stageRuns.map(stageRun => stageRun.snapshot()),
       failure: this.failure,
     };

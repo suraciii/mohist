@@ -2,6 +2,7 @@ export * from './contracts';
 export * from './default-workflow';
 export * from './errors';
 export * from './failed-check-context';
+export * from './persistence';
 export * from './runtime';
 export * from './types';
 export * from './workflow-definition';

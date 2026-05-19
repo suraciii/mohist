@@ -2,6 +2,7 @@ import { DatabaseManager } from './database';
 import { Stage } from '../types';
 import {
   DEFAULT_STAGE_DEFINITIONS,
+  createDefaultWorkflowDefinitionSnapshot,
   type CausedByMetadata,
   type BuildWorkSourceState,
   type StageRunSnapshot,
@@ -14,6 +15,7 @@ import {
   freezePointFromStageSnapshot,
   hydrateWorkflowRun,
   repairWorkflowRunSnapshot,
+  workflowDefinitionSnapshotFromUnknown,
 } from '../workflow/domain/persistence';
 import fs from 'fs';
 
@@ -29,6 +31,7 @@ export interface WorkflowRun {
   status: WorkflowRunStatus;
   currentStage: Stage;
   startedBy: string | null;
+  workflowDefinition: unknown | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -104,6 +107,7 @@ interface WorkflowRunRow {
   status: string;
   current_stage: string;
   started_by: string | null;
+  workflow_definition: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -193,6 +197,7 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
     status: row.status as WorkflowRunStatus,
     currentStage: row.current_stage as Stage,
     startedBy: row.started_by,
+    workflowDefinition: safeParseJson(row.workflow_definition),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -509,13 +514,16 @@ export class WorkflowRunRepo {
     });
 
     const failureStage = stageRuns.find(stage => stage.status === 'failed');
+    const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(safeParseJson(row.workflow_definition));
     const snapshot: WorkflowRunSnapshot = {
       id: row.id,
       issueId: row.issue_id,
       issueNumber: row.issue_number,
       status: row.status as WorkflowRunStatus,
       currentStage: row.current_stage as Stage,
-      stageOrder: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage),
+      stageOrder: workflowDefinitionSnapshot?.compiledStageDefinitions.map(definition => definition.stage)
+        ?? DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage),
+      workflowDefinitionSnapshot: workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot(),
       stageRuns,
       failure: failureStage?.failure ?? null,
     };
@@ -547,14 +555,36 @@ export class WorkflowRunRepo {
     const existingRun = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [snapshot.id]);
     if (existingRun) {
       this.db.run(
-        `UPDATE workflow_runs SET issue_id = ?, issue_number = ?, status = ?, current_stage = ?, started_by = ?, updated_at = ? WHERE id = ?`,
-        [snapshot.issueId, snapshot.issueNumber, snapshot.status, snapshot.currentStage, startedBy ?? existingRun.started_by, now, snapshot.id],
+        `UPDATE workflow_runs
+         SET issue_id = ?, issue_number = ?, status = ?, current_stage = ?, started_by = ?, workflow_definition = ?, updated_at = ?
+         WHERE id = ?`,
+        [
+          snapshot.issueId,
+          snapshot.issueNumber,
+          snapshot.status,
+          snapshot.currentStage,
+          startedBy ?? existingRun.started_by,
+          JSON.stringify(snapshot.workflowDefinitionSnapshot),
+          now,
+          snapshot.id,
+        ],
       );
     } else {
       this.db.run(
-        `INSERT INTO workflow_runs (id, issue_id, issue_number, status, current_stage, started_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [snapshot.id, snapshot.issueId, snapshot.issueNumber, snapshot.status, snapshot.currentStage, startedBy ?? null, now, now],
+        `INSERT INTO workflow_runs
+         (id, issue_id, issue_number, status, current_stage, started_by, workflow_definition, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          snapshot.id,
+          snapshot.issueId,
+          snapshot.issueNumber,
+          snapshot.status,
+          snapshot.currentStage,
+          startedBy ?? null,
+          JSON.stringify(snapshot.workflowDefinitionSnapshot),
+          now,
+          now,
+        ],
       );
     }
 
@@ -742,11 +772,13 @@ export class WorkflowRunRepo {
   }): WorkflowRun {
     const now = new Date().toISOString();
     const id = `wr_${data.issueNumber}_${Date.now()}`;
+    const workflowDefinitionSnapshot = createDefaultWorkflowDefinitionSnapshot(now);
 
     this.db.run(
-      `INSERT INTO workflow_runs (id, issue_id, issue_number, status, current_stage, started_by, created_at, updated_at)
-       VALUES (?, ?, ?, 'running', 'plan', ?, ?, ?)`,
-      [id, data.issueId, data.issueNumber, data.startedBy ?? null, now, now],
+      `INSERT INTO workflow_runs
+       (id, issue_id, issue_number, status, current_stage, started_by, workflow_definition, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', 'plan', ?, ?, ?, ?)`,
+      [id, data.issueId, data.issueNumber, data.startedBy ?? null, JSON.stringify(workflowDefinitionSnapshot), now, now],
     );
 
     return {
@@ -756,6 +788,7 @@ export class WorkflowRunRepo {
       status: 'running',
       currentStage: Stage.Plan,
       startedBy: data.startedBy ?? null,
+      workflowDefinition: workflowDefinitionSnapshot,
       createdAt: now,
       updatedAt: now,
     };

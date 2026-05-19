@@ -32,7 +32,7 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import { WorkflowDomainError, type StageCompletionGuard, type WorkflowRunSnapshot } from '../workflow/domain';
+import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type WorkflowRunSnapshot } from '../workflow/domain';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
@@ -435,6 +435,7 @@ function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks) {
 }
 
 function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
+  const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(run.workflowDefinition);
   const stageRuns = run.stageRuns.map(stageRun => {
     const failure = failureDetails(stageRun);
     const delivery = deliveryMetadata(stageRun);
@@ -496,6 +497,13 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
     id: run.id,
     status: run.status,
     currentStage: run.currentStage,
+    workflowDefinition: workflowDefinitionSnapshot ? {
+      workflowId: workflowDefinitionSnapshot.workflowId,
+      name: workflowDefinitionSnapshot.name,
+      source: workflowDefinitionSnapshot.source,
+      capturedAt: workflowDefinitionSnapshot.capturedAt,
+      stageOrder: workflowDefinitionSnapshot.compiledStageDefinitions.map(definition => definition.stage),
+    } : null,
     stageRuns,
     failure: stageRuns.find(stageRun => stageRun.failure)?.failure ?? null,
   };

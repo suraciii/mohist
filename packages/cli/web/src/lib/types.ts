@@ -1091,12 +1091,26 @@ export interface WorkflowStageRun {
   updatedAt?: string
 }
 
+export type WorkflowDefinitionSource =
+  | { type: 'builtin'; id: string }
+  | { type: 'project'; path: string }
+  | { type: 'runtime'; id: string }
+
+export interface WorkflowDefinitionMetadata {
+  workflowId: string
+  name?: string
+  source: WorkflowDefinitionSource
+  capturedAt: string
+  stageOrder: Stage[]
+}
+
 export interface WorkflowRun {
   id: string
   issueId: string
   issueNumber: number
   status: WorkflowRunStatus
   currentStage: Stage
+  workflowDefinition?: WorkflowDefinitionMetadata | null
   stageRuns: WorkflowStageRun[]
   failure?: WorkflowFailureDetails | null
 }

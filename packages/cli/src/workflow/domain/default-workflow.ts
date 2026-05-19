@@ -1,7 +1,7 @@
 import { Stage } from '../../types';
 import { REVIEW_RESULT_CONTRACT, REVIEW_SELF_REPAIR_POLICY, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
-import type { StageDefinition } from './types';
-import { compileWorkflowDefinition, type WorkflowDefinition } from './workflow-definition';
+import type { StageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
+import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
 
 export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
   id: 'mohist/default',
@@ -256,3 +256,11 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
 };
 
 export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+
+export function createDefaultWorkflowDefinitionSnapshot(capturedAt?: string): WorkflowDefinitionSnapshot {
+  return createWorkflowDefinitionSnapshot({
+    definition: MOHIST_DEFAULT_WORKFLOW_DEFINITION,
+    source: { type: 'builtin', id: MOHIST_DEFAULT_WORKFLOW_DEFINITION.id },
+    capturedAt,
+  });
+}
