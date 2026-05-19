@@ -2445,6 +2445,61 @@ describe('StageRunner migration regression coverage', () => {
       expect(fs.readFileSync(path.join(changeDir, staleReviews[0]), 'utf8')).toBe(reviewBody);
       expect(checkpointDeletes).toEqual([{ stage: 'check', step: 'ai-review' }]);
     });
+
+    it('generic review artifact invalidation follows custom review producer task ids', async () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-generic-custom-review-'));
+      const changeDir = path.join(tmpRoot, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+      const reviewPath = path.join(changeDir, 'review.md');
+      fs.writeFileSync(reviewPath, '# stale custom review\n<promise>FAIL</promise>\n');
+
+      const checkpointDeletes: Array<{ stage: string; step: string }> = [];
+      const customCheckStage = {
+        ...createStageDefinition(Stage.Check),
+        tasks: [{ id: 'custom-review', title: 'Custom review', uses: 'mohist/agent' }],
+        checks: [
+          { name: 'verify-custom', title: 'Verify custom', with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } } },
+          { name: 'custom-verdict', title: 'Custom verdict', with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } } },
+          { name: 'custom-candidate', title: 'Custom candidate', with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } } },
+        ],
+        repairPolicies: [{ checkName: 'custom-verdict', fixTaskId: 'fix-custom-review', fixTaskTitle: 'Fix custom review', maxAttempts: 1 }],
+        invalidationPolicy: {
+          entries: [
+            {
+              trigger: 'task-completion' as const,
+              triggerTaskId: 'fix-custom-review',
+              invalidates: { tasks: ['custom-review'], checks: ['verify-custom', 'custom-verdict', 'custom-candidate'], approval: true },
+            },
+          ],
+        },
+      };
+      const runner = new GenericStageRunner({
+        taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        checkRegistry: createBasicCheckRegistry({}),
+        getStageDefinition: stage => stage === Stage.Check ? customCheckStage : createStageDefinition(stage),
+        worktreePath: tmpRoot,
+      });
+      const ctx = makeMockContext(Stage.Check, {
+        artifactManager: {
+          getChangeDir: vi.fn().mockReturnValue(changeDir),
+          createChangeDir: vi.fn(),
+        } as any,
+        checkpointManager: {
+          getResumeSteps: vi.fn().mockReturnValue(['custom-review']),
+          deleteStep: vi.fn().mockImplementation((_issueNumber: number, stage: string, step: string) => {
+            checkpointDeletes.push({ stage, step });
+          }),
+        } as any,
+      });
+
+      (runner as any).applyAcceptedTaskSideEffects(ctx, [
+        { type: 'task-invalidated', stage: Stage.Check, taskId: 'custom-review', reason: 'custom review changed' },
+      ]);
+
+      expect(fs.existsSync(reviewPath)).toBe(false);
+      expect(checkpointDeletes).toEqual([{ stage: 'check', step: 'custom-review' }]);
+    });
   });
 
   describe('AC-5: legacy runner construction for rollback', () => {
