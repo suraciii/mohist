@@ -3,8 +3,10 @@ import { DatabaseManager } from '../src/db/database';
 import { initializeDatabase } from '../src/db/migrations';
 import { ProjectRepo } from '../src/db/project-repo';
 import { IssueRepo } from '../src/db/issue-repo';
+import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
 import { Stage } from '../src/types';
 import { StageStateService, normalizeCheckStatus, normalizeTaskStatus } from '../src/services/stage-state-service';
+import { createWorkflowDefinitionSnapshot, DEFAULT_STAGE_DEFINITIONS, WorkflowRun } from '../src/workflow/domain';
 
 describe('StageStateService', () => {
   let db: DatabaseManager;
@@ -517,8 +519,8 @@ describe('StageStateService', () => {
       expect(checkState?.checkRepair).toBeDefined();
       expect(checkState!.checkRepair!.status).toBe('available');
       expect(checkState!.checkRepair!.attemptsUsed).toBe(0);
-      expect(checkState!.checkRepair!.attemptsMax).toBe(1);
-      expect(checkState!.checkRepair!.attemptsRemaining).toBe(1);
+      expect(checkState!.checkRepair!.attemptsMax).toBe(2);
+      expect(checkState!.checkRepair!.attemptsRemaining).toBe(2);
       expect(checkState!.checkRepair!.repairAvailable).toBe(true);
       expect(checkState!.checkRepair!.lastRepairTask).toBeNull();
       expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
@@ -546,16 +548,16 @@ describe('StageStateService', () => {
       const checkState = states.find(s => s.stage === Stage.Check);
 
       expect(checkState?.checkRepair).toBeDefined();
-      expect(checkState!.checkRepair!.status).toBe('exhausted');
+      expect(checkState!.checkRepair!.status).toBe('available');
       expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
-      expect(checkState!.checkRepair!.attemptsMax).toBe(1);
-      expect(checkState!.checkRepair!.attemptsRemaining).toBe(0);
-      expect(checkState!.checkRepair!.repairAvailable).toBe(false);
+      expect(checkState!.checkRepair!.attemptsMax).toBe(2);
+      expect(checkState!.checkRepair!.attemptsRemaining).toBe(1);
+      expect(checkState!.checkRepair!.repairAvailable).toBe(true);
       expect(checkState!.checkRepair!.lastRepairTask).not.toBeNull();
       expect(checkState!.checkRepair!.lastRepairTask!.taskId).toBe('fix-review-findings');
       expect(checkState!.checkRepair!.lastRepairStatus).toBe('completed');
       expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
-      expect(checkState!.checkRepair!.stopReason).toBe('max-repair-attempts-reached');
+      expect(checkState!.checkRepair!.stopReason).toBeNull();
       expect(checkState!.checkRepair!.unresolvedSummary).toBe('2 issues remain');
     });
 
@@ -579,7 +581,7 @@ describe('StageStateService', () => {
       expect(checkState?.checkRepair).toBeDefined();
       expect(checkState!.checkRepair!.status).toBe('running');
       expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
-      expect(checkState!.checkRepair!.attemptsRemaining).toBe(0);
+      expect(checkState!.checkRepair!.attemptsRemaining).toBe(1);
       expect(checkState!.checkRepair!.repairAvailable).toBe(false);
       expect(checkState!.checkRepair!.lastRepairStatus).toBe('running');
       expect(checkState!.checkRepair!.stopReason).toBe('repair-running');
@@ -650,6 +652,85 @@ describe('StageStateService', () => {
       const checkState = states.find(s => s.stage === Stage.Check);
 
       expect(checkState?.checkRepair?.unresolvedSummary).toBe('Primitive tool_call_update.output missing metadata');
+    });
+
+    it('projects checkRepair from custom approval evidence policy outside Check', () => {
+      const snapshot = createWorkflowDefinitionSnapshot({
+        definition: {
+          id: 'custom-plan-review-state',
+          stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Plan
+            ? {
+              stage: Stage.Plan,
+              tasks: [{ id: 'plan-review', title: 'Plan review', uses: 'mohist/agent' }],
+              checks: [
+                {
+                  name: 'verify-plan',
+                  title: 'Verify plan',
+                  uses: 'mohist/health-gate',
+                  with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } },
+                },
+                {
+                  name: 'plan-verdict',
+                  title: 'Plan verdict',
+                  uses: 'mohist/verdict',
+                  with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
+                  onFailure: {
+                    retry: {
+                      limit: 2,
+                      task: { id: 'fix-plan-verdict', title: 'Fix plan verdict', uses: 'mohist/agent' },
+                    },
+                  },
+                },
+                {
+                  name: 'plan-candidate',
+                  title: 'Plan candidate',
+                  uses: 'mohist/merge-ready',
+                  with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
+                },
+              ],
+              requiresApproval: true,
+            }
+            : definition),
+        },
+      });
+      const { run } = WorkflowRun.startWorkflow({
+        id: 'wr_custom_plan_repair_state',
+        issueId,
+        issueNumber: 1,
+        workflowDefinitionSnapshot: snapshot,
+      });
+      run.completeTask(Stage.Plan, 'plan-review', { status: 'completed' });
+      run.recordCheckResult(Stage.Plan, {
+        name: 'verify-plan',
+        status: 'pass',
+        output: { headSha: 'plan-sha' },
+      });
+      run.recordCheckResult(Stage.Plan, {
+        name: 'plan-verdict',
+        status: 'fail',
+        message: 'Plan review failed',
+        output: { verdict: 'FAIL', summary: 'Plan has unresolved design concern' },
+      });
+      run.completeTask(Stage.Plan, 'fix-plan-verdict', { status: 'completed', output: { repairedItemIds: ['P-1'] } });
+      new WorkflowRunRepo(db).saveAggregate(run, 'test');
+
+      const latest = new WorkflowRunRepo(db).getLatestRunWithRelations(issueId)!;
+      const planState = service.getIssueStageStateFromWorkflowRun(latest).find(stage => stage.stage === Stage.Plan)!;
+
+      expect(planState.checkRepair).toMatchObject({
+        checkName: 'plan-verdict',
+        fixTaskId: 'fix-plan-verdict',
+        status: 'completed',
+        attemptsUsed: 1,
+        attemptsMax: 2,
+        attemptsRemaining: 1,
+        followUpReviewStatus: 'pending',
+      });
+      expect(planState.convergence).toMatchObject({
+        failedCheck: undefined,
+        directlyRepairedCount: 1,
+        reactionAttempts: 1,
+      });
     });
   });
 

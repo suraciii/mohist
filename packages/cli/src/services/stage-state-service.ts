@@ -3,7 +3,7 @@ import * as path from 'path';
 import { DatabaseManager } from '../db/database';
 import { findChangeDir } from '../openspec/detector';
 import { Stage } from '../types';
-import { getCheckFailurePolicy, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
 import type { CheckState, CheckSuiteChecks } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { CheckResult, StageTaskResult } from '../workflow/stage-context';
@@ -71,8 +71,8 @@ export interface StageFailureDetails {
 export type CheckRepairStatus = 'not-needed' | 'available' | 'pending' | 'running' | 'completed' | 'exhausted';
 
 export interface CheckRepairState {
-  checkName: 'review-passed';
-  fixTaskId: 'fix-review-findings';
+  checkName: string;
+  fixTaskId: string;
   status: CheckRepairStatus;
   attemptsUsed: number;
   attemptsMax: number;
@@ -81,7 +81,7 @@ export interface CheckRepairState {
   lastRepairTask: StageTaskState | null;
   lastRepairStatus: StageTaskStatus | null;
   followUpReviewStatus: StageCheckStatus | null;
-  stopReason: 'review-passed' | 'repair-pending' | 'repair-running' | 'max-repair-attempts-reached' | 'manual-rerun-required' | null;
+  stopReason: string | null;
   unresolvedSummary: string | null;
 }
 
@@ -489,11 +489,35 @@ const STATIC_TASK_DEFS: Partial<Record<Stage, StaticTaskDef[]>> = {
   [Stage.Integrate]: INTEGRATE_TASK_DEFS,
 };
 
-function isFixReviewFindingsTask(taskId: string): boolean {
-  return taskId === 'fix-review-findings' ||
-    taskId.startsWith('fix-review-findings:') ||
-    taskId === 'repair-review-findings' ||
-    taskId.startsWith('repair-review-findings:');
+function isTaskAttemptForBase(taskId: string, baseTaskId: string): boolean {
+  return taskId === baseTaskId || taskId.startsWith(`${baseTaskId}:`);
+}
+
+function isLegacyFixReviewFindingsTask(taskId: string): boolean {
+  return isTaskAttemptForBase(taskId, 'fix-review-findings') || isTaskAttemptForBase(taskId, 'repair-review-findings');
+}
+
+function stageDefinitionForStage(stage: Stage, stageDefinition?: CompiledStageDefinition): CompiledStageDefinition | undefined {
+  return stageDefinition ?? DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === stage);
+}
+
+function approvalVerdictCheckName(stageDefinition?: CompiledStageDefinition): string {
+  return stageDefinition?.approvalEvidencePolicy?.verdictCheckName ?? 'review-passed';
+}
+
+function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { fixTaskId: string; maxAttempts: number } {
+  const verdictCheckName = approvalVerdictCheckName(stageDefinition);
+  const policy = stageDefinition?.repairPolicies?.find(candidate => candidate.checkName === verdictCheckName)
+    ?? stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === verdictCheckName);
+  return {
+    fixTaskId: policy?.fixTaskId ?? 'fix-review-findings',
+    maxAttempts: policy?.maxAttempts ?? 0,
+  };
+}
+
+function isApprovalVerdictFixTask(taskId: string, stageDefinition?: CompiledStageDefinition): boolean {
+  const repairPolicy = approvalVerdictRepairPolicy(stageDefinition);
+  return isTaskAttemptForBase(taskId, repairPolicy.fixTaskId) || isLegacyFixReviewFindingsTask(taskId);
 }
 
 function extractUnresolvedSummary(output: unknown, message: string | null): string | null {
@@ -519,18 +543,21 @@ function extractUnresolvedSummary(output: unknown, message: string | null): stri
 function computeCheckRepairState(
   tasks: StageTaskState[],
   checks: StageCheckState[],
+  stageDefinition?: CompiledStageDefinition,
 ): CheckRepairState | null {
-  const fixTasks = tasks.filter(task => isFixReviewFindingsTask(task.taskId));
+  const verdictCheckName = approvalVerdictCheckName(stageDefinition);
+  const repairPolicy = approvalVerdictRepairPolicy(stageDefinition);
+  const fixTasks = tasks.filter(task => isApprovalVerdictFixTask(task.taskId, stageDefinition));
 
   if (fixTasks.length === 0) {
-    const reviewPassed = checks.find(c => c.checkName === 'review-passed');
-    if (!reviewPassed || reviewPassed.status === 'pending' || reviewPassed.status === 'running') {
+    const verdictCheck = checks.find(c => c.checkName === verdictCheckName);
+    if (!verdictCheck || verdictCheck.status === 'pending' || verdictCheck.status === 'running') {
       return null;
     }
   }
 
-  const reviewPassed = checks.find(c => c.checkName === 'review-passed');
-  const maxAttempts = getCheckFailurePolicy(Stage.Check, 'review-passed')?.maxAttempts ?? 0;
+  const verdictCheck = checks.find(c => c.checkName === verdictCheckName);
+  const maxAttempts = repairPolicy.maxAttempts;
 
   const completedFixTasks = fixTasks.filter(t => t.status === 'completed');
   const pendingFixTasks = fixTasks.filter(t => t.status === 'pending' || t.status === 'running');
@@ -538,15 +565,17 @@ function computeCheckRepairState(
   const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed);
 
   const repairInProgress = pendingFixTasks.length > 0;
-  const repairAvailable = attemptsRemaining > 0 && reviewPassed?.status === 'failed' && !repairInProgress;
+  const repairAvailable = attemptsRemaining > 0 && verdictCheck?.status === 'failed' && !repairInProgress;
 
   let status: CheckRepairStatus;
-  if (reviewPassed?.status === 'passed') {
+  if (verdictCheck?.status === 'passed') {
     status = 'not-needed';
   } else if (repairInProgress) {
     status = pendingFixTasks.some(t => t.status === 'running') ? 'running' : 'pending';
   } else if (completedFixTasks.length > 0) {
-    status = reviewPassed?.status === 'failed' ? 'exhausted' : 'completed';
+    status = verdictCheck?.status === 'failed'
+      ? repairAvailable ? 'available' : 'exhausted'
+      : 'completed';
   } else {
     status = repairAvailable ? 'available' : 'exhausted';
   }
@@ -554,11 +583,11 @@ function computeCheckRepairState(
   const lastRepairTask = fixTasks.at(-1) ?? null;
   const lastRepairStatus: StageTaskStatus | null = lastRepairTask?.status ?? null;
 
-  const followUpReviewStatus: StageCheckStatus | null = reviewPassed?.status ?? null;
+  const followUpReviewStatus: StageCheckStatus | null = verdictCheck?.status ?? null;
 
   let stopReason: CheckRepairState['stopReason'] = null;
-  if (reviewPassed?.status === 'passed') {
-    stopReason = 'review-passed';
+  if (verdictCheck?.status === 'passed') {
+    stopReason = verdictCheckName;
   } else if (pendingFixTasks.some(t => t.status === 'pending')) {
     stopReason = 'repair-pending';
   } else if (pendingFixTasks.some(t => t.status === 'running')) {
@@ -567,13 +596,13 @@ function computeCheckRepairState(
     stopReason = 'max-repair-attempts-reached';
   }
 
-  const unresolvedSummary = reviewPassed?.status === 'failed'
-    ? extractUnresolvedSummary(reviewPassed.output, reviewPassed.message)
+  const unresolvedSummary = verdictCheck?.status === 'failed'
+    ? extractUnresolvedSummary(verdictCheck.output, verdictCheck.message)
     : null;
 
   return {
-    checkName: 'review-passed',
-    fixTaskId: 'fix-review-findings',
+    checkName: verdictCheckName,
+    fixTaskId: repairPolicy.fixTaskId,
     status,
     attemptsUsed,
     attemptsMax: maxAttempts,
@@ -613,8 +642,9 @@ function extractStructuredResult(output: unknown): {
 function computeConvergenceState(
   tasks: StageTaskState[],
   checks: StageCheckState[],
+  stageDefinition?: CompiledStageDefinition,
 ): WorkflowConvergenceState | null {
-  const fixTasks = tasks.filter(task => isFixReviewFindingsTask(task.taskId));
+  const fixTasks = tasks.filter(task => isApprovalVerdictFixTask(task.taskId, stageDefinition));
 
   const failedCheck = checks.find(c => c.status === 'failed' || c.status === 'error');
 
@@ -648,7 +678,7 @@ function computeConvergenceState(
     if (structured?.repairedItemIds) {
       directlyRepairedCount += structured.repairedItemIds.length;
     }
-    if (isFixReviewFindingsTask(task.taskId) && task.status === 'completed') {
+    if (isApprovalVerdictFixTask(task.taskId, stageDefinition) && task.status === 'completed') {
       const reaction = extractReactionOutput({
         taskId: task.taskId,
         title: task.title,
@@ -901,8 +931,9 @@ export class StageStateService {
       checkRows.map(rowToStageCheck),
     );
 
-    if (stage === Stage.Check) {
-      const convergence = computeConvergenceState(filteredTasks, stageState.checks);
+    const stageDefinition = stageDefinitionForStage(stage);
+    if (stageDefinition?.approvalEvidencePolicy) {
+      const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
       if (convergence) {
         stageState.convergence = convergence;
       }
@@ -936,10 +967,12 @@ export class StageStateService {
         checkRows.map(rowToStageCheck),
       );
 
-      if (row.stage === Stage.Check) {
-        const repair = computeCheckRepairState(filteredTasks, stageState.checks);
+      const stage = row.stage as Stage;
+      const stageDefinition = stageDefinitionForStage(stage);
+      if (stageDefinition?.approvalEvidencePolicy) {
+        const repair = computeCheckRepairState(filteredTasks, stageState.checks, stageDefinition);
         stageState.checkRepair = repair === null ? undefined : repair;
-        const convergence = computeConvergenceState(filteredTasks, stageState.checks);
+        const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
         stageState.convergence = convergence === null ? undefined : convergence;
       }
 
@@ -996,12 +1029,12 @@ export class StageStateService {
 
       const status = stageRun.status as StageStateStatus;
 
-      const checkRepairRaw = stageRun.stage === Stage.Check
-        ? computeCheckRepairState(tasks, checks)
+      const checkRepairRaw = stageDefinition?.approvalEvidencePolicy
+        ? computeCheckRepairState(tasks, checks, stageDefinition)
         : null;
 
-      const convergenceRaw = stageRun.stage === Stage.Check
-        ? computeConvergenceState(tasks, checks)
+      const convergenceRaw = stageDefinition?.approvalEvidencePolicy
+        ? computeConvergenceState(tasks, checks, stageDefinition)
         : null;
 
       return {

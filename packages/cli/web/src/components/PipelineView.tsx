@@ -62,6 +62,12 @@ function getStageDuration(stage: PipelineStage, stageStateMap: Map<string, Stage
   return total > 0 ? total : null
 }
 
+function currentCheckRepair(stageStateMap: Map<string, StageStateRead>, issue: Issue): CheckRepairState | null {
+  return stageStateMap.get(issue.stage)?.checkRepair
+    ?? [...stageStateMap.values()].find(stage => stage.checkRepair)?.checkRepair
+    ?? null
+}
+
 function CheckmarkIcon({ className = 'h-5 w-5 text-green-500' }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
@@ -1209,7 +1215,7 @@ function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
     'exhausted': 'Auto-fix exhausted',
   }
 
-  const stopReasonLabels: Record<NonNullable<CheckRepairState['stopReason']>, string> = {
+  const stopReasonLabels: Record<string, string> = {
     'review-passed': 'Review passed',
     'repair-pending': 'Waiting for repair to start',
     'repair-running': 'Repair in progress',
@@ -1221,7 +1227,7 @@ function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
     <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
       <div className="flex items-center gap-2">
         <CrossIcon className="h-4 w-4 text-red-500" />
-        <span className="text-sm font-semibold text-red-800">Check failed: Review found issues</span>
+        <span className="text-sm font-semibold text-red-800">Check failed: {checkRepair.checkName}</span>
       </div>
 
       <div className="space-y-1.5 text-xs text-red-700">
@@ -1244,14 +1250,14 @@ function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
             <span className="font-medium">Last repair:</span>
             <span className={checkRepair.lastRepairStatus === 'completed' ? 'text-green-600' : ''}>
               {checkRepair.lastRepairStatus === 'completed' ? 'completed' : checkRepair.lastRepairStatus}
-              {checkRepair.followUpReviewStatus === 'failed' && ' — follow-up review failed'}
+              {checkRepair.followUpReviewStatus === 'failed' && ' — follow-up check failed'}
             </span>
           </div>
         )}
 
         {checkRepair.followUpReviewStatus && (
           <div className="flex items-center justify-between">
-            <span className="font-medium">Follow-up review:</span>
+            <span className="font-medium">Follow-up check:</span>
             <span className={checkRepair.followUpReviewStatus === 'failed' ? 'text-red-600' : checkRepair.followUpReviewStatus === 'passed' ? 'text-green-600' : ''}>
               {checkRepair.followUpReviewStatus}
             </span>
@@ -1517,8 +1523,8 @@ export function PipelineView({ issue }: { issue: Issue }) {
         <IntegrateFailurePanel issue={issue} />
       )}
 
-      {issue.stage === Stage.Check && issue.status === IssueStatus.Blocked && stageStateMap.get(Stage.Check)?.checkRepair && (
-        <CheckRepairPanel checkRepair={stageStateMap.get(Stage.Check)!.checkRepair!} />
+      {issue.status === IssueStatus.Blocked && currentCheckRepair(stageStateMap, issue) && (
+        <CheckRepairPanel checkRepair={currentCheckRepair(stageStateMap, issue)!} />
       )}
     </div>
   )
