@@ -181,7 +181,7 @@ export interface StageEventPolicy {
   approval?: boolean;
 }
 
-export type WorkflowTasksFromSource = 'mohist/ralph-tasks';
+export type WorkflowTasksFromSource = string;
 
 export interface StageDefinition {
   stage: Stage;

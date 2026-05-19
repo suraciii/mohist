@@ -385,7 +385,7 @@ workflow:
     }
   });
 
-  it('rejects custom check stage shapes without approval evidence roles before runtime', () => {
+  it('allows custom Check stages that do not participate in approval evidence', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-check-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));
     fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
@@ -406,12 +406,7 @@ workflow:
 
     try {
       const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
-      expect(diagnostics).toEqual([
-        expect.objectContaining({
-          severity: 'error',
-          message: 'Custom Check stage must declare approval evidence checks for verdict, verification, and candidate roles',
-        }),
-      ]);
+      expect(diagnostics).toEqual([]);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

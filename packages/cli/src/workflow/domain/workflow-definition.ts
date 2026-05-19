@@ -1,6 +1,6 @@
 import { Stage } from '../../types';
 import { WorkflowDomainError } from './errors';
-import { inferWorkflowTaskUse } from '../uses-catalog';
+import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../uses-catalog';
 import type {
   AgentPromptSource,
   CheckDefinition,
@@ -138,8 +138,9 @@ function compileWorkSources(stage: StageDefinition, existingSources?: WorkSource
   if (stage.tasks.length > 0) {
     workSources.push({ kind: 'static', taskIds: stage.tasks.map(task => task.id) });
   }
-  if (stage.tasksFrom === 'mohist/ralph-tasks') {
-    workSources.push({ kind: 'ralph' });
+  if (stage.tasksFrom) {
+    const sourceKind = getWorkflowUseDefinition(stage.tasksFrom)?.sourceKind;
+    if (sourceKind) workSources.push({ kind: sourceKind });
   }
   for (const source of existingSources ?? []) {
     if (workSources.some(candidate => candidate.kind === source.kind)) continue;

@@ -523,23 +523,24 @@ function getLatestCheckResultFromStage(ctx: StageContext, checkName: string): { 
   };
 }
 
-function getApprovalEvidenceCheckName(ctx: StageContext, role: string): string | null {
-  return getStageDefinition(ctx)?.checks.find(check => approvalEvidenceRole(check.with) === role)?.name ?? null;
+type ApprovalEvidenceRole = 'verdict' | 'verification' | 'candidate';
+
+function getApprovalEvidenceCheckName(ctx: StageContext, role: ApprovalEvidenceRole): string | null {
+  const policy = getStageDefinition(ctx)?.approvalEvidencePolicy;
+  if (!policy) return null;
+  if (role === 'verdict') return policy.verdictCheckName;
+  if (role === 'verification') return policy.verificationCheckName;
+  return policy.candidateCheckName;
 }
 
-function getApprovalEvidenceSnapshotField(ctx: StageContext, role: string): string | null {
-  const check = getStageDefinition(ctx)?.checks.find(candidate => approvalEvidenceRole(candidate.with) === role);
+function getApprovalEvidenceSnapshotField(ctx: StageContext, role: ApprovalEvidenceRole): string | null {
+  const stageDefinition = getStageDefinition(ctx);
+  const checkName = getApprovalEvidenceCheckName(ctx, role);
+  const check = checkName ? stageDefinition?.checks.find(candidate => candidate.name === checkName) : undefined;
   const evidence = check?.with?.approvalEvidence;
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
   const field = (evidence as Record<string, unknown>).snapshotField;
   return typeof field === 'string' && field.length > 0 ? field : null;
-}
-
-function approvalEvidenceRole(withConfig: Record<string, unknown> | undefined): string | null {
-  const evidence = withConfig?.approvalEvidence;
-  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-  const role = (evidence as Record<string, unknown>).role;
-  return typeof role === 'string' ? role : null;
 }
 
 function getStageDefinition(ctx: StageContext): CompiledStageDefinition | undefined {
