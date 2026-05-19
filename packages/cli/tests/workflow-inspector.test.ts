@@ -427,4 +427,75 @@ workflow:
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('allows full custom workflows to declare builtin service task uses', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-custom-service-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/service-delivery
+  stages:
+    - id: integrate
+      tasks:
+        - id: sync-specs
+          uses: mohist/openspec-sync
+        - id: archive-spec-change
+          uses: mohist/archive-change
+        - id: land-locally
+          uses: mohist/merge
+      checks: []
+`, 'utf-8');
+
+    try {
+      const resolved = resolveWorkflowDefinition(tempDir);
+      const diagnostics = validateWorkflowDefinition(resolved);
+      const integrate = resolved.snapshot.compiledStageDefinitions[0];
+
+      expect(diagnostics).toEqual([]);
+      expect(integrate.tasks.map(task => [task.id, task.uses])).toEqual([
+        ['sync-specs', 'mohist/openspec-sync'],
+        ['archive-spec-change', 'mohist/archive-change'],
+        ['land-locally', 'mohist/merge'],
+      ]);
+      const serviceTaskIds = new Set(['sync-specs', 'archive-spec-change', 'land-locally']);
+      expect(integrate.taskExecutionPolicies
+        ?.filter(policy => serviceTaskIds.has(policy.taskId))
+        .map(policy => [policy.taskId, policy.kind])).toEqual([
+        ['sync-specs', 'service-call'],
+        ['archive-spec-change', 'service-call'],
+        ['land-locally', 'service-call'],
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects catalog task uses that do not have an executable task handler yet', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-unsupported-task-use-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/unsupported-task-use
+  stages:
+    - id: build
+      tasks:
+        - id: script
+          uses: mohist/shell
+          with:
+            command: npm test
+      checks: []
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          message: "Use 'mohist/shell' is not supported for full custom task execution yet",
+        }),
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -10,6 +10,7 @@ import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapt
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
 import { loadVerificationContext, buildVerificationPromptSuffix } from '../convergence';
+import { inferWorkflowTaskUse } from '../uses-catalog';
 
 interface PlanTaskConfig {
   type: string;
@@ -155,14 +156,17 @@ function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrat
     };
   }
 
-  if (input.ctx.issue.stage !== Stage.Integrate) return null;
+  const uses = input.sourceTask?.uses ?? inferWorkflowTaskUse(input.task.taskId, input.executionKind);
+  const serviceFn = buildWorkflowServiceFn(uses, input, integrator);
+  if (!serviceFn) return null;
+
   return {
     taskId: input.task.taskId,
     title: input.task.title,
     kind: 'service-call',
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
-    serviceFn: buildIntegrateServiceFn(input.task.taskId, input.worktreePath, integrator),
+    serviceFn,
   };
 }
 
@@ -370,14 +374,18 @@ function buildCheckReviewPrompt(input: TaskDispatchFactoryInput, changeDir: stri
   return basePrompt + buildVerificationPromptSuffix(verificationCtx);
 }
 
-function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrator: OpenSpecIntegrator): (ctx: StageContext) => Promise<unknown> {
-  if (taskId === 'integrate:spec-sync') {
+function buildWorkflowServiceFn(
+  uses: string,
+  input: TaskDispatchFactoryInput,
+  integrator: OpenSpecIntegrator,
+): ((ctx: StageContext) => Promise<unknown>) | null {
+  if (uses === 'mohist/openspec-sync') {
     return async (ctx) => {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
       if (!changeDir) throw new Error(`Change directory not found for issue #${ctx.issue.number}`);
-      const summary = await integrator.apply(changeDir, worktreePath);
+      const summary = await integrator.apply(changeDir, input.worktreePath);
       return {
-        step: 'integrate:spec-sync' as const,
+        step: input.task.taskId,
         capabilities: summary.capabilities,
         counts: { added: summary.added, modified: summary.modified, removed: summary.removed, renamed: summary.renamed },
         targetFiles: summary.targetFiles,
@@ -390,25 +398,25 @@ function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrato
     };
   }
 
-  if (taskId === 'integrate:archive-change') {
+  if (uses === 'mohist/archive-change') {
     return async (ctx) => {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
       if (!changeDir) throw new Error(`Change directory not found for issue #${ctx.issue.number}`);
       await ctx.artifactManager.archiveChange(ctx.issue.number);
-      return { step: 'integrate:archive-change' as const, archivePath: path.relative(worktreePath, changeDir), success: true };
+      return { step: input.task.taskId, archivePath: path.relative(input.worktreePath, changeDir), success: true };
     };
   }
 
-  if (taskId === 'integrate:merge') {
+  if (uses === 'mohist/merge') {
     return async (ctx) => {
       const project = ctx.projectRepo?.findById(ctx.issue.projectId);
       if (!project) throw new Error(`Project not found: ${ctx.issue.projectId}`);
       const baseBranch = project.baseBranch;
 
       if (ctx.issue.mergeState === MergeState.Merged) {
-        const delivery = recoverMergeDelivery(ctx, baseBranch);
+        const delivery = recoverMergeDelivery(ctx, input.task.taskId, baseBranch);
         if (!delivery) throw new Error('Issue is already marked merged but merge delivery evidence is missing');
-        return { step: 'integrate:merge' as const, ...delivery, skipped: true, reason: 'already-merged' };
+        return { step: input.task.taskId, ...delivery, skipped: true, reason: 'already-merged' };
       }
       if (!ctx.worktreeManager.mergeApprovedCandidate) throw new Error('worktreeManager.mergeApprovedCandidate is not available');
 
@@ -418,7 +426,7 @@ function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrato
       }
       if (ctx.issueRepo.setMergeState) ctx.issueRepo.setMergeState(ctx.issue.id, MergeState.Merged);
       return {
-        step: 'integrate:merge' as const,
+        step: input.task.taskId,
         targetBranch: mergeTruth.targetBranch,
         baseSha: mergeTruth.baseSha,
         candidateHeadSha: mergeTruth.candidateHeadSha,
@@ -428,12 +436,12 @@ function buildIntegrateServiceFn(taskId: string, worktreePath: string, integrato
     };
   }
 
-  throw new Error(`Unknown integrate task: ${taskId}`);
+  return null;
 }
 
-function recoverMergeDelivery(ctx: StageContext, targetBranch: string): { targetBranch: string; baseSha?: string; candidateHeadSha?: string; landedSha: string; rebased?: boolean } | null {
+function recoverMergeDelivery(ctx: StageContext, taskId: string, targetBranch: string): { targetBranch: string; baseSha?: string; candidateHeadSha?: string; landedSha: string; rebased?: boolean } | null {
   const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
-  const mergeTask = stageRun?.tasks.find(task => task.taskId === 'integrate:merge' && task.status === 'completed');
+  const mergeTask = stageRun?.tasks.find(task => task.taskId === taskId && task.status === 'completed');
   const mergeOutput = unwrapWorkflowOutput(mergeTask?.output);
   if (typeof mergeOutput?.landedSha === 'string' && mergeOutput.landedSha.length > 0) {
     return {

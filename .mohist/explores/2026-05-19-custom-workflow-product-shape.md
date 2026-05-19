@@ -733,6 +733,44 @@ Mohist 应学习它们的产品直觉：
 - Mohist 的 approval 是产品决策点，不只是 environment gate
 - Mohist 的 artifact 包括 proposal/design/spec/review 等交付文档
 
+## GitHub Actions Runner 参考结论
+
+GitHub Actions runner 的关键架构不是“runner 直接解释 YAML”，而是：
+
+```text
+.github/workflows/*.yml
+  -> GitHub service / workflow parser / planner
+  -> AgentJobRequestMessage
+  -> JobRunner
+  -> StepsRunner
+  -> ActionRunner
+  -> HandlerFactory
+```
+
+Runner 收到的是已经 materialized 的 job message。`JobRunner` 初始化 job context，把 message 中的 steps enqueue；`StepsRunner` 只负责条件判断、超时、执行和结果合并；`ActionRunner` 再根据 action definition 的 execution type 交给 node/container/script/composite handler。
+
+这给 Mohist 的启发：
+
+- YAML/parser/compiler 和 runner 必须有硬边界。
+- 运行时应执行 compiled/executable workflow definition，而不是边跑边从 YAML 或 task id 猜行为。
+- `uses` 应该是 handler registry 的入口，类似 GitHub Actions 的 action handler factory。
+- full custom workflow 至少要能表达 builtin default workflow 中所有内置 `uses`；否则“默认 workflow 只是内置定义”这个产品承诺不成立。
+- composite action 的思路后续可借鉴为 Mohist reusable task/workflow snippet，但 v1 不应先复制 GitHub Actions 的 job/matrix/needs/service container 复杂度。
+
+对应到当前 Mohist 的偏移：
+
+- `workflow-inspector.ts` 和 `workflow-loader.ts` 仍是两套 YAML/config 入口。
+- full custom workflow 只允许 `mohist/agent` / `mohist/ralph-tasks`，无法表达 `mohist/openspec-sync`、`mohist/archive-change`、`mohist/merge`。
+- `GenericStageRunner` 仍有 Plan/Check task id 特判。
+- service-call dispatch 仍偏向 Integrate stage/task id，而不是根据 `uses` catalog 选择 handler。
+
+因此近期改进顺序应是：
+
+1. 让 full custom workflow 的 task `uses` 接受 catalog 中允许作为 task 的内置 use。
+2. service-call dispatch 先按 `uses` 选择能力，task id 只作为兼容 fallback。
+3. 后续把 `workflow-loader.ts` 收口到 definition parser，把 runtime policy side table 演进成直接 executable shape。
+4. 最后再清理 runner 内 Plan/Check 特判和完全开放自定义 stage id。
+
 ## 分阶段落地
 
 ### P0: Definition 成为事实源
