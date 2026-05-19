@@ -128,6 +128,7 @@ interface NormalizedToolCall {
   input?: unknown;
   output?: unknown;
   outputMetadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 function knownName(name: string | undefined): string | undefined {
@@ -295,6 +296,7 @@ function normalizeToolCallNotification(
     title: toolCall.title as string | undefined,
     input: toolCall.input,
     output: toolCall.output,
+    metadata: toolCall.metadata as Record<string, unknown> | undefined,
     outputMetadata: toolCall.metadata as Record<string, unknown> | undefined
       ?? (isRecord(toolCall.output) ? toolCall.output.metadata as Record<string, unknown> | undefined : undefined),
   };
@@ -795,6 +797,7 @@ export class AgentSession {
         rawInput: state === 'started' ? normalized.input : undefined,
         rawOutput: state === 'completed' ? normalized.output : undefined,
         rawOutputMetadata: state === 'completed' ? normalized.outputMetadata : undefined,
+        metadata: normalized.metadata,
         status: normalized.status || undefined,
       };
       for (const obs of this._observers) {

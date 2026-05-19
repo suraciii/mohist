@@ -74,6 +74,8 @@ export interface DisplayToolPart {
   completedAt?: string | null
   rawInput?: string
   rawOutput?: string
+  metadata?: Record<string, unknown>
+  details?: Record<string, unknown>
   changedFiles?: DisplayChangedFile[]
   hasError: boolean
   isContextTool: boolean
@@ -117,14 +119,8 @@ const CONTEXT_TOOL_NAMES = new Set([
   'membrowse', 'memread', 'memsearch', 'search_files',
 ])
 
-const INTERNAL_TOOL_NAMES = new Set(['todowrite', 'todo'])
-
 function isContextTool(normalizedName: string): boolean {
   return CONTEXT_TOOL_NAMES.has(normalizedName.toLowerCase())
-}
-
-function isInternalTool(normalizedName: string): boolean {
-  return INTERNAL_TOOL_NAMES.has(normalizedName.toLowerCase())
 }
 
 function getToolPath(input?: string): string | undefined {
@@ -141,14 +137,20 @@ function getToolPath(input?: string): string | undefined {
 
 function buildDisplayPrompt(turn: SessionTurn): DisplayPrompt {
   const { user } = turn
+  const subtitle = user.summary?.subtitle
+  const outputPath = user.summary?.outputPath
+  const subtitleOutput = subtitle?.trim().replace(/^output\s*:\s*/i, '').trim()
+  const canonicalSubtitle = subtitleOutput && outputPath && subtitleOutput === outputPath.trim()
+    ? undefined
+    : subtitle
   return {
     role: 'mohist',
     text: user.text,
     kind: user.kind,
     sentAt: user.sentAt,
     title: user.summary?.title,
-    subtitle: user.summary?.subtitle,
-    outputPath: user.summary?.outputPath,
+    subtitle: canonicalSubtitle,
+    outputPath,
     contextFiles: user.summary?.contextFiles,
   }
 }
@@ -175,6 +177,26 @@ function buildDisplayReasoningPart(part: ReasoningPart): DisplayReasoningPart {
 
 function buildDisplayToolPart(part: ToolPart): DisplayToolPart {
   const { tool } = part
+  const mutationFiles = tool.details?.family === 'mutation' && Array.isArray(tool.details.files)
+    ? tool.details.files
+      .filter((file): file is Record<string, unknown> => file && typeof file === 'object' && typeof (file as Record<string, unknown>).path === 'string')
+      .map(file => ({
+        path: String(file.path),
+        operation: (file.operation === 'created' || file.operation === 'modified' || file.operation === 'deleted' || file.operation === 'moved' ? file.operation : 'modified') as DisplayChangedFile['operation'],
+        additions: typeof file.additions === 'number' ? file.additions : undefined,
+        deletions: typeof file.deletions === 'number' ? file.deletions : undefined,
+        oldPath: typeof file.oldPath === 'string' ? file.oldPath : undefined,
+        rawDetail: typeof file.diff === 'string' ? file.diff : typeof file.content === 'string' ? file.content : undefined,
+      }))
+    : undefined
+  const changedFiles = tool.changedFiles?.map(cf => ({
+    path: cf.path,
+    operation: cf.operation,
+    additions: cf.additions,
+    deletions: cf.deletions,
+    oldPath: cf.oldPath,
+    rawDetail: cf.rawDetail,
+  }))
   return {
     id: part.id,
     partType: 'tool',
@@ -193,13 +215,9 @@ function buildDisplayToolPart(part: ToolPart): DisplayToolPart {
     completedAt: tool.completedAt,
     rawInput: tool.rawInput,
     rawOutput: tool.rawOutput,
-    changedFiles: tool.changedFiles?.map(cf => ({
-      path: cf.path,
-      operation: cf.operation,
-      additions: cf.additions,
-      deletions: cf.deletions,
-      oldPath: cf.oldPath,
-    })),
+    metadata: tool.metadata,
+    details: tool.details,
+    changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : mutationFiles,
     hasError: tool.status === 'failed' || tool.status === 'cancelled' || !!tool.error,
     isContextTool: isContextTool(tool.normalizedName ?? tool.toolName),
   }
@@ -353,9 +371,6 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
 
     if (part.type === 'tool') {
       const normalizedName = part.tool.normalizedName ?? part.tool.toolName
-      if (isInternalTool(normalizedName)) {
-        continue
-      }
       if (part.hidden) {
         continue
       }

@@ -6,7 +6,7 @@ import { useCoderSessions } from '../hooks/useCoderSessions'
 import { api } from '../lib/api'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useSessionTranscript } from '../hooks/useSessionTranscript'
-import { projectSessionToDisplayTurns } from '../lib/session-transcript-display'
+import { projectTurn } from '../lib/session-transcript-display'
 import type { CoderSessionDetail, SessionStatusKind } from '../lib/types'
 import { SessionTranscriptLayout } from './session-transcript/SessionTranscriptLayout'
 
@@ -343,7 +343,7 @@ export function SessionPage() {
   const displayStatusKind: StatusKind = isFinalizing && isRunning ? 'finalizing' : statusKind
   const displayTurnCount = detail?.metadata?.turnCount ?? turns.length
 
-  const displayTurns = detail ? projectSessionToDisplayTurns(detail) : []
+  const displayTurns = turns.map((turn) => projectTurn(turn))
 
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)

@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, screen, fireEvent, waitFor } from './test-utils'
+import { baseRender, screen, fireEvent, waitFor, act } from './test-utils'
 import { SessionPage } from '../src/components/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
+import { dispatchAgentEvent } from '../src/lib/agent-events'
 import type { CoderSessionDetail, SessionMetadata, SessionTurn, TextPart, ToolPart } from '../src/lib/types'
 
 const sessionPageMocks = vi.hoisted(() => ({
@@ -607,6 +608,228 @@ describe('SessionPage centered transcript layout', () => {
       })
     })
 
+    it('renders todowrite rows when todos are present', async () => {
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: 'Track progress',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-todo',
+            normalizedName: 'todowrite',
+            toolName: 'todowrite',
+            status: 'completed',
+            input: '{"todos":[{"content":"Task 1","status":"completed"},{"content":"Task 2","status":"in_progress"}]}',
+            output: '{"success":true}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('2 items')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('2 items'))
+
+      await waitFor(() => {
+        expect(screen.getByText('1/2 completed')).toBeInTheDocument()
+        expect(screen.getByText('1 in progress')).toBeInTheDocument()
+        expect(screen.getByText('Task 1')).toBeInTheDocument()
+        expect(screen.getByText('Task 2')).toBeInTheDocument()
+      })
+    })
+
+    it('renders late live tool updates from the current turns state', async () => {
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: null,
+        incomplete: true,
+        user: {
+          role: 'mohist',
+          text: 'Fetch documentation',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        assistant: [],
+      }]
+
+      const detail = makeMockDetail({
+        status: 'running',
+        completedAt: null,
+        metadata: makeMockMetadata({
+          status: 'running',
+          statusKind: 'live',
+          completedAt: null,
+          turnCount: 1,
+        }),
+        turns,
+      })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Running')).toBeInTheDocument()
+      })
+
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: 'tc-webfetch',
+          toolName: 'webfetch',
+          state: 'started',
+          rawInput: { url: 'https://example.com/initial' },
+        })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('webfetch')).toBeInTheDocument()
+      })
+
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: 'tc-webfetch',
+          toolName: 'webfetch',
+          state: 'completed',
+          title: 'Read docs: semantic transcript spec',
+          rawInput: { url: 'https://example.com/final' },
+          rawOutput: { content: 'ok' },
+        })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('Read docs: semantic transcript spec')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('Read docs: semantic transcript spec'))
+
+      await waitFor(() => {
+        expect(screen.getByText(/https:\/\/example.com\/final/)).toBeInTheDocument()
+      })
+    })
+
+    it('renders live bash cwd and exit code from coder tool metadata', async () => {
+      const detail = makeMockDetail({
+        status: 'running',
+        completedAt: null,
+        metadata: makeMockMetadata({ status: 'running', statusKind: 'live', completedAt: null }),
+        turns: [],
+      })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Running')).toBeInTheDocument()
+      })
+
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: 'tc-bash',
+          toolName: 'bash',
+          state: 'completed',
+          rawInput: { command: 'npm test', cwd: '/project' },
+          rawOutput: { stdout: 'ok', exitCode: 1 },
+          details: { family: 'execution', cwd: '/project', exitCode: 1, outputPreview: 'ok' },
+        })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('bash')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('bash'))
+
+      await waitFor(() => {
+        expect(screen.getByText(/npm test/)).toBeInTheDocument()
+        expect(screen.getByText('/project')).toBeInTheDocument()
+        expect(screen.getByText('exit 1')).toBeInTheDocument()
+        expect(screen.getByText('ok')).toBeInTheDocument()
+        expect(screen.queryByText(/"stdout"/)).not.toBeInTheDocument()
+      })
+    })
+
+    it('renders live delegated task child session details', async () => {
+      const detail = makeMockDetail({
+        status: 'running',
+        completedAt: null,
+        metadata: makeMockMetadata({ status: 'running', statusKind: 'live', completedAt: null }),
+        turns: [],
+      })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Running')).toBeInTheDocument()
+      })
+
+      act(() => {
+        dispatchAgentEvent('coder_tool_call', {
+          issueId: '123',
+          projectId: 'project-1',
+          executionId: 'exec-123',
+          acpSessionId: 'acp-123',
+          coderSessionId: 'session-123',
+          toolCallId: 'tc-task',
+          toolName: 'task',
+          state: 'completed',
+          rawInput: { description: 'Inspect routes', subagent_type: 'explore' },
+          rawOutput: { status: 'completed' },
+          metadata: { childSessionId: 'child-session-123' },
+          details: {
+            family: 'delegation',
+            description: 'Inspect routes',
+            subagentType: 'explore',
+            childSessionId: 'child-session-123',
+          },
+        })
+      })
+
+      await waitFor(() => {
+        expect(screen.getByText('task')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('task'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Delegation')).toBeInTheDocument()
+        expect(screen.getByText('Inspect routes')).toBeInTheDocument()
+        expect(screen.getByText('explore')).toBeInTheDocument()
+        expect(screen.getByText('child-session-123')).toBeInTheDocument()
+      })
+    })
+
     it('renders webfetch tool with url subtitle', async () => {
       const turns: SessionTurn[] = [{
         id: 'turn-1',
@@ -681,7 +904,43 @@ describe('SessionPage centered transcript layout', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText('src/app.ts')).toBeInTheDocument()
+        expect(screen.getByText('app.ts')).toBeInTheDocument()
+      })
+    })
+
+    it('does not duplicate fallback subtitle when it matches the tool label', async () => {
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: 'Read file',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-1',
+            normalizedName: 'read',
+            toolName: 'read',
+            status: 'completed',
+            input: '{"file_path":"src/a.ts"}',
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getAllByText('src/a.ts')).toHaveLength(1)
       })
     })
 
@@ -719,7 +978,7 @@ describe('SessionPage centered transcript layout', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText('src/new.ts')).toBeInTheDocument()
+        expect(screen.getByText('new.ts')).toBeInTheDocument()
       })
     })
 
@@ -760,7 +1019,7 @@ describe('SessionPage centered transcript layout', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText('1 file changed')).toBeInTheDocument()
+        expect(screen.getAllByText('1 file changed')).toHaveLength(1)
       })
     })
 
@@ -845,12 +1104,8 @@ describe('SessionPage centered transcript layout', () => {
       expect(row).not.toBeNull()
       fireEvent.click(row!)
 
-      const nestedRow = screen.getAllByText('src/test.ts').at(-1)?.closest('button')
-      expect(nestedRow).not.toBeNull()
-      fireEvent.click(nestedRow!)
-
       await waitFor(() => {
-        expect(screen.getByText('Input')).toBeInTheDocument()
+        expect(screen.getByText('Reading')).toBeInTheDocument()
       })
     })
 
@@ -1146,6 +1401,69 @@ describe('SessionPage centered transcript layout', () => {
       await waitFor(() => {
         expect(screen.getByText('+10')).toBeInTheDocument()
         expect(screen.getByText('-3')).toBeInTheDocument()
+      })
+    })
+
+    it('renders metadata-sourced write diff as reviewable diff content', async () => {
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: 'Write changes',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        assistant: [
+          {
+            id: 'tool-1',
+            type: 'tool',
+            tool: {
+              toolCallId: 'tc-write',
+              normalizedName: 'write',
+              displayTitle: 'Write src/app.ts',
+              toolName: 'write',
+              status: 'completed',
+              rawInput: '{"file_path":"src/app.ts"}',
+              details: {
+                family: 'mutation',
+                files: [{
+                  path: 'src/app.ts',
+                  operation: 'modified',
+                  additions: 1,
+                  deletions: 1,
+                  diff: '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new',
+                }],
+              },
+              startedAt: '2024-01-01T10:00:02.000Z',
+              completedAt: '2024-01-01T10:00:03.000Z',
+            },
+          } as ToolPart,
+        ],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Write src/app.ts')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('Write src/app.ts'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('Show diff (expanded view)'))
+
+      await waitFor(() => {
+        expect(screen.getAllByText('src/app.ts').length).toBeGreaterThan(0)
+        expect(screen.getByText(/-old/)).toBeInTheDocument()
+        expect(screen.getByText(/\+new/)).toBeInTheDocument()
       })
     })
   })

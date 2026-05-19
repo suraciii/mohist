@@ -58,6 +58,7 @@ export interface ToolCallEvent {
   rawInput?: unknown;
   rawOutput?: unknown;
   rawOutputMetadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   status?: string;
 }
 

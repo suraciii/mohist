@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { assembleSessionTranscript, type SessionTranscript, type SessionTurn, type SessionPart, type ToolPart, type FileChangeSummary, type TranscriptWarning } from '../src/services/session-transcript-service';
+import { assembleSessionTranscript, type SessionTranscript, type SessionTurn, type SessionPart, type ToolPart, type FileChangeSummary, type TranscriptWarning, type ToolSemanticDetails, type ContextToolDetails, type ExecutionToolDetails, type PlanningToolDetails, type DelegationToolDetails, type InteractionToolDetails, type SkillToolDetails, type MutationToolDetails } from '../src/services/session-transcript-service';
 import type { SessionStreamLogEntry } from '../src/db/session-stream-log-repo';
 import type { CoderSession } from '../src/db/coder-session-repo';
 import { DatabaseManager } from '../src/db/database';
@@ -1432,7 +1432,7 @@ describe('SessionTranscriptAssembler', () => {
   });
 
   describe('internal tool suppression', () => {
-    it('should suppress todowrite tool from primary transcript', () => {
+    it('should keep todowrite visible when it contains todos', () => {
       const session = makeSession();
       const events = [
         makePromptEvent('Plan the implementation', 'task', '2024-01-01T10:00:00.000Z'),
@@ -1443,9 +1443,8 @@ describe('SessionTranscriptAssembler', () => {
       const transcript = assembleSessionTranscript(session, events);
 
       const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
-      expect(toolParts).toHaveLength(0);
-      const hiddenTools = transcript.turns[0].assistant.filter(p => p.type === 'tool' && (p as any).hidden === true);
-      expect(hiddenTools).toHaveLength(0);
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].hidden).toBeUndefined();
     });
 
     it('should still record todowrite in session toolCount and metadata', () => {
@@ -1461,7 +1460,7 @@ describe('SessionTranscriptAssembler', () => {
       expect(transcript.session.toolCount).toBe(1);
     });
 
-    it('should suppress todo tool from primary transcript', () => {
+    it('should still hide todo tools that have no visible items', () => {
       const session = makeSession();
       const events = [
         makePromptEvent('Plan the implementation', 'task', '2024-01-01T10:00:00.000Z'),
@@ -1471,7 +1470,8 @@ describe('SessionTranscriptAssembler', () => {
       const transcript = assembleSessionTranscript(session, events);
 
       const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
-      expect(toolParts).toHaveLength(0);
+      expect(toolParts).toHaveLength(1);
+      expect(toolParts[0].hidden).toBe(true);
     });
   });
 
@@ -1811,6 +1811,7 @@ it('should parse apply_patch Move to operations', () => {
 
       expect(transcript.turns[0].user.summary).toBeDefined();
       expect(transcript.turns[0].user.summary!.outputPath).toBe('packages/cli/src/index.ts');
+      expect(transcript.turns[0].user.summary!.subtitle).toBeUndefined();
     });
 
     it('should extract context files from context_files tag', () => {
@@ -2319,6 +2320,711 @@ it('should parse apply_patch Move to operations', () => {
 
       expect(transcript.session.changedFiles).toBeDefined();
       expect(transcript.session.changedFiles!.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('semantic details extraction', () => {
+    function getToolDetails(transcript: SessionTranscript, toolIndex: number = 0): ToolSemanticDetails | undefined {
+      const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+      if (toolIndex >= toolParts.length) return undefined;
+      return toolParts[toolIndex].tool.details;
+    }
+
+    function getAllToolDetails(transcript: SessionTranscript): Array<{ tool: ToolPart['tool']; details?: ToolSemanticDetails }> {
+      return transcript.turns[0].assistant
+        .filter(p => p.type === 'tool')
+        .map(p => {
+          const tp = p as ToolPart;
+          return { tool: tp.tool, details: tp.tool.details };
+        });
+    }
+
+    describe('context tools', () => {
+      it('extracts path and result summary for read tool', () => {
+        const events = [
+          makePromptEvent('Read file', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-read', 'read', 'src/index.ts', JSON.stringify({ file_path: 'src/index.ts' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-read', 'completed', 'file contents here', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('context');
+        expect(details.path).toBe('src/index.ts');
+        expect(details.resultSummary).toContain('file contents here');
+      });
+
+      it('extracts pattern for glob tool', () => {
+        const events = [
+          makePromptEvent('Glob files', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-glob', 'glob', undefined, JSON.stringify({ pattern: '**/*.ts' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-glob', 'completed', JSON.stringify({ files: ['a.ts', 'b.ts'] }), undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('context');
+        expect(details.pattern).toBe('**/*.ts');
+        expect(details.resultSummary).toContain('2 file(s) matched');
+      });
+
+      it('extracts query and include for grep tool', () => {
+        const events = [
+          makePromptEvent('Grep', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-grep', 'grep', undefined, JSON.stringify({ pattern: 'function', include: '*.ts', path: 'src' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('context');
+        expect(details.pattern).toBe('function');
+        expect(details.include).toBe('*.ts');
+        expect(details.path).toBe('src');
+      });
+
+      it('extracts offset and limit for read with range', () => {
+        const events = [
+          makePromptEvent('Read', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-read', 'read', undefined, JSON.stringify({ file_path: 'big.log', offset: 100, limit: 50 }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.path).toBe('big.log');
+        expect(details.offset).toBe(100);
+        expect(details.limit).toBe(50);
+      });
+
+      it('extracts results count for search tool', () => {
+        const events = [
+          makePromptEvent('Search', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-search', 'search', undefined, JSON.stringify({ query: 'authentication' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-search', 'completed', JSON.stringify({ results: [{ file: 'a.ts' }, { file: 'b.ts' }, { file: 'c.ts' }] }), undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.query).toBe('authentication');
+        expect(details.resultSummary).toContain('3 result(s)');
+      });
+    });
+
+    describe('execution tools', () => {
+      it('extracts command and output preview for bash tool', () => {
+        const events = [
+          makePromptEvent('Run command', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-bash', 'bash', 'npm test', JSON.stringify({ command: 'npm test' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-bash', 'completed', 'All tests passed', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ExecutionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('execution');
+        expect(details.command).toBe('npm test');
+        expect(details.outputPreview).toContain('All tests passed');
+        expect(details.completionStatus).toBe('completed');
+      });
+
+      it('extracts cwd and timeout for bash tool', () => {
+        const events = [
+          makePromptEvent('Run command', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-bash', 'bash', 'npm test', JSON.stringify({ command: 'npm test', cwd: '/project', timeout: 30000 }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ExecutionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.command).toBe('npm test');
+        expect(details.cwd).toBe('/project');
+        expect(details.timeout).toBe(30000);
+      });
+
+      it('extracts exit code from structured output', () => {
+        const events = [
+          makePromptEvent('Run command', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-bash', 'bash', 'failing', JSON.stringify({ command: 'failing' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-bash', 'completed', JSON.stringify({ exitCode: 1, stdout: 'error output' }), undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ExecutionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.exitCode).toBe(1);
+        expect(details.outputPreview).toContain('error output');
+      });
+
+      it('shows failed completion status for bash with error', () => {
+        const events = [
+          makePromptEvent('Run command', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-bash', 'bash', 'bad cmd', JSON.stringify({ command: 'bad cmd' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-bash', 'failed', undefined, 'Command failed with exit code 1', '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ExecutionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.completionStatus).toBe('failed');
+      });
+
+      it('truncates long output previews', () => {
+        const longOutput = 'x'.repeat(1000);
+        const events = [
+          makePromptEvent('Run command', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-bash', 'bash', 'cmd', JSON.stringify({ command: 'cmd' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-bash', 'completed', longOutput, undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ExecutionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.outputPreview!.length).toBeLessThan(600);
+        expect(details.outputPreview).toContain('...');
+      });
+    });
+
+    describe('planning tools', () => {
+      it('extracts todo items and completion counts for todowrite', () => {
+        const todos = [
+          { content: 'Task A', status: 'completed' },
+          { content: 'Task B', status: 'in_progress' },
+          { content: 'Task C', status: 'pending' },
+        ];
+        const events = [
+          makePromptEvent('Plan', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-todo', 'todowrite', 'Update todos', JSON.stringify({ todos }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const allTools = getAllToolDetails(transcript);
+        const todoTool = allTools.find(t => t.tool.normalizedName === 'todowrite');
+        expect(todoTool).toBeDefined();
+        const details = todoTool!.details as PlanningToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('planning');
+        expect(details.items).toHaveLength(3);
+        expect(details.totalCount).toBe(3);
+        expect(details.completedCount).toBe(1);
+        expect(details.statusSummary).toContain('1 completed');
+      });
+
+      it('handles empty todo list gracefully', () => {
+        const events = [
+          makePromptEvent('Plan', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-todo', 'todowrite', 'Update todos', JSON.stringify({ todos: [] }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const allTools = getAllToolDetails(transcript);
+        const todoTool = allTools.find(t => t.tool.normalizedName === 'todowrite');
+        expect(todoTool).toBeDefined();
+        const details = todoTool!.details as PlanningToolDetails;
+        expect(details).toBeDefined();
+        expect(details.totalCount).toBe(0);
+      });
+    });
+
+    describe('delegation tools', () => {
+      it('extracts subagent type and description for task tool', () => {
+        const events = [
+          makePromptEvent('Delegate', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-task', 'task', 'Explore codebase', JSON.stringify({ description: 'Find all API routes', subagent_type: 'explore' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as DelegationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('delegation');
+        expect(details.subagentType).toBe('explore');
+        expect(details.description).toBe('Find all API routes');
+      });
+
+      it('extracts child session id from metadata', () => {
+        const events = [
+          makePromptEvent('Delegate', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-task', 'task', 'Explore', JSON.stringify({ description: 'Search' }), '2024-01-01T10:00:01.000Z'),
+          makeEvent('tool_call_update', {
+            toolCallId: 'tc-task',
+            status: 'completed',
+            metadata: { childSessionId: 'child-session-123' },
+            createdAt: '2024-01-01T10:00:02.000Z',
+          }, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as DelegationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.childSessionId).toBe('child-session-123');
+      });
+    });
+
+    describe('interaction tools', () => {
+      it('extracts URL and result preview for webfetch tool', () => {
+        const events = [
+          makePromptEvent('Fetch', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-fetch', 'webfetch', undefined, JSON.stringify({ url: 'https://example.com/docs' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-fetch', 'completed', 'Documentation content here', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as InteractionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('interaction');
+        expect(details.url).toBe('https://example.com/docs');
+        expect(details.resultPreview).toContain('Documentation content');
+      });
+
+      it('extracts query for websearch tool', () => {
+        const events = [
+          makePromptEvent('Search', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-search', 'websearch', undefined, JSON.stringify({ query: 'TypeScript generics tutorial' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-search', 'completed', 'Search results here', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as InteractionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.query).toBe('TypeScript generics tutorial');
+        expect(details.resultPreview).toContain('Search results');
+      });
+
+      it('extracts question for question tool', () => {
+        const events = [
+          makePromptEvent('Ask', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-q', 'question', undefined, JSON.stringify({ question: 'Should I use REST or GraphQL?' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as InteractionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.question).toBe('Should I use REST or GraphQL?');
+      });
+    });
+
+    describe('skill tools', () => {
+      it('extracts skill name from title pattern "Loaded skill: X"', () => {
+        const events = [
+          makePromptEvent('Load skill', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-skill', 'skill', 'Loaded skill: software-design', undefined, '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as SkillToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('skill');
+        expect(details.skillName).toBe('software-design');
+      });
+
+      it('extracts skill name from rawInput', () => {
+        const events = [
+          makePromptEvent('Load skill', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-skill', 'skill', undefined, JSON.stringify({ name: 'debugging-code' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as SkillToolDetails;
+        expect(details).toBeDefined();
+        expect(details.skillName).toBe('debugging-code');
+      });
+
+      it('falls back to non-generic title as skill name', () => {
+        const events = [
+          makePromptEvent('Load skill', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-skill', 'skill', 'frontend-design', undefined, '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as SkillToolDetails;
+        expect(details).toBeDefined();
+        expect(details.skillName).toBe('frontend-design');
+      });
+    });
+
+    describe('mutation tools', () => {
+      it('extracts per-file change entries with diff for apply_patch', () => {
+        const patchText = `*** Begin Patch
+*** Add File: src/new.ts
++ export const foo = 1;
+*** Update File: src/existing.ts
+- old line
++ new line
+*** End Patch`;
+        const events = [
+          makePromptEvent('Patch', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-patch', 'apply_patch', 'multi-file patch', JSON.stringify({ patchText }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('mutation');
+        expect(details.files).toHaveLength(2);
+        expect(details.files[0].path).toBe('src/new.ts');
+        expect(details.files[0].operation).toBe('created');
+        expect(details.files[0].additions).toBe(1);
+        expect(details.files[0].diff).toContain('Add File: src/new.ts');
+        expect(details.files[1].path).toBe('src/existing.ts');
+        expect(details.files[1].operation).toBe('modified');
+        expect(details.files[1].deletions).toBe(1);
+        expect(details.files[1].diff).toContain('old line');
+      });
+
+      it('extracts file path and diff for edit tool', () => {
+        const events = [
+          makePromptEvent('Edit', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-edit', 'edit', 'src/index.ts', JSON.stringify({ file_path: 'src/index.ts', old_string: 'old value', new_string: 'new value' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('mutation');
+        expect(details.files).toHaveLength(1);
+        expect(details.files[0].path).toBe('src/index.ts');
+        expect(details.files[0].operation).toBe('modified');
+        expect(details.files[0].diff).toContain('old value');
+        expect(details.files[0].diff).toContain('new value');
+      });
+
+      it('extracts file path and content for write tool', () => {
+        const events = [
+          makePromptEvent('Write', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-write', 'write', 'src/new.ts', JSON.stringify({ file_path: 'src/new.ts', content: 'export const foo = 42;' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('mutation');
+        expect(details.files).toHaveLength(1);
+        expect(details.files[0].path).toBe('src/new.ts');
+        expect(details.files[0].content).toBe('export const foo = 42;');
+        expect(details.files[0].diff).toContain('+export const foo = 42;');
+      });
+
+      it('handles edit with camelCase oldString/newString', () => {
+        const events = [
+          makePromptEvent('Edit', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-edit', 'edit', 'src/app.ts', JSON.stringify({ file_path: 'src/app.ts', oldString: 'foo', newString: 'bar' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.files).toHaveLength(1);
+        expect(details.files[0].diff).toContain('bar');
+      });
+    });
+
+    describe('list and search_files context tools', () => {
+      it('extracts path for list tool', () => {
+        const events = [
+          makePromptEvent('List dir', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-list', 'list', undefined, JSON.stringify({ path: 'src/components' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('context');
+        expect(details.path).toBe('src/components');
+      });
+
+      it('extracts pattern for search_files tool', () => {
+        const events = [
+          makePromptEvent('Search files', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-sf', 'search_files', undefined, JSON.stringify({ pattern: '*.test.ts', path: 'packages/cli' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-sf', 'completed', JSON.stringify({ files: ['a.test.ts', 'b.test.ts'] }), undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ContextToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('context');
+        expect(details.pattern).toBe('*.test.ts');
+        expect(details.resultSummary).toContain('2 file(s) matched');
+      });
+    });
+
+    describe('shell execution tool', () => {
+      it('extracts command and cwd for shell tool', () => {
+        const events = [
+          makePromptEvent('Shell', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-shell', 'shell', 'ls -la', JSON.stringify({ command: 'ls -la', cwd: '/tmp' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-shell', 'completed', 'file1.txt\nfile2.txt', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as ExecutionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('execution');
+        expect(details.command).toBe('ls -la');
+        expect(details.cwd).toBe('/tmp');
+        expect(details.completionStatus).toBe('completed');
+      });
+    });
+
+    describe('todo planning tool', () => {
+      it('extracts items for todo tool (not just todowrite)', () => {
+        const todos = [
+          { content: 'Write tests', status: 'completed' },
+          { content: 'Fix bugs', status: 'in_progress' },
+        ];
+        const events = [
+          makePromptEvent('Plan', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-todo', 'todo', 'Update todos', JSON.stringify({ todos }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const allTools = getAllToolDetails(transcript);
+        const todoTool = allTools.find(t => t.tool.normalizedName === 'todo');
+        expect(todoTool).toBeDefined();
+        const details = todoTool!.details as PlanningToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('planning');
+        expect(details.items).toHaveLength(2);
+        expect(details.completedCount).toBe(1);
+        expect(details.totalCount).toBe(2);
+      });
+    });
+
+    describe('question tool with answer count', () => {
+      it('extracts answer count from output', () => {
+        const events = [
+          makePromptEvent('Ask', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-q', 'question', undefined, JSON.stringify({ question: 'Continue?' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-q', 'completed', JSON.stringify({ answers: ['yes', 'ok'] }), undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as InteractionToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('interaction');
+        expect(details.question).toBe('Continue?');
+        expect(details.answerCount).toBe(2);
+      });
+    });
+
+    describe('write_file mutation tool', () => {
+      it('extracts file path and content for write_file tool', () => {
+        const events = [
+          makePromptEvent('Write', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-wf', 'write_file', 'src/out.ts', JSON.stringify({ file_path: 'src/out.ts', content: 'export const x = 1;' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('mutation');
+        expect(details.files).toHaveLength(1);
+        expect(details.files[0].path).toBe('src/out.ts');
+        expect(details.files[0].content).toBe('export const x = 1;');
+      });
+    });
+
+    describe('mutation details refreshed via tool_call_update', () => {
+      it('updates mutation details when edit tool receives output via update', () => {
+        const events = [
+          makePromptEvent('Edit', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-edit', 'edit', 'src/app.ts', JSON.stringify({ file_path: 'src/app.ts', old_string: 'hello', new_string: 'world' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-edit', 'completed', 'Success. Updated src/app.ts', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('mutation');
+        expect(details.files).toHaveLength(1);
+        expect(details.files[0].path).toBe('src/app.ts');
+        expect(details.files[0].diff).toContain('world');
+      });
+
+      it('builds mutation details when apply_patch data arrives via update', () => {
+        const patchText = `Add File: src/brand-new.ts\n+ export const v = 1;`;
+        const events = [
+          makePromptEvent('Patch', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-ap', 'apply_patch', undefined, undefined, '2024-01-01T10:00:01.000Z'),
+          makeEvent('tool_call_update', {
+            toolCallId: 'tc-ap',
+            status: 'completed',
+            rawInput: { patchText },
+            output: 'Success',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          }, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details).toBeDefined();
+        expect(details.family).toBe('mutation');
+        expect(details.files.length).toBeGreaterThanOrEqual(1);
+        expect(details.files[0].path).toBe('src/brand-new.ts');
+        expect(details.files[0].operation).toBe('created');
+      });
+    });
+
+    describe('mutation replay parity', () => {
+      it('replay of persisted edit produces same mutation details as live', () => {
+        const events = [
+          makePromptEvent('Edit', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-edit', 'edit', 'src/index.ts', JSON.stringify({ file_path: 'src/index.ts', old_string: 'old', new_string: 'new' }), '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-edit', 'completed', 'done', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript1 = assembleSessionTranscript(makeSession(), events);
+        const transcript2 = assembleSessionTranscript(makeSession(), events);
+        const details1 = getToolDetails(transcript1) as MutationToolDetails;
+        const details2 = getToolDetails(transcript2) as MutationToolDetails;
+        expect(details1).toEqual(details2);
+        expect(details1.files[0].path).toBe('src/index.ts');
+        expect(details1.files[0].diff).toContain('old');
+      });
+    });
+
+    describe('replay parity', () => {
+      it('persists semantic details for live and replay paths identically', () => {
+        const rawInput = JSON.stringify({ file_path: 'src/config.ts', offset: 10, limit: 20 });
+        const rawOutput = JSON.stringify({ content: 'export const DB_URL = "...";' });
+        const events = [
+          makePromptEvent('Read config', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-read', 'read', 'src/config.ts', rawInput, '2024-01-01T10:00:01.000Z'),
+          makeToolCallUpdate('tc-read', 'completed', rawOutput, undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript1 = assembleSessionTranscript(makeSession(), events);
+        const transcript2 = assembleSessionTranscript(makeSession(), events);
+        const details1 = getToolDetails(transcript1) as ContextToolDetails;
+        const details2 = getToolDetails(transcript2) as ContextToolDetails;
+        expect(details1).toEqual(details2);
+        expect(details1.path).toBe('src/config.ts');
+        expect(details1.offset).toBe(10);
+        expect(details1.limit).toBe(20);
+      });
+
+      it('updates details when tool_call_update brings more data', () => {
+        const events = [
+          makePromptEvent('Bash', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-bash', 'bash', 'npm test', JSON.stringify({ command: 'npm test' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcriptBefore = assembleSessionTranscript(makeSession(), events);
+        const detailsBefore = getToolDetails(transcriptBefore) as ExecutionToolDetails;
+        expect(detailsBefore.outputPreview).toBeUndefined();
+
+        const eventsWithOutput = [
+          ...events,
+          makeToolCallUpdate('tc-bash', 'completed', 'All tests passed', undefined, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcriptAfter = assembleSessionTranscript(makeSession(), eventsWithOutput);
+        const detailsAfter = getToolDetails(transcriptAfter) as ExecutionToolDetails;
+        expect(detailsAfter.outputPreview).toContain('All tests passed');
+        expect(detailsAfter.completionStatus).toBe('completed');
+      });
+
+      it('reclassifies unknown tool to skill from late semantic update', () => {
+        const events = [
+          makePromptEvent('Skill', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-skill', 'unknown', 'skill', JSON.stringify({}), '2024-01-01T10:00:01.000Z'),
+          makeEvent('tool_call_update', {
+            toolCallId: 'tc-skill',
+            status: 'completed',
+            title: 'Loaded skill: software-design',
+            rawInput: { name: 'software-design' },
+            createdAt: '2024-01-01T10:00:02.000Z',
+          }, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolPart = transcript.turns[0].assistant.find(p => p.type === 'tool') as ToolPart;
+        expect(toolPart.tool.normalizedName).toBe('skill');
+        expect(toolPart.tool.displayTitle).toBe('Loaded skill: software-design');
+        expect((toolPart.tool.details as SkillToolDetails).skillName).toBe('software-design');
+      });
+
+      it('keeps canonical family when late title becomes more specific', () => {
+        const events = [
+          makePromptEvent('Read', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-read', 'unknown', 'read', JSON.stringify({}), '2024-01-01T10:00:01.000Z'),
+          makeEvent('tool_call_update', {
+            toolCallId: 'tc-read',
+            status: 'completed',
+            title: 'Read src/app.ts',
+            rawInput: { file_path: 'src/app.ts' },
+            createdAt: '2024-01-01T10:00:02.000Z',
+          }, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolPart = transcript.turns[0].assistant.find(p => p.type === 'tool') as ToolPart;
+        expect(toolPart.tool.normalizedName).toBe('read');
+        expect(toolPart.tool.displayTitle).toBe('Read src/app.ts');
+        expect(toolPart.tool.category).toBe('context');
+        expect((toolPart.tool.details as ContextToolDetails).path).toBe('src/app.ts');
+      });
+
+      it('infers unknown tool as task from semantic payload fields', () => {
+        const events = [
+          makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-task', 'unknown', 'delegate', JSON.stringify({ description: 'Inspect routes', subagent_type: 'explore', task_id: 'task-1' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolPart = transcript.turns[0].assistant.find(p => p.type === 'tool') as ToolPart;
+        expect(toolPart.tool.normalizedName).toBe('task');
+        expect(toolPart.tool.category).toBe('delegation');
+        expect(transcript.session.warnings?.some((w: TranscriptWarning) => w.code === 'UNKNOWN_TOOL')).not.toBe(true);
+      });
+
+      it('prefers modified semantics for write when before/after metadata exists', () => {
+        const events = [
+          makePromptEvent('Write', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-write', 'write', 'src/app.ts', JSON.stringify({ file_path: 'src/app.ts', old_string: 'old', new_string: 'new', content: 'new' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const details = getToolDetails(transcript) as MutationToolDetails;
+        expect(details.files[0].operation).toBe('modified');
+        expect(details.files[0].diff).toContain('-old');
+        expect(details.files[0].diff).toContain('+new');
+      });
+
+      it('builds mutation details and changed files from metadata diff when raw input is minimal', () => {
+        const events = [
+          makePromptEvent('Write', 'task', '2024-01-01T10:00:00.000Z'),
+          makeEvent('tool_call', {
+            toolCallId: 'tc-write-metadata',
+            toolName: 'write',
+            title: 'src/app.ts',
+            input: JSON.stringify({ file_path: 'src/app.ts' }),
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          }, '2024-01-01T10:00:01.000Z'),
+          makeEvent('tool_call_update', {
+            toolCallId: 'tc-write-metadata',
+            toolName: 'write',
+            status: 'completed',
+            output: 'ok',
+            metadata: {
+              path: 'src/app.ts',
+              diff: '--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new',
+              before: 'old',
+              after: 'new',
+            },
+            createdAt: '2024-01-01T10:00:02.000Z',
+          }, '2024-01-01T10:00:02.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolPart = transcript.turns[0].assistant.find(p => p.type === 'tool') as ToolPart;
+        const details = toolPart.tool.details as MutationToolDetails;
+        expect(details.files[0].operation).toBe('modified');
+        expect(details.files[0].diff).toContain('-old');
+        expect(details.files[0].diff).toContain('+new');
+        expect(toolPart.tool.changedFiles?.[0]).toMatchObject({
+          path: 'app.ts',
+          operation: 'modified',
+          additions: 1,
+          deletions: 1,
+        });
+        expect(toolPart.tool.metadata?.diff).toContain('-old');
+      });
+    });
+
+    describe('tool categories', () => {
+      it('assigns delegation category to task tools', () => {
+        const events = [
+          makePromptEvent('Task', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-task', 'task', 'Explore', JSON.stringify({ description: 'Search' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+        expect(toolParts[0].tool.category).toBe('delegation');
+      });
+
+      it('assigns skill category to skill tools', () => {
+        const events = [
+          makePromptEvent('Skill', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-skill', 'skill', 'Loaded skill: test', undefined, '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+        expect(toolParts[0].tool.category).toBe('skill');
+      });
+
+      it('assigns interaction category to webfetch tools', () => {
+        const events = [
+          makePromptEvent('Fetch', 'task', '2024-01-01T10:00:00.000Z'),
+          makeToolCallStart('tc-fetch', 'webfetch', undefined, JSON.stringify({ url: 'https://example.com' }), '2024-01-01T10:00:01.000Z'),
+        ];
+        const transcript = assembleSessionTranscript(makeSession(), events);
+        const toolParts = transcript.turns[0].assistant.filter(p => p.type === 'tool') as ToolPart[];
+        expect(toolParts[0].tool.category).toBe('interaction');
+      });
     });
   });
 });

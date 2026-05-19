@@ -132,6 +132,7 @@ export class WorkflowSessionObserver {
       rawInput: event.rawInput,
       rawOutput: event.rawOutput,
       rawOutputMetadata: event.rawOutputMetadata,
+      metadata: event.metadata,
       status: event.status,
     });
   }

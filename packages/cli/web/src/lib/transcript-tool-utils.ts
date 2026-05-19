@@ -325,25 +325,78 @@ export function stringifyPayload(payload: unknown): string | undefined {
   return typeof payload === 'string' ? payload : JSON.stringify(payload)
 }
 
-export function inferToolName(toolName: string | undefined, _title?: string, rawInput?: unknown, rawOutput?: unknown): string {
+function inferTitleToolFamily(titleLower: string): string | undefined {
+  if (titleLower.includes('apply_patch')) return 'apply_patch'
+  if (titleLower.includes('search_files')) return 'search_files'
+  if (titleLower.includes('webfetch')) return 'webfetch'
+  if (titleLower.includes('websearch')) return 'websearch'
+  if (titleLower.includes('todowrite')) return 'todowrite'
+  if (titleLower === 'todo' || titleLower.startsWith('todo:') || titleLower.includes(' todo ')) return 'todo'
+  if (titleLower.includes('bash')) return 'bash'
+  if (titleLower.includes('shell')) return 'shell'
+  if (titleLower.includes('grep')) return 'grep'
+  if (titleLower.includes('glob')) return 'glob'
+  if (titleLower.includes('read')) return 'read'
+  if (titleLower.includes('write')) return 'write'
+  if (titleLower.includes('edit')) return 'edit'
+  if (titleLower.includes('list')) return 'list'
+  if (titleLower.includes('question')) return 'question'
+  if (titleLower.includes('search')) return 'search'
+  return undefined
+}
+
+function inferSemanticToolName(
+  obj: Record<string, unknown>,
+  toolName?: string,
+  name?: string,
+  title?: string,
+): string | undefined {
+  const candidateTitle = typeof obj.title === 'string' ? obj.title : title
+  if (candidateTitle) {
+    const titleLower = candidateTitle.toLowerCase()
+    if (titleLower.startsWith('loaded skill:') || titleLower === 'skill' || titleLower.startsWith('skill:')) return 'skill'
+    if (titleLower.includes('subagent') || titleLower.includes('delegate') || titleLower.startsWith('task:')) return 'task'
+    const inferredFamily = inferTitleToolFamily(titleLower)
+    if (inferredFamily) return inferredFamily
+  }
+
+  const skillName = obj.skillName ?? obj.skill ?? obj.name
+  if (typeof skillName === 'string' && skillName && skillName !== toolName && skillName !== name) return 'skill'
+  if (obj.subagent_type !== undefined || obj.subagentType !== undefined || obj.task_id !== undefined || obj.taskId !== undefined || obj.childSessionId !== undefined || obj.child_session_id !== undefined) return 'task'
+  if (obj.patchText !== undefined) return 'apply_patch'
+  if (obj.command !== undefined || obj.script !== undefined || obj.cmd !== undefined) return 'bash'
+  if (obj.url !== undefined || obj.uri !== undefined) {
+    if (obj.search_query !== undefined || obj.query !== undefined) return 'websearch'
+    return 'webfetch'
+  }
+  if (obj.pattern !== undefined || obj.query !== undefined || obj.search !== undefined) {
+    if (obj.file_path !== undefined || obj.filePath !== undefined || obj.include !== undefined) return 'grep'
+    return 'search'
+  }
+  if (obj.file_path !== undefined || obj.filePath !== undefined || obj.path !== undefined) return 'read'
+  if (obj.todos !== undefined) return 'todowrite'
+  if (obj.question !== undefined) return 'question'
+  return undefined
+}
+
+export function inferToolName(toolName: string | undefined, title?: string, rawInput?: unknown, rawOutput?: unknown): string {
   if (toolName && toolName !== 'unknown') return toolName
+
+  if (title) {
+    const inferred = inferSemanticToolName({}, toolName, undefined, title)
+    if (inferred) return inferred
+  }
 
   const input = typeof rawInput === 'string' ? rawInput : rawInput && typeof rawInput === 'object' ? rawInput as Record<string, unknown> : null
   if (input && typeof input === 'object') {
     if (typeof input.toolName === 'string') return input.toolName
     if (typeof input.name === 'string') return input.name
-    if (typeof input.patchText === 'string') return 'apply_patch'
-    if (typeof input.command === 'string') return 'bash'
-    if (input.pattern !== undefined || input.query !== undefined || input.search !== undefined) {
-      if (input.file_path !== undefined) return 'grep'
-      return 'search'
-    }
-    if (typeof input.filePath === 'string' || typeof input.file_path === 'string' || typeof input.path === 'string') return 'read'
-    if (Array.isArray(input.todos)) return 'todowrite'
+    const inferred = inferSemanticToolName(input, toolName, typeof input.name === 'string' ? input.name : undefined, title)
+    if (inferred) return inferred
   }
   if (typeof input === 'string') {
     try {
-      return inferToolName(undefined, undefined, JSON.parse(input), rawOutput)
+      return inferToolName(undefined, title, JSON.parse(input), rawOutput)
     } catch {
       if (input.includes('*** Begin Patch') || input.includes('*** Add File:') || input.includes('*** Update File:') || input.includes('*** Delete File:')) return 'apply_patch'
     }
@@ -353,6 +406,10 @@ export function inferToolName(toolName: string | undefined, _title?: string, raw
   const metadata = output?.metadata && typeof output.metadata === 'object' ? output.metadata as Record<string, unknown> : null
   if (typeof metadata?.toolName === 'string') return metadata.toolName
   if (typeof metadata?.name === 'string') return metadata.name
+  if (metadata) {
+    const inferred = inferSemanticToolName(metadata, toolName, typeof metadata.name === 'string' ? metadata.name : undefined, title)
+    if (inferred) return inferred
+  }
 
   return toolName ?? 'unknown'
 }

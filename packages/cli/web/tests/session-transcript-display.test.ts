@@ -162,12 +162,14 @@ describe('projectTurn', () => {
     expect(errPart.kind).toBe('failed')
   })
 
-  it('excludes todowrite from transcript', () => {
+  it('renders todowrite in transcript when present', () => {
     const turn = makeTurn('turn-1', 'Plan tasks', [
       makeToolPart('tool-todo', 'call-todo', 'todowrite', 'todowrite', 'completed'),
     ])
     const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(0)
+    expect(display.assistantParts).toHaveLength(1)
+    expect(display.assistantParts[0].partType).toBe('tool')
+    expect((display.assistantParts[0] as any).normalizedName).toBe('todowrite')
   })
 
   it('groups contiguous context tools into context-group', () => {
@@ -218,7 +220,7 @@ describe('projectTurn', () => {
     expect(toolPart.normalizedName).toBe('apply_patch')
   })
 
-  it('extracts changed-files from apply_patch tool into turn', () => {
+  it('does not duplicate apply_patch changed-files in turn summary', () => {
     const turn = makeTurn('turn-1', 'Patch files', [
       makeToolPart('p1', 'c1', 'apply_patch', 'apply_patch', 'completed', {
         title: 'Apply patch',
@@ -229,11 +231,7 @@ describe('projectTurn', () => {
       }),
     ])
     const display = projectTurn(turn)
-    expect(display.changedFiles).toHaveLength(2)
-    expect(display.changedFiles[0].path).toBe('src/utils.ts')
-    expect(display.changedFiles[0].operation).toBe('modified')
-    expect(display.changedFiles[1].path).toBe('src/auth.ts')
-    expect(display.changedFiles[1].operation).toBe('created')
+    expect(display.changedFiles).toHaveLength(0)
   })
 
   it('extracts changed-files from edit tool into turn', () => {
@@ -245,6 +243,32 @@ describe('projectTurn', () => {
     const display = projectTurn(turn)
     expect(display.changedFiles).toHaveLength(1)
     expect(display.changedFiles[0].path).toBe('config.json')
+  })
+
+  it('projects mutation details into changed files with raw diff detail', () => {
+    const turn = makeTurn('turn-1', 'Edit file', [
+      makeToolPart('e1', 'c1', 'write', 'write', 'completed', {
+        title: 'Write config',
+      }),
+    ])
+    const tool = turn.assistant[0]
+    if (tool.type === 'tool') {
+      tool.tool.details = {
+        family: 'mutation',
+        files: [{
+          path: 'config.json',
+          operation: 'modified',
+          additions: 1,
+          deletions: 1,
+          diff: '--- a/config.json\n+++ b/config.json\n@@ -1 +1 @@\n-old\n+new',
+        }],
+      }
+    }
+    const display = projectTurn(turn)
+    const files = extractTurnChangedFiles(display)
+    expect(files).toHaveLength(1)
+    expect(files[0].path).toBe('config.json')
+    expect(files[0].rawDetail).toContain('-old')
   })
 
   it('turn state is idle when completedAt is set', () => {
@@ -336,7 +360,7 @@ describe('projectTurn', () => {
     }
     const display = projectTurn(turn)
     expect(display.prompt.title).toBe('Fix login')
-    expect(display.prompt.subtitle).toBe('Output: src/auth.ts')
+    expect(display.prompt.subtitle).toBeUndefined()
     expect(display.prompt.outputPath).toBe('src/auth.ts')
     expect(display.prompt.contextFiles).toEqual(['src/auth.ts', 'src/utils.ts'])
   })
@@ -355,9 +379,9 @@ describe('projectSessionToDisplayTurns', () => {
 })
 
 describe('extractTurnChangedFiles', () => {
-  it('extracts changed files from display turn', () => {
+  it('extracts changed files from display turn for non-apply_patch tools', () => {
     const turn = makeTurn('turn-1', 'Patch', [
-      makeToolPart('p1', 'c1', 'apply_patch', 'apply_patch', 'completed', {
+      makeToolPart('p1', 'c1', 'edit', 'edit', 'completed', {
         changedFiles: [{ path: 'a.txt', operation: 'modified', additions: 5 }],
       }),
     ])
@@ -450,11 +474,12 @@ describe('reasoning reorder', () => {
       makeTextPart('t2', 'World', '2024-01-01T00:00:00Z'),
     ])
     const display = projectTurn(turn)
-    expect(display.assistantParts).toHaveLength(4)
+    expect(display.assistantParts).toHaveLength(5)
     expect(display.assistantParts[0].partType).toBe('text')
     expect(display.assistantParts[1].partType).toBe('reasoning')
     expect(display.assistantParts[2].partType).toBe('context-group')
-    expect(display.assistantParts[3].partType).toBe('reasoning')
+    expect(display.assistantParts[3].partType).toBe('text')
+    expect(display.assistantParts[4].partType).toBe('reasoning')
   })
 
   it('does not reorder when last reasoning and text share second but earlier text exists', () => {
@@ -467,8 +492,8 @@ describe('reasoning reorder', () => {
     expect(display.assistantParts).toHaveLength(3)
     expect(display.assistantParts[0].partType).toBe('text')
     expect((display.assistantParts[0] as any).text).toBe('First text')
-    expect(display.assistantParts[1].partType).toBe('reasoning')
-    expect(display.assistantParts[2].partType).toBe('text')
-    expect((display.assistantParts[2] as any).text).toBe('Second text')
+    expect(display.assistantParts[1].partType).toBe('text')
+    expect((display.assistantParts[1] as any).text).toBe('Second text')
+    expect(display.assistantParts[2].partType).toBe('reasoning')
   })
 })
