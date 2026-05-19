@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STAGE_DEFINITIONS,
+  MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   WorkflowDomainError,
   WorkflowRun,
+  compileWorkflowDefinition,
   type StageDefinition,
 } from '../src/workflow/domain';
 import { Stage } from '../src/types';
@@ -71,6 +73,63 @@ function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
 }
 
 describe('WorkflowRun domain aggregate', () => {
+  it('derives the default runtime stage definitions from mohist/default WorkflowDefinition', () => {
+    const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+
+    expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.id).toBe('mohist/default');
+    expect(compiled).toEqual(DEFAULT_STAGE_DEFINITIONS);
+    expect(compiled.map(definition => definition.stage)).toEqual([
+      Stage.Plan,
+      Stage.Build,
+      Stage.Check,
+      Stage.Integrate,
+    ]);
+    expect(compiled.find(definition => definition.stage === Stage.Plan)?.tasks.map(task => task.id)).toEqual([
+      'proposal',
+      'specs',
+      'design',
+      'tasks',
+      'self-review',
+    ]);
+  });
+
+  it('compiles WorkflowDefinition defensively so callers cannot mutate the source definition', () => {
+    const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+    compiled[0].tasks[0].title = 'Mutated title';
+    compiled[0].workSources?.[0].taskIds?.push('mutated-task');
+
+    const recompiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+
+    expect(recompiled[0].tasks[0].title).toBe('Generate proposal');
+    expect(recompiled[0].workSources?.[0].taskIds).not.toContain('mutated-task');
+  });
+
+  it('rejects invalid WorkflowDefinition shapes before they become runtime definitions', () => {
+    expect(() => compileWorkflowDefinition({ id: '', stages: [] })).toThrow(/requires an id/);
+    expect(() => compileWorkflowDefinition({
+      id: 'invalid/empty',
+      stages: [],
+    })).toThrow(/requires at least one stage/);
+    expect(() => compileWorkflowDefinition({
+      id: 'invalid/duplicate-stage',
+      stages: [
+        { stage: Stage.Build, tasks: [], checks: [] },
+        { stage: Stage.Build, tasks: [], checks: [] },
+      ],
+    })).toThrow(/duplicate stage/);
+    expect(() => compileWorkflowDefinition({
+      id: 'invalid/check-policy',
+      stages: [
+        {
+          stage: Stage.Build,
+          tasks: [],
+          checks: [],
+          checkPolicies: [{ checkName: 'missing-check', phase: 'post-task' }],
+        },
+      ],
+    })).toThrow(/unknown check/);
+  });
+
   it('starts at the first configured stage without hardcoded backlog-to-plan logic', () => {
     const definitions: StageDefinition[] = [
       {

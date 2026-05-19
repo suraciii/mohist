@@ -122,6 +122,11 @@ export {
 } from './config-driven-stage-runner';
 
 export {
+  MOHIST_DEFAULT_WORKFLOW_DEFINITION,
+  DEFAULT_STAGE_DEFINITIONS,
+  compileWorkflowDefinition,
+  type WorkflowDefinition,
+  type StageDefinition,
   type FailedCheckContext,
   type ReactionInputSelector,
   buildFailedCheckContext,
