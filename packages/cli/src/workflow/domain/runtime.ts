@@ -14,13 +14,13 @@ import type {
   CheckResultInput,
   CheckRunStatus,
   CheckStateSnapshot,
+  CompiledStageDefinition,
   DeliveryMetadata,
   FailureDetails,
   FreezePoint,
   InvalidationEntry,
   MaterializedTaskInput,
   StageCompletionGuard,
-  StageDefinition,
   StageRunSnapshot,
   StageRunStatus,
   TaskResultInput,
@@ -40,7 +40,7 @@ import type {
 export function getCheckFailurePolicy(
   stage: Stage,
   checkName: string,
-  definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
+  definitions: CompiledStageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
 ): CheckFailurePolicy | null {
   return definitions
     .find(definition => definition.stage === stage)
@@ -370,7 +370,7 @@ export class StageRun {
   buildWorkSourceState: BuildWorkSourceState = { evaluated: false };
 
   constructor(
-    readonly definition: StageDefinition,
+    readonly definition: CompiledStageDefinition,
     readonly order: number,
   ) {
     this.tasks = definition.tasks.map((task, index) => {
@@ -647,7 +647,7 @@ export class WorkflowRun {
     readonly id: string,
     readonly issueId: string,
     readonly issueNumber: number,
-    readonly definitions: StageDefinition[],
+    readonly definitions: CompiledStageDefinition[],
     readonly workflowDefinitionSnapshot: WorkflowDefinitionSnapshot,
   ) {
     if (definitions.length === 0) throw new WorkflowDomainError('WorkflowRun requires at least one stage definition');
@@ -659,7 +659,7 @@ export class WorkflowRun {
     id: string;
     issueId: string;
     issueNumber: number;
-    definitions?: StageDefinition[];
+    definitions?: CompiledStageDefinition[];
     workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
     now?: string;
   }): { run: WorkflowRun; decision: WorkflowDecision } {

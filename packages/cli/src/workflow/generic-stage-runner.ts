@@ -8,7 +8,7 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, StageDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkSourceKind } from './domain';
+import type { CheckRunStatus, CompiledStageDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkSourceKind } from './domain';
 import { Log } from '../util/log';
 import {
   extractReactionOutput,
@@ -39,7 +39,7 @@ export interface GenericStageRunnerOptions {
   taskHandlerRegistry: TaskHandlerRegistry;
   checkRegistry: CheckRegistry;
   taskDispatchFactoryRegistry?: TaskDispatchFactoryRegistry;
-  getStageDefinition(stage: Stage): StageDefinition | undefined;
+  getStageDefinition(stage: Stage): CompiledStageDefinition | undefined;
   worktreePath: string;
   enabledStages?: Stage[];
 }
@@ -49,7 +49,7 @@ export class GenericStageRunner implements StageRunner {
   private taskHandlerRegistry: TaskHandlerRegistry;
   private taskDispatchFactoryRegistry: TaskDispatchFactoryRegistry;
   private checkRegistry: CheckRegistry;
-  private getStageDefinition: (stage: Stage) => StageDefinition | undefined;
+  private getStageDefinition: (stage: Stage) => CompiledStageDefinition | undefined;
   private worktreePath: string;
   private enabledStages?: Set<Stage>;
   private stageExecutionId?: string;
@@ -687,7 +687,7 @@ export class GenericStageRunner implements StageRunner {
     return task.taskId ?? task.id ?? '';
   }
 
-  private resolveExecutableTask(ctx: StageContext, taskId: string, stageDefinition: StageDefinition): ExecutableTask | null {
+  private resolveExecutableTask(ctx: StageContext, taskId: string, stageDefinition: CompiledStageDefinition): ExecutableTask | null {
     for (const workSource of stageDefinition.workSources ?? []) {
       if (workSource.kind === 'runtime') continue;
 
@@ -723,7 +723,7 @@ export class GenericStageRunner implements StageRunner {
   }
 
   private resolveTaskExecutionPolicy(
-    stageDefinition: StageDefinition,
+    stageDefinition: CompiledStageDefinition,
     taskId: string,
     workSourceKind?: WorkSourceKind,
   ): TaskExecutionPolicy | undefined {
@@ -734,7 +734,7 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private resolveRuntimeTask(stageDefinition: StageDefinition, taskId: string): ExecutableTask | null {
+  private resolveRuntimeTask(stageDefinition: CompiledStageDefinition, taskId: string): ExecutableTask | null {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     const task = this.sourceTaskDefinition(stageDefinition, taskId)
       ?? this.buildRuntimeTaskDefinition(taskId)
@@ -800,7 +800,7 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private sourceTaskDefinition(stageDefinition: StageDefinition, taskId: string): import('./domain').TaskDefinition | undefined {
+  private sourceTaskDefinition(stageDefinition: CompiledStageDefinition, taskId: string): import('./domain').TaskDefinition | undefined {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     return stageDefinition.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
       ?? stageDefinition.checks
@@ -808,7 +808,7 @@ export class GenericStageRunner implements StageRunner {
         .find((task): task is import('./domain').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
-  private taskWorkSourceKind(ctx: StageContext, stageDefinition: StageDefinition, taskId: string): WorkSourceKind | undefined {
+  private taskWorkSourceKind(ctx: StageContext, stageDefinition: CompiledStageDefinition, taskId: string): WorkSourceKind | undefined {
     for (const workSource of stageDefinition.workSources ?? []) {
       if (workSource.kind === 'static') {
         const allowedTaskIds = new Set(workSource.taskIds ?? stageDefinition.tasks.map(task => task.id));

@@ -178,21 +178,10 @@ export interface StageDefinition {
   on?: Record<string, StageEventPolicy>;
   requiresApproval?: boolean;
   approvalCheckName?: string;
-  /**
-   * Compiled runtime metadata. These fields are derived from the semantic
-   * workflow definition and should not be authored in builtin source blocks or
-   * project workflow YAML.
-   */
-  checkFailurePolicies?: CheckFailurePolicy[];
-  workSources?: WorkSourceDefinition[];
-  taskExecutionPolicies?: TaskExecutionPolicy[];
-  checkPolicies?: CheckPolicy[];
-  approvalPolicy?: ApprovalPolicy;
-  repairPolicies?: RepairPolicy[];
-  invalidationPolicy?: InvalidationPolicy;
 }
 
 export type CompiledStageDefinition = StageDefinition & {
+  checkFailurePolicies?: CheckFailurePolicy[];
   workSources?: WorkSourceDefinition[];
   taskExecutionPolicies?: TaskExecutionPolicy[];
   checkPolicies: CheckPolicy[];

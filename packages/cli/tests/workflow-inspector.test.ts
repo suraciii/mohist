@@ -65,6 +65,20 @@ describe('workflow inspector', () => {
     });
   });
 
+  it('keeps builtin health gates in the semantic workflow definition', () => {
+    const resolved = resolveWorkflowDefinition();
+    const build = resolved.snapshot.compiledStageDefinitions.find(stage => stage.stage === Stage.Build)!;
+    const health = build.checks.find(check => check.name === 'health:build');
+
+    expect(health).toMatchObject({
+      uses: 'mohist/health-gate',
+      with: {
+        command: 'npm ci && npm run build',
+        timeout: 300000,
+      },
+    });
+  });
+
   it('resolves extends mohist/default project overrides for inspection', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-override-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));

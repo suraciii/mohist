@@ -2574,6 +2574,8 @@ describe('StageRunner migration regression coverage', () => {
     it('default check registry names match declared health checks', async () => {
       const { createDefaultCheckRegistry } = await import('../../src/services/agent-runner-service');
       const { DEFAULT_HEALTH_GATE_POLICIES } = await import('../../src/workflow/workflow-loader');
+      const { createWorkflowDefinitionSnapshot } = await import('../../src/workflow/domain');
+      const { Stage } = await import('../../src/types');
 
       const registry = createDefaultCheckRegistry({
         worktreePath: tmpDir,
@@ -2583,6 +2585,31 @@ describe('StageRunner migration regression coverage', () => {
       for (const checkName of ['health:plan', 'health:build', 'health:check', 'health:integrate']) {
         expect(registry.get(checkName)).toBeDefined();
       }
+
+      const snapshot = createWorkflowDefinitionSnapshot({
+        definition: {
+          id: 'test/health-from-definition',
+          stages: [{
+            stage: Stage.Build,
+            tasks: [],
+            checks: [{
+              name: 'health:build',
+              title: 'Build health',
+              uses: 'mohist/health-gate',
+              with: { command: 'printf ok', timeout: 1234 },
+            }],
+          }],
+        },
+      });
+      const definitionRegistry = createDefaultCheckRegistry({
+        worktreePath: tmpDir,
+        healthGatePolicies: DEFAULT_HEALTH_GATE_POLICIES,
+        workflowDefinitionSnapshot: snapshot,
+      });
+      const check = await definitionRegistry.get('health:build')!(makeMockContext(Stage.Build) as any);
+      const result = await check.run(makeMockContext(Stage.Build) as any);
+
+      expect(result.output).toMatchObject({ command: 'printf ok', timeout: 1234 });
     });
   });
 

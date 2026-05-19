@@ -10,7 +10,7 @@ import type { CheckResult, StageTaskResult } from '../workflow/stage-context';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/convergence';
-import type { StageDefinition } from '../workflow/domain';
+import type { CompiledStageDefinition } from '../workflow/domain';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -1025,7 +1025,7 @@ export class StageStateService {
   private workflowRunDeliveryMetadata(
     tasks: StageTaskState[],
     checks: StageCheckState[],
-    stageDefinition?: StageDefinition,
+    stageDefinition?: CompiledStageDefinition,
   ): StageDeliveryMetadata | null {
     const deliveryTasks = tasks
       .map(task => ({ task, use: this.workflowTaskUse(stageDefinition, task.taskId) }))
@@ -1081,14 +1081,14 @@ export class StageStateService {
     };
   }
 
-  private workflowTaskUse(stageDefinition: StageDefinition | undefined, taskId: string): string {
+  private workflowTaskUse(stageDefinition: CompiledStageDefinition | undefined, taskId: string): string {
     const taskDefinition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
     const policy = stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
       ?? stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
     return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
   }
 
-  private workflowCheckUse(stageDefinition: StageDefinition | undefined, checkName: string): string {
+  private workflowCheckUse(stageDefinition: CompiledStageDefinition | undefined, checkName: string): string {
     const checkDefinition = stageDefinition?.checks.find(candidate => candidate.name === checkName);
     return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
   }
@@ -1096,7 +1096,7 @@ export class StageStateService {
   private hasCompletedLockingUse(
     tasks: StageTaskState[],
     checks: StageCheckState[],
-    stageDefinition?: StageDefinition,
+    stageDefinition?: CompiledStageDefinition,
   ): boolean {
     return tasks.some(task => {
       if (task.status !== 'completed') return false;
@@ -1111,7 +1111,7 @@ export class StageStateService {
     stageRun: WorkflowRunWithStageRuns['stageRuns'][number],
     tasks: StageTaskState[],
     checks: StageCheckState[],
-    stageDefinition?: StageDefinition,
+    stageDefinition?: CompiledStageDefinition,
   ): StageFailureDetails | null {
     if (stageRun.status !== 'failed') return null;
     const failedTask = tasks.find(task => task.status === 'failed');

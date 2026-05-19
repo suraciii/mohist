@@ -32,7 +32,7 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type StageDefinition, type WorkflowRunSnapshot } from '../workflow/domain';
+import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/domain';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
@@ -384,7 +384,7 @@ function taskCause(task: { causedByType: string | null; causedByCheckName: strin
   };
 }
 
-function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: StageDefinition) {
+function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: CompiledStageDefinition) {
   const deliveryTasks = stageRun.tasks
     .map(task => ({ task, origin: taskOrigin(stageDefinition, task.taskId) }))
     .filter(({ origin }) => getWorkflowUseDefinition(origin.uses)?.deliveryRole !== 'none');
@@ -439,7 +439,7 @@ function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDef
   };
 }
 
-function hasCompletedLockingUse(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: StageDefinition): boolean {
+function hasCompletedLockingUse(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: CompiledStageDefinition): boolean {
   return stageRun.tasks.some(task => {
     if (task.status !== 'completed') return false;
     return getWorkflowUseDefinition(taskOrigin(stageDefinition, task.taskId).uses)?.locksCode === true;
@@ -449,7 +449,7 @@ function hasCompletedLockingUse(stageRun: WorkflowStageRunWithTasksAndChecks, st
   });
 }
 
-function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: StageDefinition) {
+function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: CompiledStageDefinition) {
   if (stageRun.status !== 'failed') return null;
   const failedTask = stageRun.tasks.find(task => task.status === 'failed');
   if (failedTask) {
@@ -557,7 +557,7 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
   };
 }
 
-function taskOrigin(stageDefinition: StageDefinition | undefined, taskId: string): WorkItemOrigin {
+function taskOrigin(stageDefinition: CompiledStageDefinition | undefined, taskId: string): WorkItemOrigin {
   const definition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
   const policy = stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
     ?? stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
@@ -568,7 +568,7 @@ function taskOrigin(stageDefinition: StageDefinition | undefined, taskId: string
   };
 }
 
-function checkOrigin(stageDefinition: StageDefinition | undefined, checkName: string): WorkItemOrigin {
+function checkOrigin(stageDefinition: CompiledStageDefinition | undefined, checkName: string): WorkItemOrigin {
   const definition = stageDefinition?.checks.find(candidate => candidate.name === checkName);
 
   return {

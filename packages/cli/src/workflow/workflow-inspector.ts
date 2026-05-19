@@ -9,6 +9,7 @@ import {
   parseWorkflowDefinitionSource,
   type CheckDefinition,
   type CheckFailurePolicy,
+  type CompiledStageDefinition,
   type StageDefinition,
   type TaskDefinition,
   type WorkflowDefinition,
@@ -503,11 +504,6 @@ function applyDisableList(
     const checkCount = stage.checks.length;
     stage.tasks = stage.tasks.filter(task => task.id !== value);
     stage.checks = stage.checks.filter(check => check.name !== value);
-    if (stage.checks.length !== checkCount) {
-      stage.checkPolicies = stage.checkPolicies?.filter(policy => policy.checkName !== value);
-      stage.repairPolicies = stage.repairPolicies?.filter(policy => policy.checkName !== value);
-      stage.checkFailurePolicies = stage.checkFailurePolicies?.filter(policy => policy.checkName !== value);
-    }
     if (stage.tasks.length === taskCount && stage.checks.length === checkCount) {
       diagnostics.push({ severity: 'error', path: `${stagePath}.disable`, message: `Cannot disable unknown task or check '${value}'` });
     }
@@ -535,12 +531,6 @@ function applyRepairOverrides(
     if (check?.onFailure?.retry) {
       check.onFailure.retry.limit = raw.maxAttempts;
       changed = true;
-    }
-    for (const policy of [...(stage.repairPolicies ?? []), ...(stage.checkFailurePolicies ?? [])]) {
-      if (policy.checkName === checkName) {
-        policy.maxAttempts = raw.maxAttempts;
-        changed = true;
-      }
     }
     if (!changed) {
       diagnostics.push({ severity: 'error', path: `${stagePath}.repair.${checkName}`, message: `Unknown repair policy for check '${checkName}'` });
@@ -576,15 +566,11 @@ function applyStageChecks(
       uses: raw.uses,
       with: isRecord(raw.with) ? { ...raw.with } : undefined,
     });
-    stage.checkPolicies = [
-      ...(stage.checkPolicies ?? []),
-      { checkName: raw.id, phase: 'post-task' },
-    ];
   }
 }
 
 function applyCheckOverride(
-  stage: StageDefinition,
+  _stage: StageDefinition,
   check: CheckDefinition,
   raw: Record<string, unknown>,
   checkPath: string,
@@ -604,9 +590,6 @@ function applyCheckOverride(
     } else {
       if (check.onFailure?.retry) {
         check.onFailure.retry.limit = maxAttempts;
-      }
-      for (const policy of [...(stage.repairPolicies ?? []), ...(stage.checkFailurePolicies ?? [])]) {
-        if (policy.checkName === check.name) policy.maxAttempts = maxAttempts;
       }
     }
   }
@@ -717,7 +700,7 @@ export function explainWorkflowItem(
   return null;
 }
 
-function explainTask(stage: StageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
+function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
   const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
     ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
   const uses = task.uses ?? inferWorkflowTaskUse(task.id, policy?.kind);
@@ -736,7 +719,7 @@ function explainTask(stage: StageDefinition, task: TaskDefinition): ExplainedWor
   };
 }
 
-function explainCheck(stage: StageDefinition, check: CheckDefinition): ExplainedWorkflowItem {
+function explainCheck(stage: CompiledStageDefinition, check: CheckDefinition): ExplainedWorkflowItem {
   const phase = stage.checkPolicies?.find(candidate => candidate.checkName === check.name)?.phase ?? 'post-task';
   const reaction = stage.repairPolicies?.find(candidate => candidate.checkName === check.name)
     ?? stage.checkFailurePolicies?.find(candidate => candidate.checkName === check.name);
@@ -765,13 +748,13 @@ function findCheck(definition: WorkflowDefinition, checkName: string): { stage: 
   return null;
 }
 
-function inferTaskUseForStage(stage: StageDefinition, taskId: string): string {
+function inferTaskUseForStage(stage: CompiledStageDefinition, taskId: string): string {
   const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
     ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
   return inferWorkflowTaskUse(taskId, policy?.kind);
 }
 
-function hasDefaultCheckEvidenceShape(stage: StageDefinition): boolean {
+function hasDefaultCheckEvidenceShape(stage: CompiledStageDefinition): boolean {
   const taskIds = new Set(stage.tasks.map(task => task.id));
   const checkNames = new Set(stage.checks.map(check => check.name));
   return taskIds.has('ai-review')
@@ -780,7 +763,7 @@ function hasDefaultCheckEvidenceShape(stage: StageDefinition): boolean {
     && checkNames.has('merge-ready');
 }
 
-function isProjectDefinedStage(stage: StageDefinition): boolean {
+function isProjectDefinedStage(stage: CompiledStageDefinition): boolean {
   return stage.tasks.some(task => task.source === 'project') || stage.checks.some(check => check.source === 'project');
 }
 
