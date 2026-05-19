@@ -2092,6 +2092,67 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('uses approval evidence policy outside the Check stage', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'custom-plan-evidence',
+      stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Plan
+        ? {
+          stage: Stage.Plan,
+          tasks: [{ id: 'plan-review', title: 'Plan review', uses: 'mohist/agent' }],
+          checks: [
+            {
+              name: 'verify-plan',
+              title: 'Verify plan',
+              uses: 'mohist/health-gate',
+              with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } },
+            },
+            {
+              name: 'plan-verdict',
+              title: 'Plan verdict',
+              uses: 'mohist/verdict',
+              with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
+            },
+            {
+              name: 'plan-candidate',
+              title: 'Plan candidate',
+              uses: 'mohist/merge-ready',
+              with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
+            },
+          ],
+          requiresApproval: true,
+        }
+        : definition),
+    });
+    const run = startRun(definitions);
+
+    run.completeTask(Stage.Plan, 'plan-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, { name: 'verify-plan', status: 'pass', output: { headSha: 'old-sha' } });
+    const review = run.recordCheckResult(Stage.Plan, { name: 'plan-verdict', status: 'pass', output: { verdict: 'PASS' } });
+
+    expect(review.nextWork).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'check:converge-review-snapshot' });
+
+    const convergence = run.completeTask(Stage.Plan, 'check:converge-review-snapshot', {
+      status: 'completed',
+      output: { snapshotSha: 'new-sha' },
+    });
+
+    expect(convergence.events).toContainEqual(expect.objectContaining({
+      type: 'check-invalidated',
+      stage: Stage.Plan,
+      checkName: 'verify-plan',
+    }));
+
+    run.recordCheckResult(Stage.Plan, { name: 'verify-plan', status: 'pass', output: { headSha: 'new-sha' } });
+    run.recordCheckResult(Stage.Plan, { name: 'plan-verdict', status: 'pass', output: { verdict: 'PASS' } });
+    const decision = run.recordCheckResult(Stage.Plan, { name: 'plan-candidate', status: 'pass', output: { headSha: 'new-sha' } });
+
+    expect(run.stageRun(Stage.Plan).findCheck('plan-verdict')).toMatchObject({
+      status: 'passed',
+      output: { verdict: 'PASS', reviewedSha: 'new-sha' },
+    });
+    expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Plan });
+  });
+
   it('Integrate post-delivery check failure remains non-repairable after merge freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);

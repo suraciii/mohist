@@ -6,6 +6,7 @@ import type {
   CheckDefinition,
   CheckFailurePolicy,
   ApprovalPolicy,
+  ApprovalEvidencePolicy,
   CheckPolicy,
   CompiledStageDefinition,
   InvalidationPolicy,
@@ -126,6 +127,7 @@ function cloneCompiledStageDefinition(stage: CompiledStageDefinition): CompiledS
     taskExecutionPolicies: stage.taskExecutionPolicies?.map(policy => ({ ...policy })),
     checkPolicies: stage.checkPolicies.map(policy => ({ ...policy })),
     approvalPolicy: stage.approvalPolicy ? { ...stage.approvalPolicy } : undefined,
+    approvalEvidencePolicy: stage.approvalEvidencePolicy ? { ...stage.approvalEvidencePolicy } : undefined,
     repairPolicies: stage.repairPolicies?.map(cloneRepairPolicy),
     invalidationPolicy: stage.invalidationPolicy ? cloneInvalidationPolicy(stage.invalidationPolicy) : undefined,
   };
@@ -158,6 +160,27 @@ function compileApprovalPolicy(stage: StageDefinition, existingPolicy?: Approval
   if (existingPolicy) return { ...existingPolicy };
   if (stage.requiresApproval) return { checkName: stage.approvalCheckName ?? 'user-approval' };
   return undefined;
+}
+
+function approvalEvidenceRole(check: CheckDefinition): string | null {
+  const evidence = check.with?.approvalEvidence;
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+  const role = (evidence as Record<string, unknown>).role;
+  return typeof role === 'string' ? role : null;
+}
+
+function compileApprovalEvidencePolicy(stage: StageDefinition): ApprovalEvidencePolicy | undefined {
+  const verdictCheckName = stage.checks.find(check => approvalEvidenceRole(check) === 'verdict')?.name;
+  const verificationCheckName = stage.checks.find(check => approvalEvidenceRole(check) === 'verification')?.name;
+  const candidateCheckName = stage.checks.find(check => approvalEvidenceRole(check) === 'candidate')?.name;
+  if (!verdictCheckName || !verificationCheckName || !candidateCheckName) return undefined;
+  return {
+    verdictCheckName,
+    verificationCheckName,
+    candidateCheckName,
+    convergenceTaskId: 'check:converge-review-snapshot',
+    convergenceTaskTitle: 'Converge review snapshot',
+  };
 }
 
 function compileRepairPoliciesFromChecks(stage: StageDefinition): RepairPolicy[] {
@@ -276,7 +299,7 @@ function compileRuntimeTaskExecutionPolicies(stage: StageDefinition): TaskExecut
     { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
   ];
 
-  if (stage.stage === Stage.Check) {
+  if (compileApprovalEvidencePolicy(stage)?.convergenceTaskId) {
     policies.push({ taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' });
   }
 
@@ -333,7 +356,7 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkP
 }
 
 function compileRuntimeInvalidationPolicy(stage: StageDefinition, checkPolicies?: CheckPolicy[]): InvalidationPolicy | undefined {
-  if (stage.stage !== Stage.Check || !stage.on?.['code.changed']) return undefined;
+  if (!stage.on?.['code.changed']) return undefined;
   const codeChangedPolicy = stage.on['code.changed'];
   const checks = checkNamesForEventPolicy(stage, codeChangedPolicy, checkPolicies);
   return {
@@ -396,6 +419,7 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
       workSources: compileWorkSources(source),
       checkPolicies: compileCheckPolicies(source),
       approvalPolicy: compileApprovalPolicy(source),
+      approvalEvidencePolicy: compileApprovalEvidencePolicy(source),
     };
     const repairPoliciesFromChecks = compileRepairPoliciesFromChecks(source);
     if (repairPoliciesFromChecks.length > 0) {

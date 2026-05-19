@@ -550,7 +550,8 @@ export class StageRun {
     for (let index = this.tasks.length - 1; index >= 0; index--) {
       const task = this.tasks[index];
       const isRepairTask = [...repairTaskIds].some(fixTaskId => task.id === fixTaskId || task.id.startsWith(`${fixTaskId}:`));
-      const isRuntimeTask = task.causedBy !== null || task.id === 'rebase-branch' || task.id === 'check:converge-review-snapshot';
+      const convergenceTaskId = this.definition.approvalEvidencePolicy?.convergenceTaskId;
+      const isRuntimeTask = task.causedBy !== null || task.id === 'rebase-branch' || (Boolean(convergenceTaskId) && task.id === convergenceTaskId);
       if (isRepairTask || isRuntimeTask) {
         this.tasks.splice(index, 1);
       }
@@ -849,7 +850,7 @@ export class WorkflowRun {
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
     const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, effectiveResult);
     events.push(...invalidationEvents);
-    if (taskId === 'check:converge-review-snapshot' && effectiveResult.status === 'completed') {
+    if (taskId === stageRun.definition.approvalEvidencePolicy?.convergenceTaskId && effectiveResult.status === 'completed') {
       events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, effectiveResult));
     }
     if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
@@ -908,7 +909,12 @@ export class WorkflowRun {
         checkName: result.name,
         message: 'Converge review snapshot before approval',
       };
-      const task = stageRun.appendAdHocTask('check:converge-review-snapshot', 'Converge review snapshot', causedBy);
+      const evidencePolicy = stageRun.definition.approvalEvidencePolicy;
+      const task = stageRun.appendAdHocTask(
+        evidencePolicy?.convergenceTaskId ?? 'check:converge-review-snapshot',
+        evidencePolicy?.convergenceTaskTitle ?? 'Converge review snapshot',
+        causedBy,
+      );
       check.status = 'pending';
       events.push({ type: 'fix-task-scheduled', stage, taskId: task.id, causedBy });
       return this.decision(events);
@@ -1401,10 +1407,8 @@ export class WorkflowRun {
     const workSourceGuard = this.evaluateWorkSourceFailureGuard(stageRun);
     if (workSourceGuard) return workSourceGuard;
 
-    if (stageRun.stage === Stage.Check) {
-      const checkEvidenceGuard = this.evaluateCheckReviewEvidenceGuard(stageRun);
-      if (!checkEvidenceGuard.complete) return checkEvidenceGuard;
-    }
+    const checkEvidenceGuard = this.evaluateCheckReviewEvidenceGuard(stageRun);
+    if (!checkEvidenceGuard.complete) return checkEvidenceGuard;
 
     const deliveryEvidenceGuard = this.evaluateDeliveryEvidenceGuard(stageRun);
     if (!deliveryEvidenceGuard.complete) return deliveryEvidenceGuard;
@@ -1602,7 +1606,8 @@ export class WorkflowRun {
     if (!evidence || result.name !== evidence.verdict.definition.name || result.status !== 'pass') return result.output;
     if (!result.output || typeof result.output !== 'object') return result.output;
     if (this.approvalEvidenceSnapshot(evidence.verdict.definition, result.output)) return result.output;
-    const convergenceTask = stageRun.tasks.find(task => task.id === 'check:converge-review-snapshot');
+    const convergenceTaskId = stageRun.definition.approvalEvidencePolicy?.convergenceTaskId ?? 'check:converge-review-snapshot';
+    const convergenceTask = stageRun.tasks.find(task => task.id === convergenceTaskId);
     const convergenceOutput = convergenceTask?.output as { snapshotSha?: unknown } | null;
     if (typeof convergenceOutput?.snapshotSha !== 'string' || convergenceOutput.snapshotSha.length === 0) return result.output;
     const snapshotField = this.approvalEvidenceSnapshotField(evidence.verdict.definition);
@@ -1615,7 +1620,8 @@ export class WorkflowRun {
     if (!evidence || result.name !== evidence.verdict.definition.name || result.status !== 'pass') return false;
     if (!result.output || typeof result.output !== 'object') return false;
     if (this.approvalEvidenceSnapshot(evidence.verdict.definition, result.output)) return false;
-    return !stageRun.tasks.some(task => task.id === 'check:converge-review-snapshot');
+    const convergenceTaskId = stageRun.definition.approvalEvidencePolicy?.convergenceTaskId ?? 'check:converge-review-snapshot';
+    return !stageRun.tasks.some(task => task.id === convergenceTaskId);
   }
 
   private invalidateStaleCheckEvidenceAfterConvergence(stageRun: StageRun, result: TaskResultInput): WorkflowEvent[] {
@@ -1646,24 +1652,19 @@ export class WorkflowRun {
     verification: { definition: CheckDefinition; check: CheckState };
     candidate: { definition: CheckDefinition; check: CheckState };
   } | null {
-    const verdict = this.approvalEvidenceCheck(stageRun, 'verdict');
-    const verification = this.approvalEvidenceCheck(stageRun, 'verification');
-    const candidate = this.approvalEvidenceCheck(stageRun, 'candidate');
+    const policy = stageRun.definition.approvalEvidencePolicy;
+    if (!policy) return null;
+    const verdict = this.approvalEvidenceCheck(stageRun, policy.verdictCheckName);
+    const verification = this.approvalEvidenceCheck(stageRun, policy.verificationCheckName);
+    const candidate = this.approvalEvidenceCheck(stageRun, policy.candidateCheckName);
     if (!verdict || !verification || !candidate) return null;
     return { verdict, verification, candidate };
   }
 
-  private approvalEvidenceCheck(stageRun: StageRun, role: string): { definition: CheckDefinition; check: CheckState } | null {
-    const definition = stageRun.definition.checks.find(check => this.approvalEvidenceRole(check) === role);
+  private approvalEvidenceCheck(stageRun: StageRun, checkName: string): { definition: CheckDefinition; check: CheckState } | null {
+    const definition = stageRun.definition.checks.find(check => check.name === checkName);
     if (!definition) return null;
     return { definition, check: stageRun.findCheck(definition.name) };
-  }
-
-  private approvalEvidenceRole(check: CheckDefinition): string | null {
-    const evidence = check.with?.approvalEvidence;
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-    const role = (evidence as Record<string, unknown>).role;
-    return typeof role === 'string' ? role : null;
   }
 
   private approvalEvidenceSnapshot(definition: CheckDefinition, output: unknown): string | null {
