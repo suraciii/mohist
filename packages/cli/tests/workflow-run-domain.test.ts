@@ -1246,7 +1246,7 @@ describe('WorkflowRun domain aggregate', () => {
       },
     });
     expect(decision.events).toContainEqual({
-      type: 'integrate-frozen',
+      type: 'delivery-frozen',
       stage: Stage.Integrate,
       freezePoint: run.stageRun(Stage.Integrate).freezePoint,
     });
@@ -1343,7 +1343,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 
-  it('fails post-merge health with post-merge-health-failed and does not schedule fixes after freeze', () => {
+  it('fails post-delivery check with post-delivery-check-failed and does not schedule fixes after freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -1356,7 +1356,7 @@ describe('WorkflowRun domain aggregate', () => {
     const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'post merge test failed' });
 
     expect(run.status).toBe('failed');
-    expect(run.failure?.reason).toBe('post-merge-health-failed');
+    expect(run.failure?.reason).toBe('post-delivery-check-failed');
     expect(run.stageRun(Stage.Integrate).tasks.map(task => task.id)).not.toContain('fix-integrate-health');
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
@@ -1886,7 +1886,7 @@ describe('WorkflowRun domain aggregate', () => {
     }));
   });
 
-  it('Integrate post-merge health failure remains non-repairable after merge freeze', () => {
+  it('Integrate post-delivery check failure remains non-repairable after merge freeze', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -1895,7 +1895,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'tests failed' });
 
     expect(run.status).toBe('failed');
-    expect(run.failure?.reason).toBe('post-merge-health-failed');
+    expect(run.failure?.reason).toBe('post-delivery-check-failed');
     expect(run.stageRun(Stage.Integrate).tasks.some(t => t.id === 'fix-integrate-health')).toBe(false);
   });
 });

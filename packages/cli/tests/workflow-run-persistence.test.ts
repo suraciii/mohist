@@ -116,7 +116,7 @@ describe('workflow run persistence helpers', () => {
       delivery: { landedSha: 'remote-landed' },
     });
     expect(run.failure).toMatchObject({
-      reason: 'post-merge-health-failed',
+      reason: 'post-delivery-check-failed',
       checkName: 'delivery-health',
     });
   });

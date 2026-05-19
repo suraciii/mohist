@@ -286,7 +286,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
         [
           {
             checkName: 'health:integrate',
-            title: 'Post-merge health check',
+            title: 'Delivery health check',
             status: 'failed',
             message: 'build failed',
             output: { kind: 'health-gate' },
@@ -307,7 +307,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
       </QueryClientProvider>
     )
 
-    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Delivery health check').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText('Health Gate: integrate')).toBeNull()
   })
 
@@ -443,7 +443,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
           { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
         ]),
         makeWorkflowChecks([
-          { checkName: 'health:integrate', title: 'Post-merge health check', status: 'passed' },
+          { checkName: 'health:integrate', title: 'Delivery health check', status: 'passed' },
         ]),
       ),
     ])
@@ -460,7 +460,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
 
     expect(screen.getAllByText('Sync specs').length).toBeGreaterThanOrEqual(1)
     fireEvent.click(screen.getByRole('button', { name: /integrate/i }))
-    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Delivery health check').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryAllByText('Health Gate: integrate')).toHaveLength(0)
   })
 
@@ -499,7 +499,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
           { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
         ]),
         makeWorkflowChecks([
-          { checkName: 'health:integrate', title: 'Post-merge health check', status: 'failed' },
+          { checkName: 'health:integrate', title: 'Delivery health check', status: 'failed' },
         ]),
       ),
     ])
@@ -515,7 +515,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /integrate/i }))
-    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Delivery health check').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryAllByText('Health Gate: integrate')).toHaveLength(0)
   })
 
@@ -537,7 +537,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
             { taskId: 'integrate:merge', title: 'Merge branch', status: 'completed' },
           ]).map((task) => task.taskId === 'integrate:merge' ? { ...task, output: mergeOutput } : task),
           makeWorkflowChecks([
-            { checkName: 'health:integrate', title: 'Post-merge health check', status: 'passed' },
+            { checkName: 'health:integrate', title: 'Delivery health check', status: 'passed' },
           ]),
         ),
         deliveryMetadata: {
@@ -560,15 +560,15 @@ describe('WorkflowRun-backed task and check data consistency', () => {
       </QueryClientProvider>
     )
 
-    expect(screen.getByText('Integration Evidence')).toBeTruthy()
+    expect(screen.getByText('Delivery Evidence')).toBeTruthy()
     expect(screen.getAllByText('Spec Sync').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Archive OpenSpec Change').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Merge to Target Branch').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText(/main: base123 → head567 → landed9/)).toBeTruthy()
-    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/main: base123 -> head567 -> landed9/)).toBeTruthy()
+    expect(screen.getAllByText('Delivery health check').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('blocked Issue Detail keeps post-merge delivery metadata visible after final health failure', () => {
+  it('blocked Issue Detail keeps post-delivery metadata visible after final health failure', () => {
     const mergeOutput = {
       targetBranch: 'main',
       baseSha: 'base1234',
@@ -588,7 +588,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
           [
             {
               checkName: 'health:integrate',
-              title: 'Post-merge health check',
+              title: 'Delivery health check',
               status: 'failed',
               message: 'post-merge build failed',
               output: { manualIntervention: true },
@@ -599,7 +599,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
         ),
         status: 'failed',
         failure: {
-          reason: 'post-merge-health-failed',
+          reason: 'post-delivery-check-failed',
           stage: Stage.Integrate,
           checkName: 'health:integrate',
           message: 'post-merge build failed',
@@ -624,9 +624,9 @@ describe('WorkflowRun-backed task and check data consistency', () => {
       </QueryClientProvider>
     )
 
-    expect(screen.getByText('Integration Evidence')).toBeTruthy()
-    expect(screen.getByText(/main: base123 → head567 → landed9/)).toBeTruthy()
-    expect(screen.getAllByText('Post-merge health check').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Delivery Evidence')).toBeTruthy()
+    expect(screen.getByText(/main: base123 -> head567 -> landed9/)).toBeTruthy()
+    expect(screen.getAllByText('Delivery health check').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('post-merge build failed').length).toBeGreaterThanOrEqual(1)
   })
 })

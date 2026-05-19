@@ -826,7 +826,7 @@ export class WorkflowRun {
     if (stage === Stage.Check && taskId === 'check:converge-review-snapshot' && effectiveResult.status === 'completed') {
       events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, effectiveResult));
     }
-    if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
+    if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
     return this.maybeCompleteStage(stageRun, events);
   }
 
@@ -888,13 +888,13 @@ export class WorkflowRun {
       return this.decision(events);
     }
     if (effectiveStatus === 'pending' || effectiveStatus === 'pass') {
-      if (stageRun.freezePoint) events.push({ type: 'integrate-frozen', stage, freezePoint: stageRun.freezePoint });
+      if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
       return this.maybeCompleteStage(stageRun, events);
     }
 
     if (stageRun.freezePoint) {
       return this.fail(stageRun, {
-        reason: 'post-merge-health-failed',
+        reason: 'post-delivery-check-failed',
         stage,
         checkName: result.name,
         message: effectiveMessage,

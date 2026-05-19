@@ -287,6 +287,38 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
+  it('projects frozen delivery metadata from a custom locking check', () => {
+    const snapshot = createWorkflowDefinitionSnapshot({
+      definition: {
+        id: 'project/remote-merge',
+        stages: [
+          {
+            stage: Stage.Check,
+            tasks: [],
+            checks: [
+              { name: 'pr-merged', title: 'PR merged', uses: 'mohist/pr-merged' },
+              { name: 'delivery-health', title: 'Delivery health', uses: 'mohist/health-gate' },
+            ],
+            checkPolicies: [
+              { checkName: 'pr-merged', phase: 'post-task' },
+              { checkName: 'delivery-health', phase: 'post-task' },
+            ],
+          },
+        ],
+      },
+      source: { type: 'project', path: '.mohist/workflows/remote-merge.yaml' },
+      capturedAt: '2026-05-19T00:00:00.000Z',
+    });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_remote_merge_done', issueId, issueNumber, workflowDefinitionSnapshot: snapshot });
+
+    run.recordCheckResult(Stage.Check, { name: 'pr-merged', status: 'pass', output: { mergedSha: 'remote-landed' } });
+    run.recordCheckResult(Stage.Check, { name: 'delivery-health', status: 'pass' });
+
+    const check = stageStateService.getIssueStageStateFromWorkflowRun(run).find(stage => stage.stage === Stage.Check)!;
+    expect(check.deliveryMetadata?.remoteMerge).toMatchObject({ status: 'passed', mergedSha: 'remote-landed' });
+    expect(check.deliveryMetadata?.frozen).toBe(true);
+  });
+
   it('rejects mergeState-only Done projection without terminal stage task/check completion', () => {
     issueRepo.update(issueId, { mergeState: MergeState.Merged });
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_merge_only_done', issueId, issueNumber });
@@ -549,7 +581,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
-  it('preserves delivery metadata and manual-intervention evidence after post-merge health failure', () => {
+  it('preserves delivery metadata and manual-intervention evidence after post-delivery check failure', () => {
     startWorkflow();
     advanceToIntegrate();
 
@@ -573,7 +605,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(latest.status).toBe('failed');
     expect(integrate.tasks.find(task => task.taskId === 'integrate:merge')?.output).toMatchObject({ landedSha: 'landed789', targetBranch: 'main' });
     expect(integrate.tasks.some(task => task.taskId === 'fix-integrate-health')).toBe(false);
-    expect(stageProjection.failure).toMatchObject({ reason: 'post-merge-health-failed', checkName: 'health:integrate', message: 'post-merge build failed' });
+    expect(stageProjection.failure).toMatchObject({ reason: 'post-delivery-check-failed', checkName: 'health:integrate', message: 'post-merge build failed' });
     expect(stageProjection.deliveryMetadata?.merge).toMatchObject({ landedSha: 'landed789', targetBranch: 'main', rebased: true });
     expect(stageProjection.deliveryMetadata?.frozen).toBe(true);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Integrate, status: IssueStatus.Blocked });
