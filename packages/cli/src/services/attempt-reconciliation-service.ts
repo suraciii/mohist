@@ -129,6 +129,10 @@ export class AttemptReconciliationService {
   }
 
   private isAttemptEvidenceLive(attempt: WorkItemAttempt, issueId: string): boolean {
+    if (!this.hasAttemptSpecificEvidence(attempt) && this.evidencePort.hasActiveQueueTask(issueId)) {
+      return true;
+    }
+
     if (attempt.queueTaskId) {
       const queueTask = this.evidencePort.findQueueTaskById(attempt.queueTaskId);
       if (queueTask?.status === 'running' || queueTask?.status === 'pending') return true;
