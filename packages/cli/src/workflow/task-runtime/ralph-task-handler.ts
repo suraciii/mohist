@@ -1,5 +1,4 @@
 import type { StageContext, StageTaskResult } from '../stage-context';
-import { Stage } from '../../types';
 import type { ExecutableTask, RalphTaskInput } from './types';
 import {
   executeRalphTask,
@@ -82,9 +81,9 @@ export function createRalphTaskHandler(): (
     }
 
     const activeStageExecution = ctx.stageExecutionRepo?.findActiveByIssueId?.(ctx.issue.id);
-    const stageExecutionId = activeStageExecution?.stage === Stage.Build
+    const stageExecutionId = activeStageExecution?.stage === ctx.issue.stage
       ? activeStageExecution.id
-      : ctx.stageExecutionRepo?.create(ctx.issue.id, Stage.Build).id;
+      : ctx.stageExecutionRepo?.create(ctx.issue.id, ctx.issue.stage).id;
 
     const ralphContext: RalphExecutorContext = {
       worktreePath: ctx.acpOptions.cwd,
@@ -92,11 +91,11 @@ export function createRalphTaskHandler(): (
       issueId: ctx.issue.id,
       projectId: ctx.issue.projectId,
       eventBus: ctx.eventBus,
-      executionId: `build-${ctx.issue.number}`,
+      executionId: `${ctx.issue.stage}-${ctx.issue.number}`,
       issueNumber: ctx.issue.number,
       issueTitle: ctx.issue.title,
       issueBody: ctx.issue.body,
-      stage: Stage.Build,
+      stage: ctx.issue.stage,
       model: ctx.acpOptions.model,
       stageExecutionId,
       stageExecutionRepo: ctx.stageExecutionRepo,
@@ -105,7 +104,7 @@ export function createRalphTaskHandler(): (
       coderSessionRepo: ctx.coderSessionRepo,
       observers: ctx.acpOptions.observers,
       syncTasksToStageState: ctx.artifactManager
-        ? () => ctx.artifactManager.syncTasksToStageState(ctx.issue.number, ctx.issue.id, Stage.Build, ctx.stageStateService!)
+        ? () => ctx.artifactManager.syncTasksToStageState(ctx.issue.number, ctx.issue.id, ctx.issue.stage, ctx.stageStateService!)
         : undefined,
       workflowApplicationService: ctx.workflowApplicationService,
     };
@@ -162,7 +161,7 @@ export function createRalphTaskHandler(): (
       alreadyReported: Boolean(ctx.workflowApplicationService),
       output: {
         kind: 'ralph-task',
-        stage: Stage.Build,
+        stage: ctx.issue.stage,
         success: taskResult.status === 'completed',
         error: taskResult.error,
       },
@@ -188,7 +187,7 @@ export function materializeRalphTasks(ctx: StageContext): void {
   if (ctx.workflowApplicationService) {
     ctx.workflowApplicationService.materializeTasks({
       issueId: ctx.issue.id,
-      stage: Stage.Build,
+      stage: ctx.issue.stage,
       tasks: tasks.map(t => ({
         id: t.id,
         title: t.title,

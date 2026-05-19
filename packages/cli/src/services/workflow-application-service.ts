@@ -34,6 +34,7 @@ export interface WorkflowCommandOptions {
   sessionId?: string | null;
   startedBy?: string | null;
   workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
+  workSourceState?: 'missing' | 'invalid' | 'empty';
   buildWorkSourceState?: 'missing' | 'invalid' | 'empty';
 }
 
@@ -343,8 +344,8 @@ export class WorkflowApplicationService {
     return { run, decision };
   }
 
-  materializeTasks(input: { issueId: string; stage: Stage; tasks: MaterializedTaskInput[]; buildWorkSourceState?: 'missing' | 'invalid' | 'empty' } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    return this.updateActiveRun(input.issueId, input, run => run.materializeTasks(input.stage, input.tasks, input.buildWorkSourceState));
+  materializeTasks(input: { issueId: string; stage: Stage; tasks: MaterializedTaskInput[]; workSourceState?: 'missing' | 'invalid' | 'empty'; buildWorkSourceState?: 'missing' | 'invalid' | 'empty' } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    return this.updateActiveRun(input.issueId, input, run => run.materializeTasks(input.stage, input.tasks, input.workSourceState ?? input.buildWorkSourceState));
   }
 
   completeTask(input: { issueId: string; stage: Stage; taskId: string; result: TaskResultInput } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {

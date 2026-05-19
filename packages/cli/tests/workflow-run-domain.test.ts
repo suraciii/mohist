@@ -1828,6 +1828,47 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
   });
 
+  it('applies dynamic work source guards to non-Build stages', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'custom-check-dynamic-source',
+      stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Check
+        ? {
+          stage: Stage.Check,
+          tasks: [],
+          tasksFrom: 'mohist/ralph-tasks',
+          checks: [
+            { name: 'custom-check', title: 'Custom check', uses: 'mohist/health-gate' },
+          ],
+        }
+        : definition),
+    });
+    const run = startRun(definitions);
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+
+    const missing = run.materializeTasks(Stage.Check, [], 'missing');
+
+    expect(run.stageRun(Stage.Check).workSourceState).toMatchObject({
+      evaluated: true,
+      missing: true,
+    });
+    expect(missing.nextWork).toEqual({
+      kind: 'blocked',
+      stage: Stage.Check,
+      reason: { complete: false, reason: 'dynamic-source-missing', stage: Stage.Check },
+    });
+
+    const materialized = run.materializeTasks(Stage.Check, [{ id: 'C-001', title: 'Check task', order: 0 }]);
+
+    expect(run.stageRun(Stage.Check).workSourceState).toMatchObject({
+      evaluated: true,
+      tasks: [{ id: 'C-001', title: 'Check task', order: 0 }],
+    });
+    expect(materialized.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'C-001' });
+  });
+
   it.each([
     ['missing', 'dynamic-source-missing'],
     ['invalid', 'dynamic-source-invalid'],

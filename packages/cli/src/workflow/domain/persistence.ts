@@ -111,8 +111,9 @@ export function hydrateWorkflowRun(
     const stageDefinition = definitions.find(definition => definition.stage === stageSnapshot.stage);
     stageRun.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
     stageRun.failure = inferStageFailure(stageSnapshot.stage, { ...stageSnapshot, freezePoint: stageRun.freezePoint });
-    if (stageSnapshot.buildWorkSourceState) {
-      stageRun.buildWorkSourceState = stageSnapshot.buildWorkSourceState;
+    const workSourceState = stageSnapshot.workSourceState ?? stageSnapshot.buildWorkSourceState;
+    if (workSourceState) {
+      stageRun.workSourceState = workSourceState;
     }
 
     stageRun.tasks.splice(0, stageRun.tasks.length);
@@ -196,7 +197,7 @@ export function repairWorkflowRunSnapshot(
     const shouldMaterializeBuild = workflowRunning && definition.stage === Stage.Build && buildTasks.length > 0;
 
     if (shouldMaterializeBuild) {
-      stageRun.buildWorkSourceState = {
+      stageRun.workSourceState = {
         evaluated: true,
         tasks: buildTasks.map(t => ({
           id: t.id,

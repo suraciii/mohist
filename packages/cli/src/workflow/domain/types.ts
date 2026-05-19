@@ -92,12 +92,14 @@ export interface CheckFailurePolicy {
 
 export type WorkSourceKind = 'static' | 'ralph' | 'runtime';
 
-export type BuildWorkSourceState =
+export type WorkSourceState =
   | { evaluated: true; tasks: MaterializedTaskInput[] }
   | { evaluated: true; missing: true }
   | { evaluated: true; invalid: true }
   | { evaluated: true; empty: true }
   | { evaluated: false };
+
+export type BuildWorkSourceState = WorkSourceState;
 
 export interface WorkSourceDefinition {
   kind: WorkSourceKind;
@@ -375,6 +377,7 @@ export interface StageRunSnapshot {
   approval: ApprovalSnapshot | null;
   failure: FailureDetails | null;
   freezePoint: FreezePoint | null;
+  workSourceState?: WorkSourceState;
   buildWorkSourceState?: BuildWorkSourceState;
 }
 

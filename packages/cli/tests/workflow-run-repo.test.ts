@@ -7,7 +7,7 @@ import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
-import { WorkflowRun, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS, WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
 import { Stage } from '../src/types';
 
 describe('WorkflowRunRepo aggregate persistence', () => {
@@ -283,6 +283,47 @@ describe('WorkflowRunRepo aggregate persistence', () => {
       attempts: 0,
       output: null,
     });
+  });
+
+  it('persists generic work source state for non-Build stages', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'repo/custom-check-dynamic-source',
+      stages: DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Check
+        ? {
+          stage: Stage.Check,
+          tasks: [],
+          tasksFrom: 'mohist/ralph-tasks',
+          checks: [{ name: 'custom-check', title: 'Custom check', uses: 'mohist/health-gate' }],
+        }
+        : definition),
+    });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_check_source', issueId, issueNumber, definitions });
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.recordCheckResult(Stage.Plan, { name: 'self-review-passed', status: 'pass', output: { verdict: 'PASS' } });
+    run.recordCheckResult(Stage.Plan, { name: 'health:plan', status: 'pass' });
+    run.approveStage(Stage.Plan);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.materializeTasks(Stage.Check, [], 'missing');
+
+    repo.saveAggregate(run, 'tester');
+    const loaded = repo.loadAggregateById(run.id)!;
+    const check = loaded.snapshot().stageRuns.find(stage => stage.stage === Stage.Check)!;
+    const row = db.get<{ work_source_state: string | null; build_work_source_state: string | null }>(
+      `SELECT work_source_state, build_work_source_state FROM workflow_stage_runs WHERE id = ?`,
+      [`${run.id}/check`],
+    )!;
+
+    expect(check.workSourceState).toMatchObject({ evaluated: true, missing: true });
+    expect(check.buildWorkSourceState).toBeUndefined();
+    expect(row.work_source_state).toContain('"missing":true');
+    expect(row.build_work_source_state).toBeNull();
   });
 
   it('repairs rerun-cleared Build task identities from tasks.json before dispatch', () => {

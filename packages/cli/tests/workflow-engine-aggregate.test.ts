@@ -457,7 +457,7 @@ describe('WorkflowEngine aggregate progression', () => {
       resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
       completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
       recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
-      materializeTasks: vi.fn(({ stage, tasks, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, buildWorkSourceState) })),
+      materializeTasks: vi.fn(({ stage, tasks, workSourceState, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, workSourceState ?? buildWorkSourceState) })),
       approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
       retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
     };
@@ -470,7 +470,7 @@ describe('WorkflowEngine aggregate progression', () => {
           issueId: issue.id,
           stage: Stage.Build,
           tasks: [],
-          buildWorkSourceState: 'missing',
+          workSourceState: 'missing',
         });
         return true;
       }),
@@ -493,7 +493,7 @@ describe('WorkflowEngine aggregate progression', () => {
       issueId: issue.id,
       stage: Stage.Build,
       tasks: [],
-      buildWorkSourceState: 'missing',
+      workSourceState: 'missing',
     }));
   });
 

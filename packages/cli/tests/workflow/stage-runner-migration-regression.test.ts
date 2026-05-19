@@ -1105,7 +1105,7 @@ describe('StageRunner migration regression coverage', () => {
           issueId: ctx.issue.id,
           stage: Stage.Build,
           tasks: [],
-          buildWorkSourceState: 'missing',
+          workSourceState: 'missing',
         });
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1155,7 +1155,7 @@ describe('StageRunner migration regression coverage', () => {
           issueId: ctx.issue.id,
           stage: Stage.Build,
           tasks: [],
-          buildWorkSourceState: 'invalid',
+          workSourceState: 'invalid',
         });
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1205,7 +1205,7 @@ describe('StageRunner migration regression coverage', () => {
           issueId: ctx.issue.id,
           stage: Stage.Build,
           tasks: [],
-          buildWorkSourceState: 'empty',
+          workSourceState: 'empty',
         });
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
