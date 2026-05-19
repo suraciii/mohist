@@ -802,6 +802,47 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     ]);
   });
 
+  it('does not interrupt a just-rerun attempt while its queue task is active but evidence is not attached yet', () => {
+    const run = createRunningPlanRun();
+    run.completeTask(Stage.Plan, 'proposal', { status: 'failed', reason: 'agent stopped' });
+    run.rerunStage(Stage.Plan);
+    run.startTaskAttempt(Stage.Plan, 'proposal', '2026-05-19T00:00:00.000Z');
+    const proposalTask = run.stageRun(Stage.Plan).findTask('proposal');
+
+    expect(proposalTask.latestAttempt?.state).toBe('running');
+    expect(proposalTask.latestAttempt?.queueTaskId).toBeNull();
+    expect(proposalTask.latestAttempt?.acpSessionId).toBeNull();
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => null,
+      loadRunningAggregate: () => run,
+      loadLatestAggregate: () => run,
+      saveAggregate: () => {
+        throw new Error('saveAggregate should not be called when active queue task proves liveness');
+      },
+    };
+    const projection: WorkflowRunProjectionPort = {
+      apply: () => {
+        throw new Error('projection should not be called when active queue task proves liveness');
+      },
+    };
+    const service = new WorkflowApplicationService(repo, projection);
+    service.setEvidencePort({
+      hasActiveQueueTask: () => true,
+      hasLiveProcess: () => false,
+      findQueueTaskById: () => null,
+      findRunningCoderSessionsByAttemptEvidence: () => [],
+    });
+
+    const result = service.reconcileIssueWorkflow('issue-1');
+
+    expect(result.reconciled).toBe(false);
+    expect(result.interruptedCount).toBe(0);
+    expect(proposalTask.latestAttempt?.state).toBe('running');
+    expect(run.snapshot().status).toBe('running');
+  });
+
   it('derives recovery from the current work item after a repairable check failure', () => {
     const run = createRunningPlanRun();
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
