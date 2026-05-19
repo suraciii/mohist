@@ -65,30 +65,50 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   source: 'builtin',
 };
 
+function workflowFileCandidates(cwd: string): string[] {
+  return [
+    path.join(cwd, '.mohist', 'workflow.yaml'),
+    path.join(cwd, 'workflow.yaml'),
+  ];
+}
+
 function parseWorkflowFile(filePath: string): WorkflowConfig | string {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = yaml.parse(content);
 
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.stages)) {
+    if (!parsed || typeof parsed !== 'object') {
+      return `Error: ${filePath} must be a workflow mapping`;
+    }
+
+    const data = parsed as Record<string, unknown>;
+    if (!Array.isArray(data.stages)) {
+      if (data.workflow !== undefined || data.extends !== undefined) {
+        return {
+          stages: DEFAULT_WORKFLOW.stages.map(stage => ({ ...stage })),
+          healthGates: data.healthGates,
+          checks: data.checks,
+          source: filePath,
+        };
+      }
       return `Error: ${filePath} is missing a valid "stages" array`;
     }
 
-    for (const s of parsed.stages) {
+    for (const s of data.stages) {
       if (!s.stage || typeof s.stage !== 'string') {
         return `Error: each stage must have a "stage" string field`;
       }
     }
 
     return {
-      stages: parsed.stages.map((s: Record<string, unknown>) => ({
+      stages: data.stages.map((s: Record<string, unknown>) => ({
         stage: String(s.stage),
         prompt: String(s.prompt ?? ''),
         approval: Boolean(s.approval),
         timeout: typeof s.timeout === 'number' ? s.timeout : undefined,
       })),
-      healthGates: parsed.healthGates,
-      checks: parsed.checks,
+      healthGates: data.healthGates,
+      checks: data.checks,
       source: filePath,
     };
   } catch (err) {
@@ -103,10 +123,7 @@ function parseWorkflowFile(filePath: string): WorkflowConfig | string {
 }
 
 export function loadWorkflow(cwd: string): WorkflowConfig | string {
-  const candidates = [
-    path.join(cwd, 'workflow.yaml'),
-    path.join(cwd, '.mohist', 'workflow.yaml'),
-  ];
+  const candidates = workflowFileCandidates(cwd);
 
   let workflow: WorkflowConfig | undefined;
 
@@ -383,10 +400,7 @@ export interface AgentConfig {
 }
 
 export function loadAgentConfig(cwd: string): AgentConfig {
-  const candidates = [
-    path.join(cwd, 'workflow.yaml'),
-    path.join(cwd, '.mohist', 'workflow.yaml'),
-  ];
+  const candidates = workflowFileCandidates(cwd);
 
   for (const candidate of candidates) {
     try {
