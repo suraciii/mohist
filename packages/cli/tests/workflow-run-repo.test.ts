@@ -7,7 +7,7 @@ import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
-import { WorkflowRun } from '../src/workflow/domain';
+import { WorkflowRun, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
 import { Stage } from '../src/types';
 
 describe('WorkflowRunRepo aggregate persistence', () => {
@@ -46,6 +46,57 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(second.id).toBe(first.id);
     expect(rows).toHaveLength(1);
     expect(second.snapshot().stageRuns.map(stage => stage.stage)).toEqual([Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate]);
+  });
+
+  it('persists the workflow definition snapshot captured at run start', () => {
+    const workflowDefinition: WorkflowDefinition = {
+      id: 'project/custom-snapshot',
+      name: 'Project custom snapshot',
+      stages: [
+        {
+          stage: Stage.Plan,
+          tasks: [{ id: 'proposal', title: 'Original proposal task' }],
+          checks: [{ name: 'proposal-complete', title: 'Original proposal check' }],
+          requiresApproval: false,
+        },
+        {
+          stage: Stage.Build,
+          tasks: [{ id: 'T-001', title: 'Original build task' }],
+          checks: [],
+        },
+      ],
+    };
+    const workflowDefinitionSnapshot = createWorkflowDefinitionSnapshot({
+      definition: workflowDefinition,
+      source: { type: 'project', path: 'workflow.yaml' },
+      capturedAt: '2026-05-19T00:00:00.000Z',
+    });
+    const { run } = WorkflowRun.startWorkflow({
+      id: 'wr_188_custom_snapshot',
+      issueId,
+      issueNumber,
+      workflowDefinitionSnapshot,
+    });
+
+    workflowDefinition.stages[0].tasks[0].title = 'Mutated proposal task';
+    workflowDefinition.stages[1].tasks.push({ id: 'T-002', title: 'Mutated build task' });
+    repo.saveAggregate(run, 'tester');
+
+    const row = db.get<{ workflow_definition: string | null }>(
+      'SELECT workflow_definition FROM workflow_runs WHERE id = ?',
+      [run.id],
+    );
+    const loaded = repo.loadAggregateById(run.id)!;
+    const snapshot = loaded.snapshot();
+
+    expect(row?.workflow_definition).toContain('project/custom-snapshot');
+    expect(snapshot.workflowDefinitionSnapshot.workflowId).toBe('project/custom-snapshot');
+    expect(snapshot.workflowDefinitionSnapshot.source).toEqual({ type: 'project', path: 'workflow.yaml' });
+    expect(snapshot.workflowDefinitionSnapshot.capturedAt).toBe('2026-05-19T00:00:00.000Z');
+    expect(snapshot.stageOrder).toEqual([Stage.Plan, Stage.Build]);
+    expect(snapshot.stageRuns.map(stage => stage.stage)).toEqual([Stage.Plan, Stage.Build]);
+    expect(snapshot.stageRuns[0].tasks.map(task => task.title)).toEqual(['Original proposal task']);
+    expect(snapshot.stageRuns[1].tasks.map(task => task.id)).toEqual(['T-001']);
   });
 
   it('loads an aggregate snapshot with ordered stages, tasks, checks, approval, and delivery metadata', () => {

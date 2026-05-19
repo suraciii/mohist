@@ -1,6 +1,7 @@
 import { Stage } from '../../types';
 import {
   DEFAULT_STAGE_DEFINITIONS,
+  createDefaultWorkflowDefinitionSnapshot,
   WorkflowRun,
   type CausedByMetadata,
   type CheckRunStatus,
@@ -9,6 +10,7 @@ import {
   type StageDefinition,
   type StageRunSnapshot,
   type TaskRunStatus,
+  type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
 } from './index';
 
@@ -85,13 +87,15 @@ function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDet
 
 export function hydrateWorkflowRun(
   snapshot: WorkflowRunSnapshot,
-  definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
 ): WorkflowRun {
+  const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot();
+  const definitions = workflowDefinitionSnapshot.compiledStageDefinitions;
   const workflow = WorkflowRun.startWorkflow({
     id: snapshot.id,
     issueId: snapshot.issueId,
     issueNumber: snapshot.issueNumber,
     definitions,
+    workflowDefinitionSnapshot,
   }).run;
 
   workflow.status = snapshot.status;
@@ -161,8 +165,11 @@ export function repairWorkflowRunSnapshot(
     durations?: number[];
     error?: string | null;
   }> = [],
-  definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
 ): WorkflowRunSnapshot {
+  const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot();
+  const definitions: StageDefinition[] = workflowDefinitionSnapshot.compiledStageDefinitions.length > 0
+    ? workflowDefinitionSnapshot.compiledStageDefinitions
+    : DEFAULT_STAGE_DEFINITIONS;
   const stageSnapshots = new Map(snapshot.stageRuns.map(stageRun => [stageRun.stage, stageRun]));
   const workflowRunning = snapshot.status === 'running';
 
@@ -258,8 +265,20 @@ export function repairWorkflowRunSnapshot(
   return {
     ...snapshot,
     stageOrder: definitions.map(definition => definition.stage),
+    workflowDefinitionSnapshot,
     stageRuns: [...stageSnapshots.values()].sort((a, b) => a.order - b.order),
   };
+}
+
+export function workflowDefinitionSnapshotFromUnknown(value: unknown): WorkflowDefinitionSnapshot | null {
+  if (!value || typeof value !== 'object') return null;
+  const snapshot = value as Partial<WorkflowDefinitionSnapshot>;
+  if (typeof snapshot.workflowId !== 'string') return null;
+  if (!snapshot.source || typeof snapshot.source !== 'object') return null;
+  if (!snapshot.resolvedDefinition || typeof snapshot.resolvedDefinition !== 'object') return null;
+  if (!Array.isArray(snapshot.compiledStageDefinitions)) return null;
+  if (typeof snapshot.capturedAt !== 'string') return null;
+  return snapshot as WorkflowDefinitionSnapshot;
 }
 
 export function freezePointFromStageSnapshot(stage: Stage, snapshot: StageRunSnapshot): FreezePoint | null {

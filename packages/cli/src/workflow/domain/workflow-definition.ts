@@ -1,13 +1,15 @@
 import { Stage } from '../../types';
 import { WorkflowDomainError } from './errors';
-import type { CheckFailurePolicy, InvalidationPolicy, RepairPolicy, StageDefinition, TaskDefinition } from './types';
-
-export interface WorkflowDefinition {
-  id: string;
-  name?: string;
-  stages: StageDefinition[];
-  defaults?: Record<string, unknown>;
-}
+import type {
+  CheckFailurePolicy,
+  InvalidationPolicy,
+  RepairPolicy,
+  StageDefinition,
+  TaskDefinition,
+  WorkflowDefinition,
+  WorkflowDefinitionSnapshot,
+  WorkflowDefinitionSource,
+} from './types';
 
 function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
   return {
@@ -105,4 +107,40 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Stage
   }
 
   return definition.stages.map(cloneStageDefinition);
+}
+
+export function cloneWorkflowDefinition(definition: WorkflowDefinition): WorkflowDefinition {
+  return {
+    ...definition,
+    stages: definition.stages.map(cloneStageDefinition),
+    defaults: definition.defaults ? { ...definition.defaults } : undefined,
+  };
+}
+
+export function createWorkflowDefinitionSnapshot(input: {
+  definition: WorkflowDefinition;
+  source?: WorkflowDefinitionSource;
+  capturedAt?: string;
+}): WorkflowDefinitionSnapshot {
+  const resolvedDefinition = cloneWorkflowDefinition(input.definition);
+  const compiledStageDefinitions = compileWorkflowDefinition(resolvedDefinition);
+  return {
+    workflowId: resolvedDefinition.id,
+    name: resolvedDefinition.name,
+    source: input.source ?? { type: 'runtime', id: resolvedDefinition.id },
+    resolvedDefinition,
+    compiledStageDefinitions,
+    capturedAt: input.capturedAt ?? new Date().toISOString(),
+  };
+}
+
+export function cloneWorkflowDefinitionSnapshot(snapshot: WorkflowDefinitionSnapshot): WorkflowDefinitionSnapshot {
+  return {
+    workflowId: snapshot.workflowId,
+    name: snapshot.name,
+    source: { ...snapshot.source },
+    resolvedDefinition: cloneWorkflowDefinition(snapshot.resolvedDefinition),
+    compiledStageDefinitions: snapshot.compiledStageDefinitions.map(cloneStageDefinition),
+    capturedAt: snapshot.capturedAt,
+  };
 }

@@ -148,6 +148,27 @@ export interface StageDefinition {
   invalidationPolicy?: InvalidationPolicy;
 }
 
+export interface WorkflowDefinition {
+  id: string;
+  name?: string;
+  stages: StageDefinition[];
+  defaults?: Record<string, unknown>;
+}
+
+export type WorkflowDefinitionSource =
+  | { type: 'builtin'; id: string }
+  | { type: 'project'; path: string }
+  | { type: 'runtime'; id: string };
+
+export interface WorkflowDefinitionSnapshot {
+  workflowId: string;
+  name?: string;
+  source: WorkflowDefinitionSource;
+  resolvedDefinition: WorkflowDefinition;
+  compiledStageDefinitions: StageDefinition[];
+  capturedAt: string;
+}
+
 export interface FailedCheckContext {
   checkName: string;
   verdict: 'PASS' | 'FAIL';
@@ -317,6 +338,7 @@ export interface WorkflowRunSnapshot {
   status: WorkflowRunStatus;
   currentStage: Stage;
   stageOrder: Stage[];
+  workflowDefinitionSnapshot: WorkflowDefinitionSnapshot;
   stageRuns: StageRunSnapshot[];
   failure: FailureDetails | null;
 }
