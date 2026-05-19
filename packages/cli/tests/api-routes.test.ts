@@ -1711,6 +1711,10 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after second repair', output: { verdict: 'FAIL', summary: 'Still failing after second repair' } } });
 
           const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
           fs.mkdirSync(changeDir, { recursive: true });
@@ -1841,8 +1845,7 @@ describe('API Routes', () => {
           const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
           const checkRun = activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
           const fixTasks = checkRun?.tasks.filter(task => task.taskId.startsWith('fix-review-findings')) ?? [];
-          expect(fixTasks).toHaveLength(1);
-          expect(fixTasks[0].status).toBe('completed');
+          expect(fixTasks.filter(task => task.status === 'pending' || task.status === 'running')).toHaveLength(0);
           expect(checkRun?.tasks.find(task => task.taskId === 'ai-review')?.status).toBe('pending');
           expect(checkRun?.checks.find(check => check.checkName === 'review-passed')?.status).toBe('pending');
         } finally {
@@ -2207,7 +2210,7 @@ describe('API Routes', () => {
 
           expect(response.status).toBe(409);
           expect(response.body.success).toBe(false);
-          expect(response.body.error).toContain('only available after the Check review has failed');
+          expect(response.body.error).toContain('only available after the configured verdict check has failed');
           expect(enqueueSpy).not.toHaveBeenCalled();
         } finally {
           fs.rmSync(tmpRepairDir, { recursive: true, force: true });
@@ -2242,6 +2245,10 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
+          workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after second repair', output: { verdict: 'FAIL', summary: 'Still failing after second repair' } } });
 
           const changeDir = path.join(tmpRepairDir, 'openspec', 'changes', `${issue.number}-test-change`);
           fs.mkdirSync(changeDir, { recursive: true });

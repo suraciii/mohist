@@ -1098,6 +1098,7 @@ export interface WorkflowCheck {
 export interface WorkflowStageRun {
   stage: Stage
   status: WorkflowStageRunStatus
+  definition?: WorkflowStageDefinition | null
   tasks: WorkflowTask[]
   checks: WorkflowCheck[]
   approvalStatus: string | null
@@ -1124,6 +1125,27 @@ export interface WorkflowDefinitionMetadata {
   source: WorkflowDefinitionSource
   capturedAt: string
   stageOrder: Stage[]
+  stageDefinitions?: WorkflowStageDefinition[]
+}
+
+export interface WorkflowCheckFailurePolicy {
+  checkName: string
+  fixTaskId: string
+  fixTaskTitle: string
+  maxAttempts: number
+}
+
+export interface WorkflowApprovalEvidencePolicy {
+  verdictCheckName: string
+  verificationCheckName?: string
+  candidateCheckName?: string
+  convergenceTaskId?: string
+}
+
+export interface WorkflowStageDefinition {
+  stage: Stage
+  checkFailurePolicies?: WorkflowCheckFailurePolicy[]
+  approvalEvidencePolicy?: WorkflowApprovalEvidencePolicy
 }
 
 export interface WorkflowRun {

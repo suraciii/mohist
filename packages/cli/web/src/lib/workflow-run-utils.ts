@@ -1,5 +1,4 @@
-import { Stage } from './types'
-import type { CheckRepairState, StageCheckState, StageStateRead, StageStateStatus, StageTaskCause, StageTaskState, StageApprovalState, WorkflowRun } from './types'
+import type { CheckRepairState, StageCheckState, StageStateRead, StageStateStatus, StageTaskCause, StageTaskState, StageApprovalState, WorkflowCheckFailurePolicy, WorkflowRun, WorkflowStageDefinition } from './types'
 
 const CAUSE_TYPE_MAP: Record<string, StageTaskCause['type']> = {
   'check-failure': 'check-failure',
@@ -24,11 +23,8 @@ export function convertCause(cause: { type: string; checkName?: string; taskId?:
   return { type: mapCauseType(cause.type), checkName: cause.checkName, taskId: cause.taskId, message: cause.message }
 }
 
-function isReviewRepairTask(taskId: string): boolean {
-  return taskId === 'fix-review-findings' ||
-    taskId.startsWith('fix-review-findings:') ||
-    taskId === 'repair-review-findings' ||
-    taskId.startsWith('repair-review-findings:')
+function isTaskAttemptForBase(taskId: string, baseTaskId: string): boolean {
+  return taskId === baseTaskId || taskId.startsWith(`${baseTaskId}:`)
 }
 
 function extractUnresolvedSummary(output: unknown, message: string | null): string | null {
@@ -40,37 +36,54 @@ function extractUnresolvedSummary(output: unknown, message: string | null): stri
   return message ?? null
 }
 
-function computeCheckRepair(tasks: StageTaskState[], checks: StageCheckState[]): CheckRepairState | undefined {
-  const repairTasks = tasks.filter(task => isReviewRepairTask(task.taskId))
-  const reviewPassed = checks.find(check => check.checkName === 'review-passed')
-  if (repairTasks.length === 0 && (!reviewPassed || reviewPassed.status === 'pending' || reviewPassed.status === 'running')) {
+function approvalVerdictRepairPolicy(definition?: WorkflowStageDefinition | null): WorkflowCheckFailurePolicy | null {
+  const verdictCheckName = definition?.approvalEvidencePolicy?.verdictCheckName ?? 'review-passed'
+  return definition?.checkFailurePolicies?.find(policy => policy.checkName === verdictCheckName) ?? {
+    checkName: verdictCheckName,
+    fixTaskId: 'fix-review-findings',
+    fixTaskTitle: 'Fix review findings',
+    maxAttempts: 1,
+  }
+}
+
+function computeCheckRepair(tasks: StageTaskState[], checks: StageCheckState[], definition?: WorkflowStageDefinition | null): CheckRepairState | undefined {
+  const policy = approvalVerdictRepairPolicy(definition)
+  if (!policy) return undefined
+
+  const repairTasks = tasks.filter(task => isTaskAttemptForBase(task.taskId, policy.fixTaskId))
+  const verdictCheck = checks.find(check => check.checkName === policy.checkName)
+  if (repairTasks.length === 0 && (!verdictCheck || verdictCheck.status === 'pending' || verdictCheck.status === 'running')) {
     return undefined
   }
 
-  const maxAttempts = 1
+  const maxAttempts = policy.maxAttempts
   const attemptsUsed = repairTasks.length
   const attemptsRemaining = Math.max(0, maxAttempts - attemptsUsed)
   const pendingRepairTasks = repairTasks.filter(task => task.status === 'pending' || task.status === 'running')
   const completedRepairTasks = repairTasks.filter(task => task.status === 'completed')
   const repairInProgress = pendingRepairTasks.length > 0
-  const repairAvailable = attemptsRemaining > 0 && reviewPassed?.status === 'failed' && !repairInProgress
+  const repairAvailable = attemptsRemaining > 0 && verdictCheck?.status === 'failed' && !repairInProgress
 
   let status: CheckRepairState['status']
-  if (reviewPassed?.status === 'passed') status = 'not-needed'
+  if (verdictCheck?.status === 'passed') status = 'not-needed'
   else if (repairInProgress) status = pendingRepairTasks.some(task => task.status === 'running') ? 'running' : 'pending'
-  else if (completedRepairTasks.length > 0) status = reviewPassed?.status === 'failed' ? 'exhausted' : 'completed'
+  else if (completedRepairTasks.length > 0) {
+    status = verdictCheck?.status === 'failed'
+      ? repairAvailable ? 'available' : 'exhausted'
+      : 'completed'
+  }
   else status = repairAvailable ? 'available' : 'exhausted'
 
   let stopReason: CheckRepairState['stopReason'] = null
-  if (reviewPassed?.status === 'passed') stopReason = 'review-passed'
+  if (verdictCheck?.status === 'passed') stopReason = 'review-passed'
   else if (pendingRepairTasks.some(task => task.status === 'pending')) stopReason = 'repair-pending'
   else if (pendingRepairTasks.some(task => task.status === 'running')) stopReason = 'repair-running'
   else if (attemptsRemaining === 0 && completedRepairTasks.length > 0) stopReason = 'max-repair-attempts-reached'
 
   const lastRepairTask = repairTasks.at(-1) ?? null
   return {
-    checkName: 'review-passed',
-    fixTaskId: 'fix-review-findings',
+    checkName: policy.checkName,
+    fixTaskId: policy.fixTaskId,
     status,
     attemptsUsed,
     attemptsMax: maxAttempts,
@@ -78,9 +91,9 @@ function computeCheckRepair(tasks: StageTaskState[], checks: StageCheckState[]):
     repairAvailable,
     lastRepairTask,
     lastRepairStatus: lastRepairTask?.status ?? null,
-    followUpReviewStatus: reviewPassed?.status ?? null,
+    followUpReviewStatus: verdictCheck?.status ?? null,
     stopReason,
-    unresolvedSummary: reviewPassed?.status === 'failed' ? extractUnresolvedSummary(reviewPassed.output, reviewPassed.message) : null,
+    unresolvedSummary: verdictCheck?.status === 'failed' ? extractUnresolvedSummary(verdictCheck.output, verdictCheck.message) : null,
   }
 }
 
@@ -139,8 +152,9 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
       failure: sr.failure ?? null,
       deliveryMetadata: sr.deliveryMetadata ?? null,
     }
-    if (sr.stage === Stage.Check) {
-      const checkRepair = computeCheckRepair(tasks, checks)
+    const definition = sr.definition ?? workflowRun.workflowDefinition?.stageDefinitions?.find(candidate => candidate.stage === sr.stage) ?? null
+    if (definition?.approvalEvidencePolicy) {
+      const checkRepair = computeCheckRepair(tasks, checks, definition)
       if (checkRepair) stageState.checkRepair = checkRepair
     }
     map.set(sr.stage, stageState)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WorkflowApplicationService, type WorkflowRunProjectionPort, type WorkflowRunRepositoryPort } from '../src/services/workflow-application-service';
-import { WorkflowRun } from '../src/workflow/domain';
+import { WorkflowRun, createWorkflowDefinitionSnapshot, parseWorkflowDefinitionSource } from '../src/workflow/domain';
 import { Stage } from '../src/types';
 import type { WorkflowAttemptEvidencePort } from '../src/services/attempt-reconciliation-service';
 
@@ -350,6 +350,76 @@ describe('WorkflowApplicationService', () => {
     expect(result.run.snapshot().status).toBe('failed');
     expect(result.decision.events).toContainEqual(expect.objectContaining({ type: 'approval-rejected', stage: Stage.Plan }));
     expect(result.decision.nextWork.kind).toBe('failed');
+  });
+
+  it('schedules approval verdict repair from the stage definition instead of Check defaults', () => {
+    const workflowDefinitionSnapshot = createWorkflowDefinitionSnapshot({
+      definition: parseWorkflowDefinitionSource({
+        id: 'custom/approval-repair',
+        stages: [
+          {
+            id: Stage.Plan,
+            tasks: [{ id: 'draft', title: 'Draft', uses: 'mohist/agent' }],
+            checks: [
+              {
+                id: 'quality-approved',
+                title: 'Quality approved',
+                uses: 'mohist/verdict',
+                with: { approvalEvidence: { role: 'verdict' } },
+                onFailure: {
+                  retry: {
+                    limit: 2,
+                    task: { id: 'repair-quality', title: 'Repair quality', uses: 'mohist/agent' },
+                  },
+                },
+              },
+              {
+                id: 'quality-verification',
+                title: 'Quality verification',
+                uses: 'mohist/health-gate',
+                with: { approvalEvidence: { role: 'verification' } },
+              },
+              {
+                id: 'quality-candidate',
+                title: 'Quality candidate',
+                uses: 'mohist/merge-ready',
+                with: { approvalEvidence: { role: 'candidate' } },
+              },
+            ],
+            approval: true,
+          },
+        ],
+      }),
+      source: { type: 'runtime', id: 'custom/approval-repair' },
+      capturedAt: '2026-05-19T00:00:00.000Z',
+    });
+    const run = WorkflowRun.startWorkflow({
+      id: 'wr-custom',
+      issueId: 'issue-custom',
+      issueNumber: 188,
+      workflowDefinitionSnapshot,
+    }).run;
+    run.completeTask(Stage.Plan, 'draft', { status: 'completed' });
+    run.recordCheckResult(Stage.Plan, {
+      name: 'quality-approved',
+      status: 'fail',
+      message: 'Quality failed',
+      output: { verdict: 'FAIL', summary: 'Quality failed' },
+    });
+
+    const repo: WorkflowRunRepositoryPort = {
+      createOrLoadActiveAggregate: () => run,
+      loadActiveAggregate: () => run,
+      saveAggregate: () => {},
+    };
+    const projection: WorkflowRunProjectionPort = { apply: () => {} };
+    const service = new WorkflowApplicationService(repo, projection);
+
+    const result = service.scheduleApprovalVerdictRepair({ issueId: 'issue-custom', stage: Stage.Plan });
+
+    expect(result.repairStatus).toBe('already-running');
+    expect(result.repairTaskId).toBe('repair-quality');
+    expect(result.run.stageRun(Stage.Plan).tasks.some(task => task.id === 'repair-quality')).toBe(true);
   });
 
   it('rejection with string message stores message, not prior approval output', () => {

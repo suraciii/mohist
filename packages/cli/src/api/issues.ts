@@ -491,6 +491,11 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
       stage: stageRun.stage,
       status: stageRun.status,
       stageOrder: stageRun.stageOrder,
+      definition: stageDefinition ? {
+        stage: stageDefinition.stage,
+        checkFailurePolicies: stageDefinition.checkFailurePolicies,
+        approvalEvidencePolicy: stageDefinition.approvalEvidencePolicy,
+      } : null,
       tasks: stageRun.tasks.map(task => ({
         id: task.id,
         taskId: task.taskId,
@@ -551,6 +556,11 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
       source: workflowDefinitionSnapshot.source,
       capturedAt: workflowDefinitionSnapshot.capturedAt,
       stageOrder: workflowDefinitionSnapshot.compiledStageDefinitions.map(definition => definition.stage),
+      stageDefinitions: workflowDefinitionSnapshot.compiledStageDefinitions.map(definition => ({
+        stage: definition.stage,
+        checkFailurePolicies: definition.checkFailurePolicies,
+        approvalEvidencePolicy: definition.approvalEvidencePolicy,
+      })),
     } : null,
     stageRuns,
     failure: stageRuns.find(stageRun => stageRun.failure)?.failure ?? null,
@@ -4544,11 +4554,11 @@ export function createIssueRoutes(
       const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
       const tasksPath = changeDir ? path.join(changeDir, 'tasks.json') : undefined;
 
-      const result = workflowApplicationService.scheduleFixReviewFindings({
+      const result = workflowApplicationService.scheduleApprovalVerdictRepair({
         issueId: issue.id,
         stage: Stage.Check,
         tasksPath,
-        startedBy: 'fix-review-findings',
+        startedBy: 'approval-verdict-repair',
       });
 
       switch (result.repairStatus) {
@@ -4566,7 +4576,7 @@ export function createIssueRoutes(
                 taskId: queued.taskId,
                 status: queued.status,
                 queuePosition: queued.queuePosition,
-                message: `Fix review findings scheduled for issue #${number}`,
+                message: `Repair task ${result.repairTaskId} scheduled for issue #${number}`,
               },
             } satisfies ApiResponse, 202);
           }
@@ -4575,7 +4585,7 @@ export function createIssueRoutes(
             success: true,
             data: {
               repairTaskId: result.repairTaskId,
-              message: `Fix review findings scheduled for issue #${number}`,
+              message: `Repair task ${result.repairTaskId} scheduled for issue #${number}`,
             },
           } satisfies ApiResponse, 202);
         case 'already-running':
@@ -4587,7 +4597,7 @@ export function createIssueRoutes(
             success: true,
             data: {
               repairTaskId: result.repairTaskId,
-              message: `Fix review findings already in progress for issue #${number}`,
+              message: `Repair task ${result.repairTaskId} already in progress for issue #${number}`,
             },
           } satisfies ApiResponse, 200);
         case 'exhausted':
@@ -4603,7 +4613,7 @@ export function createIssueRoutes(
         case 'not-available':
           return c.json({
             success: false,
-            error: `Fix review findings is only available after the Check review has failed, or while an existing repair task is pending or running.`,
+            error: `Approval verdict repair is only available after the configured verdict check has failed, or while an existing repair task is pending or running.`,
           } satisfies ApiResponse, 409);
       }
     } catch (error) {
