@@ -13,6 +13,7 @@ import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import { createAgentSessionTaskHandler } from '../../src/workflow/task-runtime/agent-session-task-handler';
 import { createRalphTaskHandler } from '../../src/workflow/task-runtime/ralph-task-handler';
 import { createRalphTaskLoader } from '../../src/workflow/task-runtime/ralph-task-loader';
+import { defaultServiceCallTaskHandler } from '../../src/workflow/task-runtime/service-call-task-handler';
 import { EventBus } from '../../src/services/event-bus';
 import { WorkflowRun } from '../../src/workflow/domain';
 import * as RalphExecutor from '../../src/openspec/ralph-executor';
@@ -1278,6 +1279,60 @@ describe('StageRunner migration regression coverage', () => {
         worktreePath: '/tmp',
       }));
       expect(executedTitle).toBe('Factory-built task');
+    });
+
+    it('service-call dispatch selects delivery behavior by uses for custom task ids', async () => {
+      const worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-custom-service-dispatch-'));
+      try {
+        const changeDir = path.join(worktreePath, 'openspec', 'changes', 'custom-service');
+        fs.mkdirSync(changeDir, { recursive: true });
+        const stageDefinition: StageDefinition = {
+          stage: Stage.Integrate,
+          tasks: [{ id: 'archive-spec-change', title: 'Archive spec change', uses: 'mohist/archive-change' }],
+          checks: [],
+          workSources: [{ kind: 'static', taskIds: ['archive-spec-change'] }],
+          taskExecutionPolicies: [{ taskId: 'archive-spec-change', kind: 'service-call', workSourceKind: 'static' }],
+        };
+        const taskLoaderRegistry: TaskLoaderRegistry = {
+          get: vi.fn().mockImplementation((kind: string) => kind === 'static'
+            ? {
+                kind: 'static' as const,
+                load: () => [{ taskId: 'archive-spec-change', title: 'Archive spec change', kind: 'service-call' as const }],
+              }
+            : undefined),
+          list: vi.fn().mockReturnValue([]),
+        };
+        const runner = new GenericStageRunner({
+          taskLoaderRegistry,
+          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': defaultServiceCallTaskHandler as any }),
+          checkRegistry: createBasicCheckRegistry({}),
+          getStageDefinition: () => stageDefinition,
+          worktreePath,
+        });
+        const ctx = makeMockContext(Stage.Integrate, {
+          acpOptions: { cwd: worktreePath } as any,
+          artifactManager: {
+            getChangeDir: vi.fn().mockReturnValue(changeDir),
+            createChangeDir: vi.fn(),
+            archiveChange: vi.fn(),
+          } as any,
+          workflowApplicationService: undefined,
+          requestedWork: { kind: 'task', stage: Stage.Integrate, taskId: 'archive-spec-change' },
+        });
+
+        const result = await runner.run(ctx);
+        const output = result.output as { kind: string; result: { step: string; archivePath: string; success: boolean } };
+
+        expect(result.success).toBe(true);
+        expect(ctx.artifactManager.archiveChange).toHaveBeenCalledWith(ctx.issue.number);
+        expect(output.result).toMatchObject({
+          step: 'archive-spec-change',
+          archivePath: path.relative(worktreePath, changeDir),
+          success: true,
+        });
+      } finally {
+        fs.rmSync(worktreePath, { recursive: true, force: true });
+      }
     });
 
     it('requested static task resolves through the task loader registry', async () => {

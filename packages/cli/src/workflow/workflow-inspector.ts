@@ -184,8 +184,8 @@ function compileCustomTasks(
       diagnostics.push({ severity: 'error', path: `${taskPath}.uses`, message: `Use '${rawTask.uses}' is not allowed as a task` });
       continue;
     }
-    if (rawTask.uses !== 'mohist/agent' && rawTask.uses !== 'mohist/ralph-tasks') {
-      diagnostics.push({ severity: 'error', path: `${taskPath}.uses`, message: `Use '${rawTask.uses}' is not supported for full custom task execution in v1` });
+    if (!isExecutableCustomTaskUse(rawTask.uses)) {
+      diagnostics.push({ severity: 'error', path: `${taskPath}.uses`, message: `Use '${rawTask.uses}' is not supported for full custom task execution yet` });
       continue;
     }
     const task: TaskDefinition = {
@@ -207,6 +207,15 @@ function compileCustomTasks(
     tasks.push(task);
   }
   return tasks;
+}
+
+function isExecutableCustomTaskUse(uses: string): boolean {
+  return uses === 'mohist/agent'
+    || uses === 'mohist/ralph-tasks'
+    || uses === 'mohist/openspec-sync'
+    || uses === 'mohist/archive-change'
+    || uses === 'mohist/merge'
+    || uses === 'mohist/rebase';
 }
 
 function compileTasksFrom(
