@@ -77,7 +77,12 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
     {
       id: Stage.Check,
       on: {
-        'code.changed': { reset: 'checks-and-approval' },
+        'code.changed': {
+          reset: 'checks-and-approval',
+          tasks: ['ai-review'],
+          checks: 'all',
+          approval: true,
+        },
       },
       tasks: [
         {
@@ -94,7 +99,11 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           id: 'health:check',
           title: 'Check health gate',
           uses: 'mohist/health-gate',
-          with: { command: DEFAULT_CHECK_HEALTH_COMMAND, timeout: DEFAULT_HEALTH_TIMEOUT_MS },
+          with: {
+            command: DEFAULT_CHECK_HEALTH_COMMAND,
+            timeout: DEFAULT_HEALTH_TIMEOUT_MS,
+            approvalEvidence: { role: 'verification' },
+          },
           onFailure: {
             retry: {
               limit: 1,
@@ -111,6 +120,13 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'review-passed',
           title: 'Review passed',
+          uses: 'mohist/verdict',
+          with: {
+            approvalEvidence: {
+              role: 'verdict',
+              snapshotField: 'snapshotSha',
+            },
+          },
           onFailure: {
             retry: {
               limit: 2,
@@ -138,6 +154,13 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'merge-ready',
           title: 'Merge ready',
+          uses: 'mohist/merge-ready',
+          with: {
+            approvalEvidence: {
+              role: 'candidate',
+              snapshotField: 'candidateHeadSha',
+            },
+          },
           onFailure: {
             retry: {
               limit: 1,

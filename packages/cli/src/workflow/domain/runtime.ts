@@ -8,6 +8,7 @@ import type {
   ApprovalSnapshot,
   BuildWorkSourceState,
   CausedByMetadata,
+  CheckDefinition,
   CheckFailurePolicy,
   CheckPhase,
   CheckPolicy,
@@ -1080,21 +1081,11 @@ export class WorkflowRun {
           check.resetForFreshAttempt();
         }
       } else if (failedCheck) {
-        if (
-          stage === Stage.Check &&
-          stageRun.tasks.some(task => task.id.startsWith('fix-review-findings') && task.status === 'completed')
-        ) {
-          const reason = 'Retrying Check after review findings were fixed; re-run AI review before rechecking';
-          stageRun.resetTask('ai-review');
-          for (const checkName of ['health:check', 'review-passed', 'merge-ready']) {
-            stageRun.resetCheck(checkName);
-          }
+        const retryInvalidationEvents = this.applyRetryInvalidationForCompletedTasks(stageRun);
+        if (retryInvalidationEvents.length > 0) {
           return this.decision([
             { type: 'stage-retried', stage },
-            { type: 'task-invalidated', stage, taskId: 'ai-review', reason },
-            { type: 'check-invalidated', stage, checkName: 'health:check', reason },
-            { type: 'check-invalidated', stage, checkName: 'review-passed', reason },
-            { type: 'check-invalidated', stage, checkName: 'merge-ready', reason },
+            ...retryInvalidationEvents,
           ]);
         }
 
@@ -1120,6 +1111,46 @@ export class WorkflowRun {
     }
 
     return this.decision([{ type: 'stage-retried', stage }]);
+  }
+
+  private applyRetryInvalidationForCompletedTasks(stageRun: StageRun): WorkflowEvent[] {
+    const policy = stageRun.definition.invalidationPolicy;
+    if (!policy) return [];
+
+    const events: WorkflowEvent[] = [];
+    for (const task of stageRun.tasks) {
+      if (task.status !== 'completed') continue;
+      const baseTaskId = this.baseRuntimeTaskId(task.id);
+      for (const entry of policy.entries) {
+        if (entry.trigger !== 'task-completion') continue;
+        if (entry.triggerTaskId && entry.triggerTaskId !== task.id && entry.triggerTaskId !== baseTaskId) continue;
+        if (!this.evaluateInvalidationCondition(entry.when, task.output)) continue;
+        const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
+        for (const taskId of entry.invalidates.tasks ?? []) {
+          try {
+            stageRun.resetTask(taskId);
+            events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId, reason });
+          } catch {
+            // Task may not belong to this stage definition.
+          }
+        }
+        for (const checkName of entry.invalidates.checks ?? []) {
+          try {
+            stageRun.resetCheck(checkName);
+            events.push({ type: 'check-invalidated', stage: stageRun.stage, checkName, reason });
+          } catch {
+            // Check may not belong to this stage definition.
+          }
+        }
+        if (entry.invalidates.approval && stageRun.approval) {
+          stageRun.approval = null;
+          if (stageRun.status === 'awaiting-approval') {
+            stageRun.status = 'running';
+          }
+        }
+      }
+    }
+    return events;
   }
 
   canRetryStage(stage: Stage): boolean {
@@ -1420,31 +1451,18 @@ export class WorkflowRun {
   }
 
   private evaluateCheckReviewEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
-    const aiReview = stageRun.tasks.find(task => task.id === 'ai-review');
-    const healthCheck = stageRun.checks.find(check => check.name === 'health:check');
-    const reviewPassed = stageRun.checks.find(check => check.name === 'review-passed');
-    const mergeReady = stageRun.checks.find(check => check.name === 'merge-ready');
-    if (aiReview?.status !== 'completed') return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
-    if (healthCheck?.status !== 'passed') return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
-    if (reviewPassed?.status !== 'passed' || !reviewPassed.output || typeof reviewPassed.output !== 'object') {
-      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    const evidence = this.approvalEvidence(stageRun);
+    if (!evidence) return { complete: true };
+    if (evidence.verdict.check.status !== 'passed' || evidence.verification.check.status !== 'passed' || evidence.candidate.check.status !== 'passed') {
+      return { complete: false, reason: 'check-review-evidence-missing', stage: stageRun.stage };
     }
-    if (mergeReady?.status !== 'passed' || !mergeReady.output || typeof mergeReady.output !== 'object') {
-      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
+    const verdictSnapshot = this.approvalEvidenceSnapshot(evidence.verdict.definition, evidence.verdict.check.output);
+    const candidateSnapshot = this.approvalEvidenceSnapshot(evidence.candidate.definition, evidence.candidate.check.output);
+    if (!verdictSnapshot || !candidateSnapshot) {
+      return { complete: false, reason: 'check-review-evidence-missing', stage: stageRun.stage };
     }
-
-    const reviewOutput = reviewPassed.output as Record<string, unknown>;
-    const mergeReadyOutput = mergeReady.output as Record<string, unknown>;
-    const reviewSnapshotSha = reviewOutput.snapshotSha;
-    const mergeCandidateHeadSha = mergeReadyOutput.candidateHeadSha;
-    if (typeof reviewSnapshotSha !== 'string' || reviewSnapshotSha.length === 0) {
-      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
-    }
-    if (typeof mergeCandidateHeadSha !== 'string' || mergeCandidateHeadSha.length === 0) {
-      return { complete: false, reason: 'check-review-evidence-missing', stage: Stage.Check };
-    }
-    if (reviewSnapshotSha !== mergeCandidateHeadSha) {
-      return { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check };
+    if (verdictSnapshot !== candidateSnapshot) {
+      return { complete: false, reason: 'check-review-evidence-stale', stage: stageRun.stage };
     }
     return { complete: true };
   }
@@ -1512,26 +1530,24 @@ export class WorkflowRun {
       };
     }
 
-    if (stageRun.stage !== Stage.Check) return null;
-    const reviewPassed = stageRun.checks.find(check => check.name === 'review-passed');
-    const mergeReady = stageRun.checks.find(check => check.name === 'merge-ready');
-    if (reviewPassed?.status !== 'passed' || mergeReady?.status !== 'passed') return null;
-    if (!reviewPassed.output || typeof reviewPassed.output !== 'object') return null;
-    if (!mergeReady.output || typeof mergeReady.output !== 'object') return null;
-    const reviewOutput = reviewPassed.output as Record<string, unknown>;
-    const mergeReadySnapshot = mergeReady.output as Record<string, unknown>;
-    const snapshotSha = reviewOutput.snapshotSha;
-    if (typeof snapshotSha !== 'string' || snapshotSha.length === 0) return null;
+    const evidence = this.approvalEvidence(stageRun);
+    if (!evidence) return null;
+    if (evidence.verdict.check.status !== 'passed' || evidence.candidate.check.status !== 'passed') return null;
+    if (!evidence.verdict.check.output || typeof evidence.verdict.check.output !== 'object') return null;
+    if (!evidence.candidate.check.output || typeof evidence.candidate.check.output !== 'object') return null;
+    const reviewOutput = evidence.verdict.check.output as Record<string, unknown>;
+    const mergeReadySnapshot = evidence.candidate.check.output as Record<string, unknown>;
+    const snapshotSha = this.approvalEvidenceSnapshot(evidence.verdict.definition, evidence.verdict.check.output);
+    if (!snapshotSha) return null;
 
-    const healthCheck = stageRun.checks.find(check => check.name === 'health:check');
-    if (!healthCheck || healthCheck.status !== 'passed') {
+    if (evidence.verification.check.status !== 'passed') {
       return {
-        error: 'Cannot request check approval: health:check has not passed',
+        error: `Cannot request approval: ${evidence.verification.check.name} has not passed`,
       };
     }
-    const healthCheckOutput = healthCheck.output as Record<string, unknown> | undefined;
-    if (healthCheckOutput?.enabled === false) {
-      return { error: 'Cannot request check approval: health:check is disabled by policy and cannot serve as approval evidence' };
+    const verificationOutput = evidence.verification.check.output as Record<string, unknown> | undefined;
+    if (verificationOutput?.enabled === false) {
+      return { error: `Cannot request approval: ${evidence.verification.check.name} is disabled by policy and cannot serve as approval evidence` };
     }
 
     return {
@@ -1545,18 +1561,18 @@ export class WorkflowRun {
   }
 
   private extractVerificationEvidence(stageRun: StageRun): VerificationEvidence | null {
-    if (stageRun.stage !== Stage.Check) return null;
-    const healthCheck = stageRun.checks.find(check => check.name === 'health:check');
-    if (!healthCheck || healthCheck.status !== 'passed' || !healthCheck.output) return null;
-    const output = healthCheck.output as Record<string, unknown>;
+    const evidence = this.approvalEvidence(stageRun);
+    const verification = evidence?.verification.check;
+    if (!verification || verification.status !== 'passed' || !verification.output) return null;
+    const output = verification.output as Record<string, unknown>;
     return {
-      checkName: healthCheck.name,
-      status: healthCheck.status === 'passed' ? 'pass' : healthCheck.status === 'failed' ? 'fail' : healthCheck.status,
+      checkName: verification.name,
+      status: verification.status === 'passed' ? 'pass' : verification.status === 'failed' ? 'fail' : verification.status,
       command: (output.command as string) ?? '',
       duration: (output.duration as number) ?? 0,
       summary: (output.summary as string) ?? (output.message as string) ?? '',
       logExcerpt: (output.logExcerpt as string) ?? '',
-      checkedAt: healthCheck.runCount > 0 ? new Date().toISOString() : '',
+      checkedAt: verification.runCount > 0 ? new Date().toISOString() : '',
       candidateHeadSha: (output.candidateHeadSha as string) ?? undefined,
       baseSha: (output.baseSha as string) ?? undefined,
     };
@@ -1601,6 +1617,41 @@ export class WorkflowRun {
       });
     }
     return events;
+  }
+
+  private approvalEvidence(stageRun: StageRun): {
+    verdict: { definition: CheckDefinition; check: CheckState };
+    verification: { definition: CheckDefinition; check: CheckState };
+    candidate: { definition: CheckDefinition; check: CheckState };
+  } | null {
+    const verdict = this.approvalEvidenceCheck(stageRun, 'verdict');
+    const verification = this.approvalEvidenceCheck(stageRun, 'verification');
+    const candidate = this.approvalEvidenceCheck(stageRun, 'candidate');
+    if (!verdict || !verification || !candidate) return null;
+    return { verdict, verification, candidate };
+  }
+
+  private approvalEvidenceCheck(stageRun: StageRun, role: string): { definition: CheckDefinition; check: CheckState } | null {
+    const definition = stageRun.definition.checks.find(check => this.approvalEvidenceRole(check) === role);
+    if (!definition) return null;
+    return { definition, check: stageRun.findCheck(definition.name) };
+  }
+
+  private approvalEvidenceRole(check: CheckDefinition): string | null {
+    const evidence = check.with?.approvalEvidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+    const role = (evidence as Record<string, unknown>).role;
+    return typeof role === 'string' ? role : null;
+  }
+
+  private approvalEvidenceSnapshot(definition: CheckDefinition, output: unknown): string | null {
+    const evidence = definition.with?.approvalEvidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
+    const snapshotField = (evidence as Record<string, unknown>).snapshotField;
+    if (typeof snapshotField !== 'string' || snapshotField.length === 0) return null;
+    const data = this.unwrapTaskOutput(output);
+    const value = data?.[snapshotField];
+    return typeof value === 'string' && value.length > 0 ? value : null;
   }
 
   private toCheckStatus(status: CheckResultInput['status']): CheckRunStatus {

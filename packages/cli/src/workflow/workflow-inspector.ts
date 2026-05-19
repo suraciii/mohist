@@ -333,7 +333,20 @@ function compileStageEventPolicies(
       diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}.reset`, message: 'reset must be checks-and-approval, checks, or approval' });
       continue;
     }
-    on[eventName] = { reset: rawPolicy.reset };
+    const tasks = arrayValue(rawPolicy.tasks).filter((value): value is string => typeof value === 'string');
+    let checks: 'all' | string[] | undefined;
+    if (rawPolicy.checks === 'all') {
+      checks = 'all';
+    } else {
+      const checkList = arrayValue(rawPolicy.checks).filter((value): value is string => typeof value === 'string');
+      if (checkList.length > 0) checks = checkList;
+    }
+    on[eventName] = {
+      reset: rawPolicy.reset,
+      tasks: tasks.length > 0 ? tasks : undefined,
+      checks,
+      approval: typeof rawPolicy.approval === 'boolean' ? rawPolicy.approval : undefined,
+    };
   }
   return Object.keys(on).length > 0 ? on : undefined;
 }
@@ -673,12 +686,12 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
       }
     }
 
-    if (isFullCustomWorkflow && stage.stage === Stage.Check && isProjectDefinedStage(stage) && !hasDefaultCheckEvidenceShape(stage)) {
+    if (isFullCustomWorkflow && stage.stage === Stage.Check && isProjectDefinedStage(stage) && !hasApprovalEvidenceShape(stage)) {
       diagnostics.push({
         severity: 'error',
         path: stagePath,
-        message: 'Custom Check stage v1 must include ai-review, health:check, review-passed, and merge-ready until Check evidence guards are generalized',
-        suggestion: 'Keep the default Check stage through extends: mohist/default, or include the default check evidence items.',
+        message: 'Custom Check stage must declare approval evidence checks for verdict, verification, and candidate roles',
+        suggestion: 'Set check.with.approvalEvidence.role to verdict, verification, and candidate; verdict/candidate roles also need snapshotField.',
       });
     }
   }
@@ -754,13 +767,17 @@ function inferTaskUseForStage(stage: CompiledStageDefinition, taskId: string): s
   return inferWorkflowTaskUse(taskId, policy?.kind);
 }
 
-function hasDefaultCheckEvidenceShape(stage: CompiledStageDefinition): boolean {
-  const taskIds = new Set(stage.tasks.map(task => task.id));
-  const checkNames = new Set(stage.checks.map(check => check.name));
-  return taskIds.has('ai-review')
-    && checkNames.has('health:check')
-    && checkNames.has('review-passed')
-    && checkNames.has('merge-ready');
+function hasApprovalEvidenceShape(stage: CompiledStageDefinition): boolean {
+  const roles = new Set<string>();
+  for (const check of stage.checks) {
+    const evidence = check.with?.approvalEvidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) continue;
+    const role = (evidence as Record<string, unknown>).role;
+    if (typeof role !== 'string') continue;
+    if ((role === 'verdict' || role === 'candidate') && typeof (evidence as Record<string, unknown>).snapshotField !== 'string') continue;
+    roles.add(role);
+  }
+  return roles.has('verdict') && roles.has('verification') && roles.has('candidate');
 }
 
 function isProjectDefinedStage(stage: CompiledStageDefinition): boolean {
