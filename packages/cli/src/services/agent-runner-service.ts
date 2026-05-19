@@ -56,7 +56,9 @@ import { CodeCompilesCheck } from '../workflow/checks/code-compiles-check';
 import { BuildTestCheck } from '../workflow/checks/build-test-check';
 import { IntegrationHealthGatePreviewCheck } from '../workflow/checks/integration-health-gate-preview-check';
 import { HealthGateCheck } from '../workflow/checks/health-gate-check';
+import { ArtifactExistsCheck, ShellCommandCheck } from '../workflow/checks';
 import { DEFAULT_HEALTH_GATE_POLICIES, loadHealthGatePolicies, loadWorkflow } from '../workflow/workflow-loader';
+import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/workflow-inspector';
 
 const execFileAsync = promisify(execFile);
 
@@ -132,9 +134,10 @@ const log = Log.create({ service: 'agent-runner' });
 export function createDefaultCheckRegistry(input: {
   worktreePath: string;
   healthGatePolicies: ReturnType<typeof loadHealthGatePolicies>;
+  workflowDefinitionSnapshot?: import('../workflow/domain').WorkflowDefinitionSnapshot;
 }) {
-  const { worktreePath, healthGatePolicies } = input;
-  return createCheckRegistry({
+  const { worktreePath, healthGatePolicies, workflowDefinitionSnapshot } = input;
+  const registry = createCheckRegistry({
     'proposal-complete': () => Promise.resolve(new ProposalCompleteCheck()),
     'specs-complete': () => Promise.resolve(new SpecsCompleteCheck()),
     'design-complete': () => Promise.resolve(new DesignCompleteCheck()),
@@ -152,6 +155,21 @@ export function createDefaultCheckRegistry(input: {
     'build-test': (_ctx) => Promise.resolve(new BuildTestCheck({ worktreePath })),
     'integration-health-gate-preview': () => Promise.resolve(new IntegrationHealthGatePreviewCheck()),
   });
+  for (const stage of workflowDefinitionSnapshot?.compiledStageDefinitions ?? []) {
+    for (const check of stage.checks) {
+      if (check.uses === 'mohist/shell' && typeof check.with?.command === 'string') {
+        registry.register(check.name, () => Promise.resolve(new ShellCommandCheck(check.name, {
+          command: check.with!.command as string,
+          timeout: typeof check.with!.timeout === 'number' ? check.with!.timeout as number : undefined,
+          cwd: typeof check.with!.cwd === 'string' ? check.with!.cwd as string : undefined,
+        })));
+      }
+      if (check.uses === 'mohist/artifact-exists' && typeof check.with?.path === 'string') {
+        registry.register(check.name, () => Promise.resolve(new ArtifactExistsCheck(check.name, check.with!.path as string)));
+      }
+    }
+  }
+  return registry;
 }
 
 export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {
@@ -1172,7 +1190,15 @@ export class AgentRunnerService {
 
     if (this.workflowRunService) {
       try {
-        this.workflowRunService.startRun(issue.id, issue.number, 'start-pipeline');
+        const resolvedWorkflow = resolveWorkflowDefinition(worktreePath);
+        const diagnostics = validateWorkflowDefinition(resolvedWorkflow);
+        const blockingDiagnostics = diagnostics.filter(diagnostic => diagnostic.severity === 'error');
+        if (blockingDiagnostics.length > 0) {
+          const message = blockingDiagnostics.map(diagnostic => `${diagnostic.path}: ${diagnostic.message}`).join('; ');
+          this.completeTask(task.id, 'failed', `Workflow definition is invalid: ${message}`);
+          return;
+        }
+        this.workflowRunService.startRun(issue.id, issue.number, 'start-pipeline', resolvedWorkflow.snapshot);
         log.info('WorkflowRun started for issue', { issueNumber: issue.number });
       } catch (err) {
         log.warn('Failed to start WorkflowRun', { issueNumber: issue.number, error: err instanceof Error ? err.message : String(err) });
@@ -1342,7 +1368,9 @@ export class AgentRunnerService {
         {
           kind: 'static',
           load: (ctx) => {
-            const definition = DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === ctx.issue.stage);
+            const definition = ctx.workflowRun?.workflowDefinition
+              ? (ctx.workflowRun.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot).compiledStageDefinitions.find(candidate => candidate.stage === ctx.issue.stage)
+              : DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === ctx.issue.stage);
             if (!definition) return [];
             const allowedTaskIds = new Set(
               definition.workSources
@@ -1360,6 +1388,8 @@ export class AgentRunnerService {
               .map(task => ({
                 taskId: task.id,
                 title: task.title,
+                prompt: resolveWorkflowTaskPrompt(task.with, worktreePath),
+                input: task.with,
                 kind: toTaskKind(definition.taskExecutionPolicies?.find(policy => policy.taskId === task.id)?.kind ?? 'agent-session'),
               }));
           },
@@ -1372,13 +1402,20 @@ export class AgentRunnerService {
         ? DEFAULT_HEALTH_GATE_POLICIES
         : loadHealthGatePolicies(workflowConfig);
 
-      const checkRegistry = createDefaultCheckRegistry({ worktreePath, healthGatePolicies });
+      const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
+      const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
+      const checkRegistry = createDefaultCheckRegistry({ worktreePath, healthGatePolicies, workflowDefinitionSnapshot });
 
       const unifiedRunner = new ConfigDrivenStageRunner({
         taskLoaderRegistry,
         taskHandlerRegistry,
         checkRegistry,
-        getStageDefinition: (stage) => DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage),
+        getStageDefinition: (stage) => {
+          const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
+          const snapshot = activeRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
+          return snapshot?.compiledStageDefinitions.find(d => d.stage === stage)
+            ?? DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage);
+        },
         worktreePath,
         enabledStages: configDrivenStagesFromEnv(),
       });
@@ -1888,5 +1925,26 @@ export class AgentRunnerService {
       recoverableIssues: this.recoverableIssues,
       blockedIssues: this.getBlockedIssues(),
     };
+  }
+}
+
+function resolveWorkflowTaskPrompt(input: Record<string, unknown> | undefined, worktreePath: string): string | undefined {
+  if (!input) return undefined;
+  if (typeof input.prompt === 'string') return input.prompt;
+  if (typeof input.promptFile !== 'string') return undefined;
+
+  const promptPath = path.resolve(worktreePath, input.promptFile);
+  if (!promptPath.startsWith(path.resolve(worktreePath) + path.sep)) {
+    log.warn('Ignoring workflow promptFile outside worktree', { promptFile: input.promptFile });
+    return undefined;
+  }
+  try {
+    return fs.readFileSync(promptPath, 'utf-8');
+  } catch (err) {
+    log.warn('Failed to read workflow promptFile', {
+      promptFile: input.promptFile,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
   }
 }

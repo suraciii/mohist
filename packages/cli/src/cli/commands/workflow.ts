@@ -8,7 +8,7 @@ import {
   type ResolvedWorkflowDefinition,
   type WorkflowDiagnostic,
 } from '../../workflow/workflow-inspector';
-import { getWorkflowUseDefinition } from '../../workflow/uses-catalog';
+import { inferWorkflowCheckUse, inferWorkflowTaskUse } from '../../workflow/uses-catalog';
 
 export interface CliOutput {
   write(line?: string): void;
@@ -66,7 +66,8 @@ export function setupWorkflowCommands(program: Command, output: CliOutput = defa
 
 export function renderWorkflowShow(resolved: ResolvedWorkflowDefinition, output: CliOutput = defaultOutput): void {
   const source = resolved.sourceChain.join(' + ');
-  output.write(chalk.bold(`Workflow: ${source}`));
+  output.write(chalk.bold(`Workflow: ${resolved.snapshot.workflowId}`));
+  output.write(`Source: ${source}`);
   output.write();
 
   for (const stage of resolved.snapshot.compiledStageDefinitions) {
@@ -74,10 +75,10 @@ export function renderWorkflowShow(resolved: ResolvedWorkflowDefinition, output:
     for (const task of stage.tasks) {
       const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
         ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-      output.write(`  Task   ${task.id.padEnd(28)} uses: ${inferTaskUses(task.id, policy?.kind).padEnd(18)} source: ${task.source ?? 'builtin'}`);
+      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(task.uses ?? inferWorkflowTaskUse(task.id, policy?.kind)).padEnd(18)} source: ${task.source ?? 'builtin'}`);
     }
     for (const check of stage.checks) {
-      output.write(`  Check  ${check.name.padEnd(28)} uses: ${(check.uses ?? inferCheckUses(check.name)).padEnd(18)} source: ${check.source ?? 'builtin'}`);
+      output.write(`  Check  ${check.name.padEnd(28)} uses: ${(check.uses ?? inferWorkflowCheckUse(check.name)).padEnd(18)} source: ${check.source ?? 'builtin'}`);
     }
     const approvalCheck = stage.approvalPolicy?.checkName ?? stage.approvalCheckName;
     if (approvalCheck) {
@@ -122,20 +123,4 @@ export function renderWorkflowExplanation(item: ExplainedWorkflowItem, output: C
       output.write(`Reaction: ${item.reaction.fixTaskId} (${item.reaction.maxAttempts} attempt${item.reaction.maxAttempts === 1 ? '' : 's'})`);
     }
   }
-}
-
-function inferCheckUses(checkName: string): string {
-  if (checkName.startsWith('health:')) return 'mohist/health-gate';
-  if (checkName === 'review-passed' || checkName === 'self-review-passed') return 'mohist/verdict';
-  if (checkName === 'merge-ready') return 'mohist/merge-ready';
-  return 'mohist/artifact-exists';
-}
-
-function inferTaskUses(taskId: string, executionKind?: string): string {
-  if (taskId === 'integrate:spec-sync') return 'mohist/openspec-sync';
-  if (taskId === 'integrate:archive-change') return 'mohist/archive-change';
-  if (taskId === 'integrate:merge') return 'mohist/merge';
-  if (taskId === 'rebase-branch') return 'mohist/rebase';
-  if (executionKind === 'ralph-task') return 'mohist/ralph-tasks';
-  return getWorkflowUseDefinition('mohist/agent')?.name ?? 'mohist/agent';
 }

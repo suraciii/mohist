@@ -80,6 +80,18 @@ export function resolveWorkflowDefinition(cwd: string = process.cwd()): Resolved
     };
   }
 
+  if (isFullCustomWorkflowDocument(parsed.document)) {
+    const compiled = compileFullCustomWorkflow(parsed.document, overridePath);
+    return {
+      snapshot: createWorkflowDefinitionSnapshot({
+        definition: compiled.definition,
+        source: { type: 'project', path: overridePath },
+      }),
+      sourceChain: [overridePath],
+      diagnostics: [...parsed.diagnostics, ...compiled.diagnostics],
+    };
+  }
+
   const definition = cloneWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
   const diagnostics = applyWorkflowOverride(definition, parsed.document, overridePath);
   return {
@@ -90,6 +102,204 @@ export function resolveWorkflowDefinition(cwd: string = process.cwd()): Resolved
     sourceChain: ['mohist/default', overridePath],
     diagnostics: [...parsed.diagnostics, ...diagnostics],
   };
+}
+
+function isFullCustomWorkflowDocument(document: WorkflowOverrideDocument): boolean {
+  return isRecord(document.workflow) && Array.isArray(document.workflow.stages);
+}
+
+function compileFullCustomWorkflow(
+  document: WorkflowOverrideDocument,
+  filePath: string,
+): { definition: WorkflowDefinition; diagnostics: WorkflowDiagnostic[] } {
+  const diagnostics: WorkflowDiagnostic[] = [];
+  const workflow = isRecord(document.workflow) ? document.workflow : {};
+  const id = typeof workflow.id === 'string' && workflow.id.trim().length > 0
+    ? workflow.id
+    : 'project/custom';
+  const name = typeof workflow.name === 'string' ? workflow.name : undefined;
+  const rawStages = Array.isArray(workflow.stages) ? workflow.stages : [];
+  const stages: StageDefinition[] = [];
+
+  for (const [stageIndex, rawStage] of rawStages.entries()) {
+    const stagePath = `${filePath}:workflow.stages[${stageIndex}]`;
+    if (!isRecord(rawStage)) {
+      diagnostics.push({ severity: 'error', path: stagePath, message: 'stage must be a mapping' });
+      continue;
+    }
+
+    const stage = parseStageId(rawStage.id ?? rawStage.stage);
+    if (!stage) {
+      diagnostics.push({
+        severity: 'error',
+        path: `${stagePath}.id`,
+        message: 'stage id must be one of plan, build, check, integrate',
+      });
+      continue;
+    }
+
+    const tasks = compileCustomTasks(rawStage.tasks, stagePath, diagnostics);
+    const checks = compileCustomChecks(rawStage.checks, stagePath, diagnostics);
+    const repairPolicies = compileCustomReactions(rawStage.reactions, stagePath, diagnostics);
+    const approval = rawStage.approval === true;
+
+    stages.push({
+      stage,
+      tasks,
+      checks,
+      requiresApproval: approval || undefined,
+      approvalCheckName: approval ? 'user-approval' : undefined,
+      workSources: tasks.length > 0 ? [{ kind: 'static', taskIds: tasks.map(task => task.id) }] : [{ kind: 'static', taskIds: [] }],
+      taskExecutionPolicies: [
+        ...tasks.map(task => ({
+          taskId: task.id,
+          kind: task.uses === 'mohist/ralph-tasks' ? 'ralph-task' as const : 'agent-session' as const,
+          agentSessionRef: task.with && typeof task.with.session === 'string' ? task.with.session : undefined,
+        })),
+        { taskId: 'rebase-branch', kind: 'rebase-task' as const, workSourceKind: 'runtime' as const },
+        ...repairPolicies.map(policy => ({
+          taskId: policy.fixTaskId,
+          kind: 'repair-task' as const,
+          workSourceKind: 'runtime' as const,
+        })),
+      ],
+      checkPolicies: checks.map(check => ({ checkName: check.name, phase: 'post-task' as const })),
+      approvalPolicy: approval ? { checkName: 'user-approval' } : undefined,
+      repairPolicies,
+      checkFailurePolicies: repairPolicies.map(policy => ({ ...policy })),
+      invalidationPolicy: { entries: [] },
+    });
+  }
+
+  return {
+    definition: { id, name, stages },
+    diagnostics,
+  };
+}
+
+function compileCustomTasks(
+  rawTasks: unknown,
+  stagePath: string,
+  diagnostics: WorkflowDiagnostic[],
+): TaskDefinition[] {
+  if (rawTasks === undefined) return [];
+  if (!Array.isArray(rawTasks)) {
+    diagnostics.push({ severity: 'error', path: `${stagePath}.tasks`, message: 'tasks must be a list' });
+    return [];
+  }
+
+  const tasks: TaskDefinition[] = [];
+  for (const [taskIndex, rawTask] of rawTasks.entries()) {
+    const taskPath = `${stagePath}.tasks[${taskIndex}]`;
+    if (!isRecord(rawTask) || typeof rawTask.id !== 'string' || typeof rawTask.uses !== 'string') {
+      diagnostics.push({ severity: 'error', path: taskPath, message: 'task requires id and uses' });
+      continue;
+    }
+    if (!isWorkflowUseAllowed(rawTask.uses, 'task')) {
+      diagnostics.push({ severity: 'error', path: `${taskPath}.uses`, message: `Use '${rawTask.uses}' is not allowed as a task` });
+      continue;
+    }
+    if (rawTask.uses !== 'mohist/agent' && rawTask.uses !== 'mohist/ralph-tasks') {
+      diagnostics.push({ severity: 'error', path: `${taskPath}.uses`, message: `Use '${rawTask.uses}' is not supported for full custom task execution in v1` });
+      continue;
+    }
+    const task: TaskDefinition = {
+      id: rawTask.id,
+      title: typeof rawTask.title === 'string' ? rawTask.title : rawTask.id,
+      source: 'project',
+      uses: rawTask.uses,
+      with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
+      dependsOn: arrayValue(rawTask.needs).filter((value): value is string => typeof value === 'string'),
+    };
+    if (task.uses === 'mohist/agent' && (!task.with || (typeof task.with.prompt !== 'string' && typeof task.with.promptFile !== 'string'))) {
+      diagnostics.push({
+        severity: 'error',
+        path: `${taskPath}.with.prompt`,
+        message: `Agent task '${task.id}' requires with.prompt or with.promptFile`,
+      });
+    }
+    tasks.push(task);
+  }
+  return tasks;
+}
+
+function compileCustomChecks(
+  rawChecks: unknown,
+  stagePath: string,
+  diagnostics: WorkflowDiagnostic[],
+): CheckDefinition[] {
+  if (rawChecks === undefined) return [];
+  if (!Array.isArray(rawChecks)) {
+    diagnostics.push({ severity: 'error', path: `${stagePath}.checks`, message: 'checks must be a list' });
+    return [];
+  }
+
+  const checks: CheckDefinition[] = [];
+  for (const [checkIndex, rawCheck] of rawChecks.entries()) {
+    const checkPath = `${stagePath}.checks[${checkIndex}]`;
+    if (!isRecord(rawCheck) || typeof rawCheck.id !== 'string' || typeof rawCheck.uses !== 'string') {
+      diagnostics.push({ severity: 'error', path: checkPath, message: 'check requires id and uses' });
+      continue;
+    }
+    if (!isWorkflowUseAllowed(rawCheck.uses, 'check')) {
+      diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${rawCheck.uses}' is not allowed as a check` });
+      continue;
+    }
+    if (rawCheck.uses === 'mohist/shell' && (!isRecord(rawCheck.with) || typeof rawCheck.with.command !== 'string')) {
+      diagnostics.push({ severity: 'error', path: `${checkPath}.with.command`, message: `Shell check '${rawCheck.id}' requires with.command` });
+    }
+    if (rawCheck.uses === 'mohist/artifact-exists' && (!isRecord(rawCheck.with) || typeof rawCheck.with.path !== 'string')) {
+      diagnostics.push({ severity: 'error', path: `${checkPath}.with.path`, message: `Artifact check '${rawCheck.id}' requires with.path` });
+    }
+    checks.push({
+      name: rawCheck.id,
+      title: typeof rawCheck.title === 'string' ? rawCheck.title : rawCheck.id,
+      source: 'project',
+      uses: rawCheck.uses,
+      with: isRecord(rawCheck.with) ? { ...rawCheck.with } : undefined,
+    });
+  }
+  return checks;
+}
+
+function compileCustomReactions(
+  rawReactions: unknown,
+  stagePath: string,
+  diagnostics: WorkflowDiagnostic[],
+): CheckFailurePolicy[] {
+  if (rawReactions === undefined) return [];
+  if (!Array.isArray(rawReactions)) {
+    diagnostics.push({ severity: 'error', path: `${stagePath}.reactions`, message: 'reactions must be a list' });
+    return [];
+  }
+
+  const policies: CheckFailurePolicy[] = [];
+  for (const [reactionIndex, rawReaction] of rawReactions.entries()) {
+    const reactionPath = `${stagePath}.reactions[${reactionIndex}]`;
+    if (!isRecord(rawReaction) || typeof rawReaction.onCheckFailure !== 'string' || !isRecord(rawReaction.repair)) {
+      diagnostics.push({ severity: 'error', path: reactionPath, message: 'reaction requires onCheckFailure and repair' });
+      continue;
+    }
+    const repair = rawReaction.repair;
+    if (typeof repair.task !== 'string') {
+      diagnostics.push({ severity: 'error', path: `${reactionPath}.repair.task`, message: 'repair.task is required' });
+      continue;
+    }
+    policies.push({
+      checkName: rawReaction.onCheckFailure,
+      fixTaskId: repair.task,
+      fixTaskTitle: typeof repair.title === 'string' ? repair.title : repair.task,
+      maxAttempts: typeof repair.maxAttempts === 'number' ? repair.maxAttempts : 1,
+    });
+  }
+  return policies;
+}
+
+function parseStageId(value: unknown): Stage | null {
+  if (value === Stage.Plan || value === Stage.Build || value === Stage.Check || value === Stage.Integrate) {
+    return value;
+  }
+  return null;
 }
 
 function resolveBuiltinDefault(): ResolvedWorkflowDefinition {
@@ -348,6 +558,7 @@ function applyCheckOverride(
 export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition = resolveWorkflowDefinition()): WorkflowDiagnostic[] {
   const diagnostics: WorkflowDiagnostic[] = [...resolved.diagnostics];
   const seenStages = new Set<Stage>();
+  const isFullCustomWorkflow = resolved.sourceChain[0] !== 'mohist/default';
 
   for (const [stageIndex, stage] of resolved.snapshot.compiledStageDefinitions.entries()) {
     const stagePath = `stages[${stageIndex}]`;
@@ -365,6 +576,21 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
     for (const [taskIndex, task] of stage.tasks.entries()) {
       if (!task.id.trim()) {
         diagnostics.push({ severity: 'error', path: `${stagePath}.tasks[${taskIndex}].id`, message: 'Task id is required' });
+      }
+      const uses = task.uses ?? inferTaskUseForStage(stage, task.id);
+      if (!isWorkflowUseAllowed(uses, 'task')) {
+        diagnostics.push({
+          severity: 'error',
+          path: `${stagePath}.tasks[${taskIndex}].uses`,
+          message: `Use '${uses}' is not allowed as a task`,
+        });
+      }
+      if (uses === 'mohist/agent' && task.source === 'project' && (!task.with || (typeof task.with.prompt !== 'string' && typeof task.with.promptFile !== 'string'))) {
+        diagnostics.push({
+          severity: 'error',
+          path: `${stagePath}.tasks[${taskIndex}].with.prompt`,
+          message: `Agent task '${task.id}' requires with.prompt or with.promptFile`,
+        });
       }
       for (const dependency of task.dependsOn ?? []) {
         if (!taskIds.has(dependency)) {
@@ -406,6 +632,23 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
         diagnostics.push({ severity: 'error', path: `${stagePath}.repairPolicies`, message: `Repair policy references unknown check '${repair.checkName}'` });
       }
     }
+
+    if (isFullCustomWorkflow && stage.stage === Stage.Check && isProjectDefinedStage(stage) && !hasDefaultCheckEvidenceShape(stage)) {
+      diagnostics.push({
+        severity: 'error',
+        path: stagePath,
+        message: 'Custom Check stage v1 must include ai-review, health:check, review-passed, and merge-ready until Check evidence guards are generalized',
+        suggestion: 'Keep the default Check stage through extends: mohist/default, or include the default check evidence items.',
+      });
+    }
+    if (isFullCustomWorkflow && stage.stage === Stage.Integrate && isProjectDefinedStage(stage) && !hasDefaultIntegrateEvidenceShape(stage)) {
+      diagnostics.push({
+        severity: 'error',
+        path: stagePath,
+        message: 'Custom Integrate stage v1 must include integrate:spec-sync, integrate:archive-change, integrate:merge, and health:integrate until delivery guards are generalized',
+        suggestion: 'Keep the default Integrate stage through extends: mohist/default, or include the default delivery items.',
+      });
+    }
   }
 
   return diagnostics;
@@ -428,7 +671,7 @@ export function explainWorkflowItem(
 function explainTask(stage: StageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
   const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
     ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-  const uses = inferWorkflowTaskUse(task.id, policy?.kind);
+  const uses = task.uses ?? inferWorkflowTaskUse(task.id, policy?.kind);
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'task',
@@ -471,6 +714,34 @@ function findCheck(definition: WorkflowDefinition, checkName: string): { stage: 
     if (check) return { stage, check };
   }
   return null;
+}
+
+function inferTaskUseForStage(stage: StageDefinition, taskId: string): string {
+  const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
+    ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
+  return inferWorkflowTaskUse(taskId, policy?.kind);
+}
+
+function hasDefaultCheckEvidenceShape(stage: StageDefinition): boolean {
+  const taskIds = new Set(stage.tasks.map(task => task.id));
+  const checkNames = new Set(stage.checks.map(check => check.name));
+  return taskIds.has('ai-review')
+    && checkNames.has('health:check')
+    && checkNames.has('review-passed')
+    && checkNames.has('merge-ready');
+}
+
+function hasDefaultIntegrateEvidenceShape(stage: StageDefinition): boolean {
+  const taskIds = new Set(stage.tasks.map(task => task.id));
+  const checkNames = new Set(stage.checks.map(check => check.name));
+  return taskIds.has('integrate:spec-sync')
+    && taskIds.has('integrate:archive-change')
+    && taskIds.has('integrate:merge')
+    && checkNames.has('health:integrate');
+}
+
+function isProjectDefinedStage(stage: StageDefinition): boolean {
+  return stage.tasks.some(task => task.source === 'project') || stage.checks.some(check => check.source === 'project');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

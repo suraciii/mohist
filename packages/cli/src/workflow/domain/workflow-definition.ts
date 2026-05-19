@@ -14,6 +14,7 @@ import type {
 function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
   return {
     ...task,
+    with: task.with ? { ...task.with } : undefined,
     dependsOn: task.dependsOn ? [...task.dependsOn] : undefined,
   };
 }

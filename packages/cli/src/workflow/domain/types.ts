@@ -44,6 +44,8 @@ export interface TaskDefinition {
   id: string;
   title: string;
   source?: 'builtin' | 'project';
+  uses?: string;
+  with?: Record<string, unknown>;
   dependsOn?: string[];
   resultContract?: ResultContract;
   selfRepairPolicy?: SelfRepairPolicy;

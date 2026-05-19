@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Command } from 'commander';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 vi.mock('../src/cli/api-client', () => ({ apiClient: vi.fn() }));
 vi.mock('../src/cli/server-check', () => ({ requireServer: vi.fn().mockResolvedValue(undefined) }));
 
@@ -332,6 +335,50 @@ describe('CLI Commands', () => {
       expect(output).toContain('Check: merge-ready');
       expect(output).toContain('Uses: mohist/merge-ready');
       expect(output).toContain('Blocking: yes');
+    });
+
+    it('workflow commands inspect a full custom workflow definition', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-cli-workflow-custom-'));
+      fs.mkdirSync(path.join(tempDir, '.mohist'));
+      fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/custom-cli
+  stages:
+    - id: plan
+      tasks:
+        - id: design
+          uses: mohist/agent
+          with:
+            prompt: Write design.
+      checks:
+        - id: design-file
+          uses: mohist/artifact-exists
+          with:
+            path: design.md
+`, 'utf-8');
+      const cwd = process.cwd();
+      const lines: string[] = [];
+      const program = new Command();
+      setupWorkflowCommands(program, { write: line => lines.push(line ?? ''), error: line => lines.push(line) });
+
+      try {
+        process.chdir(tempDir);
+        await program.parseAsync(['node', 'test', 'workflow', 'validate']);
+        await program.parseAsync(['node', 'test', 'workflow', 'show']);
+        await program.parseAsync(['node', 'test', 'workflow', 'explain', 'design']);
+      } finally {
+        process.chdir(cwd);
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+
+      const output = lines.join('\n');
+      expect(output).toContain('Workflow is valid');
+      expect(output).toContain('Workflow:');
+      expect(output).toContain('project/custom-cli');
+      expect(output).toContain('Task   design');
+      expect(output).toContain('source: project');
+      expect(output).toContain('Check  design-file');
+      expect(output).toContain('Uses: mohist/agent');
     });
   });
   

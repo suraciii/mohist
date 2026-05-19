@@ -99,6 +99,39 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(snapshot.stageRuns[1].tasks.map(task => task.id)).toEqual(['T-001']);
   });
 
+  it('starts a persisted aggregate from a supplied workflow definition snapshot', () => {
+    const workflowDefinition: WorkflowDefinition = {
+      id: 'project/custom-start',
+      stages: [
+        {
+          stage: Stage.Plan,
+          tasks: [{ id: 'design', title: 'Design', source: 'project', uses: 'mohist/agent', with: { prompt: 'Design this' } }],
+          checks: [{ name: 'design-file', title: 'Design file', source: 'project', uses: 'mohist/artifact-exists', with: { path: 'design.md' } }],
+          requiresApproval: false,
+        },
+        {
+          stage: Stage.Build,
+          tasks: [{ id: 'implement', title: 'Implement', source: 'project', uses: 'mohist/agent', with: { prompt: 'Implement this' } }],
+          checks: [],
+        },
+      ],
+    };
+    const workflowDefinitionSnapshot = createWorkflowDefinitionSnapshot({
+      definition: workflowDefinition,
+      source: { type: 'project', path: '.mohist/workflow.yaml' },
+      capturedAt: '2026-05-19T01:00:00.000Z',
+    });
+
+    const run = repo.createOrLoadActiveAggregate({ issueId, issueNumber, workflowDefinitionSnapshot });
+    const snapshot = run.snapshot();
+
+    expect(snapshot.workflowDefinitionSnapshot.workflowId).toBe('project/custom-start');
+    expect(snapshot.workflowDefinitionSnapshot.source).toEqual({ type: 'project', path: '.mohist/workflow.yaml' });
+    expect(snapshot.stageOrder).toEqual([Stage.Plan, Stage.Build]);
+    expect(snapshot.stageRuns[0].tasks.map(task => task.id)).toEqual(['design']);
+    expect(snapshot.stageRuns[0].checks.map(check => check.name)).toEqual(['design-file']);
+  });
+
   it('loads an aggregate snapshot with ordered stages, tasks, checks, approval, and delivery metadata', () => {
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_snapshot', issueId, issueNumber });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
