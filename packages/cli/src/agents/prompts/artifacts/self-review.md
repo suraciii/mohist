@@ -36,13 +36,49 @@ If all pass, do nothing.
 
 ## Output Format
 
-You MUST include exactly one of these tags in your self-review.md:
+Produce self-review.md with the following structured format. Every reported item MUST include `ID`, `Severity`, `Evidence`, and `Status`. Include `SuggestedAction` for all blocking items. Include `Scope` where applicable.
+
+```
+# Self Review Report
+
+## Result: PASS / FAIL
+
+## Repaired Items
+(Items you fixed directly. Omit section if none.)
+
+- [ID: item-N]
+  Severity: info
+  Scope: alignment | completeness | consistency | feasibility | dependencies
+  Evidence: What was wrong and what was changed
+  Verification: How the fix was verified
+  Status: resolved
+
+## Blocking Items
+(Items that prevent PASS and were not repaired. Omit section if none.)
+
+- [ID: item-N]
+  Severity: blocking
+  Scope: alignment | completeness | consistency | feasibility | dependencies
+  Evidence: What is wrong
+  SuggestedAction: What should be done
+  Status: open | unresolved
+
+## Follow-up Items
+(Non-blocking suggestions for improvement. Omit section if none.)
+
+- [ID: item-N]
+  Severity: follow-up
+  Scope: alignment | completeness | consistency | feasibility | dependencies
+  Evidence: Description
+  SuggestedAction: Suggested improvement
+  Status: follow-up
+```
+
+## Verdict Marker
+
+You MUST include exactly one of these tags on its own line at the end of self-review.md:
 
 - If all checks pass: `<promise>PASS</promise>`
 - If any check fails: `<promise>FAIL</promise>`
 
-Place the tag on its own line at the end of self-review.md. Example:
-
-```
-<promise>PASS</promise>
-```
+Do NOT include more than one marker. Do NOT include markers in code examples, explanations, or quoted text. The marker must be the final machine-readable verdict.

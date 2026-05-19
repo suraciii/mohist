@@ -1,0 +1,303 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Persist generic structured workflow results",
+      "spec": "specs/workflow-structured-results/spec.md#REQ-WSR-001",
+      "description": "Add generic workflow result types and persistence for task outputs, check outputs, reaction outputs, and stage-state projections. The stored shape must support verdicts, markers, workflow items, evidence, repaired item IDs, snapshots, verification, facts, and reaction attempted/resolved/unresolved item IDs without introducing review-specific core entities.",
+      "acceptanceCriteria": [
+        "Task output state can store and read generic items, verdict, marker, evidence, repairedItemIds, snapshot, verification, summary, and facts",
+        "Check output state can store and read generic verdict, items, evidence, and message without review-specific database or TypeScript entities",
+        "Reaction task output can store and read attemptedItemIds, resolvedItemIds, unresolvedItemIds, and newItemIds",
+        "Existing execution history and older task/check output records remain readable when structured result fields are absent",
+        "Relevant persistence or service tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/types; packages/cli/src/services/stage-state-service.ts; packages/cli/src/db",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep the model generic. Do not add ReviewFinding, ReviewSnapshot, or review-specific storage tables.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        609129
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Implement declared verdict result contracts",
+      "spec": "specs/workflow-structured-results/spec.md#REQ-WSR-002",
+      "description": "Add reusable result contract definitions and a strict parser for promise-marker judgment outputs. Parsing must read only the declared output source, require exactly one allowed marker, normalize PASS/FAIL plus structured items from the same source, and return typed errors for missing, duplicate, malformed, or unavailable output.",
+      "acceptanceCriteria": [
+        "A declared artifact source containing exactly one <promise>PASS</promise> parses to verdict PASS and returns the same marker",
+        "A declared artifact source containing exactly one <promise>FAIL</promise> parses to verdict FAIL and returns the same marker",
+        "Missing, duplicate, malformed, and source-missing markers produce clear typed parser errors rather than implicit PASS or FAIL",
+        "Markers in logs, transcripts, or unrelated artifacts are ignored when they are not the declared output source",
+        "Structured items and evidence are parsed from the same declared output envelope as the verdict marker",
+        "Parser unit tests cover PASS, FAIL, missing, duplicate, malformed, source binding, and item extraction cases",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/utils.ts; packages/cli/src/workflow/result-contracts.ts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Prefer replacing loose verdict helpers with a shared contract while preserving existing callers until they migrate.",
+      "attempts": 2,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        458196
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Use shared contracts in judgment checks",
+      "spec": "specs/workflow-structured-results/spec.md#REQ-WSR-002",
+      "description": "Wire review, self-review, and other built-in AI judgment checks to declared result contracts and the shared parser. Checks must remain read-only validators that derive pass/fail from the parsed marker and item policy, surfacing malformed output as check errors instead of interpreting prose.",
+      "acceptanceCriteria": [
+        "Review and self-review task definitions declare promise-marker result contracts with explicit output sources",
+        "review-passed derives PASS/FAIL from the shared parser result and never from natural-language report prose",
+        "self-review or plan-quality checks use the same parser and error handling path as review",
+        "Malformed or missing declared markers block with a clear check error message and do not become implicit FAIL findings",
+        "Checks validate structured blocking item policy while remaining read-only and not starting agents or modifying files",
+        "Regression tests prove review and self-review share parser behavior for PASS, FAIL, and malformed outputs",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/checks; packages/cli/src/workflow/task-runtime; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-002"
+      ],
+      "passes": true,
+      "notes": "This task consumes the generic structured result model and parser from T-001/T-002.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        540873
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Enable bounded in-session review repair",
+      "spec": "specs/workflow-structured-results/spec.md#REQ-WSR-003",
+      "description": "Add task-level selfRepairPolicy support and update the built-in review task to perform only safe, local, low-risk repairs before producing its final output. The final structured result must reflect the post-repair candidate snapshot, record repaired item IDs, changed evidence, verification commands/results, and leave unsafe or ambiguous items visible instead of silently fixing them.",
+      "acceptanceCriteria": [
+        "Task definitions can express selfRepairPolicy boundaries, allowed scopes, max attempts, verification requirements, and disallowed reasons",
+        "Built-in review prompt or adapter allows only bounded safe local repairs and reports broad, ambiguous, product-affecting, security/data-risk, or out-of-scope issues as unresolved or follow-up items",
+        "When review repairs an item, the final structured output records repairedItemIds, changed evidence, and verification results",
+        "When review changes the candidate, the final verdict is based on the post-repair snapshot and unresolved blocking items remain visible",
+        "Review cannot produce PASS after an unverified repair that still needs evidence",
+        "Tests or prompt fixture assertions cover safe repair recording and unsafe item reporting",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/task-runtime; packages/cli/src/agents/prompts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": true,
+      "notes": "Self-repair is a task capability. Do not move repair behavior into checks.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        538383
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Produce comprehensive structured review output",
+      "spec": "specs/workflow-structured-results/spec.md#REQ-WSR-004",
+      "description": "Update built-in review and self-review prompts to emit the generic structured result contract with exactly one verdict marker. The review task must continue after the first blocker, inspect acceptance criteria and affected adjacent paths, and separate directly repaired items, blocking current-change items, non-blocking follow-ups, and pre-existing or out-of-scope items.",
+      "acceptanceCriteria": [
+        "Review prompt requires a comprehensive pass and explicitly instructs the agent not to stop after the first blocking item",
+        "Review output contract includes exactly one promise marker plus structured item groups for repaired, blocking, follow-up, and pre-existing or out-of-scope items",
+        "Self-review output uses the same generic structured verdict contract and marker requirement",
+        "Review prompt requires evidence, suggestedAction, verification guidance, stable item IDs, and item status or severity for each reported item",
+        "Follow-up or out-of-scope items are emitted as visible non-blocking items by default",
+        "Prompt tests or snapshots prove required structured sections and marker constraints are present",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/agents/prompts; packages/cli/src/agents/prompts/artifacts",
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Keep review as a built-in implementation using generic workflow items, not a core workflow domain model.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        456546
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Pass structured failed context to reactions",
+      "spec": "specs/workflow-run/spec.md#REQ-WR-001",
+      "description": "Extend reaction definitions and stage-runner failure handling so a failed check can pass explicit structured context into a configured reaction task. The built-in fix-review-findings task must receive the full relevant blocking item batch, source artifact references, snapshot metadata, and prior task outputs instead of scraping unstructured review prose.",
+      "acceptanceCriteria": [
+        "Reaction definitions support inputFrom selectors for failed check output, selected task outputs, artifacts, and structured item batches",
+        "FailedCheckContext includes check identity, parsed verdict, blocking items, non-blocking items, source artifact references, snapshot metadata, and relevant prior task outputs",
+        "fix-review-findings receives the full blocking current-change item batch in structured input",
+        "Reaction prompts do not scrape unstructured review text as the source of item identity or blocking status",
+        "Check execution remains read-only and schedules repair only through configured reaction control flow",
+        "Tests prove multiple blocking items from one failed review are passed together to the reaction task",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow; packages/cli/src/agents/prompts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "This task relies on structured outputs from prior tasks so reaction input is bounded and source-aware.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        666127
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Track reaction convergence and verification rechecks",
+      "spec": "specs/workflow-engine/spec.md#REQ-WE-001",
+      "description": "Record reaction attempted, resolved, unresolved, and newly observed item IDs, then rerun the configured task/check path in verification mode after repair. The built-in review workflow must verify known item resolution first and only allow policy-approved new blockers to keep the stage blocked.",
+      "acceptanceCriteria": [
+        "Reaction task outputs persist attemptedItemIds, resolvedItemIds, unresolvedItemIds, evidence, and newItemIds when present",
+        "After a successful reaction task, the stage runner reruns the configured review task/check path in verification mode",
+        "Verification mode receives known item IDs and expected repairs before evaluating policy-allowed new blockers",
+        "Unresolved known blockers or policy-allowed new blockers keep the stage blocked with structured evidence",
+        "Resolved known items no longer block when the verification task/check output confirms resolution",
+        "Non-blocking follow-up and out-of-scope items remain visible without blocking by default",
+        "Regression tests cover fail -> reaction batch -> verification recheck -> pass and fail -> reaction batch -> unresolved blocker paths",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/workflow/check-stage-runner.ts; packages/cli/src/workflow/base-stage-runner.ts; packages/cli/tests/workflow",
+      "dependsOn": [
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "A reaction task cannot directly mutate a failed check into pass; pass requires the configured recheck evidence.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        756379
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Expose generic convergence state through APIs",
+      "spec": "specs/pipeline-model/spec.md#REQ-PM-STRUCTURED-001",
+      "description": "Project structured task, check, and reaction outputs into a generic WorkflowConvergenceState on stage-state and issue APIs. The response must show failed check, blocking item count, direct repairs, reaction attempts, resolved/unresolved counts, blocked reason, and non-blocking items without exposing review-specific lifecycle primitives.",
+      "acceptanceCriteria": [
+        "Stage-state output includes failedCheck, blockingItemCount, directlyRepairedCount, reactionAttempts, attemptedItemIds, resolvedItemIds, unresolvedItemIds, newBlockingItemIds, nonBlockingItemIds, and blockedReason",
+        "Issue detail API exposes the same generic convergence state for the current stage or active failed check",
+        "Convergence state is computed from authoritative structured task/check/reaction outputs instead of parsing messages or artifacts in API routes",
+        "Existing issue and stage-state consumers continue to receive their current fields when no convergence state is available",
+        "API tests cover blocked review items, direct repairs, reaction attempts, resolved/unresolved IDs, and non-blocking follow-ups",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/src/services/stage-state-service.ts; packages/cli/src/api/issues.ts; packages/cli/tests/api",
+      "dependsOn": [
+        "T-007"
+      ],
+      "passes": true,
+      "notes": "Keep convergence state workflow-oriented. UI labels may say review, but API fields should stay generic.",
+      "attempts": 4,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        1651405
+      ]
+    },
+    {
+      "id": "T-009",
+      "title": "Render workflow convergence in issue UI",
+      "spec": "specs/web-ui/spec.md#REQ-WUI-STRUCTURED-001",
+      "description": "Update the issue detail and pipeline/task progress UI to explain generic workflow convergence state. Users should see the current failed check, blocking item count, directly fixed item count, reaction attempts, resolved and unresolved counts, blocked reason, and non-blocking follow-up items without needing to parse review prose.",
+      "acceptanceCriteria": [
+        "Issue Detail renders current failed check and blocked reason from generic convergence state",
+        "Issue Detail or pipeline progress renders blocking item count, directly repaired count, reaction attempt count, and resolved/unresolved counts",
+        "Non-blocking follow-up or out-of-scope items are visible without being shown as current blockers",
+        "The UI does not introduce review-specific lifecycle concepts as core Mohist primitives",
+        "Frontend tests or component tests cover blocked, partially resolved, fully resolved, and no-convergence-state displays",
+        "Frontend typecheck passes"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/cli/web/src/components; packages/cli/web/src/lib/types.ts; packages/cli/web/src/lib/api.ts",
+      "dependsOn": [
+        "T-008"
+      ],
+      "passes": true,
+      "notes": "Preserve the existing visual language; this is primarily a clarity and trust surface, not a redesign.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        478083
+      ]
+    },
+    {
+      "id": "T-010",
+      "title": "Add end-to-end structured workflow regressions",
+      "spec": "specs/workflow-structured-results/spec.md#REQ-WSR-002",
+      "description": "Add focused regression coverage that exercises the structured failure and convergence contract across parser, persistence, review/self-review checks, reaction batching, verification rechecks, API projection, and UI rendering. The tests should prove the workflow avoids one-finding-at-a-time prose scraping and preserves existing review history and reviewed-snapshot behavior.",
+      "acceptanceCriteria": [
+        "Tests prove malformed, missing, and duplicate promise markers are surfaced as check errors from declared sources only",
+        "Tests prove structured item persistence survives task/check/reaction writes and reads through stage state",
+        "Tests prove review and self-review use the same verdict parser contract",
+        "Tests prove fix-review-findings receives and attempts a full batch of blocking item IDs",
+        "Tests prove verification recheck records resolved and unresolved item IDs and blocks only on unresolved or policy-allowed new blockers",
+        "Tests prove convergence API and UI expose failed check, blocking count, direct repairs, reaction attempts, resolved/unresolved counts, blocked reason, and follow-ups",
+        "Tests prove existing review history behavior and reviewed-snapshot binding remain compatible",
+        "Relevant backend and frontend tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/cli/tests; packages/cli/web/src/components/*.test.tsx",
+      "dependsOn": [
+        "T-009"
+      ],
+      "passes": true,
+      "notes": "Prefer deterministic unit/integration tests with mocked agents over broad LLM end-to-end tests.",
+      "attempts": 1,
+      "order": 999999,
+      "error": null,
+      "durations": [
+        476394
+      ]
+    }
+  ]
+}

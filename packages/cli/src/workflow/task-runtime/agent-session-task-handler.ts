@@ -2,6 +2,7 @@ import type { StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
 import { emitStageTaskUpdate } from '../stage-context';
 import { AgentSession, createWorkflowSessionObservers, type AgentSessionOptions } from '../../agent-runtime';
+import { extractReactionOutput } from '../convergence';
 
 export interface AgentSessionTaskHandlerDeps {
   createSession?: (options: AgentSessionOptions) => Promise<AgentSession>;
@@ -79,6 +80,21 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         artifacts = input.artifactVerification([]);
       }
 
+      const structuredResult = extractReactionOutput({
+        taskId,
+        title,
+        status,
+        artifacts,
+        attempts: attempt,
+        duration,
+        output: {
+          kind: 'agent-session-task',
+          result: {
+            structuredOutput: result.text,
+          },
+        },
+      });
+
       emitStageTaskUpdate(
         ctx.eventBus,
         ctx.issue.id,
@@ -106,6 +122,10 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
           error: result.error,
           acpSessionId: result.acpSessionId,
           agentSessionRef: input.agentSessionRef,
+          result: {
+            ...(structuredResult ?? {}),
+            structuredOutput: result.text,
+          },
           summary: result.success
             ? `${title} completed`
             : `${title} failed: ${result.error ?? 'unknown error'}`,

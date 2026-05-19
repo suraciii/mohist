@@ -1,24 +1,28 @@
 ## Input
 
-A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and `## Fix Suggestions`. Auto-fixes have been applied since.
+A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and structured blocking items. Auto-fixes have been applied since.
 
 ## Process
 
 1. Read the context-files to understand the change intent (proposal), approach (design), and requirements (specs)
 2. Identify all changed files (git diff or scan)
-2. Review against all dimensions with concrete evidence:
+3. Review against all dimensions with concrete evidence:
    - Correctness, Complexity, Test Coverage, Security, Spec Compliance
-3. Run build and tests, check results
-4. Update `review.md`:
-   - If ALL pass: set `## Result: PASS` and end the file with `<promise>PASS</promise>`
-   - If any fail: set `## Result: FAIL` with Fix Suggestions and end the file with `<promise>FAIL</promise>`
+4. Run build and tests, check results
+5. For each previously reported blocking item, verify whether it is resolved
+6. Update `review.md` with the new structured format
 
-## Rules
+## Comprehensive Re-verification
 
-- Full re-review — auto-fixes can introduce new issues
-- A fix is FIXED only if the original issue is completely resolved
+You MUST perform a complete re-review. Auto-fixes can introduce new issues. Do NOT stop after verifying the first original item. Check ALL changed files and ALL dimensions before producing your final output.
+
+## Verdict Rules
+
+- A previously blocking item is FIXED only if the original issue is completely resolved
 - Build and test failures count as unresolved
-- Include new findings beyond original Fix Suggestions
+- You MAY report new findings beyond original blocking items
+- New findings that are fix-introduced regressions, missed acceptance criteria, or serious safety/data risks MUST be reported as blocking
+- Non-blocking follow-up or out-of-scope items do not prevent PASS
 
 ## Output
 
@@ -29,28 +33,48 @@ Same format as original review:
 
 ## Result: PASS / FAIL
 
-## Dimensions
+## Repaired Items
+(Items fixed directly during this verification session. Omit section if none.)
 
-### Correctness: PASS / FAIL
-- [findings]
+- [ID: item-N]
+  Severity: info
+  Scope: file path or area
+  Evidence: What was wrong and what was changed
+  Verification: Command run to verify the fix
+  Status: resolved
 
-### Complexity: PASS / FAIL
-- [findings]
+## Blocking Items
+(Items that prevent PASS. Omit section if none.)
 
-### Test Coverage: PASS / FAIL
-- [findings]
+- [ID: item-N]
+  Severity: blocking
+  Scope: file path or area
+  Evidence: What is wrong [disallowed:reason] (if repair was considered but disallowed)
+  SuggestedAction: What should be done
+  Verification: How to verify the fix
+  Status: open | unresolved
 
-### Security: PASS / FAIL
-- [findings]
+## Follow-up Items
+(Non-blocking suggestions for future work. Omit section if none.)
 
-### Spec Compliance: PASS / FAIL
-- [per-criterion findings]
+- [ID: item-N]
+  Severity: follow-up
+  Scope: file path or area
+  Evidence: Description
+  SuggestedAction: Suggested improvement
+  Status: follow-up
 
-## Fix Suggestions
-1. [file:line] description
+## Pre-existing or Out-of-scope Items
+(Pre-existing failures or out-of-scope items. Omit section if none.)
 
-<promise>PASS</promise> or <promise>FAIL</promise>
+- [ID: item-N]
+  Severity: info | warning
+  Scope: file path or area
+  Evidence: Description
+  SuggestedAction: Optional suggested action
+  Status: pre-existing | out-of-scope
 ```
 
 Output ONLY the final report. No thinking process or meta-commentary.
 The final line MUST be exactly one machine-readable verdict tag: `<promise>PASS</promise>` or `<promise>FAIL</promise>`.
+Do NOT include more than one marker. Do NOT include markers in code examples or explanations.

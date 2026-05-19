@@ -13,11 +13,27 @@ import { validateReviewArtifact } from './utils';
 import { Log } from '../util/log';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { createRepairFixAdapter } from './task-runtime/repair-fix-adapter';
+import { buildFailedCheckContext, getCheckFailurePolicy, type ReactionInputSelector } from './domain';
 import { executeRebaseBranchTask } from './task-runtime/rebase-task-handler';
 import { loadHealthGatePolicies, loadWorkflow } from './workflow-loader';
+import {
+  extractReactionOutput,
+  buildVerificationContextFromReaction,
+  saveVerificationContext,
+  loadVerificationContext,
+  clearVerificationContext,
+  buildVerificationPromptSuffix,
+} from './convergence';
 import * as fs from 'node:fs';
 
 const log = Log.create({ service: 'check-stage-runner' });
+
+type ReactionInputStageRun = {
+  tasks: Array<{
+    id: string;
+    output: unknown | null;
+  }>;
+};
 
 export interface StageRunner {
   canHandle(stage: Stage): boolean;
@@ -96,10 +112,12 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         log.warn('runFixTask: no worktree path found', { issueNumber: ctx.issue.number });
         return null;
       }
+      const failedCheckContext = this.buildRepairFailedCheckContext(ctx, failedCheck);
       const result = await adapter.dispatch('fix-review-findings', ctx, {
         worktreePath,
         failedCheck,
         attempt,
+        failedCheckContext,
       });
       if (result.status === 'completed') {
         this.invalidateReviewArtifactForRereview(ctx);
@@ -288,7 +306,8 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         let attempts = 1;
 
         const prompt = task.buildPrompt(ctx.issue, changeDir);
-        const result = await session.execute(prompt, { kind: 'task', title: task.label });
+        const finalPrompt = this.buildVerificationPrompt(ctx, prompt);
+        const result = await session.execute(finalPrompt, { kind: 'task', title: task.label });
 
         if (!result.success) {
           log.error('Review task failed', { artifact: task.type, error: result.error });
@@ -397,6 +416,7 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
           task.type,
           null,
         );
+        this.cleanupAfterSuccessfulVerification(ctx);
       }
 
       await session.close();
@@ -452,13 +472,19 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
         log.warn('executeReportedTask: no worktree path found', { issueNumber: ctx.issue.number });
         return null;
       }
+      const fallbackCheck = failedCheck ?? { name: 'review-passed', status: 'fail' as const, output: { verdict: 'FAIL' } };
+      const failedCheckContext = this.buildRepairFailedCheckContext(ctx, fallbackCheck);
       const result = await adapter.dispatch('fix-review-findings', ctx, {
         worktreePath,
-        failedCheck: failedCheck ?? { name: 'review-passed', status: 'fail' as const, output: { verdict: 'FAIL' } },
+        failedCheck: fallbackCheck,
         attempt,
+        failedCheckContext,
       });
       const instanceResult = { ...result, taskId };
-      if (instanceResult.status === 'completed') this.invalidateReviewArtifactForRereview(ctx);
+      if (instanceResult.status === 'completed') {
+        this.persistReactionConvergence(ctx, fallbackCheck, instanceResult, attempt);
+        this.invalidateReviewArtifactForRereview(ctx);
+      }
       return instanceResult;
     }
 
@@ -549,6 +575,139 @@ export class CheckStageRunner extends BaseStageRunner implements StageRunner {
 
   protected getNextStage(): Stage {
     return Stage.Integrate;
+  }
+
+  private persistReactionConvergence(
+    ctx: StageContext,
+    failedCheck: { name: string; status: string; message?: string; output?: unknown },
+    taskResult: StageTaskResult,
+    attempt: number,
+  ): void {
+    const reactionOutput = extractReactionOutput(taskResult);
+    if (!reactionOutput) {
+      log.info('No structured reaction output to persist', {
+        issueNumber: ctx.issue.number,
+        taskId: taskResult.taskId,
+      });
+      return;
+    }
+
+    log.info('Persisting reaction convergence data', {
+      issueNumber: ctx.issue.number,
+      attempted: reactionOutput.attemptedItemIds,
+      resolved: reactionOutput.resolvedItemIds,
+      unresolved: reactionOutput.unresolvedItemIds,
+    });
+
+    const verificationCtx = buildVerificationContextFromReaction(
+      failedCheck as import('./stage-context').CheckResult,
+      reactionOutput,
+      attempt,
+    );
+
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    if (changeDir) {
+      saveVerificationContext(changeDir, verificationCtx);
+    }
+  }
+
+  private buildRepairFailedCheckContext(
+    ctx: StageContext,
+    failedCheck: import('./stage-context').CheckResult,
+  ) {
+    const priorTaskOutputs = this.resolveReactionInputs(ctx, failedCheck);
+    return buildFailedCheckContext(failedCheck, priorTaskOutputs);
+  }
+
+  private resolveReactionInputs(
+    ctx: StageContext,
+    failedCheck: import('./stage-context').CheckResult,
+  ): Record<string, unknown>[] {
+    const policy = getCheckFailurePolicy(Stage.Check, failedCheck.name);
+    const selectors = policy?.inputFrom ?? [];
+    if (selectors.length === 0) return [];
+
+    const stageRun = ctx.workflowRun?.stageRuns.find(stage => stage.stage === Stage.Check);
+    const outputs: Record<string, unknown>[] = [];
+
+    for (const selector of selectors) {
+      const selected = this.resolveReactionInputSelector(selector, failedCheck, stageRun);
+      if (selected) {
+        outputs.push(...selected);
+      }
+    }
+
+    return outputs;
+  }
+
+  private resolveReactionInputSelector(
+    selector: ReactionInputSelector,
+    failedCheck: import('./stage-context').CheckResult,
+    stageRun: ReactionInputStageRun | undefined,
+  ): Record<string, unknown>[] | null {
+    const failedOutput = (failedCheck.output && typeof failedCheck.output === 'object')
+      ? failedCheck.output as Record<string, unknown>
+      : {};
+    const structuredResult = (failedOutput.structuredResult && typeof failedOutput.structuredResult === 'object')
+      ? failedOutput.structuredResult as Record<string, unknown>
+      : failedOutput;
+
+    switch (selector.type) {
+      case 'failed-check-output':
+        return [{ source: 'failed-check-output', checkName: failedCheck.name, output: failedCheck.output ?? null }];
+      case 'check-items': {
+        const allItems = Array.isArray(structuredResult.items) ? structuredResult.items as Array<Record<string, unknown>> : [];
+        const items = selector.filter === 'blocking'
+          ? allItems.filter(item => item.severity === 'blocking' && item.status !== 'resolved' && item.status !== 'pre-existing' && item.status !== 'out-of-scope')
+          : allItems;
+        return [{ source: 'check-items', checkName: failedCheck.name, filter: selector.filter ?? 'all', items }];
+      }
+      case 'snapshot': {
+        const snapshot = structuredResult.snapshot ?? failedOutput.snapshotSha;
+        if (!snapshot) return null;
+        return [{
+          source: 'snapshot',
+          checkName: failedCheck.name,
+          snapshot: typeof snapshot === 'string' ? { sha: snapshot } : snapshot,
+        }];
+      }
+      case 'task-output': {
+        const task = stageRun?.tasks.find(candidate => candidate.id === selector.taskId && candidate.output != null);
+        if (!task?.output) return null;
+        return [{ source: 'task-output', taskId: selector.taskId, output: task.output }];
+      }
+      case 'prior-task-outputs': {
+        const tasks = stageRun?.tasks.filter(task => task.output != null && !task.id.startsWith('fix-review-findings')) ?? [];
+        return tasks.map(task => ({ source: 'prior-task-output', taskId: task.id, output: task.output }));
+      }
+      case 'artifact':
+        return [{ source: 'artifact', path: selector.path }];
+      default:
+        return null;
+    }
+  }
+
+  protected buildVerificationPrompt(ctx: StageContext, basePrompt: string): string {
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    if (!changeDir) return basePrompt;
+
+    const verificationCtx = loadVerificationContext(changeDir);
+    if (!verificationCtx) return basePrompt;
+
+    log.info('Running ai-review in verification mode', {
+      issueNumber: ctx.issue.number,
+      knownItemIds: verificationCtx.knownItemIds.length,
+      resolvedItemIds: verificationCtx.resolvedItemIds.length,
+    });
+
+    return basePrompt + buildVerificationPromptSuffix(verificationCtx);
+  }
+
+  protected cleanupAfterSuccessfulVerification(ctx: StageContext): void {
+    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+    if (changeDir) {
+      clearVerificationContext(changeDir);
+    }
   }
 }
 

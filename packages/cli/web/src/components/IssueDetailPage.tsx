@@ -9,6 +9,7 @@ import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSess
 import type { CheckRepairState } from '../lib/types'
 import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import { EditIssueDialog } from './EditIssueDialog'
+import { WorkflowConvergencePanel } from './WorkflowConvergencePanel'
 import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
 import { BranchBar } from './BranchBar'
@@ -693,6 +694,10 @@ export function IssueDetailPage() {
                     Click &quot;Resume Pipeline&quot; below to continue from where it left off.
                   </p>
                 </div>
+              )}
+
+              {(issue.status === IssueStatus.Blocked || issue.convergence) && (
+                <WorkflowConvergencePanel convergence={issue.convergence} />
               )}
 
               <div className="rounded-lg border border-gray-200 bg-white p-4">

@@ -6,15 +6,21 @@ Read `{changeDir}/review.md` and check:
 
 - Starts with `# Review Report`
 - Has `## Result: PASS` or `## Result: FAIL`
-- Contains `<promise>PASS</promise>` or `<promise>FAIL</promise>` tag
-- Has `## Dimensions` with Correctness, Complexity, Test Coverage, Security, Spec Compliance
-- Each dimension has PASS/FAIL verdict
-- If any dimension FAILS, overall verdict is FAIL
-- All changed files covered
-- Fix suggestions reference specific file:line
+- Contains exactly one `<promise>PASS</promise>` or `<promise>FAIL</promise>` tag on its own line at the end
+- If `## Result: PASS`, the tag must be `<promise>PASS</promise>`
+- If `## Result: FAIL`, the tag must be `<promise>FAIL</promise>`
+- Every item under `## Repaired Items`, `## Blocking Items`, `## Follow-up Items`, or `## Pre-existing or Out-of-scope Items` has:
+  - A stable ID: `[ID: item-N]`
+  - A Severity field
+  - An Evidence field
+  - A Status field
+- Repaired items have `Status: resolved` and include a `Verification` field
+- Blocking items have `Status: open` or `Status: unresolved` and include `SuggestedAction`
 - No placeholder text like `[findings]` remains
-- Spec Compliance explicitly addresses each acceptance criterion with concrete evidence
+- All changed files are covered across the item groups
 - No thinking/reasoning process present
+- No duplicate `<promise>` markers exist anywhere in the report
+- Follow-up and pre-existing items have non-blocking severities
 
 ## Actions
 

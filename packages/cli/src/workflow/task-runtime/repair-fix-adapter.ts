@@ -1,5 +1,6 @@
 import type { CheckResult, StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
+import type { FailedCheckContext } from '../domain';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
 
 export type RepairFixTaskId =
@@ -15,6 +16,7 @@ export interface RepairFixContext {
   worktreePath: string;
   failedCheck: CheckResult;
   attempt: number;
+  failedCheckContext?: FailedCheckContext;
 }
 
 function isHealthFixTask(taskId: string): boolean {
@@ -247,6 +249,51 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
   }
 
   if (taskId === 'fix-review-findings') {
+    const structuredContext = context.failedCheckContext;
+    const priorOutputsSection = formatPriorTaskOutputsSection(structuredContext?.priorTaskOutputs);
+
+    if (structuredContext && structuredContext.blockingItems.length > 0) {
+      const itemsSection = structuredContext.blockingItems.map(item => {
+        const parts = [
+          `- [ID: ${item.id}]`,
+          `  Severity: ${item.severity}`,
+          item.scope ? `  Scope: ${item.scope}` : '',
+          `  Evidence: ${item.evidence}`,
+          item.suggestedAction ? `  SuggestedAction: ${item.suggestedAction}` : '',
+          item.verification ? `  Verification: ${item.verification}` : '',
+        ];
+        return parts.filter(Boolean).join('\n');
+      }).join('\n\n');
+
+      const nonBlockingSection = structuredContext.nonBlockingItems.length > 0
+        ? '\n\nNon-blocking / Follow-up Items (do NOT fix these unless they directly overlap with a blocking item):\n' +
+          structuredContext.nonBlockingItems.map(item =>
+            `- [ID: ${item.id}] Severity: ${item.severity} Status: ${item.status ?? 'open'} — ${item.evidence}`
+          ).join('\n')
+        : '';
+
+      const snapshotSection = structuredContext.snapshot?.sha
+        ? `\n\nCandidate Snapshot SHA: ${structuredContext.snapshot.sha}`
+        : '';
+
+      return [
+        `Change Directory: ${changeDir ?? context.worktreePath}`,
+        '',
+        `Issue: ${ctx.issue.title}`,
+        `Failed check: ${context.failedCheck.name}`,
+        '',
+        `Blocking Items (${structuredContext.blockingItems.length}):`,
+        'You MUST resolve ALL of these items:',
+        '',
+        itemsSection,
+        nonBlockingSection,
+        snapshotSection,
+        priorOutputsSection,
+        '',
+        'Contract: Apply the minimal code or artifact changes required to resolve every listed blocking item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
+      ].join('\n');
+    }
+
     const output = context.failedCheck.output as { verdict?: string; reviewReport?: string; fixSuggestions?: string } | undefined;
     const fixSuggestions = output?.fixSuggestions ?? '';
     const reviewReport = output?.reviewReport ?? '';
@@ -264,12 +311,23 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
       '',
       'Fix Suggestions:',
       trimmedSuggestions || 'No structured fix suggestions found. Read the review report carefully and address all FAIL items.',
+      priorOutputsSection,
       '',
-      'Contract: Apply the minimal code or artifact changes required to resolve every FAIL item. Do not modify review.md or review-self-check.md.',
+      'Contract: Apply the minimal code or artifact changes required to resolve every FAIL item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
     ].join('\n');
   }
 
   return '';
+}
+
+function formatPriorTaskOutputsSection(priorTaskOutputs?: Record<string, unknown>[]): string {
+  if (!priorTaskOutputs || priorTaskOutputs.length === 0) return '';
+  const formatted = priorTaskOutputs.map((entry, index) => {
+    const json = JSON.stringify(entry, null, 2);
+    const trimmed = json.length > 4000 ? `${json.slice(0, 4000)}\n...` : json;
+    return `Prior Context ${index + 1}:\n${trimmed}`;
+  }).join('\n\n');
+  return `\n\nSelected Prior Outputs:\n${formatted}`;
 }
 
 export const defaultRepairFixAdapter = createRepairFixAdapter();

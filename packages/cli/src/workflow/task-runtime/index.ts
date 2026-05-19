@@ -61,3 +61,9 @@ export {
   createRalphTaskHandler,
   materializeRalphTasks,
 } from './ralph-task-handler';
+
+export {
+  extractRepairResultFromArtifact,
+  isRepairAllowed,
+  type SelfRepairResult,
+} from './self-repair';

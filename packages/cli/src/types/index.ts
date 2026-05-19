@@ -319,3 +319,19 @@ export interface EpicDetail extends Epic {
   linkedIssues: LinkedIssue[];
   progress: EpicProgress;
 }
+
+export type {
+  WorkflowVerdict,
+  WorkflowItemSeverity,
+  WorkflowItemStatus,
+  WorkflowItem,
+  WorkflowVerification,
+  WorkflowSnapshot,
+  StructuredWorkflowResult,
+  ReactionTaskOutput,
+  ResultContract,
+  ResultOutputSource,
+  SelfRepairPolicy,
+  WorkflowConvergenceState,
+  FailedCheckContext,
+} from './workflow-results';

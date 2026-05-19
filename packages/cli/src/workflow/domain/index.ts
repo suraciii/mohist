@@ -1,4 +1,5 @@
 import { Stage } from '../../types';
+import type { ResultContract, SelfRepairPolicy, WorkflowItem, WorkflowSnapshot } from '../../types/workflow-results';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
@@ -43,6 +44,8 @@ export interface TaskDefinition {
   id: string;
   title: string;
   dependsOn?: string[];
+  resultContract?: ResultContract;
+  selfRepairPolicy?: SelfRepairPolicy;
 }
 
 export interface CheckDefinition {
@@ -55,6 +58,7 @@ export interface CheckFailurePolicy {
   fixTaskId: string;
   fixTaskTitle: string;
   maxAttempts: number;
+  inputFrom?: ReactionInputSelector[];
 }
 
 export type WorkSourceKind = 'static' | 'ralph' | 'runtime';
@@ -91,11 +95,20 @@ export interface ApprovalPolicy {
   checkName: string;
 }
 
+export type ReactionInputSelector =
+  | { type: 'failed-check-output' }
+  | { type: 'check-items'; filter?: 'blocking' | 'all' }
+  | { type: 'task-output'; taskId: string }
+  | { type: 'artifact'; path: string }
+  | { type: 'snapshot' }
+  | { type: 'prior-task-outputs' };
+
 export interface RepairPolicy {
   checkName: string;
   fixTaskId: string;
   fixTaskTitle: string;
   maxAttempts: number;
+  inputFrom?: ReactionInputSelector[];
 }
 
 export type InvalidationTrigger = 'check-completion' | 'task-completion' | 'branch-rebase';
@@ -143,6 +156,48 @@ export function getCheckFailurePolicy(
   return definitions
     .find(definition => definition.stage === stage)
     ?.checkFailurePolicies?.find(policy => policy.checkName === checkName) ?? null;
+}
+
+export interface FailedCheckContext {
+  checkName: string;
+  verdict: 'PASS' | 'FAIL';
+  blockingItems: WorkflowItem[];
+  nonBlockingItems: WorkflowItem[];
+  sourceArtifactRefs?: string[];
+  snapshot?: WorkflowSnapshot;
+  priorTaskOutputs?: Record<string, unknown>[];
+}
+
+export function buildFailedCheckContext(
+  failedCheck: { name: string; status: string; message?: string; output?: unknown },
+  priorTaskOutputs?: Record<string, unknown>[],
+): FailedCheckContext {
+  const output = (failedCheck.output ?? {}) as Record<string, unknown>;
+  const structuredResult = output.structuredResult as { verdict?: string; items?: WorkflowItem[]; snapshot?: WorkflowSnapshot } | undefined;
+  const verdict = (structuredResult?.verdict ?? output.verdict ?? 'FAIL') as 'PASS' | 'FAIL';
+  const allItems = structuredResult?.items ?? [];
+  const blockingItems = allItems.filter(item =>
+    item.severity === 'blocking' && item.status !== 'resolved' && item.status !== 'pre-existing' && item.status !== 'out-of-scope',
+  );
+  const nonBlockingItems = allItems.filter(item =>
+    item.severity !== 'blocking' || item.status === 'pre-existing' || item.status === 'out-of-scope',
+  );
+  const sourceArtifactRefs: string[] = [];
+  if (typeof output.reviewReport === 'string') sourceArtifactRefs.push('review.md');
+  if (typeof output.fixSuggestions === 'string' && output.fixSuggestions.length > 0) {
+    const reportRef = sourceArtifactRefs.length > 0 ? sourceArtifactRefs[0] : 'review.md';
+    if (!sourceArtifactRefs.includes('fix-suggestions')) sourceArtifactRefs.push(reportRef);
+  }
+  const snapshot = structuredResult?.snapshot;
+  return {
+    checkName: failedCheck.name,
+    verdict,
+    blockingItems,
+    nonBlockingItems,
+    sourceArtifactRefs: sourceArtifactRefs.length > 0 ? sourceArtifactRefs : undefined,
+    snapshot: snapshot ?? (output.snapshotSha ? { sha: output.snapshotSha as string } : undefined),
+    priorTaskOutputs: priorTaskOutputs && priorTaskOutputs.length > 0 ? priorTaskOutputs : undefined,
+  };
 }
 
 export interface DeliveryMetadata {
@@ -905,6 +960,46 @@ export class StageRun {
   }
 }
 
+export const REVIEW_RESULT_CONTRACT: ResultContract = {
+  kind: 'promise-marker',
+  required: true,
+  outputSource: { type: 'artifact', path: 'review.md' },
+  allowedMarkers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+};
+
+export const SELF_REVIEW_RESULT_CONTRACT: ResultContract = {
+  kind: 'promise-marker',
+  required: true,
+  outputSource: { type: 'artifact', path: 'self-review.md' },
+  allowedMarkers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+};
+
+export const REVIEW_SELF_REPAIR_POLICY: SelfRepairPolicy = {
+  enabled: true,
+  allowedScopes: [
+    'formatting',
+    'typos',
+    'missing-obvious-guards',
+    'small-test-expectation-updates',
+    'import-cleanup',
+    'dead-code-removal',
+  ],
+  maxAttempts: 3,
+  requiresVerification: true,
+  disallowedReasons: [
+    'product-behavior-change',
+    'public-contract-modification',
+    'data-safety-risk',
+    'security-posture-change',
+    'merge-strategy-change',
+    'architectural-judgment-required',
+    'cross-file-refactoring',
+    'ambiguous-solution',
+    'user-decision-required',
+    'out-of-current-scope',
+  ],
+};
+
 export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
   {
     stage: Stage.Plan,
@@ -913,7 +1008,7 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
       { id: 'specs', title: 'Write specs' },
       { id: 'design', title: 'Create design' },
       { id: 'tasks', title: 'Generate tasks' },
-      { id: 'self-review', title: 'Self review' },
+      { id: 'self-review', title: 'Self review', resultContract: SELF_REVIEW_RESULT_CONTRACT },
     ],
     checks: [
       { name: 'proposal-complete', title: 'Proposal complete' },
@@ -987,7 +1082,7 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
   {
     stage: Stage.Check,
     tasks: [
-      { id: 'ai-review', title: 'AI review' },
+      { id: 'ai-review', title: 'AI review', resultContract: REVIEW_RESULT_CONTRACT, selfRepairPolicy: REVIEW_SELF_REPAIR_POLICY },
     ],
     checks: [
       { name: 'health:check', title: 'Check health gate' },
@@ -998,7 +1093,11 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
     approvalCheckName: 'user-approval',
     checkFailurePolicies: [
       { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
-      { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
+      { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1, inputFrom: [
+        { type: 'failed-check-output' },
+        { type: 'check-items', filter: 'blocking' },
+        { type: 'snapshot' },
+      ] },
       { checkName: 'merge-ready', fixTaskId: 'fix-merge-readiness', fixTaskTitle: 'Fix merge readiness', maxAttempts: 1 },
     ],
     workSources: [
@@ -1021,7 +1120,11 @@ export const DEFAULT_STAGE_DEFINITIONS: StageDefinition[] = [
     approvalPolicy: { checkName: 'user-approval' },
     repairPolicies: [
       { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
-      { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
+      { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1, inputFrom: [
+        { type: 'failed-check-output' },
+        { type: 'check-items', filter: 'blocking' },
+        { type: 'snapshot' },
+      ] },
       { checkName: 'merge-ready', fixTaskId: 'fix-merge-readiness', fixTaskTitle: 'Fix merge readiness', maxAttempts: 1 },
     ],
     invalidationPolicy: {
