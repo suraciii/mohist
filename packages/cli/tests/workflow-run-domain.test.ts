@@ -125,18 +125,13 @@ describe('WorkflowRun domain aggregate', () => {
     expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
       fixTaskId: 'fix-review-findings',
       maxAttempts: 2,
-      inputFrom: [
-        { type: 'failed-check-output' },
-        { type: 'check-items', filter: 'blocking' },
-        { type: 'snapshot' },
-      ],
     });
     expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'static',
     });
     expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
-      kind: 'repair-task',
+      kind: 'agent-session',
       workSourceKind: 'runtime',
     });
   });
@@ -682,13 +677,13 @@ describe('WorkflowRun domain aggregate', () => {
       type: 'task-invalidated',
       stage: Stage.Check,
       taskId: 'ai-review',
-      reason: 'Review findings changed code; re-run AI review before rechecking',
+      reason: 'code.changed reset checks-and-approval',
     });
     expect(fix.events).toContainEqual({
       type: 'check-invalidated',
       stage: Stage.Check,
       checkName: 'review-passed',
-      reason: 'Review findings changed code; re-run AI review before rechecking',
+      reason: 'code.changed reset checks-and-approval',
     });
     expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({
       status: 'pending',
@@ -1888,7 +1883,7 @@ describe('WorkflowRun domain aggregate', () => {
       type: 'task-invalidated',
       stage: Stage.Check,
       taskId: 'ai-review',
-      reason: 'Review findings changed code; re-run AI review before rechecking',
+      reason: 'code.changed reset checks-and-approval',
     }));
   });
 

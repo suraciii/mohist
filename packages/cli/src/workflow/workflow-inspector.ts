@@ -140,28 +140,22 @@ function compileFullCustomWorkflow(
 
     const tasks = compileCustomTasks(rawStage.tasks, stagePath, diagnostics);
     const checks = compileCustomChecks(rawStage.checks, stagePath, diagnostics);
-    const repairPolicies = compileCustomReactions(rawStage.reactions, stagePath, diagnostics);
     const approval = rawStage.approval === true;
+    const on = compileStageEventPolicies(rawStage.on, stagePath, diagnostics);
 
     stages.push({
       stage,
       tasks,
       checks,
+      on,
       requiresApproval: approval || undefined,
       approvalCheckName: approval ? 'user-approval' : undefined,
       workSources: tasks.length > 0 ? [{ kind: 'static', taskIds: tasks.map(task => task.id) }] : [{ kind: 'static', taskIds: [] }],
       taskExecutionPolicies: [
         { taskId: 'rebase-branch', kind: 'rebase-task' as const, workSourceKind: 'runtime' as const },
-        ...repairPolicies.map(policy => ({
-          taskId: policy.fixTaskId,
-          kind: 'repair-task' as const,
-          workSourceKind: 'runtime' as const,
-        })),
       ],
       checkPolicies: checks.map(check => ({ checkName: check.name, phase: 'post-task' as const })),
       approvalPolicy: approval ? { checkName: 'user-approval' } : undefined,
-      repairPolicies,
-      checkFailurePolicies: repairPolicies.map(policy => ({ ...policy })),
       invalidationPolicy: { entries: [] },
     });
   }
@@ -204,6 +198,7 @@ function compileCustomTasks(
       source: 'project',
       uses: rawTask.uses,
       with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
+      emits: arrayValue(rawTask.emits).filter((value): value is string => typeof value === 'string'),
       dependsOn: arrayValue(rawTask.needs).filter((value): value is string => typeof value === 'string'),
     };
     if (task.uses === 'mohist/agent' && !hasAgentPromptSource(task.with)) {
@@ -286,6 +281,7 @@ function compileCheckOnFailure(
     source: 'project',
     uses: typeof rawTask.uses === 'string' ? rawTask.uses : 'mohist/agent',
     with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
+    emits: arrayValue(rawTask.emits).filter((value): value is string => typeof value === 'string'),
   };
   return {
     retry: {
@@ -296,38 +292,29 @@ function compileCheckOnFailure(
   };
 }
 
-function compileCustomReactions(
-  rawReactions: unknown,
+function compileStageEventPolicies(
+  rawOn: unknown,
   stagePath: string,
   diagnostics: WorkflowDiagnostic[],
-): CheckFailurePolicy[] {
-  if (rawReactions === undefined) return [];
-  if (!Array.isArray(rawReactions)) {
-    diagnostics.push({ severity: 'error', path: `${stagePath}.reactions`, message: 'reactions must be a list' });
-    return [];
+): StageDefinition['on'] | undefined {
+  if (rawOn === undefined) return undefined;
+  if (!isRecord(rawOn)) {
+    diagnostics.push({ severity: 'error', path: `${stagePath}.on`, message: 'on must be a mapping keyed by event name' });
+    return undefined;
   }
-
-  const policies: CheckFailurePolicy[] = [];
-  for (const [reactionIndex, rawReaction] of rawReactions.entries()) {
-    const reactionPath = `${stagePath}.reactions[${reactionIndex}]`;
-    if (!isRecord(rawReaction) || typeof rawReaction.onCheckFailure !== 'string' || !isRecord(rawReaction.repair)) {
-      diagnostics.push({ severity: 'error', path: reactionPath, message: 'reaction requires onCheckFailure and repair' });
+  const on: NonNullable<StageDefinition['on']> = {};
+  for (const [eventName, rawPolicy] of Object.entries(rawOn)) {
+    if (!isRecord(rawPolicy)) {
+      diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}`, message: 'event policy must be a mapping' });
       continue;
     }
-    const repair = rawReaction.repair;
-    if (typeof repair.task !== 'string') {
-      diagnostics.push({ severity: 'error', path: `${reactionPath}.repair.task`, message: 'repair.task is required' });
+    if (rawPolicy.reset !== 'checks-and-approval' && rawPolicy.reset !== 'checks' && rawPolicy.reset !== 'approval') {
+      diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}.reset`, message: 'reset must be checks-and-approval, checks, or approval' });
       continue;
     }
-    policies.push({
-      checkName: rawReaction.onCheckFailure,
-      fixTaskId: repair.task,
-      fixTaskTitle: typeof repair.title === 'string' ? repair.title : repair.task,
-      maxAttempts: typeof repair.maxAttempts === 'number' ? repair.maxAttempts : 1,
-      inputFrom: compileReactionInputs(repair.inputFrom),
-    });
+    on[eventName] = { reset: rawPolicy.reset };
   }
-  return policies;
+  return Object.keys(on).length > 0 ? on : undefined;
 }
 
 function compileReactionInputs(rawInputs: unknown): CheckFailurePolicy['inputFrom'] {

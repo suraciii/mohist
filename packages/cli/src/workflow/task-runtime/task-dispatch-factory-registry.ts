@@ -103,7 +103,10 @@ function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Dispatchable
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     serviceFn: async () => {
-      const result = await executeRebaseBranchTask(input.ctx, input.attempt);
+      const result = await executeRebaseBranchTask(input.ctx, input.attempt, {
+        taskId: input.task.taskId,
+        title: input.task.title,
+      });
       if (result.status !== 'completed') {
         throw new Error(result.reason ?? 'Rebase branch failed');
       }
@@ -198,29 +201,61 @@ function builtinAgentPromptRef(input: TaskDispatchFactoryInput, fallback: string
 }
 
 function resolveCustomAgentPrompt(input: TaskDispatchFactoryInput, source: AgentPromptSource): string {
-  if ('inline' in source) return source.inline;
+  if ('inline' in source) return renderPromptTemplate(input, source.inline);
   if ('file' in source) {
     const promptPath = path.isAbsolute(source.file) ? source.file : path.join(input.worktreePath, source.file);
-    return fs.readFileSync(promptPath, 'utf-8');
+    return renderPromptTemplate(input, fs.readFileSync(promptPath, 'utf-8'));
   }
   throw new Error(`Unknown agent prompt ref '${source.ref}' for task '${input.task.taskId}'`);
+}
+
+function renderPromptTemplate(input: TaskDispatchFactoryInput, template: string): string {
+  const values = buildPromptTemplateValues(input);
+  return template.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, key: string) => {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) {
+      throw new Error(`Unknown prompt template variable '${key}' for task '${input.task.taskId}'`);
+    }
+    return values[key] ?? '';
+  });
+}
+
+function buildPromptTemplateValues(input: TaskDispatchFactoryInput): Record<string, string> {
+  const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
+    || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title)
+    || '';
+  return {
+    'issue.number': String(input.ctx.issue.number),
+    'issue.title': input.ctx.issue.title,
+    'worktree.path': input.worktreePath,
+    'openspec.changeDir': changeDir,
+  };
 }
 
 function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, prompt: string): DispatchableTask {
   const declaredArtifacts = extractStringArray((input.task.input as { artifacts?: unknown; outputs?: unknown } | undefined)?.artifacts)
     ?? extractStringArray((input.task.input as { outputs?: unknown } | undefined)?.outputs)
     ?? [];
-  return {
+  const agentInput = {
     taskId: input.task.taskId,
     title: input.task.title,
-    kind: 'agent-session',
     prompt,
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
     artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
-    input: input.task.input,
+  };
+  return {
+    taskId: input.task.taskId,
+    title: input.task.title,
+    kind: 'agent-session',
+    prompt,
+    cwd: agentInput.cwd,
+    stage: agentInput.stage,
+    attempt: agentInput.attempt,
+    agentSessionRef: input.agentSessionRef,
+    artifactVerification: agentInput.artifactVerification,
+    input: agentInput,
   };
 }
 

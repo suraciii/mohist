@@ -207,11 +207,47 @@ function createStageDefinition(stage: Stage): StageDefinition {
     },
     [Stage.Check]: {
       stage: Stage.Check,
+      on: {
+        'code.changed': { reset: 'checks-and-approval' },
+      },
       tasks: [{ id: 'ai-review', title: 'AI review' }],
       checks: [
-        { name: 'health:check', title: 'Check health gate' },
-        { name: 'review-passed', title: 'Review passed' },
-        { name: 'merge-ready', title: 'Merge ready' },
+        {
+          name: 'health:check',
+          title: 'Check health gate',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: { id: 'fix-check-health', title: 'Fix check health', uses: 'mohist/agent', emits: ['code.changed'] },
+            },
+          },
+        },
+        {
+          name: 'review-passed',
+          title: 'Review passed',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'fix-review-findings',
+                title: 'Fix review findings',
+                uses: 'mohist/agent',
+                emits: ['code.changed'],
+                with: { prompt: { inline: 'Fix findings in {{ openspec.changeDir }}/review.md' } },
+              },
+            },
+          },
+        },
+        {
+          name: 'merge-ready',
+          title: 'Merge ready',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: { id: 'fix-merge-readiness', title: 'Fix merge readiness', uses: 'mohist/rebase', emits: ['code.changed'] },
+            },
+          },
+        },
       ],
       requiresApproval: true,
       approvalCheckName: 'user-approval',
@@ -219,8 +255,8 @@ function createStageDefinition(stage: Stage): StageDefinition {
       taskExecutionPolicies: [
         { taskId: 'ai-review', kind: 'agent-session' },
         { taskId: 'fix-check-health', kind: 'repair-task', workSourceKind: 'runtime' },
-        { taskId: 'fix-review-findings', kind: 'repair-task', workSourceKind: 'runtime' },
-        { taskId: 'fix-merge-readiness', kind: 'repair-task', workSourceKind: 'runtime' },
+        { taskId: 'fix-review-findings', kind: 'agent-session', workSourceKind: 'runtime' },
+        { taskId: 'fix-merge-readiness', kind: 'rebase-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'agent-session', workSourceKind: 'runtime' },
       ],
       checkPolicies: [
@@ -239,8 +275,8 @@ function createStageDefinition(stage: Stage): StageDefinition {
           {
             trigger: 'task-completion',
             triggerTaskId: 'fix-review-findings',
-            reason: 'Review findings changed code; re-run AI review before rechecking',
-            invalidates: { tasks: ['ai-review'], checks: ['review-passed', 'merge-ready'], approval: true },
+            reason: 'code.changed reset checks-and-approval',
+            invalidates: { tasks: ['ai-review'], checks: ['health:check', 'review-passed', 'merge-ready'], approval: true },
           },
           {
             trigger: 'task-completion',
@@ -1507,7 +1543,7 @@ describe('StageRunner migration regression coverage', () => {
       }));
     });
 
-    it('config-driven Check resolves suffixed review repair tasks as executable runtime repair tasks', () => {
+    it('config-driven Check resolves suffixed review repair tasks as executable runtime agent tasks', () => {
       const runner = new ConfigDrivenStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
         taskHandlerRegistry: createBasicTaskHandlerRegistry(),
@@ -1556,8 +1592,71 @@ describe('StageRunner migration regression coverage', () => {
       }));
       expect(dispatchable).toEqual(expect.objectContaining({
         taskId: 'fix-review-findings:1',
-        kind: 'service-call',
+        kind: 'agent-session',
+        prompt: 'Fix findings in /tmp/change/review.md',
+        cwd: '/tmp',
         stage: Stage.Check,
+        attempt: 1,
+        input: expect.objectContaining({
+          taskId: 'fix-review-findings:1',
+          prompt: 'Fix findings in /tmp/change/review.md',
+          cwd: '/tmp',
+          stage: Stage.Check,
+          attempt: 1,
+        }),
+      }));
+    });
+
+    it('config-driven Check resolves project-defined retry tasks without builtin task ids', () => {
+      const stageDefinition: StageDefinition = {
+        stage: Stage.Check,
+        on: { 'code.changed': { reset: 'checks-and-approval' } },
+        tasks: [{ id: 'ai-review', title: 'AI review' }],
+        checks: [{
+          name: 'review-passed',
+          title: 'Review passed',
+          onFailure: {
+            retry: {
+              limit: 1,
+              task: {
+                id: 'auto-fix-review',
+                title: 'Auto-fix review',
+                uses: 'mohist/agent',
+                emits: ['code.changed'],
+                with: { prompt: { inline: 'Fix {{ openspec.changeDir }}/review.md' } },
+              },
+            },
+          },
+        }],
+        workSources: [{ kind: 'static', taskIds: ['ai-review'] }, { kind: 'runtime' }],
+        taskExecutionPolicies: [{ taskId: 'auto-fix-review', kind: 'agent-session', workSourceKind: 'runtime' }],
+        checkPolicies: [{ checkName: 'review-passed', phase: 'post-task' }],
+      };
+      const runner = new ConfigDrivenStageRunner({
+        taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        checkRegistry: createBasicCheckRegistry({}),
+        getStageDefinition: () => stageDefinition,
+        worktreePath: '/tmp',
+      });
+
+      const ctx = makeMockContext(Stage.Check);
+      const task = (runner as any).resolveRuntimeTask(stageDefinition, 'auto-fix-review:1');
+      const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
+        failedCheck: { name: 'review-passed', status: 'fail', message: 'Review failed' },
+        attempt: 2,
+      });
+
+      expect(task).toEqual(expect.objectContaining({
+        taskId: 'auto-fix-review:1',
+        title: 'Auto-fix review',
+        kind: 'agent-session',
+      }));
+      expect(dispatchable).toEqual(expect.objectContaining({
+        taskId: 'auto-fix-review:1',
+        kind: 'agent-session',
+        prompt: 'Fix /tmp/change/review.md',
+        attempt: 2,
       }));
     });
 

@@ -57,6 +57,7 @@ export interface TaskDefinition {
   source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
+  emits?: string[];
   dependsOn?: string[];
   resultContract?: ResultContract;
   selfRepairPolicy?: SelfRepairPolicy;
@@ -161,10 +162,17 @@ export interface InvalidationPolicy {
   entries: InvalidationEntry[];
 }
 
+export type StageResetTarget = 'checks-and-approval' | 'checks' | 'approval';
+
+export interface StageEventPolicy {
+  reset: StageResetTarget;
+}
+
 export interface StageDefinition {
   stage: Stage;
   tasks: TaskDefinition[];
   checks: CheckDefinition[];
+  on?: Record<string, StageEventPolicy>;
   requiresApproval?: boolean;
   approvalCheckName?: string;
   checkFailurePolicies?: CheckFailurePolicy[];

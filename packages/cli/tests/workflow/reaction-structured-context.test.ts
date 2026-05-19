@@ -377,8 +377,8 @@ describe('Reaction structured context: T-006', () => {
     });
   });
 
-  describe('ReactionInputSelector on stage definitions', () => {
-    it('Check stage review-passed repair policy has inputFrom selectors', async () => {
+  describe('Default Check retry prompt shape', () => {
+    it('review-passed retry uses a plain review.md prompt instead of input selectors', async () => {
       const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/domain');
       const checkStage = DEFAULT_STAGE_DEFINITIONS.find(s => s.stage === 'check');
       expect(checkStage).toBeDefined();
@@ -387,25 +387,20 @@ describe('Reaction structured context: T-006', () => {
         p => p.fixTaskId === 'fix-review-findings',
       );
       expect(reviewRepairPolicy).toBeDefined();
-      expect(reviewRepairPolicy!.inputFrom).toBeDefined();
-      expect(reviewRepairPolicy!.inputFrom!.length).toBeGreaterThan(0);
-
-      const inputTypes = reviewRepairPolicy!.inputFrom!.map(s => s.type);
-      expect(inputTypes).toContain('failed-check-output');
-      expect(inputTypes).toContain('check-items');
-      expect(inputTypes).toContain('snapshot');
-    });
-
-    it('Check stage checkFailurePolicy has inputFrom selectors', async () => {
-      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/domain');
-      const checkStage = DEFAULT_STAGE_DEFINITIONS.find(s => s.stage === 'check');
+      expect(reviewRepairPolicy!.inputFrom).toBeUndefined();
 
       const reviewFailurePolicy = checkStage!.checkFailurePolicies?.find(
         p => p.checkName === 'review-passed',
       );
       expect(reviewFailurePolicy).toBeDefined();
-      expect(reviewFailurePolicy!.inputFrom).toBeDefined();
-      expect(reviewFailurePolicy!.inputFrom!.length).toBeGreaterThan(0);
+      expect(reviewFailurePolicy!.inputFrom).toBeUndefined();
+
+      const reviewCheck = checkStage!.checks.find(check => check.name === 'review-passed');
+      expect(reviewCheck?.onFailure?.retry?.task.with).toMatchObject({
+        prompt: expect.objectContaining({
+          inline: expect.stringContaining('{{ openspec.changeDir }}/review.md'),
+        }),
+      });
     });
   });
 

@@ -298,6 +298,9 @@ workflow:
   id: project/on-failure
   stages:
     - id: check
+      on:
+        code.changed:
+          reset: checks-and-approval
       tasks:
         - id: ai-review
           uses: mohist/agent
@@ -316,14 +319,11 @@ workflow:
                 id: fix-review-findings
                 title: Fix review findings
                 uses: mohist/agent
+                emits: [code.changed]
                 with:
                   prompt:
-                    inline: Fix review findings.
-              inputFrom:
-                - type: failed-check-output
-                - type: check-items
-                  filter: blocking
-                - type: snapshot
+                    inline: |
+                      Fix findings in {{ openspec.changeDir }}/review.md
         - id: merge-ready
           uses: mohist/merge-ready
 `, 'utf-8');
@@ -339,16 +339,19 @@ workflow:
         fixTaskId: 'fix-review-findings',
         fixTaskTitle: 'Fix review findings',
         maxAttempts: 2,
-        inputFrom: [
-          { type: 'failed-check-output' },
-          { type: 'check-items', filter: 'blocking' },
-          { type: 'snapshot' },
-        ],
       });
       expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
-        kind: 'repair-task',
+        kind: 'agent-session',
         workSourceKind: 'runtime',
       });
+      expect(check.invalidationPolicy?.entries).toContainEqual(expect.objectContaining({
+        triggerTaskId: 'fix-review-findings',
+        invalidates: {
+          tasks: ['ai-review'],
+          checks: ['health:check', 'review-passed', 'merge-ready'],
+          approval: true,
+        },
+      }));
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

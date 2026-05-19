@@ -96,6 +96,9 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
     },
     {
       stage: Stage.Check,
+      on: {
+        'code.changed': { reset: 'checks-and-approval' },
+      },
       tasks: [
         {
           id: 'ai-review',
@@ -117,6 +120,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
                 id: 'fix-check-health',
                 title: 'Fix check health',
                 uses: 'mohist/agent',
+                emits: ['code.changed'],
                 with: { prompt: { ref: 'mohist/check/fix-health' } },
               },
             },
@@ -132,13 +136,20 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
                 id: 'fix-review-findings',
                 title: 'Fix review findings',
                 uses: 'mohist/agent',
-                with: { prompt: { ref: 'mohist/check/fix-review-findings' } },
+                emits: ['code.changed'],
+                with: {
+                  prompt: {
+                    inline: [
+                      'Fix the blocking findings in:',
+                      '',
+                      '{{ openspec.changeDir }}/review.md',
+                      '',
+                      'Apply the minimal code changes required.',
+                      'Do not edit review.md.',
+                    ].join('\n'),
+                  },
+                },
               },
-              inputFrom: [
-                { type: 'failed-check-output' },
-                { type: 'check-items', filter: 'blocking' },
-                { type: 'snapshot' },
-              ],
             },
           },
         },
@@ -151,8 +162,8 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
               task: {
                 id: 'fix-merge-readiness',
                 title: 'Fix merge readiness',
-                uses: 'mohist/agent',
-                with: { prompt: { ref: 'mohist/check/fix-merge-readiness' } },
+                uses: 'mohist/rebase',
+                emits: ['code.changed'],
               },
             },
           },
@@ -176,16 +187,6 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
       approvalPolicy: { checkName: 'user-approval' },
       invalidationPolicy: {
         entries: [
-          {
-            trigger: 'task-completion',
-            triggerTaskId: 'fix-review-findings',
-            reason: 'Review findings changed code; re-run AI review before rechecking',
-            invalidates: {
-              tasks: ['ai-review'],
-              checks: ['health:check', 'review-passed', 'merge-ready'],
-              approval: true,
-            },
-          },
           {
             trigger: 'task-completion',
             triggerTaskId: 'rebase-branch',

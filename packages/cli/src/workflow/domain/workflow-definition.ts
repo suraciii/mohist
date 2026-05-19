@@ -47,6 +47,7 @@ function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
   return {
     ...normalized,
     with: normalized.with ? { ...normalized.with } : undefined,
+    emits: normalized.emits ? [...normalized.emits] : undefined,
     dependsOn: normalized.dependsOn ? [...normalized.dependsOn] : undefined,
   };
 }
@@ -106,6 +107,7 @@ function cloneStageDefinition(stage: StageDefinition): StageDefinition {
       ...source,
       taskIds: source.taskIds ? [...source.taskIds] : undefined,
     })),
+    on: stage.on ? Object.fromEntries(Object.entries(stage.on).map(([event, policy]) => [event, { ...policy }])) : undefined,
     taskExecutionPolicies: stage.taskExecutionPolicies?.map(policy => ({ ...policy })),
     checkPolicies: stage.checkPolicies?.map(policy => ({ ...policy })),
     approvalPolicy: stage.approvalPolicy ? { ...stage.approvalPolicy } : undefined,
@@ -141,6 +143,26 @@ function inferTaskExecutionKind(taskId: string, uses?: string): TaskExecutionKin
   }
   if (resolvedUses === 'mohist/rebase') return 'rebase-task';
   return 'agent-session';
+}
+
+function promptSourceKind(task: TaskDefinition): 'inline' | 'file' | 'ref' | null {
+  const prompt = task.with?.prompt;
+  if (typeof prompt === 'string') return 'inline';
+  if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null;
+  const data = prompt as Record<string, unknown>;
+  if (typeof data.inline === 'string') return 'inline';
+  if (typeof data.file === 'string') return 'file';
+  if (typeof data.ref === 'string') return 'ref';
+  return null;
+}
+
+function inferRepairTaskExecutionKind(task: TaskDefinition): TaskExecutionKind {
+  if (task.uses === 'mohist/rebase') return 'rebase-task';
+  if (task.uses === 'mohist/agent') {
+    const promptKind = promptSourceKind(task);
+    if (promptKind === 'inline' || promptKind === 'file') return 'agent-session';
+  }
+  return 'repair-task';
 }
 
 function taskWorkSourceKind(stage: StageDefinition, taskId: string): WorkSourceKind | undefined {
@@ -190,13 +212,54 @@ function compileTaskExecutionPolicies(stage: StageDefinition): TaskExecutionPoli
     if (existing) continue;
     const policy: TaskExecutionPolicy = {
       taskId: task.id,
-      kind: 'repair-task',
+      kind: inferRepairTaskExecutionKind(task),
       workSourceKind: 'runtime',
     };
     policies.set(policyKey(policy), policy);
   }
 
   return policies.size > 0 ? [...policies.values()] : undefined;
+}
+
+function allCheckNames(stage: StageDefinition): string[] {
+  return stage.checkPolicies?.filter(policy => policy.phase !== 'approval').map(policy => policy.checkName)
+    ?? stage.checks.map(check => check.name);
+}
+
+function compileInvalidationPolicyFromStageEvents(stage: StageDefinition): InvalidationPolicy | undefined {
+  const eventPolicies = stage.on ? Object.entries(stage.on) : [];
+  if (eventPolicies.length === 0) return undefined;
+
+  const entries: InvalidationPolicy['entries'] = [];
+  const taskDefinitions = [
+    ...stage.tasks,
+    ...stage.checks.flatMap(check => check.onFailure?.retry?.task ? [check.onFailure.retry.task] : []),
+  ];
+
+  for (const task of taskDefinitions) {
+    for (const eventName of task.emits ?? []) {
+      const eventPolicy = stage.on?.[eventName];
+      if (!eventPolicy) continue;
+      const invalidates: InvalidationPolicy['entries'][number]['invalidates'] = {};
+      if (eventPolicy.reset === 'checks' || eventPolicy.reset === 'checks-and-approval') {
+        if (stage.stage === Stage.Check && eventName === 'code.changed') {
+          invalidates.tasks = ['ai-review'];
+        }
+        invalidates.checks = allCheckNames(stage);
+      }
+      if (eventPolicy.reset === 'approval' || eventPolicy.reset === 'checks-and-approval') {
+        invalidates.approval = true;
+      }
+      entries.push({
+        trigger: 'task-completion',
+        triggerTaskId: task.id,
+        reason: `${eventName} reset ${eventPolicy.reset}`,
+        invalidates,
+      });
+    }
+  }
+
+  return entries.length > 0 ? { entries } : undefined;
 }
 
 export function compileWorkflowDefinition(definition: WorkflowDefinition): StageDefinition[] {
@@ -260,6 +323,15 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Stage
         ...(compiled.checkFailurePolicies ?? []).filter(policy => !onFailureCheckNames.has(policy.checkName)),
         ...repairPoliciesFromChecks.map(policy => ({ ...policy })),
       ];
+    }
+    const eventInvalidationPolicy = compileInvalidationPolicyFromStageEvents(compiled);
+    if (eventInvalidationPolicy) {
+      compiled.invalidationPolicy = {
+        entries: [
+          ...(compiled.invalidationPolicy?.entries ?? []),
+          ...eventInvalidationPolicy.entries,
+        ],
+      };
     }
     compiled.taskExecutionPolicies = compileTaskExecutionPolicies(compiled);
     return compiled;
