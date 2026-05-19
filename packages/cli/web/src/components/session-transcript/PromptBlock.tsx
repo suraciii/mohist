@@ -60,7 +60,7 @@ export function PromptBlock({ prompt }: PromptBlockProps) {
         <div className="mb-2 space-y-1">
           <p className="text-sm font-medium leading-relaxed">{prompt.title || 'Task prompt'}</p>
           {prompt.subtitle && <p className="text-xs text-gray-500">{prompt.subtitle}</p>}
-          {prompt.outputPath && prompt.outputPath !== prompt.subtitle && (
+          {prompt.outputPath && prompt.outputPath !== prompt.subtitle && !prompt.subtitle?.endsWith(prompt.outputPath) && (
             <p className="text-xs text-gray-400">Output: {prompt.outputPath}</p>
           )}
           {prompt.contextFiles && prompt.contextFiles.length > 0 && (

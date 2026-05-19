@@ -21,6 +21,10 @@ export interface ToolRegistryEntry {
   icon: React.ReactElement
 }
 
+function basename(path: string): string {
+  return path.split('/').pop() ?? path
+}
+
 const FallbackEntry: ToolRegistryEntry = {
   category: 'fallback',
   getTitle: (toolName: string, rawInput?: string) => {
@@ -98,6 +102,17 @@ const GrepEntry: ToolRegistryEntry = {
   ),
 }
 
+const SearchEntry: ToolRegistryEntry = {
+  category: 'context',
+  getTitle: (_toolName, rawInput) => {
+    const label = getToolLabel('search', rawInput)
+    return label ?? 'search'
+  },
+  getSubtitle: () => undefined,
+  getBadges: (toolName, rawInput) => getToolArgs(toolName, rawInput),
+  icon: GrepEntry.icon,
+}
+
 const GlobEntry: ToolRegistryEntry = {
   category: 'context',
   getTitle: (_toolName, rawInput) => {
@@ -112,6 +127,17 @@ const GlobEntry: ToolRegistryEntry = {
       <path d="M2 10h20" />
     </svg>
   ),
+}
+
+const ListEntry: ToolRegistryEntry = {
+  category: 'context',
+  getTitle: (_toolName, rawInput) => {
+    const label = getToolLabel('list', rawInput)
+    return label ?? 'list'
+  },
+  getSubtitle: () => undefined,
+  getBadges: (toolName, rawInput) => getToolArgs(toolName, rawInput),
+  icon: GlobEntry.icon,
 }
 
 const WebfetchEntry: ToolRegistryEntry = {
@@ -130,6 +156,17 @@ const WebfetchEntry: ToolRegistryEntry = {
   ),
 }
 
+const WebsearchEntry: ToolRegistryEntry = {
+  category: 'network',
+  getTitle: (_toolName, rawInput) => {
+    const label = getToolLabel('websearch', rawInput)
+    return label ?? getToolLabel('search', rawInput) ?? 'websearch'
+  },
+  getSubtitle: () => undefined,
+  getBadges: (toolName, rawInput) => getToolArgs(toolName, rawInput),
+  icon: WebfetchEntry.icon,
+}
+
 const QuestionEntry: ToolRegistryEntry = {
   category: 'question',
   getTitle: (_toolName, rawInput) => {
@@ -143,6 +180,22 @@ const QuestionEntry: ToolRegistryEntry = {
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  ),
+}
+
+const TodoEntry: ToolRegistryEntry = {
+  category: 'execution',
+  getTitle: (_toolName, rawInput) => {
+    const label = getToolLabel('todowrite', rawInput)
+    return label ?? 'Update todo list'
+  },
+  getSubtitle: () => undefined,
+  getBadges: (toolName, rawInput) => getToolArgs(toolName, rawInput),
+  icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l3 3L22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
     </svg>
   ),
 }
@@ -215,7 +268,7 @@ const EditEntry: ToolRegistryEntry = {
   getTitle: (_toolName, rawInput) => {
     const parsed = parseEditInput(rawInput)
     if (parsed && parsed.filePath) {
-      return parsed.filePath
+      return basename(parsed.filePath)
     }
     const label = getToolLabel('edit', rawInput)
     return label ?? 'edit'
@@ -243,7 +296,7 @@ const WriteEntry: ToolRegistryEntry = {
   getTitle: (_toolName, rawInput) => {
     const parsed = parseEditInput(rawInput)
     if (parsed && parsed.filePath) {
-      return parsed.filePath
+      return basename(parsed.filePath)
     }
     const label = getToolLabel('write', rawInput)
     return label ?? 'write'
@@ -269,10 +322,16 @@ const WriteEntry: ToolRegistryEntry = {
 export const TOOL_REGISTRY: Record<string, ToolRegistryEntry> = {
   bash: BashEntry,
   read: ReadEntry,
+  search: SearchEntry,
+  search_files: SearchEntry,
   grep: GrepEntry,
   glob: GlobEntry,
+  list: ListEntry,
   webfetch: WebfetchEntry,
+  websearch: WebsearchEntry,
   question: QuestionEntry,
+  todo: TodoEntry,
+  todowrite: TodoEntry,
   task: TaskEntry,
   skill: SkillEntry,
   apply_patch: ApplyPatchEntry,

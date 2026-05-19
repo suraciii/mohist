@@ -141,7 +141,16 @@ function PromptSummaryCard({
 }
 
 function AssistantTextPartView({ part }: { part: TextPart }) {
+  const [copied, setCopied] = useState(false)
   const isStreaming = part.completedAt === null
+  const hasText = part.text.trim().length > 0
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(part.text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   return (
     <div className="max-w-[90%]">
@@ -171,6 +180,14 @@ function AssistantTextPartView({ part }: { part: TextPart }) {
           <span className="inline-block h-4 w-0.5 bg-gray-800 ml-0.5 animate-pulse align-middle" />
         )}
       </div>
+      {hasText && (
+        <button
+          onClick={handleCopy}
+          className="mt-1 text-xs text-gray-400 hover:text-gray-700 transition-colors"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      )}
     </div>
   )
 }

@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import Markdown from 'react-markdown'
 import type { DisplayAssistantPart, DisplayChangedFile } from '../../lib/session-transcript-display'
 import { getToolRegistryEntry, getToolDisplayType } from './tool-registry'
-import { parseJsonSafely, getFallbackSubtitle } from '../../lib/transcript-tool-utils'
+import { parseJsonSafely, getFallbackSubtitle, parsePatchOperations, parseEditInput } from '../../lib/transcript-tool-utils'
 import { parseDiff, isLargeDiff, type FileBlock } from '../../lib/diffModel'
 
 function formatTime(iso: string): string {
@@ -199,20 +199,31 @@ function truncateOutput(output: string, maxLines: number = 5): string {
 interface BashContentViewProps {
   input?: string
   output?: string
-  exitCode?: number
+  details?: Record<string, unknown>
 }
 
-function BashContentView({ input, output, exitCode }: BashContentViewProps) {
+function BashContentView({ input, output, details }: BashContentViewProps) {
   const parsed = input ? parseJsonSafely(input) : null
   const command = parsed
     ? (parsed.command ?? parsed.script ?? parsed.cmd ?? '') as string
     : input ?? ''
+  const cwd = typeof details?.cwd === 'string' ? details.cwd : undefined
+  const exitCode = typeof details?.exitCode === 'number' ? details.exitCode : undefined
+  const outputPreview = typeof details?.outputPreview === 'string' && details.outputPreview
+    ? details.outputPreview
+    : undefined
+  const displayOutput = outputPreview ?? output
 
   return (
     <div className="border-t border-gray-100">
       <div className="px-3 pt-2">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-xs font-medium text-gray-500">Command</span>
+          {cwd && (
+            <span className="text-xs px-1 rounded bg-gray-100 text-gray-600 font-mono">
+              {cwd}
+            </span>
+          )}
           {exitCode !== undefined && (
             <span className={`text-xs px-1 rounded ${exitCode === 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
               {exitCode === 0 ? 'success' : `exit ${exitCode}`}
@@ -223,11 +234,11 @@ function BashContentView({ input, output, exitCode }: BashContentViewProps) {
           {command}
         </pre>
       </div>
-      {output && (
+      {displayOutput && (
         <div className="px-3 pb-2">
           <div className="font-medium text-xs text-gray-500 mb-1">Output</div>
           <pre className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 font-mono overflow-auto max-h-32">
-            {truncateOutput(output)}
+            {truncateOutput(displayOutput)}
           </pre>
         </div>
       )}
@@ -331,6 +342,90 @@ function SearchContentView({ input, output }: SearchContentViewProps) {
   )
 }
 
+interface TodoContentViewProps {
+  input?: string
+}
+
+function TodoContentView({ input }: TodoContentViewProps) {
+  const parsed = input ? parseJsonSafely(input) : null
+  if (!parsed) return null
+  const todos = parsed.todos
+  if (!Array.isArray(todos) || todos.length === 0) return null
+
+  const completed = todos.filter((t: any) => t.status === 'completed').length
+  const pending = todos.filter((t: any) => t.status === 'pending').length
+  const inProgress = todos.filter((t: any) => t.status === 'in_progress').length
+
+  return (
+    <div className="border-t border-gray-100 px-3 py-2">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs font-medium text-gray-500">
+          {completed}/{todos.length} completed
+        </span>
+        {inProgress > 0 && (
+          <span className="text-xs text-blue-600">{inProgress} in progress</span>
+        )}
+        {pending > 0 && (
+          <span className="text-xs text-gray-400">{pending} pending</span>
+        )}
+      </div>
+      <div className="space-y-0.5">
+        {todos.slice(0, 8).map((todo: any, i: number) => {
+          const statusIcon = todo.status === 'completed' ? 'done' : todo.status === 'in_progress' ? 'doing' : 'todo'
+          return (
+            <div key={i} className="flex items-center gap-1.5 text-xs">
+              <span className={`shrink-0 w-3 text-center ${todo.status === 'completed' ? 'text-green-500' : todo.status === 'in_progress' ? 'text-blue-500' : 'text-gray-300'}`}>
+                {statusIcon === 'done' ? 'done' : statusIcon === 'doing' ? '>' : 'o'}
+              </span>
+              <span className={`truncate ${todo.status === 'completed' ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                {todo.content ?? todo.title ?? `Task ${i + 1}`}
+              </span>
+            </div>
+          )
+        })}
+        {todos.length > 8 && (
+          <span className="text-xs text-gray-400">...and {todos.length - 8} more</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface DelegationContentViewProps {
+  input?: string
+  details: Record<string, unknown>
+}
+
+function DelegationContentView({ input, details }: DelegationContentViewProps) {
+  const parsed = input ? parseJsonSafely(input) : null
+  const description = typeof details.description === 'string'
+    ? details.description
+    : parsed && typeof parsed.description === 'string'
+      ? parsed.description
+      : undefined
+  const subagentType = typeof details.subagentType === 'string' ? details.subagentType : undefined
+  const childSessionId = typeof details.childSessionId === 'string' ? details.childSessionId : undefined
+
+  if (!description && !subagentType && !childSessionId) return null
+
+  return (
+    <div className="border-t border-gray-100 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-gray-500">Delegation</span>
+        {subagentType && (
+          <span className="text-xs px-1 rounded bg-blue-50 text-blue-700">{subagentType}</span>
+        )}
+        {childSessionId && (
+          <span className="text-xs px-1 rounded bg-gray-100 text-gray-600 font-mono">{childSessionId}</span>
+        )}
+      </div>
+      {description && (
+        <div className="mt-1 text-xs text-gray-700 break-words">{description}</div>
+      )}
+    </div>
+  )
+}
+
 interface ToolStatusDotProps {
   status: string
 }
@@ -362,6 +457,18 @@ function PatchDiffView({ changedFiles }: PatchDiffViewProps) {
 
   const hasRawDetail = changedFiles.some(f => f.rawDetail)
 
+  let diffBlocks: FileBlock[] = []
+  if (hasRawDetail) {
+    const rawDetail = changedFiles.find(f => f.rawDetail)?.rawDetail
+    if (rawDetail && typeof rawDetail === 'string') {
+      if (rawDetail.includes('---')) {
+        diffBlocks = parseDiff(rawDetail)
+      } else if (rawDetail.includes('*** ')) {
+        diffBlocks = buildDiffFromPatchText(rawDetail)
+      }
+    }
+  }
+
   return (
     <div className="border-t border-gray-100">
       <button
@@ -389,7 +496,14 @@ function PatchDiffView({ changedFiles }: PatchDiffViewProps) {
                     <span className="text-xs text-red-600">-{change.deletions}</span>
                   )}
                 </div>
-                {change.rawDetail && (
+                {change.rawDetail && diffBlocks.length > 0 && (
+                  <div className="pl-4">
+                    {diffBlocks.slice(0, 3).map((block, j) => (
+                      <DiffBlockView key={j} block={block} />
+                    ))}
+                  </div>
+                )}
+                {change.rawDetail && diffBlocks.length === 0 && (
                   <pre className="text-xs font-mono text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap break-all max-h-32 overflow-auto">
                     {change.rawDetail}
                   </pre>
@@ -407,16 +521,23 @@ interface DiffContentViewProps {
   changedFiles?: DisplayChangedFile[]
   rawInput?: string
   rawOutput?: string
+  details?: Record<string, unknown>
   normalizedName: string
 }
 
-function DiffContentView({ changedFiles, rawInput, rawOutput, normalizedName: _normalizedName }: DiffContentViewProps) {
+function DiffContentView({ changedFiles, rawInput, rawOutput, details, normalizedName }: DiffContentViewProps) {
   const [showRaw, setShowRaw] = useState(false)
 
   let diffBlocks: FileBlock[] = []
   let diffText: string | undefined
+  const metadataDiff = details?.family === 'mutation' && Array.isArray(details.files)
+    ? details.files.find((file) => file && typeof file === 'object' && typeof (file as Record<string, unknown>).diff === 'string')
+    : undefined
+  const metadataDiffText = metadataDiff && typeof metadataDiff === 'object' ? (metadataDiff as Record<string, unknown>).diff : undefined
 
-  if (rawOutput && typeof rawOutput === 'string' && rawOutput.includes('---')) {
+  if (typeof metadataDiffText === 'string' && metadataDiffText) {
+    diffText = metadataDiffText
+  } else if (rawOutput && typeof rawOutput === 'string' && rawOutput.includes('---')) {
     diffText = rawOutput
   } else if (rawInput && typeof rawInput === 'string' && rawInput.includes('---')) {
     diffText = rawInput
@@ -424,6 +545,20 @@ function DiffContentView({ changedFiles, rawInput, rawOutput, normalizedName: _n
 
   if (diffText) {
     diffBlocks = parseDiff(diffText)
+  } else if ((normalizedName === 'edit' || normalizedName === 'write') && rawInput) {
+    const editInput = parseEditInput(rawInput)
+    if (editInput && editInput.oldString && editInput.newString && editInput.filePath) {
+      const fileName = editInput.filePath.split('/').pop() ?? editInput.filePath
+      diffBlocks = buildDiffFromEdit(fileName, editInput.oldString, editInput.newString)
+    }
+  } else if (normalizedName === 'apply_patch' && rawInput) {
+    const parsed = parseJsonSafely(rawInput)
+    if (parsed) {
+      const patchText = parsed.patchText ?? parsed.patch
+      if (typeof patchText === 'string' && patchText.includes('*** ')) {
+        diffBlocks = buildDiffFromPatchText(patchText)
+      }
+    }
   }
 
   const hasDiff = diffBlocks.length > 0
@@ -519,6 +654,211 @@ function DiffContentView({ changedFiles, rawInput, rawOutput, normalizedName: _n
       )}
     </div>
   )
+}
+
+function buildDiffFromEdit(filePath: string, oldStr: string, newStr: string): FileBlock[] {
+  const oldLines = oldStr.split('\n')
+  const newLines = newStr.split('\n')
+
+  const additions = newLines.filter(l => l.trim() !== '').length
+  const deletions = oldLines.filter(l => l.trim() !== '').length
+
+  const diffLines: import('../../lib/diffModel').DiffLine[] = []
+
+  diffLines.push({ type: 'hunk', content: `--- a/${filePath}`, oldLine: undefined, newLine: undefined })
+  diffLines.push({ type: 'hunk', content: `+++ b/${filePath}`, oldLine: undefined, newLine: undefined })
+  diffLines.push({ type: 'hunk', content: `@@ -1,${oldLines.length} +1,${newLines.length} @@`, oldLine: 1, newLine: 1 })
+
+  const maxLines = Math.max(oldLines.length, newLines.length)
+  const contextBefore: string[] = []
+  const contextAfter: string[] = []
+  const addLines: string[] = []
+  const delLines: string[] = []
+
+  for (let i = 0; i < maxLines; i++) {
+    const oldLine = oldLines[i]
+    const newLine = newLines[i]
+
+    if (oldLine !== undefined && newLine !== undefined && oldLine !== newLine) {
+      if (contextBefore.length > 0) {
+        for (const ctx of contextBefore) {
+          diffLines.push({ type: 'context', content: ` ${ctx}`, oldLine: undefined, newLine: undefined })
+        }
+        contextBefore.length = 0
+      }
+      if (delLines.length > 0) {
+        for (const dl of delLines) {
+          diffLines.push({ type: 'del', content: `-${dl}`, oldLine: undefined, newLine: undefined })
+        }
+        delLines.length = 0
+      }
+      if (addLines.length > 0) {
+        for (const al of addLines) {
+          diffLines.push({ type: 'add', content: `+${al}`, oldLine: undefined, newLine: undefined })
+        }
+        addLines.length = 0
+      }
+      if (oldLine.trim() !== '') {
+        diffLines.push({ type: 'del', content: `-${oldLine}`, oldLine: undefined, newLine: undefined })
+      }
+      if (newLine.trim() !== '') {
+        diffLines.push({ type: 'add', content: `+${newLine}`, oldLine: undefined, newLine: undefined })
+      }
+    } else if (oldLine !== undefined && oldLine !== newLine) {
+      if (contextBefore.length > 0 && delLines.length === 0 && addLines.length === 0) {
+        contextBefore.push(oldLine)
+      } else if (delLines.length > 0 || addLines.length > 0) {
+        if (oldLine.trim() !== '') {
+          delLines.push(oldLine)
+        }
+      } else {
+        contextBefore.push(oldLine)
+      }
+      if (newLine !== undefined && newLine !== oldLine) {
+        if (contextBefore.length > 0) {
+          for (const ctx of contextBefore) {
+            diffLines.push({ type: 'context', content: ` ${ctx}`, oldLine: undefined, newLine: undefined })
+          }
+          contextBefore.length = 0
+        }
+        if (newLine.trim() !== '') {
+          addLines.push(newLine)
+        }
+      }
+    } else if (oldLine !== undefined) {
+      if (delLines.length > 0) {
+        for (const dl of delLines) {
+          diffLines.push({ type: 'del', content: `-${dl}`, oldLine: undefined, newLine: undefined })
+        }
+        delLines.length = 0
+      }
+      if (addLines.length > 0) {
+        for (const al of addLines) {
+          diffLines.push({ type: 'add', content: `+${al}`, oldLine: undefined, newLine: undefined })
+        }
+        addLines.length = 0
+      }
+      contextAfter.push(oldLine)
+      if (contextAfter.length > 3) {
+        const removed = contextAfter.shift()!
+        diffLines.push({ type: 'context', content: ` ${removed}`, oldLine: undefined, newLine: undefined })
+      }
+    }
+  }
+
+  if (delLines.length > 0) {
+    for (const dl of delLines) {
+      diffLines.push({ type: 'del', content: `-${dl}`, oldLine: undefined, newLine: undefined })
+    }
+  }
+  if (addLines.length > 0) {
+    for (const al of addLines) {
+      diffLines.push({ type: 'add', content: `+${al}`, oldLine: undefined, newLine: undefined })
+    }
+  }
+  for (const ctx of contextBefore) {
+    diffLines.push({ type: 'context', content: ` ${ctx}`, oldLine: undefined, newLine: undefined })
+  }
+  for (const ctx of contextAfter) {
+    diffLines.push({ type: 'context', content: ` ${ctx}`, oldLine: undefined, newLine: undefined })
+  }
+
+  return [{
+    oldPath: filePath,
+    newPath: filePath,
+    status: 'modified',
+    isBinary: false,
+    additions,
+    deletions,
+    hunks: [],
+    lines: diffLines,
+    changedLineCount: diffLines.length,
+    hunkCount: 1,
+  }]
+}
+
+function buildDiffFromPatchText(patchText: string): FileBlock[] {
+  const changes = parsePatchOperations(patchText)
+  const blocks: FileBlock[] = []
+
+  for (const change of changes) {
+    const diffLines: import('../../lib/diffModel').DiffLine[] = []
+    diffLines.push({ type: 'hunk', content: `--- a/${change.path}`, oldLine: undefined, newLine: undefined })
+    diffLines.push({ type: 'hunk', content: `+++ b/${change.path}`, oldLine: undefined, newLine: undefined })
+
+    const patchForFile = extractPatchForFile(patchText, change.path)
+    if (patchForFile) {
+      diffLines.push({ type: 'hunk', content: `@@ -1,${change.deletions ?? 0} +1,${change.additions ?? 0} @@`, oldLine: 1, newLine: 1 })
+
+      const lines = patchForFile.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          diffLines.push({ type: 'add', content: line, oldLine: undefined, newLine: undefined })
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+          diffLines.push({ type: 'del', content: line, oldLine: undefined, newLine: undefined })
+        } else if (!line.startsWith('@@')) {
+          diffLines.push({ type: 'context', content: ` ${line}`, oldLine: undefined, newLine: undefined })
+        }
+      }
+    }
+
+    const status = change.operation === 'created' ? 'added'
+      : change.operation === 'deleted' ? 'deleted'
+      : change.operation === 'moved' ? 'renamed'
+      : 'modified'
+
+    blocks.push({
+      oldPath: change.oldPath ?? change.path,
+      newPath: change.path,
+      status,
+      isBinary: false,
+      additions: change.additions ?? 0,
+      deletions: change.deletions ?? 0,
+      hunks: [],
+      lines: diffLines,
+      changedLineCount: diffLines.length,
+      hunkCount: 1,
+    })
+  }
+
+  return blocks
+}
+
+function extractPatchForFile(patchText: string, filePath: string): string | undefined {
+  const lines = patchText.split('\n')
+  let inFile = false
+  const fileLines: string[] = []
+
+  const escapedPath = filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const addRegex = new RegExp(`^\\*\\*\\* Add File:\\s*${escapedPath}$`)
+  const updateRegex = new RegExp(`^\\*\\*\\* Update File:\\s*${escapedPath}$`)
+  const deleteRegex = new RegExp(`^\\*\\*\\* Delete File:\\s*${escapedPath}$`)
+
+  for (const line of lines) {
+    const addMatch = line.match(addRegex)
+    const updateMatch = line.match(updateRegex)
+    const deleteMatch = line.match(deleteRegex)
+
+    if (addMatch || updateMatch || deleteMatch) {
+      inFile = true
+      fileLines.length = 0
+      continue
+    }
+
+    if (inFile) {
+      if (line.startsWith('*** ') || line.startsWith('diff ') || line.startsWith('--- a/')) {
+        if (fileLines.length > 0) {
+          break
+        }
+      }
+      if (line.match(/^\*\*\* (Add File|Update File|Delete File|Move to|OldPath):/)) {
+        break
+      }
+      fileLines.push(line)
+    }
+  }
+
+  return fileLines.length > 0 ? fileLines.join('\n') : undefined
 }
 
 function DiffBlockView({ block }: { block: FileBlock }) {
@@ -619,7 +959,7 @@ function ToolRowView({ part }: ToolRowViewProps) {
     }
 
     if (displayType === 'terminal' && (part.input || part.output)) {
-      return <BashContentView input={part.input} output={part.output} />
+      return <BashContentView input={part.input} output={part.output} details={part.details} />
     }
 
     if ((part.normalizedName === 'read' || part.normalizedName === 'read_file') && (part.input || part.output)) {
@@ -642,12 +982,21 @@ function ToolRowView({ part }: ToolRowViewProps) {
       return <SearchContentView input={part.input} output={part.output} />
     }
 
+    if ((part.normalizedName === 'todowrite' || part.normalizedName === 'todo') && part.input) {
+      return <TodoContentView input={part.input} />
+    }
+
+    if (part.normalizedName === 'task' && part.details) {
+      return <DelegationContentView input={part.input} details={part.details} />
+    }
+
     if (displayType === 'diff') {
       return (
         <DiffContentView
           changedFiles={part.changedFiles}
           rawInput={part.rawInput}
           rawOutput={part.rawOutput}
+          details={part.details}
           normalizedName={part.normalizedName}
         />
       )
@@ -736,6 +1085,10 @@ interface ContextGroupViewProps {
 function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
   const [expanded, setExpanded] = useState(false)
   const [titlePrefix, titleDetail] = title.split(' · ', 2)
+  const singleContextTool = tools.length === 1 ? tools[0] : undefined
+  const canExpandSingleContextTool = singleContextTool && singleContextTool.status !== 'running' && singleContextTool.status !== 'pending'
+  const singleContextToolLabel = singleContextTool ? getToolDisplayLabel(singleContextTool.normalizedName, singleContextTool.displayTitle, singleContextTool.displaySubtitle, singleContextTool.input) : undefined
+  const singleContextToolArgs = singleContextTool ? getToolDisplayArgs(singleContextTool.normalizedName, singleContextTool.input) : []
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
@@ -759,9 +1112,37 @@ function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
       </button>
       {expanded && (
         <div className="px-3 pb-2 border-t border-gray-100 space-y-1.5">
-          {tools.map((tool) => (
-            <ToolRowView key={tool.id} part={tool} />
-          ))}
+          {singleContextTool && canExpandSingleContextTool ? (
+            <div className="px-3 py-2 text-xs text-gray-600">
+              <div className="font-medium text-xs text-gray-500 mb-1">
+                {singleContextTool.normalizedName === 'read' || singleContextTool.normalizedName === 'read_file' ? 'Reading' : singleContextToolLabel}
+              </div>
+              {singleContextToolArgs.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {singleContextToolArgs.map((arg) => (
+                    <span key={arg} className="rounded bg-gray-100 px-1 py-0.5 font-mono text-gray-500">{arg}</span>
+                  ))}
+                </div>
+              )}
+              {singleContextTool.output && (
+                <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                  {singleContextTool.output}
+                </pre>
+              )}
+              {singleContextTool.input && (
+                <div className="mt-2">
+                  <div className="font-medium text-xs text-gray-500 mb-1">Input</div>
+                  <pre data-scrollable="" className="whitespace-pre-wrap break-all text-xs text-gray-700 bg-gray-50 rounded p-2 max-h-24 overflow-auto">
+                    {singleContextTool.input}
+                  </pre>
+                </div>
+              )}
+            </div>
+          ) : (
+            tools.map((tool) => (
+              <ToolRowView key={tool.id} part={tool} />
+            ))
+          )}
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../lib/agent-events'
 import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../lib/types'
-import { parseEditInput, parsePatchOperations } from '../lib/transcript-tool-utils'
+import { parseEditInput, parsePatchOperations, parseJsonSafely } from '../lib/transcript-tool-utils'
 import {
   normalizeToolName,
   inferDisplayTitle,
@@ -23,6 +23,10 @@ interface UseSessionTranscriptOptions {
 interface LiveToolCall {
   toolCallId: string
   toolName: string
+  normalizedName?: string
+  displayTitle?: string
+  displaySubtitle?: string
+  category?: string
   status: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'
   title?: string
   target?: string
@@ -33,6 +37,8 @@ interface LiveToolCall {
   completedAt?: string | null
   rawInput?: unknown
   rawOutput?: unknown
+  metadata?: Record<string, unknown>
+  details?: Record<string, unknown>
 }
 
 export interface UseSessionTranscriptResult {
@@ -65,8 +71,10 @@ function createErrorPart(message: string, kind: ErrorPart['kind'], at: string): 
 }
 
 function createToolPart(tool: LiveToolCall): ToolPart {
-  const normalizedName = normalizeToolName(tool.toolName, tool.title, tool.rawInput, tool.rawOutput)
-  const { displayTitle, displaySubtitle } = inferDisplayTitle(normalizedName, tool.title)
+  const normalizedName = tool.normalizedName ?? normalizeToolName(tool.toolName, tool.title, tool.rawInput, tool.rawOutput)
+  const { displayTitle, displaySubtitle } = tool.displayTitle || tool.displaySubtitle
+    ? { displayTitle: tool.displayTitle, displaySubtitle: tool.displaySubtitle }
+    : inferDisplayTitle(normalizedName, tool.title)
   const input = tool.input ?? stringifyPayload(tool.rawInput)
   const output = tool.output ?? stringifyPayload(tool.rawOutput)
   const parsedEdit = parseEditInput(input)
@@ -80,6 +88,7 @@ function createToolPart(tool: LiveToolCall): ToolPart {
       toolName: tool.toolName,
       displayTitle,
       displaySubtitle,
+      category: tool.category,
       status: mapStatusToDisplay(tool.status),
       title: tool.title,
       target: tool.target,
@@ -90,6 +99,8 @@ function createToolPart(tool: LiveToolCall): ToolPart {
       completedAt: tool.completedAt,
       rawInput: input,
       rawOutput: output,
+      metadata: tool.metadata,
+      details: tool.details,
       changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
     },
   }
@@ -216,6 +227,152 @@ function deriveToolTarget(toolName: string, rawInput: unknown, title?: string): 
   return label ?? title
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+function asPayloadRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') return parseJsonSafely(value)
+  return asRecord(value)
+}
+
+function getNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined
+}
+
+function truncatePreview(value: string, maxLength: number = 1000): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
+}
+
+function buildLiveToolDetails(
+  normalizedName: string,
+  rawInput: unknown,
+  rawOutput: unknown,
+  metadata?: Record<string, unknown>,
+  error?: string,
+): Record<string, unknown> | undefined {
+  const input = asPayloadRecord(rawInput)
+  const output = asPayloadRecord(rawOutput)
+  const lower = normalizedName.toLowerCase()
+
+  if (lower === 'bash' || lower === 'shell' || lower === 'exec' || lower === 'command') {
+    const details: Record<string, unknown> = { family: 'execution' }
+    const command = getString(input?.command ?? input?.script ?? input?.cmd)
+    const cwd = getString(input?.cwd ?? input?.workdir ?? input?.workingDir)
+    const timeout = getNumber(input?.timeout)
+    const exitCode = getNumber(output?.exitCode ?? output?.exit_code ?? output?.code)
+    const outputPreview = getString(output?.stdout ?? output?.output)
+    if (command) details.command = command
+    if (cwd) details.cwd = cwd
+    if (timeout !== undefined) details.timeout = timeout
+    if (exitCode !== undefined) details.exitCode = exitCode
+    if (outputPreview) details.outputPreview = truncatePreview(outputPreview)
+    else if (typeof rawOutput === 'string' && rawOutput) details.outputPreview = truncatePreview(rawOutput)
+    if (error) details.completionStatus = 'failed'
+    else if (rawOutput !== undefined) details.completionStatus = 'completed'
+    return details
+  }
+
+  if (lower === 'task') {
+    const details: Record<string, unknown> = { family: 'delegation' }
+    const description = getString(input?.description ?? input?.prompt ?? input?.task ?? input?.command ?? metadata?.description)
+    const subagentType = getString(input?.subagent_type ?? input?.agentType ?? input?.type ?? metadata?.subagentType)
+    const subagentName = getString(input?.subagent_name ?? input?.agentName ?? input?.name)
+    const taskId = getString(input?.task_id ?? input?.taskId)
+    const childSessionId = getString(metadata?.childSessionId ?? metadata?.sessionId ?? metadata?.child_session_id)
+    if (description) details.description = description
+    if (subagentType) details.subagentType = subagentType
+    if (subagentName) details.subagentName = subagentName
+    if (taskId) details.taskId = taskId
+    if (childSessionId) details.childSessionId = childSessionId
+    return details
+  }
+
+  if (lower === 'skill') {
+    const details: Record<string, unknown> = { family: 'skill' }
+    const title = getString(metadata?.title)
+    const skillNameFromTitle = title?.match(/(?:loaded skill:?\s*)(.+)/i)?.[1]?.trim()
+    const skillName = skillNameFromTitle
+      ?? getString(input?.name ?? input?.skillName ?? input?.skill)
+      ?? getString(metadata?.skillName ?? metadata?.name)
+    if (skillName) details.skillName = skillName
+    return details
+  }
+
+  if (lower === 'question' || lower === 'webfetch' || lower === 'websearch') {
+    const details: Record<string, unknown> = { family: 'interaction' }
+    const url = getString(input?.url ?? input?.uri)
+    const query = getString(input?.query ?? input?.search_query ?? input?.searchQuery ?? input?.search ?? input?.question ?? input?.text)
+    const textPreview = getString(output?.content ?? output?.text ?? output?.summary)
+    const answers = Array.isArray(output?.answers) ? output.answers : undefined
+    if (url) details.url = url
+    if (query) details.query = query
+    if (answers) details.answerCount = answers.length
+    if (textPreview) details.resultPreview = textPreview.slice(0, 300)
+    else if (typeof rawOutput === 'string' && rawOutput) details.resultPreview = rawOutput.slice(0, 300)
+    return details
+  }
+
+  if (lower === 'todowrite' || lower === 'todo') {
+    const todos = Array.isArray(input?.todos) ? input.todos : []
+    const details: Record<string, unknown> = {
+      family: 'planning',
+      totalCount: todos.length,
+    }
+    const byStatus: Record<string, number> = {}
+    for (const todo of todos) {
+      const status = asRecord(todo)?.status
+      if (typeof status === 'string' && status) {
+        byStatus[status] = (byStatus[status] ?? 0) + 1
+      }
+    }
+    if (Object.keys(byStatus).length > 0) details.statusCounts = byStatus
+    return details
+  }
+
+  return undefined
+}
+
+function getNormalizedName(detail: {
+  normalizedName?: string
+  toolName: string
+  title?: string
+  rawInput?: unknown
+  rawOutput?: unknown
+}): string {
+  return detail.normalizedName ?? normalizeToolName(detail.toolName, detail.title, detail.rawInput, detail.rawOutput)
+}
+
+function getDisplayFields(detail: {
+  normalizedName?: string
+  displayTitle?: string
+  displaySubtitle?: string
+  toolName: string
+  title?: string
+  rawInput?: unknown
+  rawOutput?: unknown
+}): { normalizedName: string; displayTitle?: string; displaySubtitle?: string } {
+  const normalizedName = getNormalizedName(detail)
+  if (detail.title) {
+    return { normalizedName, displayTitle: detail.title }
+  }
+  if (detail.displayTitle || detail.displaySubtitle) {
+    return {
+      normalizedName,
+      displayTitle: detail.displayTitle,
+      displaySubtitle: detail.displaySubtitle,
+    }
+  }
+  return {
+    normalizedName,
+    ...inferDisplayTitle(normalizedName, detail.title),
+  }
+}
+
 function updateToolInTurn(
   turn: SessionTurn,
   toolCallId: string,
@@ -235,13 +392,18 @@ function updateToolInTurn(
         const toolPart = p as ToolPart
         const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
         const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
+        const metadata = updates.metadata ?? toolPart.tool.metadata
+        const details = updates.details ?? toolPart.tool.details
         const startedAt = updates.startedAt ?? toolPart.tool.startedAt
-        const normalizedName = normalizeToolName(
-          updates.toolName ?? toolPart.tool.toolName,
-          updates.title ?? toolPart.tool.title,
+        const { normalizedName, displayTitle, displaySubtitle } = getDisplayFields({
+          normalizedName: updates.normalizedName ?? toolPart.tool.normalizedName,
+          displayTitle: updates.displayTitle ?? toolPart.tool.displayTitle,
+          displaySubtitle: updates.displaySubtitle ?? toolPart.tool.displaySubtitle,
+          toolName: updates.toolName ?? toolPart.tool.toolName,
+          title: updates.title ?? toolPart.tool.title,
           rawInput,
           rawOutput,
-        )
+        })
         const input = stringifyPayload(rawInput) ?? toolPart.tool.input
         const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
         const parsedEdit = parseEditInput(input)
@@ -254,10 +416,15 @@ function updateToolInTurn(
             ...toolPart.tool,
             ...restUpdates,
             normalizedName,
+            displayTitle,
+            displaySubtitle,
+            category: updates.category ?? toolPart.tool.category,
             input,
             output,
             rawInput: input,
             rawOutput: output,
+            metadata,
+            details,
             target: updates.target ?? toolPart.tool.target,
             changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
             startedAt,
@@ -281,7 +448,18 @@ function updateToolInTurn(
           const toolPart = p as ToolPart
           const rawInput = updates.rawInput ?? updates.input ?? toolPart.tool.rawInput ?? toolPart.tool.input
           const rawOutput = updates.rawOutput ?? updates.output ?? toolPart.tool.rawOutput ?? toolPart.tool.output
+          const metadata = updates.metadata ?? toolPart.tool.metadata
+          const details = updates.details ?? toolPart.tool.details
           const startedAt = updates.startedAt ?? toolPart.tool.startedAt
+          const { displayTitle, displaySubtitle } = getDisplayFields({
+            normalizedName,
+            displayTitle: updates.displayTitle ?? toolPart.tool.displayTitle,
+            displaySubtitle: updates.displaySubtitle ?? toolPart.tool.displaySubtitle,
+            toolName: updates.toolName ?? toolPart.tool.toolName,
+            title: updates.title ?? toolPart.tool.title,
+            rawInput,
+            rawOutput,
+          })
           const input = stringifyPayload(rawInput) ?? toolPart.tool.input
           const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
           const parsedEdit = parseEditInput(input)
@@ -295,10 +473,15 @@ function updateToolInTurn(
               ...restUpdates,
               toolCallId,
               normalizedName,
+              displayTitle,
+              displaySubtitle,
+              category: updates.category ?? toolPart.tool.category,
               input,
               output,
               rawInput: input,
               rawOutput: output,
+              metadata,
+              details,
               target: updates.target ?? toolPart.tool.target,
               changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
               startedAt,
@@ -318,6 +501,10 @@ function updateToolInTurn(
       createToolPart({
         toolCallId,
         toolName: updates.toolName ?? 'unknown',
+        normalizedName: updates.normalizedName,
+        displayTitle: updates.displayTitle,
+        displaySubtitle: updates.displaySubtitle,
+        category: updates.category,
         status: (updates.status ?? 'started') as LiveToolCall['status'],
         title: updates.title,
         target: updates.target,
@@ -326,6 +513,8 @@ function updateToolInTurn(
         error: updates.error,
         rawInput: updates.rawInput,
         rawOutput: updates.rawOutput,
+        metadata: updates.metadata,
+        details: updates.details,
         startedAt: now,
         completedAt: isTerminalState(mapStatusToDisplay(updates.status ?? 'started')) ? now : null,
       }),
@@ -476,15 +665,23 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
 
         const now = new Date().toISOString()
         const toolCallId = detail.toolCallId
-        const normalizedName = normalizeToolName(detail.toolName, detail.title, detail.rawInput, detail.rawOutput)
+        const normalizedName = getNormalizedName(detail)
         const pendingCorrelation = pendingCorrelationRef.current.get(toolCallId)
         const target = deriveToolTarget(detail.toolName, detail.rawInput, detail.title) ?? pendingCorrelation?.target
         const correlationKey = getCorrelationKey(detail.toolName, detail.title, target)
+        const metadata = detail.metadata ?? detail.rawOutputMetadata
+        const detailsMetadata = asRecord(metadata)
+        const liveDetails = detail.details ?? buildLiveToolDetails(normalizedName, detail.rawInput, detail.rawOutput, detailsMetadata ?? undefined)
+        const { displayTitle, displaySubtitle } = getDisplayFields(detail)
 
         if (detail.state === 'started') {
           liveToolCallMapRef.current.set(toolCallId, {
             toolCallId,
             toolName: detail.toolName,
+            normalizedName,
+            displayTitle,
+            displaySubtitle,
+            category: detail.category,
             status: 'started',
             title: detail.title,
             target,
@@ -493,6 +690,8 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
             error: '',
             rawInput: detail.rawInput,
             rawOutput: detail.rawOutput,
+            metadata: detailsMetadata ?? undefined,
+            details: liveDetails,
             startedAt: now,
             completedAt: null,
           })
@@ -504,6 +703,10 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
             const lastTurn = next[next.length - 1]
             next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
               toolName: detail.toolName,
+              normalizedName,
+              displayTitle,
+              displaySubtitle,
+              category: detail.category,
               status: 'started',
               title: detail.title,
               target,
@@ -511,6 +714,8 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
               output: stringifyPayload(detail.rawOutput),
               rawInput: detail.rawInput,
               rawOutput: detail.rawOutput,
+              metadata: detailsMetadata ?? undefined,
+              details: liveDetails,
               startedAt: now,
             }, correlationKey)
             return next
@@ -521,8 +726,16 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
           const existing = liveToolCallMapRef.current.get(toolCallId)
           if (existing) {
             existing.status = detail.state as LiveToolCall['status']
+            existing.normalizedName = normalizedName
+            existing.displayTitle = displayTitle
+            existing.displaySubtitle = displaySubtitle
+            existing.category = detail.category ?? existing.category
+            existing.input = stringifyPayload(detail.rawInput) ?? existing.input
             existing.output = stringifyPayload(detail.rawOutput)
+            existing.rawInput = detail.rawInput ?? existing.rawInput
             existing.rawOutput = detail.rawOutput
+            existing.metadata = detailsMetadata ?? existing.metadata
+            existing.details = liveDetails ?? existing.details
             existing.completedAt = now
             existing.error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : existing.error
           }
@@ -534,10 +747,18 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
             next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
               status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
               toolName: detail.toolName,
+              normalizedName,
+              displayTitle,
+              displaySubtitle,
+              category: detail.category,
               title: detail.title,
               target,
+              input: stringifyPayload(detail.rawInput),
               output: stringifyPayload(detail.rawOutput),
+              rawInput: detail.rawInput,
               rawOutput: detail.rawOutput,
+              metadata: detailsMetadata ?? undefined,
+              details: liveDetails,
               completedAt: now,
               error,
             }, correlationKey)
@@ -688,6 +909,10 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
 
     return () => {
       mountedRef.current = false
+      if (streamingTimerRef.current !== null) {
+        clearTimeout(streamingTimerRef.current)
+        streamingTimerRef.current = null
+      }
       for (const unsub of unsubs) unsub()
     }
   }, [issueId, sessionId, acpSessionId, issueNumber, isRunning, queryClient, invalidateAndRefetch])

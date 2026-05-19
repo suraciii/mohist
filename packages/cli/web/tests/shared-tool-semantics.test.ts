@@ -8,6 +8,8 @@ import {
   parseEditInput,
   parseEditWriteChanges,
   getFallbackSubtitle,
+  inferToolName,
+  normalizeToolName,
   type ToolDisplayType,
   type EditInput,
 } from '../src/lib/transcript-tool-utils'
@@ -279,6 +281,24 @@ describe('shared tool semantics: fallback subtitle', () => {
     expect(getFallbackSubtitle(undefined)).toBeUndefined()
     expect(getFallbackSubtitle('')).toBeUndefined()
     expect(getFallbackSubtitle('not-json')).toBeUndefined()
+  })
+})
+
+describe('shared tool semantics: live/replay inference parity', () => {
+  it('infers skill from semantic title', () => {
+    expect(normalizeToolName('unknown', 'Loaded skill: software-design', {}, undefined)).toBe('skill')
+  })
+
+  it('infers task from delegation payload', () => {
+    expect(normalizeToolName('unknown', 'delegate', { description: 'Inspect routes', subagent_type: 'explore', task_id: 'task-1' }, undefined)).toBe('task')
+  })
+
+  it('infers websearch from search URL payload', () => {
+    expect(inferToolName('unknown', undefined, { url: 'https://example.com', search_query: 'session transcript parity' }, undefined)).toBe('websearch')
+  })
+
+  it('infers todo from todo-like title', () => {
+    expect(normalizeToolName('unknown', 'Todo: sync tests', {}, undefined)).toBe('todo')
   })
 })
 

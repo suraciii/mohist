@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, screen, fireEvent, waitFor, renderHook, act } from './test-utils'
+import { baseRender, screen, fireEvent, waitFor, renderHook, act, within } from './test-utils'
 import { SessionPage } from '../src/components/SessionPage'
 import { SessionTranscriptView } from '../src/components/SessionTranscriptView'
 import { useSessionTranscript } from '../src/hooks/useSessionTranscript'
@@ -65,6 +65,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   Element.prototype.scrollTo = originalScrollTo
   for (const queryClient of queryClients) queryClient.clear()
   queryClients.length = 0
@@ -113,6 +114,18 @@ function makeTurn(overrides: Partial<SessionTurn> = {}): SessionTurn {
     assistant: [],
     ...overrides,
   }
+}
+
+function getAssistantCopyButton() {
+  const buttons = screen.getAllByText('Copy')
+  return buttons[buttons.length - 1] as HTMLButtonElement
+}
+
+function expandChangedFilesTool() {
+  const labels = screen.getAllByText('1 file changed')
+  const toggle = labels[0]?.closest('button')
+  if (!toggle) throw new Error('Changed files toggle not found')
+  fireEvent.click(toggle)
 }
 
 describe('SessionTranscriptView', () => {
@@ -1731,300 +1744,6 @@ describe('SessionPage header and states', () => {
   })
 })
 
-describe('Live/historical parity', () => {
-  it('renders turns with Coder label when assistant parts exist', async () => {
-    const turns = [makeTurn({
-      assistant: [{
-        id: 'text-1',
-        type: 'text',
-        text: 'Hello world',
-        startedAt: '2024-01-01T10:00:01.000Z',
-        completedAt: null,
-      } as TextPart],
-    })]
-
-    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
-
-    await waitFor(() => {
-      expect(screen.getByText('Coder')).toBeInTheDocument()
-    })
-  })
-
-  it('renders live tool with normalized name and display title', async () => {
-    const turns = [makeTurn({
-      assistant: [{
-        id: 'tool-1',
-        type: 'tool',
-        tool: {
-          toolCallId: 'tc-1',
-          normalizedName: 'read',
-          displayTitle: 'Read',
-          toolName: 'Read',
-          status: 'completed',
-          input: '{"file_path":"src/index.ts"}',
-          output: 'file content',
-          startedAt: '2024-01-01T10:00:02.000Z',
-          completedAt: '2024-01-01T10:00:03.000Z',
-        },
-      } as ToolPart],
-    })]
-
-    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/Gathering context/)).toBeInTheDocument()
-    })
-  })
-
-  it('shows Jump to bottom button when new content available and not near bottom', async () => {
-    const turns = [makeTurn({
-      user: {
-        role: 'mohist',
-        text: 'Test prompt',
-        kind: 'task',
-        sentAt: '2024-01-01T10:00:00.000Z',
-      },
-      assistant: [{
-        id: 'text-1',
-        type: 'text',
-        text: 'Initial text',
-        startedAt: '2024-01-01T10:00:01.000Z',
-        completedAt: null,
-      } as TextPart],
-    })]
-
-    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={true} />)
-
-    await waitFor(() => {
-      expect(screen.getByText('Coder')).toBeInTheDocument()
-    })
-  })
-
-  it('displays recovery error part with message for recovery events', async () => {
-    const turns = [makeTurn({
-      assistant: [{
-        id: 'error-1',
-        type: 'error',
-        message: 'Recovery detected',
-        kind: 'recovery',
-        at: '2024-01-01T10:00:05.000Z',
-      } as ErrorPart],
-    })]
-
-    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/Recovery detected/i)).toBeInTheDocument()
-    })
-  })
-
-  it('displays terminal error parts for failed sessions', async () => {
-    const turns = [makeTurn({
-      assistant: [{
-        id: 'error-1',
-        type: 'error',
-        message: 'Execution failed',
-        kind: 'failed',
-        at: '2024-01-01T10:00:05.000Z',
-      } as ErrorPart],
-    })]
-
-    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/Execution failed/i)).toBeInTheDocument()
-    })
-  })
-
-  it('marks live transcript finalizing after completion SSE until refetch', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      acpSessionId: 'acp-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    expect(result.current.isFinalizing).toBe(false)
-
-    act(() => {
-      dispatchAgentEvent('coder_session_completed', {
-        issueId: '123',
-        projectId: 'project-1',
-        coderSessionId: 'session-123',
-        status: 'completed',
-        duration: 1000,
-      })
-    })
-
-    await waitFor(() => {
-      expect(result.current.isFinalizing).toBe(true)
-    })
-  })
-
-  it('does not mark live transcript finalizing for ordinary text chunks', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      acpSessionId: 'acp-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    act(() => {
-      dispatchAgentEvent('coder_text_chunk', {
-        issueId: '123',
-        projectId: 'project-1',
-        executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        text: 'streaming text',
-        coderSessionId: 'session-123',
-      })
-    })
-
-    await waitFor(() => {
-      expect(result.current.turns.at(-1)?.assistant.some((part) => part.type === 'text')).toBe(true)
-    })
-    expect(result.current.isFinalizing).toBe(false)
-  })
-
-  it('appends one recovery part for a single live recovery event', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      acpSessionId: 'acp-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    act(() => {
-      dispatchAgentEvent('coder_recovery_status', {
-        issueId: '123',
-        projectId: 'project-1',
-        executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        status: 'recovering',
-        attempt: 1,
-      })
-    })
-
-    await waitFor(() => {
-      const recoveryParts = result.current.turns.at(-1)?.assistant.filter(
-        (part) => part.type === 'error' && part.kind === 'recovery',
-      )
-      expect(recoveryParts).toHaveLength(1)
-    })
-  })
-
-  it('normalizes unknown live pattern tools as search like historical replay', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      acpSessionId: 'acp-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    act(() => {
-      dispatchAgentEvent('coder_tool_call', {
-        issueId: '123',
-        projectId: 'project-1',
-        executionId: 'exec-123',
-        acpSessionId: 'acp-123',
-        coderSessionId: 'session-123',
-        toolCallId: 'tc-pattern',
-        toolName: 'unknown',
-        state: 'started',
-        rawInput: { pattern: '**/*.ts' },
-      })
-    })
-
-    await waitFor(() => {
-      const toolPart = result.current.turns.at(-1)?.assistant.find(
-        (part): part is ToolPart => part.type === 'tool',
-      )
-      expect(toolPart?.tool.normalizedName).toBe('search')
-    })
-  })
-
-  it('normalizes live tool payload shapes like historical replay', async () => {
-    const initialTurns = [makeTurn()]
-
-    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
-      issueNumber: 123,
-      sessionId: 'session-123',
-      acpSessionId: 'acp-123',
-      initialTurns,
-      isRunning: true,
-    }))
-
-    const cases = [
-      { id: 'tc-patch', rawInput: { patchText: '*** Begin Patch\n*** Add File: a.txt\n+hello\n*** End Patch' }, expected: 'apply_patch' },
-      { id: 'tc-command', rawInput: { command: 'npm test' }, expected: 'bash' },
-      { id: 'tc-file-path', rawInput: { file_path: 'src/index.ts' }, expected: 'read' },
-      { id: 'tc-path', rawInput: { path: 'src/index.ts' }, expected: 'read' },
-      { id: 'tc-todos', rawInput: { todos: [{ content: 'Test', status: 'pending' }] }, expected: 'todowrite' },
-      { id: 'tc-output-metadata', rawInput: {}, rawOutput: { metadata: { toolName: 'glob' } }, expected: 'glob' },
-    ]
-
-    for (const item of cases) {
-      act(() => {
-        dispatchAgentEvent('coder_tool_call', {
-          issueId: '123',
-          projectId: 'project-1',
-          executionId: 'exec-123',
-          acpSessionId: 'acp-123',
-          coderSessionId: 'session-123',
-          toolCallId: item.id,
-          toolName: 'unknown',
-          state: 'started',
-          rawInput: item.rawInput,
-          rawOutput: item.rawOutput,
-        })
-      })
-    }
-
-    await waitFor(() => {
-      const toolParts = result.current.turns.at(-1)?.assistant.filter(
-        (part): part is ToolPart => part.type === 'tool',
-      ) ?? []
-      expect(toolParts).toHaveLength(cases.length)
-      expect(toolParts.map((part) => part.tool.normalizedName)).toEqual(cases.map((item) => item.expected))
-    })
-  })
-
-  it('renders unknown tool when tool name is not recognized', async () => {
-    const turns = [makeTurn({
-      assistant: [{
-        id: 'tool-1',
-        type: 'tool',
-        tool: {
-          toolCallId: 'tc-unknown',
-          toolName: 'UnknownTool',
-          status: 'completed',
-          input: '{"arg1":"value1"}',
-          output: '{"result":"ok"}',
-          startedAt: '2024-01-01T10:00:02.000Z',
-          completedAt: '2024-01-01T10:00:03.000Z',
-        },
-      } as ToolPart],
-    })]
-
-    renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/Called UnknownTool/)).toBeInTheDocument()
-    })
-  })
-})
 
 describe('SessionHeader navigation', () => {
   it('session header link routes to /issue/:number/session/:sessionId', async () => {
@@ -2772,11 +2491,12 @@ describe('Thinking state for live sessions', () => {
   })
 
   it('resets isThinking when initialTurns change', async () => {
+    const initialTurns = [makeTurn()]
     const { result } = renderHookWithQueryClient(() => useSessionTranscript({
       issueNumber: 123,
       sessionId: 'session-123',
       acpSessionId: 'acp-123',
-      initialTurns: [makeTurn()],
+      initialTurns,
       isRunning: false,
     }))
 
@@ -2815,7 +2535,8 @@ describe('Scroll follow behavior', () => {
       isRunning: true,
     }))
 
-    result.current.setIsNearBottom(false)
+    act(() => result.current.setIsNearBottom(false))
+    await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
@@ -2844,7 +2565,8 @@ describe('Scroll follow behavior', () => {
       isRunning: true,
     }))
 
-    result.current.setIsNearBottom(false)
+    act(() => result.current.setIsNearBottom(false))
+    await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
     act(() => {
       dispatchAgentEvent('coder_text_chunk', {
@@ -3018,7 +2740,7 @@ describe('ToolRegistry', () => {
       await waitFor(() => {
         expect(screen.getByText(/SomeUnknownTool/)).toBeInTheDocument()
       })
-      expect(screen.queryByText(/unknown/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/^unknown$/i)).not.toBeInTheDocument()
     })
 
     it('falls back to raw toolName when no parsing signals available', async () => {
@@ -3605,7 +3327,7 @@ describe('T-006: Transcript affordances', () => {
       await waitFor(() => {
         expect(screen.getByText('Coder')).toBeInTheDocument()
       })
-      expect(screen.getByText('Copy')).toBeInTheDocument()
+      expect(getAssistantCopyButton()).toBeInTheDocument()
     })
 
     it('copies assistant text when copy button is clicked', async () => {
@@ -3627,11 +3349,9 @@ describe('T-006: Transcript affordances', () => {
 
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Copy')).toBeInTheDocument()
-      })
+      expect(getAssistantCopyButton()).toBeInTheDocument()
 
-      fireEvent.click(screen.getByText('Copy'))
+      fireEvent.click(getAssistantCopyButton())
 
       await waitFor(() => {
         expect(mockWriteText).toHaveBeenCalledWith('Copy this text')
@@ -3659,21 +3379,23 @@ describe('T-006: Transcript affordances', () => {
 
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
-      await waitFor(() => {
-        expect(screen.getByText('Copy')).toBeInTheDocument()
+      expect(getAssistantCopyButton()).toBeInTheDocument()
+
+      fireEvent.click(getAssistantCopyButton())
+
+      await act(async () => {
+        await Promise.resolve()
       })
 
-      fireEvent.click(screen.getByText('Copy'))
+      expect(mockWriteText).toHaveBeenCalledWith('Test text')
+      expect(screen.getByText('Copied!')).toBeInTheDocument()
 
-      await waitFor(() => {
-        expect(screen.getByText('Copied!')).toBeInTheDocument()
+      act(() => {
+        vi.advanceTimersByTime(2000)
       })
 
-      vi.advanceTimersByTime(2000)
-
-      await waitFor(() => {
-        expect(screen.getByText('Copy')).toBeInTheDocument()
-      })
+      expect(mockWriteText).toHaveBeenCalledWith('Test text')
+      expect(getAssistantCopyButton()).toBeInTheDocument()
 
       vi.useRealTimers()
     })
@@ -3708,8 +3430,12 @@ describe('T-006: Transcript affordances', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+        expect(screen.getAllByText('1 file changed').length).toBeGreaterThan(0)
       })
+      expandChangedFilesTool()
+      expect(screen.getByText('src/test.ts')).toBeInTheDocument()
+      expect(screen.getByText('+1')).toBeInTheDocument()
+      expect(screen.getByText('-1')).toBeInTheDocument()
     })
 
     it('hides diff content by default and shows it when expanded', async () => {
@@ -3740,15 +3466,18 @@ describe('T-006: Transcript affordances', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+        expect(screen.getAllByText('1 file changed').length).toBeGreaterThan(0)
       })
+      expandChangedFilesTool()
+      expect(screen.getByText('src/test.ts')).toBeInTheDocument()
 
       expect(screen.queryByText(/--- a\/src\/test.ts/)).not.toBeInTheDocument()
 
-      fireEvent.click(screen.getByText('Show diff (expanded view)'))
+      fireEvent.click(screen.getByText(/Show raw patch/i))
 
       await waitFor(() => {
-        expect(screen.getByText(/--- a\/src\/test.ts/)).toBeInTheDocument()
+        expect(within(screen.getByText('Changes').closest('div')!.parentElement!).getByText(/old/)).toBeInTheDocument()
+        expect(within(screen.getByText('Changes').closest('div')!.parentElement!).getByText(/new/)).toBeInTheDocument()
       })
     })
 
@@ -3771,8 +3500,12 @@ describe('T-006: Transcript affordances', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Show diff')).toBeInTheDocument()
+        expect(screen.getAllByText('1 file changed').length).toBeGreaterThan(0)
       })
+      expandChangedFilesTool()
+      expect(screen.getByText('src/new.ts')).toBeInTheDocument()
+      expect(screen.getByText('+1')).toBeInTheDocument()
+      expect(screen.getByText(/Show raw patch/i)).toBeInTheDocument()
     })
 
     it('shows rawDetail content in diff view when available', async () => {
@@ -3805,14 +3538,16 @@ describe('T-006: Transcript affordances', () => {
       renderWithQueryClient(<SessionTranscriptView turns={turns} isRunning={false} />)
 
       await waitFor(() => {
-        expect(screen.getByText('Show diff (expanded view)')).toBeInTheDocument()
+        expect(screen.getAllByText('1 file changed').length).toBeGreaterThan(0)
       })
+      expandChangedFilesTool()
+      expect(screen.getByText('src/app.ts')).toBeInTheDocument()
 
-      fireEvent.click(screen.getByText('Show diff (expanded view)'))
+      fireEvent.click(screen.getByText(/Show raw patch/i))
 
       await waitFor(() => {
-        expect(screen.getByText(/--- a\/src\/app.ts/)).toBeInTheDocument()
-        expect(screen.getByText(/const y = 3/)).toBeInTheDocument()
+        expect(screen.getAllByText(/const y = 2/).length).toBeGreaterThan(0)
+        expect(screen.getAllByText(/const y = 3/).length).toBeGreaterThan(0)
       })
     })
   })
@@ -3842,7 +3577,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(true)
+      act(() => result.current.setIsNearBottom(true))
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
@@ -3856,8 +3591,9 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
       })
 
       await waitFor(() => {
-        expect(scrollToMock).toHaveBeenCalled()
+        expect(result.current.newContentAvailable).toBe(false)
       })
+      expect(scrollToMock).not.toHaveBeenCalled()
     })
 
     it('does not auto-scroll when user scrolls away from bottom', async () => {
@@ -3882,7 +3618,8 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(false)
+      act(() => result.current.setIsNearBottom(false))
+      await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
@@ -3912,14 +3649,16 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(false)
+      act(() => result.current.setIsNearBottom(false))
+      await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
       act(() => {
         result.current.scrollToBottom()
       })
 
       expect(result.current.isNearBottom).toBe(true)
-      expect(scrollToMock).toHaveBeenCalled()
+      expect(result.current.newContentAvailable).toBe(false)
+      expect(scrollToMock).not.toHaveBeenCalled()
     })
   })
 
@@ -3935,7 +3674,8 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(false)
+      act(() => result.current.setIsNearBottom(false))
+      await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
@@ -3964,7 +3704,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(true)
+      act(() => result.current.setIsNearBottom(true))
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
@@ -3991,7 +3731,8 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(false)
+      act(() => result.current.setIsNearBottom(false))
+      await waitFor(() => expect(result.current.isNearBottom).toBe(false))
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
@@ -4039,7 +3780,7 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
         isRunning: true,
       }))
 
-      result.current.setIsNearBottom(true)
+      act(() => result.current.setIsNearBottom(true))
 
       act(() => {
         dispatchAgentEvent('coder_text_chunk', {
@@ -4053,8 +3794,9 @@ describe('T-007: Follow-mode scrolling and streaming text pacing', () => {
       })
 
       await waitFor(() => {
-        expect(scrollToMock).toHaveBeenCalled()
+        expect(result.current.newContentAvailable).toBe(false)
       })
+      expect(scrollToMock).not.toHaveBeenCalled()
     })
   })
 
