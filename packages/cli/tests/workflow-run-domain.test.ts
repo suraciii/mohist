@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STAGE_DEFINITIONS,
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
+  MOHIST_DEFAULT_WORKFLOW_SOURCE,
   WorkflowDomainError,
   WorkflowRun,
   compileWorkflowDefinition,
@@ -73,6 +74,24 @@ function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
 }
 
 describe('WorkflowRun domain aggregate', () => {
+  it('keeps the builtin workflow source free of runtime policy fields', () => {
+    const forbiddenFields = [
+      'workSources',
+      'taskExecutionPolicies',
+      'checkPolicies',
+      'approvalPolicy',
+      'repairPolicies',
+      'checkFailurePolicies',
+      'invalidationPolicy',
+    ];
+
+    for (const stage of MOHIST_DEFAULT_WORKFLOW_SOURCE.stages) {
+      for (const field of forbiddenFields) {
+        expect(stage).not.toHaveProperty(field);
+      }
+    }
+  });
+
   it('derives the default runtime stage definitions from mohist/default WorkflowDefinition', () => {
     const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
 
@@ -93,7 +112,7 @@ describe('WorkflowRun domain aggregate', () => {
     ]);
     const plan = compiled.find(definition => definition.stage === Stage.Plan)!;
     const check = compiled.find(definition => definition.stage === Stage.Check)!;
-    expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.taskExecutionPolicies?.some(policy => policy.taskId === 'proposal')).toBe(false);
+    expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.taskExecutionPolicies).toBeUndefined();
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.tasks.find(task => task.id === 'proposal')).toMatchObject({
       uses: 'mohist/agent',
       with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } },

@@ -7,7 +7,7 @@ import type { StageContext, CheckResult, StageTaskResult } from '../src/workflow
 import type { Check } from '../src/workflow/checks';
 import { EventBus } from '../src/services/event-bus';
 import { BaseStageRunner } from '../src/workflow/base-stage-runner';
-import { CheckStageRunner } from '../src/workflow/check-stage-runner';
+import { CheckStageRunner } from '../src/workflow/legacy/check-stage-runner';
 import { AgentSession } from '../src/agent-runtime/agent-session';
 
 vi.mock('../src/agent-runtime/agent-session', () => ({

@@ -6,11 +6,13 @@ import {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   cloneWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
+  parseWorkflowDefinitionSource,
   type CheckDefinition,
   type CheckFailurePolicy,
   type StageDefinition,
   type TaskDefinition,
   type WorkflowDefinition,
+  type WorkflowSourceDefinition,
   type WorkflowDefinitionSnapshot,
 } from './domain';
 import {
@@ -119,7 +121,7 @@ function compileFullCustomWorkflow(
     : 'project/custom';
   const name = typeof workflow.name === 'string' ? workflow.name : undefined;
   const rawStages = Array.isArray(workflow.stages) ? workflow.stages : [];
-  const stages: StageDefinition[] = [];
+  const stages: WorkflowSourceDefinition['stages'] = [];
 
   for (const [stageIndex, rawStage] of rawStages.entries()) {
     const stagePath = `${filePath}:workflow.stages[${stageIndex}]`;
@@ -142,26 +144,20 @@ function compileFullCustomWorkflow(
     const checks = compileCustomChecks(rawStage.checks, stagePath, diagnostics);
     const approval = rawStage.approval === true;
     const on = compileStageEventPolicies(rawStage.on, stagePath, diagnostics);
+    const tasksFrom = compileTasksFrom(rawStage.tasksFrom, stagePath, diagnostics);
 
     stages.push({
-      stage,
+      id: stage,
       tasks,
+      tasksFrom,
       checks,
       on,
-      requiresApproval: approval || undefined,
-      approvalCheckName: approval ? 'user-approval' : undefined,
-      workSources: tasks.length > 0 ? [{ kind: 'static', taskIds: tasks.map(task => task.id) }] : [{ kind: 'static', taskIds: [] }],
-      taskExecutionPolicies: [
-        { taskId: 'rebase-branch', kind: 'rebase-task' as const, workSourceKind: 'runtime' as const },
-      ],
-      checkPolicies: checks.map(check => ({ checkName: check.name, phase: 'post-task' as const })),
-      approvalPolicy: approval ? { checkName: 'user-approval' } : undefined,
-      invalidationPolicy: { entries: [] },
+      approval,
     });
   }
 
   return {
-    definition: { id, name, stages },
+    definition: parseWorkflowDefinitionSource({ id, name, stages }, { taskSource: 'project', checkSource: 'project' }),
     diagnostics,
   };
 }
@@ -211,6 +207,21 @@ function compileCustomTasks(
     tasks.push(task);
   }
   return tasks;
+}
+
+function compileTasksFrom(
+  rawTasksFrom: unknown,
+  stagePath: string,
+  diagnostics: WorkflowDiagnostic[],
+): WorkflowSourceDefinition['stages'][number]['tasksFrom'] | undefined {
+  if (rawTasksFrom === undefined) return undefined;
+  if (rawTasksFrom === 'mohist/ralph-tasks') return rawTasksFrom;
+  diagnostics.push({
+    severity: 'error',
+    path: `${stagePath}.tasksFrom`,
+    message: 'tasksFrom must be mohist/ralph-tasks',
+  });
+  return undefined;
 }
 
 function compileCustomChecks(

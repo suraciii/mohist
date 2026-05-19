@@ -44,6 +44,53 @@ Target:
 
 因此，`DEFAULT_STAGE_DEFINITIONS` 不应继续是业务事实源。它可以保留为 builtin workflow template，但运行时应从同一种 `WorkflowDefinition` 编译出 `StageDefinition[]`。
 
+内部实现可以先用语义化 TS block 表达默认 workflow，不必等完整 YAML parser 才纠正架构：
+
+```
+MOHIST_DEFAULT_WORKFLOW_SOURCE
+  id: mohist/default
+  stages:
+    - id: plan
+      tasks/checks/approval
+    - id: build
+      tasksFrom: mohist/ralph-tasks
+      checks
+    - id: check
+      on: code.changed -> reset checks-and-approval
+      tasks/checks/onFailure
+    - id: integrate
+      tasks/checks
+```
+
+这份 source block 等价于未来的 builtin YAML：它只能包含用户也能理解的语义字段，不包含运行时为了执行而生成的 `taskExecutionPolicies`、`checkPolicies`、`repairPolicies`、`invalidationPolicy`。
+
+运行路径应是：
+
+```
+Builtin semantic source / project workflow.yaml
+  -> parseWorkflowDefinitionSource
+  -> WorkflowDefinition
+  -> compileWorkflowDefinition
+  -> ExecutableWorkflowDefinition
+  -> WorkflowRun / GenericStageRunner
+```
+
+这样默认 workflow 和项目 YAML 会使用同一种 parser/编译器；内置流程仍可用 TS 保持类型安全并引用内置 result contract；用户看到的 YAML 形态不会被 runtime policy 污染。
+
+关键边界：workflow 的所有行为都必须能从定义中推导并在编译/装载阶段显式化。运行时不应靠 runner 临场猜测行为，也不应依赖散落在 runner 内部的 stage-specific 分支来决定下一步。
+
+也就是说：
+
+```
+Allowed:
+  definition -> compiler/loader -> executable definition -> engine runs it
+
+Not allowed:
+  definition -> runner/runtime heuristics infer hidden behavior while running
+```
+
+如果当前代码里仍有 `taskExecutionPolicies` / `checkPolicies` / `repairPolicies` / `invalidationPolicy`，它们最多只能被视为迁移期的 executable-definition 内部结构或 legacy compatibility，不是用户 workflow 模型，也不是长期运行前提。长期目标是让 executable definition 的结构直接表达执行图、失败收敛、事件重置、approval 和动态 task source，而不是把这些行为塞进若干 policy side table。
+
 ## 用户旅程
 
 ### 1. 使用默认 workflow
@@ -701,6 +748,92 @@ Mohist 应学习它们的产品直觉：
 
 完成后，Mohist 仍可以默认工作，但“默认”只是一个内置定义。
 
+### P0.5: Legacy runner 退出核心路径
+
+目标：用户 YAML 是 workflow 的产品契约，`GenericStageRunner` 是唯一默认 stage executor。
+
+当前 `CheckStageRunner / PlanStageRunner / BuildStageRunner / IntegrateStageRunner` 是迁移期实现，不是新的领域模型。只要生产路径仍注册这些 runner，用户就会看到两个互相竞争的事实源：
+
+```text
+workflow.yaml says what should run
+legacy runner code may still do something else
+```
+
+这会破坏“默认 workflow 只是 builtin YAML”的产品承诺。
+
+迁移原则：
+
+- 生产默认只注册 `GenericStageRunner`。
+- legacy runner 只能作为显式兼容模式存在，不能挂在默认 fallback 后面。
+- legacy code 应移动到 `workflow/legacy/`，避免它在核心 workflow API 中看起来仍是一等实现。
+- 核心导出不再导出 `CheckStageRunner` 等 stage-specific runner。
+- 有价值的旧测试应迁移到 `GenericStageRunner`、`WorkflowRun`、task/check handler 层。
+- 还没迁完的旧测试可以临时引用 `workflow/legacy/*`，但测试名称必须表达 legacy。
+
+第一步应先清掉 `CheckStageRunner` 的生产路径，因为 Check 是最容易污染新模型的 stage：它包含 ai-review、review-passed、merge-ready、approval、repair、re-review 等核心语义。如果这些仍由手写 Check runner 决定，YAML 就不是事实源。
+
+### P0.6: Builtin default 作为 parser 输入
+
+目标：内置默认 workflow 和项目 YAML 复用同一个 definition parser。
+
+默认 workflow 应由 `MOHIST_DEFAULT_WORKFLOW_SOURCE` 这样的语义定义生成，而不是直接维护编译后的 `StageDefinition`。
+
+可接受的 source 字段：
+
+- `id/name`
+- `stages[].id`
+- `tasks`
+- `tasksFrom`
+- `checks`
+- `on`
+- `approval`
+- `onFailure.retry`
+
+不应出现在 source 中的字段：
+
+- `workSources`
+- `taskExecutionPolicies`
+- `checkPolicies`
+- `approvalPolicy`
+- `repairPolicies`
+- `checkFailurePolicies`
+- `invalidationPolicy`
+
+这些字段必须由 `parseWorkflowDefinitionSource` 和 `compileWorkflowDefinition` 统一生成。项目 YAML 的 full custom workflow 也应复用同一个 parser，避免 builtin TS block 与用户 YAML 变成两套模型。
+
+### P0.7: Executable definition 取代 runtime policy side table
+
+目标：运行时引擎可以直接运行一份 executable workflow definition，而不是依赖 runtime policy side table 和 runner heuristics。
+
+原则：
+
+- workflow 的所有行为都来自定义。
+- 编译阶段可以把语义定义展开成可执行定义。
+- 运行时只执行可执行定义，不临场推导隐藏行为。
+- `uses` catalog 可以提供 action/check 的执行能力和契约，但不能暗中增加用户没定义的 workflow 行为。
+- `onFailure.retry`、`task.emits`、`stage.on`、`approval`、`tasksFrom` 都应成为 executable definition 的直接结构。
+
+迁移方向：
+
+- 保留现有 `taskExecutionPolicies/checkPolicies/repairPolicies/invalidationPolicy` 作为短期编译产物，保证兼容。
+- 新增或逐步演进到更直接的 executable shape，例如：
+
+```ts
+ExecutableStageDefinition {
+  stage
+  taskQueue: ExecutableTaskDefinition[]
+  dynamicTaskSources: DynamicTaskSourceDefinition[]
+  checks: ExecutableCheckDefinition[]
+  approval?: ApprovalDefinition
+  eventHandlers: EventHandlerDefinition[]
+}
+```
+
+- `GenericStageRunner` 只读取 executable definition，不读取用户 source，也不从 task id 猜测行为。
+- 当 executable definition 足够完整后，移除 policy side table。
+
+这一步比“runner runtime 推导”更符合用户目标：用户自定义 workflow 的关键不是运行时聪明，而是定义本身完整、可解释、可验证、可执行。
+
 ### P1: 用户覆盖默认 workflow
 
 目标：用户可以小范围修改默认流程。
@@ -811,12 +944,13 @@ on:
 - 保持 `CheckDefinition` 简单，不增加 `source.task` / `staleWhen`。
 - `CheckFailureRetry.inputFrom` 保留为 optional advanced capability。
 
-### P2: Compiler 生成 runtime policy
+### P2: Compiler 生成 executable definition
 
-- `compileWorkflowDefinition` 将 `stage.on + task.emits` 编译成现有 `InvalidationPolicy`。
-- `code.changed -> checks-and-approval` 编译为当前 stage checks reset + approval reset。
+- `compileWorkflowDefinition` 将 `stage.on + task.emits` 编译成 executable definition 的 event handler。
+- `code.changed -> checks-and-approval` 在 executable definition 中显式表达为当前 stage checks reset + approval reset。
 - 编译器不要求事件提前声明；从 `emits` 和 `stage.on` 收集事件。
 - 如果 task emits 了没有 stage policy 的 event，给 warning 或 explain 信息，不阻断 v1。
+- 现阶段可以继续生成 `InvalidationPolicy` 兼容旧 engine，但它只是过渡产物，不是长期模型。
 
 ### P3: Prompt interpolation
 

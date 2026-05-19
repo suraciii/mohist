@@ -168,9 +168,12 @@ export interface StageEventPolicy {
   reset: StageResetTarget;
 }
 
+export type WorkflowTasksFromSource = 'mohist/ralph-tasks';
+
 export interface StageDefinition {
   stage: Stage;
   tasks: TaskDefinition[];
+  tasksFrom?: WorkflowTasksFromSource;
   checks: CheckDefinition[];
   on?: Record<string, StageEventPolicy>;
   requiresApproval?: boolean;
