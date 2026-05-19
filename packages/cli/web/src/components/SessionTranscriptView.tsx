@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
 import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary, FileChangeSummary } from '../lib/types'
-import { ToolCallCard } from './ToolCallCard'
+import { ToolCallCard, getToolLabel, getToolArgs } from './ToolCallCard'
 import type { ToolCallEntry } from '../lib/types'
 
 const CONTEXT_TOOL_NAMES = new Set(['read', 'glob', 'grep', 'list', 'membrowse', 'memread', 'memsearch'])
@@ -20,6 +20,10 @@ function getToolIdentity(part: ToolPart): string {
   const title = part.tool.title
   if (title && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(title)) return title
   return name ?? 'unknown'
+}
+
+function shouldGroupContextTool(parts: Array<TextPart | ReasoningPart | ErrorPart | ToolPart>, index: number): boolean {
+  return parts[index]?.type === 'tool'
 }
 
 function formatTime(iso: string): string {
@@ -172,16 +176,25 @@ function AssistantTextPartView({ part }: { part: TextPart }) {
 }
 
 function ReasoningPartView({ part }: { part: ReasoningPart }) {
+  const [expanded, setExpanded] = useState(false)
   const sizeKB = (part.text.length / 1024).toFixed(1)
 
   return (
     <details className="max-w-[90%]">
-      <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none">
+      <summary
+        onClick={(event) => {
+          event.preventDefault()
+          setExpanded(!expanded)
+        }}
+        className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none"
+      >
         Thinking... {sizeKB}KB · {formatTime(part.startedAt)}
       </summary>
-      <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
-        {part.text}
-      </pre>
+      {expanded && (
+        <pre className="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-all max-h-48 overflow-auto bg-gray-50 rounded p-2">
+          {part.text}
+        </pre>
+      )}
     </details>
   )
 }
@@ -305,9 +318,18 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
   for (const [name, count] of Object.entries(counts)) {
     labelParts.push(count === 1 ? name : `${name} ${count}`)
   }
+  const firstTool = tools[0]
+  const firstToolName = firstTool ? getToolIdentity(firstTool) : undefined
+  const firstToolLabel = firstToolName && firstTool
+    ? firstTool.tool.displaySubtitle ?? firstTool.tool.target ?? getToolLabel(firstToolName, firstTool.tool.input)
+    : undefined
+  if (tools.length === 1 && firstToolLabel) {
+    labelParts.push(firstToolLabel)
+  }
 
   const failedLabel = failedCount > 0 ? ` · ${failedCount} failed` : ''
   const summary = `Gathering context · ${labelParts.join(' · ')}${failedLabel}`
+  const expandedLabel = `Context gathered · ${labelParts.join(' · ')}${failedLabel}`
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
@@ -318,7 +340,8 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
         <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
         </svg>
-        <span className="text-xs font-medium text-gray-700">{summary}</span>
+        <span className="text-xs font-medium text-gray-700">{expanded ? expandedLabel : summary}</span>
+        <span className="sr-only">Context gathered</span>
         {failedCount > 0 && (
           <span className="text-xs text-red-500">{failedCount} failed</span>
         )}
@@ -329,28 +352,40 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
       {expanded && (
         <div className="px-3 pb-2 border-t border-gray-100 space-y-1.5">
           {tools.map((tool) => (
-            <ToolCallCard
-              key={tool.id}
-              entry={{
-                executionId: '',
-                toolName: getToolIdentity(tool),
-                state: tool.tool.status,
-                timestamp: tool.tool.startedAt ? new Date(tool.tool.startedAt).getTime() : Date.now(),
-                toolCallId: tool.tool.toolCallId,
-                title: tool.tool.displayTitle ?? tool.tool.title ?? tool.tool.target,
-                rawInput: tool.tool.input,
-                rawOutput: tool.tool.output,
-                error: tool.tool.error,
-                duration: tool.tool.completedAt && tool.tool.startedAt
-                  ? new Date(tool.tool.completedAt).getTime() - new Date(tool.tool.startedAt).getTime()
-                  : undefined,
-                changedFiles: tool.tool.changedFiles,
-              }}
-              compact={true}
-            />
+            <CompactContextTool key={tool.id} tool={tool} />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function CompactContextTool({ tool }: { tool: ToolPart }) {
+  const toolName = getToolIdentity(tool)
+  const input = tool.tool.input
+  const label = tool.tool.displaySubtitle ?? tool.tool.target ?? getToolLabel(toolName, input)
+  const args = getToolArgs(toolName, input)
+  const duration = tool.tool.completedAt && tool.tool.startedAt
+    ? new Date(tool.tool.completedAt).getTime() - new Date(tool.tool.startedAt).getTime()
+    : undefined
+
+  return (
+    <div className={`flex items-center gap-2 px-2 py-1 text-xs rounded border border-gray-100 bg-gray-50/50 ${tool.tool.status === 'failed' ? 'border-red-200' : ''}`}>
+      <span className={tool.tool.status === 'failed' ? 'text-red-500' : 'text-green-500'}>
+        {tool.tool.status === 'failed' ? 'failed' : tool.tool.status === 'completed' ? 'done' : tool.tool.status}
+      </span>
+      <span className="font-mono text-gray-600">{toolName}</span>
+      {label && <span className="text-gray-500 truncate max-w-[220px]">{label}</span>}
+      {args.length > 0 && (
+        <span className="flex gap-1 shrink-0">
+          {args.slice(0, 3).map((arg, i) => (
+            <span key={i} className="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-mono">
+              {arg}
+            </span>
+          ))}
+        </span>
+      )}
+      {duration != null && <span className="text-gray-400 ml-auto shrink-0">{duration < 1000 ? `${duration}ms` : `${(duration / 1000).toFixed(1)}s`}</span>}
     </div>
   )
 }
@@ -447,12 +482,13 @@ function SessionTurnView({ turn }: { turn: SessionTurn }) {
           continue
         }
 
-        if (part.type === 'tool' && isContextTool(getToolIdentity(part))) {
+        if (part.type === 'tool' && isContextTool(getToolIdentity(part)) && shouldGroupContextTool(turn.assistant, i)) {
           const contextGroup: ToolPart[] = []
           while (
             i < turn.assistant.length &&
             turn.assistant[i].type === 'tool' &&
-            isContextTool(getToolIdentity(turn.assistant[i] as ToolPart))
+            isContextTool(getToolIdentity(turn.assistant[i] as ToolPart)) &&
+            shouldGroupContextTool(turn.assistant, i)
           ) {
             contextGroup.push(turn.assistant[i] as ToolPart)
             i++

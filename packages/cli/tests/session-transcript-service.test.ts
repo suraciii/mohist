@@ -1171,6 +1171,66 @@ describe('SessionTranscriptAssembler', () => {
       expect(toolPart.category).toBe('file-change');
     });
 
+    it('should infer canonical tool families from descriptive titles', () => {
+      const session = makeSession();
+      const events: SessionStreamLogEntry[] = [
+        makePromptEvent('Gather context', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'unknown',
+            title: 'Read src/app.ts',
+            input: {},
+            status: 'started',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+        makeEvent('tool_call', {
+          toolCall: {
+            toolName: 'unknown',
+            title: 'bash npm test',
+            input: {},
+            status: 'started',
+            createdAt: '2024-01-01T10:00:02.000Z',
+          },
+        }, '2024-01-01T10:00:02.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const tools = transcript.turns[0].assistant.filter(p => p.type === 'tool').map(t => (t as ToolPart).tool);
+      expect(tools).toHaveLength(2);
+      expect(tools[0].normalizedName).toBe('read');
+      expect(tools[0].category).toBe('context');
+      expect(tools[0].displayTitle).toBe('Read src/app.ts');
+      expect(tools[1].normalizedName).toBe('bash');
+      expect(tools[1].category).toBe('execution');
+      expect(transcript.session.warnings?.some((w: TranscriptWarning) => w.code === 'UNKNOWN_TOOL')).not.toBe(true);
+    });
+
+    it('should infer canonical tool families from metadata titles', () => {
+      const session = makeSession();
+      const events: SessionStreamLogEntry[] = [
+        makePromptEvent('Gather context', 'task', '2024-01-01T10:00:00.000Z'),
+        makeEvent('tool_call_update', {
+          toolCall: {
+            toolCallId: 'tc-late-read',
+            toolName: 'unknown',
+            input: {},
+            output: { content: 'hello', metadata: { title: 'read src/app.ts' } },
+            status: 'completed',
+            createdAt: '2024-01-01T10:00:01.000Z',
+          },
+        }, '2024-01-01T10:00:01.000Z'),
+      ];
+
+      const transcript = assembleSessionTranscript(session, events);
+
+      const toolPart = (transcript.turns[0].assistant[0] as ToolPart).tool;
+      expect(toolPart.normalizedName).toBe('read');
+      expect(toolPart.category).toBe('context');
+      expect(transcript.session.warnings?.some((w: TranscriptWarning) => w.code === 'UNKNOWN_TOOL')).not.toBe(true);
+    });
+
     it('should infer tool name from input shape when toolName is missing', () => {
       const session = makeSession();
       const events: SessionStreamLogEntry[] = [

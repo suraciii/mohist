@@ -127,6 +127,18 @@ function isInternalTool(normalizedName: string): boolean {
   return INTERNAL_TOOL_NAMES.has(normalizedName.toLowerCase())
 }
 
+function getToolPath(input?: string): string | undefined {
+  if (!input) return undefined
+  try {
+    const parsed = JSON.parse(input)
+    if (!parsed || typeof parsed !== 'object') return undefined
+    const path = parsed.file_path ?? parsed.filePath ?? parsed.path
+    return typeof path === 'string' && path ? path : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function buildDisplayPrompt(turn: SessionTurn): DisplayPrompt {
   const { user } = turn
   return {
@@ -193,6 +205,10 @@ function buildDisplayToolPart(part: ToolPart): DisplayToolPart {
   }
 }
 
+function getContextToolSummary(tool: DisplayToolPart): string | undefined {
+  return tool.displayTitle ?? tool.displaySubtitle ?? tool.target ?? getToolPath(tool.input)
+}
+
 function buildDisplayErrorPart(part: ErrorPart): DisplayErrorPart {
   return {
     id: part.id,
@@ -207,7 +223,8 @@ function collectChangedFilesFromTools(parts: DisplayAssistantPart[]): DisplayCha
   const files: DisplayChangedFile[] = []
   for (const part of parts) {
     if (part.partType === 'tool') {
-      if (part.changedFiles) {
+      const includeNestedFiles = part.normalizedName !== 'apply_patch'
+      if (includeNestedFiles && part.changedFiles) {
         for (const cf of part.changedFiles) {
           files.push({ ...cf })
         }
@@ -286,10 +303,6 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
   const flushContextGroup = () => {
     if (toolStack.length === 0) return
     const groupTools = toolStack.splice(0)
-    if (groupTools.length === 1) {
-      displayParts.push(groupTools[0])
-      return
-    }
     const hasError = groupTools.some(t => t.hasError)
     const contextToolCount = groupTools.filter(t => t.isContextTool).length
     let title: string
@@ -303,7 +316,8 @@ export function projectTurn(turn: SessionTurn): DisplayTurn {
       if (globs > 0) parts.push(`${globs} glob${globs > 1 ? 's' : ''}`)
       title = `Gathering context · ${parts.join(' · ')}`
     } else {
-      title = 'Gathering context'
+      const summary = getContextToolSummary(groupTools[0])
+      title = summary ? `Gathering context · ${summary}` : 'Gathering context'
     }
     displayParts.push({
       id: `ctx-${groupTools[0].id}`,

@@ -8,6 +8,8 @@ import {
   inferDisplayTitle,
   stringifyPayload,
   getCorrelationKey,
+  getFilePathFromInput,
+  getToolLabel,
 } from '../lib/transcript-tool-utils'
 
 interface UseSessionTranscriptOptions {
@@ -198,10 +200,20 @@ function findToolByCorrelation(
     if (toolCallId && p.tool.toolCallId === toolCallId) return false
     const toolNormalized = normalizeToolName(p.tool.toolName, p.tool.title, p.tool.rawInput, p.tool.rawOutput)
     if (toolNormalized !== normalizedName) return false
+    if (isTerminalState(p.tool.status)) return false
+    if (!target) return true
     const toolTarget = p.tool.target ?? p.tool.title
     if (toolTarget !== undefined && target !== toolTarget) return false
-    return !isTerminalState(p.tool.status)
+    return true
   })
+}
+
+function deriveToolTarget(toolName: string, rawInput: unknown, title?: string): string | undefined {
+  const input = stringifyPayload(rawInput)
+  const path = getFilePathFromInput(input)
+  if (path) return path
+  const label = getToolLabel(normalizeToolName(toolName, title, rawInput), input)
+  return label ?? title
 }
 
 function updateToolInTurn(
@@ -246,6 +258,7 @@ function updateToolInTurn(
             output,
             rawInput: input,
             rawOutput: output,
+            target: updates.target ?? toolPart.tool.target,
             changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
             startedAt,
             status: newStatus,
@@ -271,27 +284,28 @@ function updateToolInTurn(
           const startedAt = updates.startedAt ?? toolPart.tool.startedAt
           const input = stringifyPayload(rawInput) ?? toolPart.tool.input
           const output = stringifyPayload(rawOutput) ?? toolPart.tool.output
-const parsedEdit = parseEditInput(input)
-        const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
-        const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
-        const { status: _updatesStatus, ...restUpdates } = updates
-        return {
-          ...toolPart,
-          tool: {
-            ...toolPart.tool,
-            ...restUpdates,
-            toolCallId,
-            normalizedName,
-            input,
-            output,
-            rawInput: input,
-            rawOutput: output,
-            changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
-            startedAt,
-            status: newStatus,
-            completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
-          },
-        }
+          const parsedEdit = parseEditInput(input)
+          const changedFiles = parsedEdit?.patch ? parsePatchOperations(parsedEdit.patch) : toolPart.tool.changedFiles
+          const newStatus = mapStatusToDisplay(updates.status ?? toolPart.tool.status)
+          const { status: _updatesStatus, ...restUpdates } = updates
+          return {
+            ...toolPart,
+            tool: {
+              ...toolPart.tool,
+              ...restUpdates,
+              toolCallId,
+              normalizedName,
+              input,
+              output,
+              rawInput: input,
+              rawOutput: output,
+              target: updates.target ?? toolPart.tool.target,
+              changedFiles: changedFiles && changedFiles.length > 0 ? changedFiles : undefined,
+              startedAt,
+              status: newStatus,
+              completedAt: isTerminalState(newStatus) ? now : toolPart.tool.completedAt,
+            },
+          }
         }),
       }
     }
@@ -464,8 +478,8 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
         const toolCallId = detail.toolCallId
         const normalizedName = normalizeToolName(detail.toolName, detail.title, detail.rawInput, detail.rawOutput)
         const pendingCorrelation = pendingCorrelationRef.current.get(toolCallId)
-        const target = detail.title ?? pendingCorrelation?.target
-        const correlationKey = getCorrelationKey(detail.toolName, detail.title ?? pendingCorrelation?.target, pendingCorrelation?.target)
+        const target = deriveToolTarget(detail.toolName, detail.rawInput, detail.title) ?? pendingCorrelation?.target
+        const correlationKey = getCorrelationKey(detail.toolName, detail.title, target)
 
         if (detail.state === 'started') {
           liveToolCallMapRef.current.set(toolCallId, {
@@ -473,7 +487,7 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
             toolName: detail.toolName,
             status: 'started',
             title: detail.title,
-            target: detail.title,
+            target,
             input: stringifyPayload(detail.rawInput),
             output: stringifyPayload(detail.rawOutput),
             error: '',
@@ -492,7 +506,7 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
               toolName: detail.toolName,
               status: 'started',
               title: detail.title,
-              target: detail.title,
+              target,
               input: stringifyPayload(detail.rawInput),
               output: stringifyPayload(detail.rawOutput),
               rawInput: detail.rawInput,
@@ -519,6 +533,9 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
             const error = detail.state === 'failed' ? (typeof detail.rawOutput === 'string' ? detail.rawOutput : JSON.stringify(detail.rawOutput ?? 'Tool failed')) : undefined
             next[next.length - 1] = updateToolInTurn(lastTurn, toolCallId, {
               status: mapStatusToDisplay(detail.state) as LiveToolCall['status'],
+              toolName: detail.toolName,
+              title: detail.title,
+              target,
               output: stringifyPayload(detail.rawOutput),
               rawOutput: detail.rawOutput,
               completedAt: now,

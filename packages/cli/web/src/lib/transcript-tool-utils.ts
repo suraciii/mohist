@@ -83,6 +83,8 @@ export function getToolLabel(toolName: string, rawInput: string | undefined): st
     default: {
       const url = parsed.url
       if (typeof url === 'string') return url
+      const fp = parsed.filePath ?? parsed.file_path ?? parsed.path
+      if (typeof fp === 'string') return fp
       const desc = parsed.description ?? parsed.name
       if (typeof desc === 'string') return desc
       const query = parsed.query
