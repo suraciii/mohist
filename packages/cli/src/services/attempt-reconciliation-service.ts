@@ -129,7 +129,7 @@ export class AttemptReconciliationService {
   }
 
   private isAttemptEvidenceLive(attempt: WorkItemAttempt, issueId: string): boolean {
-    if (!this.hasAttemptSpecificEvidence(attempt) && this.evidencePort.hasActiveQueueTask(issueId)) {
+    if (!this.hasStrongAttemptSpecificEvidence(attempt) && this.evidencePort.hasActiveQueueTask(issueId)) {
       return true;
     }
 
@@ -153,6 +153,15 @@ export class AttemptReconciliationService {
     }
 
     return this.evidencePort.hasActiveQueueTask(issueId);
+  }
+
+  private hasStrongAttemptSpecificEvidence(attempt: WorkItemAttempt): boolean {
+    return Boolean(
+      attempt.queueTaskId
+      || attempt.coderSessionId
+      || attempt.acpSessionId
+      || attempt.processPid,
+    );
   }
 
   private hasAttemptSpecificEvidence(attempt: WorkItemAttempt): boolean {

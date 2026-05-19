@@ -583,9 +583,9 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     expect(run.stageRun(Stage.Plan).findTask('specs').latestAttempt?.state).toBe('interrupted');
   });
 
-  it('does not treat unrelated issue queue activity as live evidence for an attempt', () => {
+  it('keeps rerun attempt live when it has only generated execution id and active issue queue evidence', () => {
     const run = createRunningPlanRun();
-    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString(), { executionId: 'stale-execution' });
+    run.startTaskAttempt(Stage.Plan, 'proposal', new Date().toISOString(), { executionId: 'plan-188-proposal-1' });
 
     const repo: WorkflowRunRepositoryPort = {
       createOrLoadActiveAggregate: () => run,
@@ -606,9 +606,9 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
 
     const result = service.reconcileIssueWorkflow('issue-1');
 
-    expect(result.reconciled).toBe(true);
-    expect(result.interruptedCount).toBe(1);
-    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('interrupted');
+    expect(result.reconciled).toBe(false);
+    expect(result.interruptedCount).toBe(0);
+    expect(run.stageRun(Stage.Plan).findTask('proposal').latestAttempt?.state).toBe('running');
   });
 
   it('keeps running attempt live when only active issue queue evidence exists', () => {
