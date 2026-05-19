@@ -10,11 +10,11 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
     {
       stage: Stage.Plan,
       tasks: [
-        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
-        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
-        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
-        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { session: 'plan-artifacts' } },
-        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { session: 'plan-artifacts' }, resultContract: SELF_REVIEW_RESULT_CONTRACT },
+        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } } },
+        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/specs' } } },
+        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/design' } } },
+        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/tasks' } } },
+        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/self-review' } }, resultContract: SELF_REVIEW_RESULT_CONTRACT },
       ],
       checks: [
         { name: 'proposal-complete', title: 'Proposal complete' },
@@ -107,6 +107,7 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = {
           id: 'ai-review',
           title: 'AI review',
           uses: 'mohist/agent',
+          with: { prompt: { ref: 'mohist/check/ai-review' } },
           resultContract: REVIEW_RESULT_CONTRACT,
           selfRepairPolicy: REVIEW_SELF_REPAIR_POLICY,
         },

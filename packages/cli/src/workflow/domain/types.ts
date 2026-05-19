@@ -31,6 +31,11 @@ export interface FailureDetails {
   causedBy?: CausedByMetadata;
 }
 
+export type AgentPromptSource =
+  | { ref: string }
+  | { file: string }
+  | { inline: string };
+
 export interface WorkItemAttempt {
   state: WorkItemAttemptState;
   attemptNumber: number;
