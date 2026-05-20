@@ -283,7 +283,7 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
   if (!taskConfig) throw new Error(`Unknown Plan task: ${input.task.taskId}`);
 
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'plan');
-  if (completedSteps.includes(taskConfig.type) && taskConfig.verifyArtifact()) {
+  if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(taskConfig.type) && taskConfig.verifyArtifact()) {
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, []);
     return {
       taskId: input.task.taskId,
@@ -294,7 +294,7 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
       serviceFn: async () => ({ restoredFromCheckpoint: true }),
     };
   }
-  if (taskConfig.verifyArtifact()) {
+  if (mayRestoreTaskFromPriorOutput(input) && taskConfig.verifyArtifact()) {
     input.ctx.checkpointManager.markStepComplete(input.ctx.issue.number, 'plan', taskConfig.type, tasks[tasks.indexOf(taskConfig) + 1]?.type ?? null);
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, [taskConfig.label]);
     return {
@@ -321,6 +321,12 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
   };
 }
 
+function mayRestoreTaskFromPriorOutput(input: TaskDispatchFactoryInput): boolean {
+  const taskState = input.ctx.requestedTask?.status;
+  if (taskState === 'pending' || taskState === 'running') return false;
+  return true;
+}
+
 function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
@@ -328,7 +334,7 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
 
   const reviewOutputPath = 'review.md';
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'check');
-  if (completedSteps.includes(input.task.taskId) && fs.existsSync(path.join(changeDir, reviewOutputPath))) {
+  if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(input.task.taskId) && fs.existsSync(path.join(changeDir, reviewOutputPath))) {
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, []);
     return {
       taskId: input.task.taskId,
