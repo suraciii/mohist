@@ -44,10 +44,10 @@ export function MergeStatePanel({ issueNumber, mergeState, stage, status }: Merg
             <svg className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h3a.75.75 0 000-1.5h-2.25V5z" clipRule="evenodd" />
             </svg>
-            <span className="text-sm font-medium text-gray-700">Awaiting merge approval</span>
+            <span className="text-sm font-medium text-gray-700">Awaiting stage approval</span>
           </div>
           <p className="mt-1 text-xs text-gray-500">
-            This issue is in check stage. Approve to queue for merge.
+            This issue is in check stage. Approve to continue the workflow.
           </p>
         </div>
       )

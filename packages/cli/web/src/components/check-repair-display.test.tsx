@@ -335,7 +335,7 @@ describe('Check repair display semantics', () => {
       expect(screen.queryByText(/^Retry$/)).toBeNull()
     })
 
-    it('shows Rerun review only as a distinct action from Fix review findings', () => {
+    it('shows Rerun stage as a distinct action from Fix review findings', () => {
       const checkRepair = makeCheckRepairState({
         status: 'available',
         attemptsUsed: 0,
@@ -347,7 +347,7 @@ describe('Check repair display semantics', () => {
       setupDefaultMocks(makeStageStateWithCheckRepair(checkRepair), CHECK_RECOVERY_ACTIONS)
       renderPage()
 
-      expect(screen.getByText(/Rerun review only/i)).toBeTruthy()
+      expect(screen.getByText(/Rerun stage/i)).toBeTruthy()
       expect(screen.getByText(/Fix review findings/i)).toBeTruthy()
     })
 
@@ -364,7 +364,7 @@ describe('Check repair display semantics', () => {
       renderPage()
 
       expect(screen.queryByText(/Retry checkpoint/i)).toBeNull()
-      expect(screen.queryByText(/Rerun review only/i)).toBeNull()
+      expect(screen.queryByText(/Rerun stage/i)).toBeNull()
       expect(screen.queryByText(/Fix review findings/i)).toBeNull()
     })
   })

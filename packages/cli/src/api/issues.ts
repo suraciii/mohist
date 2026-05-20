@@ -65,6 +65,11 @@ const STAGE_ALIASES: Record<string, Stage[]> = {
 
 const PIPELINE_STAGES = new Set<Stage>([Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate]);
 
+function parseWorkflowStageParam(stageParam: string): Stage | null {
+  const normalized = stageParam.toLowerCase();
+  return Object.values(Stage).find(stage => stage.toLowerCase() === normalized) ?? null;
+}
+
 type StageSelector = {
   matches: StagePredicate;
 };
@@ -4349,9 +4354,9 @@ export function createIssueRoutes(
     }
   });
 
-  app.post('/:number/check/retry-checkpoint', async (c) => {
+  const handleRetryCheckpoint = async (c: Context, requestedStage?: Stage) => {
     try {
-      const number = parseInt(c.req.param('number'));
+      const number = parseInt(c.req.param().number ?? '', 10);
       const projectId = getCurrentProjectId();
       if (!projectId) {
         return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
@@ -4362,15 +4367,16 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      if (issue.stage !== Stage.Check) {
-        return c.json({ success: false, error: `Issue #${number} is not in check stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
+      const stage = requestedStage ?? issue.stage;
+      if (issue.stage !== stage) {
+        return c.json({ success: false, error: `Issue #${number} is not in ${stage} stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
       }
 
       if (issue.status !== IssueStatus.Blocked) {
         return c.json({ success: false, error: `Issue #${number} is not blocked (current: ${issue.status}). Use retry only for blocked issues.` } satisfies ApiResponse, 409);
       }
 
-      const stageState = stageStateService?.getIssueStageState(issue.id).find(s => s.stage === Stage.Check);
+      const stageState = stageStateService?.getIssueStageState(issue.id).find(s => s.stage === stage);
       const checkRepair = stageState?.checkRepair;
       if (checkRepair && !checkRepair.repairAvailable && checkRepair.attemptsRemaining === 0) {
         const retryResult = retryIssueCheckpoint(projectId, issue, 'retry-checkpoint');
@@ -4428,11 +4434,11 @@ export function createIssueRoutes(
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
-  });
+  };
 
-  app.post('/:number/check/rerun-review', async (c) => {
+  const handleRerunStage = async (c: Context, requestedStage?: Stage) => {
     try {
-      const number = parseInt(c.req.param('number'));
+      const number = parseInt(c.req.param().number ?? '', 10);
       const projectId = getCurrentProjectId();
       if (!projectId) {
         return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
@@ -4443,8 +4449,9 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      if (issue.stage !== Stage.Check) {
-        return c.json({ success: false, error: `Issue #${number} is not in check stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
+      const stage = requestedStage ?? issue.stage;
+      if (issue.stage !== stage) {
+        return c.json({ success: false, error: `Issue #${number} is not in ${stage} stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
       }
 
       if (!agentRunner) {
@@ -4452,11 +4459,11 @@ export function createIssueRoutes(
       }
 
       if (coderSessionRepo) {
-        coderSessionRepo.cancelRunningByIssueId(issue.id, 'Review rerun requested');
+        coderSessionRepo.cancelRunningByIssueId(issue.id, `${stage} rerun requested`);
       }
 
       if (checkpointRepo) {
-        checkpointRepo.delete(issue.number, Stage.Check);
+        checkpointRepo.delete(issue.number, stage === Stage.Plan ? 'plan' : stage);
       }
 
       const project = projectService.getById(projectId);
@@ -4464,7 +4471,7 @@ export function createIssueRoutes(
         const worktreePath = worktreeManager.getPath(project.name, issue.number);
         if (worktreePath) {
           const changeDir = findChangeDir(worktreePath, issue.number);
-          if (changeDir) {
+          if (stage === Stage.Check && changeDir) {
             for (const filename of ['review.md', 'review-self-check.md']) {
               const artifactPath = path.join(changeDir, filename);
               try {
@@ -4480,7 +4487,7 @@ export function createIssueRoutes(
       agentRunner.cancelAll(issue.id);
 
       const issueRepo = stateManager.getIssueRepo();
-      clearApprovalEverywhere(issue.id, Stage.Check);
+      clearApprovalEverywhere(issue.id, stage);
       issueRepo.updateBlockedReason(issue.id, null);
       issueRepo.updateRetryCount(issue.id, 0);
       issueRepo.updateStatus(issue.id, IssueStatus.Active);
@@ -4491,9 +4498,9 @@ export function createIssueRoutes(
         const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
         const workflowInput = {
           issueId: issue.id,
-          stage: Stage.Check,
+          stage,
           tasksPath: changeDir ? path.join(changeDir, 'tasks.json') : undefined,
-          startedBy: 'rerun-review',
+          startedBy: 'rerun-stage',
         };
         try {
           const result = workflowApplicationService.retryStage(workflowInput);
@@ -4517,12 +4524,36 @@ export function createIssueRoutes(
           taskId: result.taskId,
           status: result.status,
           queuePosition: result.queuePosition,
-          message: `Issue #${number} rerunning review only (no repair task will be added)`,
+          message: `Issue #${number} rerunning ${stage} stage (no repair task will be added)`,
         },
       } satisfies ApiResponse, 202);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
+  };
+
+  app.post('/:number/stages/:stage/retry-checkpoint', async (c) => {
+    const stage = parseWorkflowStageParam(c.req.param('stage'));
+    if (!stage) {
+      return c.json({ success: false, error: `Invalid stage: ${c.req.param('stage')}` } satisfies ApiResponse, 400);
+    }
+    return handleRetryCheckpoint(c, stage);
+  });
+
+  app.post('/:number/check/retry-checkpoint', async (c) => {
+    return handleRetryCheckpoint(c, Stage.Check);
+  });
+
+  app.post('/:number/stages/:stage/rerun', async (c) => {
+    const stage = parseWorkflowStageParam(c.req.param('stage'));
+    if (!stage) {
+      return c.json({ success: false, error: `Invalid stage: ${c.req.param('stage')}` } satisfies ApiResponse, 400);
+    }
+    return handleRerunStage(c, stage);
+  });
+
+  app.post('/:number/check/rerun-review', async (c) => {
+    return handleRerunStage(c, Stage.Check);
   });
 
   const handleApprovalVerdictRepair = async (c: Context, requestedStage?: Stage) => {
@@ -4602,7 +4633,7 @@ export function createIssueRoutes(
         case 'exhausted':
           return c.json({
             success: false,
-            error: `Repair budget exhausted for issue #${number}. All automatic repair attempts have been used. Use 'Rerun review only' after making code changes.`,
+            error: `Repair budget exhausted for issue #${number}. All automatic repair attempts have been used. Use stage rerun after making changes.`,
           } satisfies ApiResponse, 409);
         case 'not-check-stage':
           return c.json({
@@ -4621,11 +4652,12 @@ export function createIssueRoutes(
   };
 
   app.post('/:number/stages/:stage/approval-verdict-repair', async (c) => {
-    const stageParam = c.req.param('stage') as Stage;
-    if (!Object.values(Stage).includes(stageParam)) {
+    const stageParam = c.req.param('stage');
+    const stage = parseWorkflowStageParam(stageParam);
+    if (!stage) {
       return c.json({ success: false, error: `Invalid stage: ${stageParam}` } satisfies ApiResponse, 400);
     }
-    return handleApprovalVerdictRepair(c, stageParam);
+    return handleApprovalVerdictRepair(c, stage);
   });
 
   app.post('/:number/check/repair-review-findings', async (c) => {

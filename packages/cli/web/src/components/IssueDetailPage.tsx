@@ -121,7 +121,7 @@ export function IssueDetailPage() {
   const workflowRunCheckRepair = workflowRun && currentIssueStage ? workflowRunToStageStateMap(workflowRun).get(currentIssueStage)?.checkRepair : undefined
   const stageStateCheckRepair = currentIssueStage ? stageStateData?.stages.find(s => s.stage === currentIssueStage)?.checkRepair : undefined
   const checkRepair: CheckRepairState | undefined = workflowRunCheckRepair ?? stageStateCheckRepair
-  const showCheckRepairActions = issue?.stage === Stage.Check && Boolean(checkRepair)
+  const showCheckRepairActions = Boolean(checkRepair)
 
   const startMutation = useMutation({
     mutationFn: () => api.startIssue(issueNumber),
@@ -204,7 +204,7 @@ export function IssueDetailPage() {
   })
 
   const retryCheckpointMutation = useMutation({
-    mutationFn: () => api.retryCheckpoint(issueNumber),
+    mutationFn: () => api.retryCheckpoint(issueNumber, issue?.stage ?? Stage.Check),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -215,7 +215,7 @@ export function IssueDetailPage() {
   })
 
   const rerunReviewMutation = useMutation({
-    mutationFn: () => api.rerunReview(issueNumber),
+    mutationFn: () => api.rerunStage(issueNumber, issue?.stage ?? Stage.Check),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -857,7 +857,7 @@ export function IssueDetailPage() {
                                 disabled={rerunReviewMutation.isPending}
                                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                               >
-                                {rerunReviewMutation.isPending ? 'Rerunning...' : 'Rerun review only'}
+                                {rerunReviewMutation.isPending ? 'Rerunning...' : 'Rerun stage'}
                               </button>
                             )}
                           </>

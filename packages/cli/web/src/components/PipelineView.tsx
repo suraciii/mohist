@@ -538,9 +538,9 @@ function InlineApproval({
   }, [])
 
   const getApproveLabel = () => {
-    if (stage === Stage.Plan) return 'Approve & Start Build'
-    if (stage === Stage.Check) return 'Approve & Queue Merge'
-    return 'Approve'
+    if (stage === Stage.Plan) return 'Approve & Continue'
+    if (stage === Stage.Check) return 'Approve & Continue'
+    return 'Approve & Continue'
   }
 
   if (readOnly) return null
@@ -566,9 +566,9 @@ function InlineApproval({
       <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
       <p className="text-xs text-amber-600">
         {stage === Stage.Plan
-          ? 'Review the design proposal and approve to start implementation.'
+          ? 'Review the design proposal and approve to continue the workflow.'
           : stage === Stage.Check
-            ? 'Review the check results and approve to queue for merge.'
+            ? 'Review the check results and approve to continue the workflow.'
             : `Review the ${stage} stage output and approve to continue, or send back with feedback.`}
       </p>
 
@@ -1282,7 +1282,7 @@ function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
       {checkRepair.status === 'exhausted' && (
         <div className="pt-2 border-t border-red-200">
           <p className="text-xs text-red-600">
-            Auto-fix will not continue automatically. You can rerun review after making code changes, or take over manually.
+            Auto-fix will not continue automatically. You can rerun this stage after making code changes, or take over manually.
           </p>
         </div>
       )}

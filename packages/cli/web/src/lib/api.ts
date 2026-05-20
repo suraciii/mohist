@@ -361,11 +361,11 @@ export const api = {
   getWorkflowRun: (number: number) =>
     request<import('./types').WorkflowRun>(`/issues/${number}/workflow-run`),
 
-  retryCheckpoint: (number: number) =>
-    request<{ message: string; repairBudgetExhausted?: boolean }>(`/issues/${number}/check/retry-checkpoint`, { method: 'POST' }),
+  retryCheckpoint: (number: number, stage: string) =>
+    request<{ message: string; repairBudgetExhausted?: boolean }>(`/issues/${number}/stages/${stage}/retry-checkpoint`, { method: 'POST' }),
 
-  rerunReview: (number: number) =>
-    request<{ issue: import('./types').Issue; taskId: string; status: string; queuePosition: number; message: string }>(`/issues/${number}/check/rerun-review`, { method: 'POST' }),
+  rerunStage: (number: number, stage: string) =>
+    request<{ issue: import('./types').Issue; taskId: string; status: string; queuePosition: number; message: string }>(`/issues/${number}/stages/${stage}/rerun`, { method: 'POST' }),
 
   runApprovalVerdictRepair: (number: number, stage: string) =>
     request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/stages/${stage}/approval-verdict-repair`, { method: 'POST' }),
