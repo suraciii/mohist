@@ -475,7 +475,7 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
 
       expect(screen.getByText(/Fix review findings/i)).toBeTruthy()
       expect(screen.getByText(/Retry checkpoint/i)).toBeTruthy()
-      expect(screen.getByText(/Rerun review only/i)).toBeTruthy()
+      expect(screen.getByText(/Rerun stage/i)).toBeTruthy()
       expect(screen.queryByText(/^Retry$/)).toBeNull()
     })
 
@@ -538,7 +538,7 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
 
       expect(screen.queryByText(/Fix review findings/i)).toBeNull()
       expect(screen.queryByText(/Retry checkpoint/i)).toBeNull()
-      expect(screen.queryByText(/Rerun review only/i)).toBeNull()
+      expect(screen.queryByText(/Rerun stage/i)).toBeNull()
       expect(screen.queryByText(/^Retry$/)).toBeNull()
     })
   })

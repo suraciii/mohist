@@ -1681,7 +1681,7 @@ describe('API Routes', () => {
       });
     });
 
-    describe('POST /api/issues/:number/check/retry-checkpoint', () => {
+    describe('POST /api/issues/:number/stages/:stage/retry-checkpoint', () => {
       it('retries the Check checkpoint and resumes the pipeline when repair budget is exhausted', async () => {
         const tmpRetryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-retry-test-'));
 
@@ -1752,7 +1752,7 @@ describe('API Routes', () => {
           ));
           const retryServer = createTestServer(retryApp);
 
-          const response = await request(retryServer).post(`/api/issues/${issue.number}/check/retry-checkpoint`);
+          const response = await request(retryServer).post(`/api/issues/${issue.number}/stages/check/retry-checkpoint`);
 
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
@@ -1775,8 +1775,8 @@ describe('API Routes', () => {
       });
     });
 
-    describe('POST /api/issues/:number/check/rerun-review', () => {
-      it('reruns review without appending a repair task', async () => {
+    describe('POST /api/issues/:number/stages/:stage/rerun', () => {
+      it('reruns a stage without appending a repair task', async () => {
         const tmpRerunDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-rerun-review-test-'));
 
         try {
@@ -1830,16 +1830,17 @@ describe('API Routes', () => {
           ));
           const rerunServer = createTestServer(rerunApp);
 
-          const response = await request(rerunServer).post(`/api/issues/${issue.number}/check/rerun-review`);
+          const response = await request(rerunServer).post(`/api/issues/${issue.number}/stages/check/rerun`);
 
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
           expect(response.body.data.message).toContain('no repair task will be added');
+          expect(response.body.data.message).toContain('rerunning check stage');
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
           expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
           expect(stateManager.getCoderSessionRepo().findById(runningSession.id)).toMatchObject({
             status: 'cancelled',
-            failureReason: 'Review rerun requested',
+            failureReason: 'check rerun requested',
           });
 
           const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
@@ -1906,7 +1907,7 @@ describe('API Routes', () => {
           ));
           const rerunServer = createTestServer(rerunApp);
 
-          const response = await request(rerunServer).post(`/api/issues/${issue.number}/check/rerun-review`);
+          const response = await request(rerunServer).post(`/api/issues/${issue.number}/stages/check/rerun`);
 
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
