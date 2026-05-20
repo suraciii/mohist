@@ -107,7 +107,6 @@ export class TaskRun {
 
   startWorkAttempt(now: string, evidence: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> = {}): WorkItemAttempt {
     this.status = 'running';
-    this.resetBy = null;
     const attemptNumber = this.latestAttempt ? this.latestAttempt.attemptNumber + 1 : 1;
     this.latestAttempt = {
       state: 'running',
@@ -129,6 +128,7 @@ export class TaskRun {
   completeWorkAttempt(result: { output?: unknown; artifacts?: string[]; events?: string[]; duration?: number; reason?: string }, now: string): WorkItemAttempt | null {
     if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
     this.status = 'completed';
+    this.resetBy = null;
     this.attempts = this.latestAttempt.attemptNumber;
     this.output = result.output ?? this.output;
     this.artifacts = result.artifacts ?? this.artifacts;
@@ -147,6 +147,7 @@ export class TaskRun {
   failWorkAttempt(error: string, diagnostic: string | null = null, now: string): WorkItemAttempt | null {
     if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
     this.status = 'failed';
+    this.resetBy = null;
     this.attempts = this.latestAttempt.attemptNumber;
     this.reason = error;
     this.latestAttempt = {
