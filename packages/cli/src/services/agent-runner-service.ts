@@ -488,7 +488,7 @@ export class AgentRunnerService {
         return;
       }
 
-      if (issue.stage === Stage.Done || issue.status === IssueStatus.Completed) {
+      if (issue.status === IssueStatus.Completed || issue.stage === Stage.Done) {
         log.info('Completed issue needs no recovery action', {
           issueNumber: issue.number,
           action: 'terminal issue preserved',
@@ -948,27 +948,9 @@ export class AgentRunnerService {
       }
     }
 
-    if (issue.stage === Stage.Done) {
+    if (issue.status === IssueStatus.Completed || issue.stage === Stage.Done) {
       log.info('Skipping resume-pipeline: issue already done', { issueNumber: issue.number });
       this.completeTask(task.id, 'completed', 'skipped');
-      return;
-    }
-
-    if (issue.stage === Stage.Integrate) {
-      const project = this.projectRepo.findById(issue.projectId);
-      if (!project) {
-        this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
-        return;
-      }
-
-      const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
-      if (!worktreePath) {
-        this.completeTask(task.id, 'failed', `Worktree not found for issue #${issue.number}`);
-        return;
-      }
-
-      const acpOptions: AgentSessionOptions = { cwd: worktreePath };
-      await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
       return;
     }
 

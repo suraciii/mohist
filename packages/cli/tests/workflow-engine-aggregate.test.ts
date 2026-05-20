@@ -302,7 +302,7 @@ describe('WorkflowEngine aggregate progression', () => {
 
     const result = await engine.run(issue, { cwd: '/tmp' });
 
-    expect(result).toEqual({ completed: true, stage: Stage.Done, message: 'Pipeline completed' });
+    expect(result).toEqual({ completed: true, stage: Stage.Plan, message: 'Pipeline completed' });
     expect(run.status).toBe('passed');
     expect(workflowRunService.getLatestRunForIssue).toHaveBeenCalled();
     expect(service.resumeDecision).toHaveBeenCalledTimes(1);

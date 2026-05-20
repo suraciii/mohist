@@ -1,4 +1,3 @@
-import { Stage } from '../types';
 import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from './stage-context';
 import type { StageRunner } from './stage-runner';
 import type { CheckContext } from './checks';
@@ -8,7 +7,7 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkSourceKind } from './model';
+import type { CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId, WorkSourceKind } from './model';
 import { inferWorkflowTaskUse } from './uses-catalog';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
@@ -29,9 +28,9 @@ export interface GenericStageRunnerOptions {
   taskHandlerRegistry: TaskHandlerRegistry;
   checkRegistry: CheckRegistry;
   taskDispatchFactoryRegistry?: TaskDispatchFactoryRegistry;
-  getStageDefinition(stage: Stage): CompiledStageDefinition | undefined;
+  getStageDefinition(stage: WorkflowStageId): CompiledStageDefinition | undefined;
   worktreePath: string;
-  enabledStages?: Stage[];
+  enabledStages?: WorkflowStageId[];
 }
 
 export class GenericStageRunner implements StageRunner {
@@ -39,9 +38,9 @@ export class GenericStageRunner implements StageRunner {
   private taskHandlerRegistry: TaskHandlerRegistry;
   private taskDispatchFactoryRegistry: TaskDispatchFactoryRegistry;
   private checkRegistry: CheckRegistry;
-  private getStageDefinition: (stage: Stage) => CompiledStageDefinition | undefined;
+  private getStageDefinition: (stage: WorkflowStageId) => CompiledStageDefinition | undefined;
   private worktreePath: string;
-  private enabledStages?: Set<Stage>;
+  private enabledStages?: Set<WorkflowStageId>;
   private stageExecutionId?: string;
   private stageExecutionKey?: string;
 
@@ -55,7 +54,7 @@ export class GenericStageRunner implements StageRunner {
     this.enabledStages = options.enabledStages ? new Set(options.enabledStages) : undefined;
   }
 
-  canHandle(stage: Stage): boolean {
+  canHandle(stage: WorkflowStageId): boolean {
     if (this.enabledStages && !this.enabledStages.has(stage)) return false;
     return this.getStageDefinition(stage) !== undefined;
   }
@@ -191,7 +190,7 @@ export class GenericStageRunner implements StageRunner {
     };
   }
 
-  private acceptedTaskResult(run: WorkflowRun | undefined, stage: Stage, result: StageTaskResult): StageTaskResult {
+  private acceptedTaskResult(run: WorkflowRun | undefined, stage: WorkflowStageId, result: StageTaskResult): StageTaskResult {
     const task = run?.snapshot().stageRuns.find(candidate => candidate.stage === stage)?.tasks.find(candidate => candidate.id === result.taskId);
     if (!task) return result;
     return {
@@ -285,7 +284,7 @@ export class GenericStageRunner implements StageRunner {
     return { decision: workflowUpdate?.decision ?? null, result: persistedResult };
   }
 
-  private acceptedCheckResult(run: WorkflowRun | undefined, stage: Stage, result: CheckResult): CheckResult {
+  private acceptedCheckResult(run: WorkflowRun | undefined, stage: WorkflowStageId, result: CheckResult): CheckResult {
     const check = run?.snapshot().stageRuns.find(candidate => candidate.stage === stage)?.checks.find(candidate => candidate.name === result.name);
     if (!check) return result;
     return {

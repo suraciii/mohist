@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Stage, MergeState } from '../../types';
+import { MergeState } from '../../types';
 import type { StageContext, CheckResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
@@ -169,12 +169,19 @@ function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Dispat
   if (typeof input.task.prompt === 'string' && input.task.prompt.trim().length > 0) {
     return createGenericAgentSessionDispatchTask(input, input.task.prompt);
   }
-  if (input.ctx.issue.stage === Stage.Plan) return createPlanAgentSessionDispatchTask(input);
-  if (input.ctx.issue.stage === Stage.Check && baseRuntimeTaskId(input.task.taskId) === 'ai-review') return createCheckAiReviewDispatchTask(input);
+  if (promptSource && 'ref' in promptSource && isBuiltinAgentPromptRef(promptSource)) {
+    return createBuiltinAgentSessionDispatchTask(input, promptSource.ref);
+  }
   return {
     ...input.task,
     agentSessionRef: input.agentSessionRef,
   };
+}
+
+function createBuiltinAgentSessionDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
+  if (promptRef.startsWith('mohist/plan/')) return createPlanAgentSessionDispatchTask(input, promptRef);
+  if (promptRef === 'mohist/check/ai-review') return createCheckAiReviewDispatchTask(input, promptRef);
+  throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
 }
 
 function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource | null {
@@ -190,12 +197,6 @@ function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource 
 
 function isBuiltinAgentPromptRef(source: AgentPromptSource): boolean {
   return 'ref' in source && source.ref.startsWith('mohist/');
-}
-
-function builtinAgentPromptRef(input: TaskDispatchFactoryInput, fallback: string): string {
-  const source = agentPromptSource(input.sourceTask);
-  if (source && 'ref' in source && source.ref.startsWith('mohist/')) return source.ref;
-  return fallback;
 }
 
 function resolveCustomAgentPrompt(input: TaskDispatchFactoryInput, source: AgentPromptSource): string {
@@ -279,14 +280,14 @@ function extractStringArray(value: unknown): string[] | null {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
-function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
+function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
 
   const tasks = createPlanTaskConfigs(changeDir);
   const baseTaskId = baseRuntimeTaskId(input.task.taskId);
-  const taskConfig = tasks.find(candidate => candidate.type === input.task.taskId || candidate.type === baseTaskId);
+  const taskConfig = tasks.find(candidate => candidate.promptRef === promptRef || candidate.type === input.task.taskId || candidate.type === baseTaskId);
   if (!taskConfig) throw new Error(`Unknown Plan task: ${input.task.taskId}`);
 
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'plan');
@@ -318,9 +319,9 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
     taskId: input.task.taskId,
     title: input.task.title,
     kind: 'agent-session',
-    prompt: buildBuiltinAgentPrompt(input, builtinAgentPromptRef(input, taskConfig.promptRef), changeDir),
+    prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
-    stage: 'plan',
+    stage: input.ctx.issue.stage,
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
@@ -336,7 +337,7 @@ function wasResetByWorkflowPolicy(input: TaskDispatchFactoryInput): boolean {
   return input.ctx.requestedTask?.resetBy?.type === 'workflow-policy';
 }
 
-function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
+function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
@@ -359,9 +360,9 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     taskId: input.task.taskId,
     title: input.task.title,
     kind: 'agent-session',
-    prompt: buildBuiltinAgentPrompt(input, builtinAgentPromptRef(input, 'mohist/check/ai-review'), changeDir),
+    prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
-    stage: 'check',
+    stage: input.ctx.issue.stage,
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),

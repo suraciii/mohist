@@ -93,6 +93,38 @@ describe('workflow inspector', () => {
     ]);
   });
 
+  it('accepts arbitrary stage ids from complete workflow YAML', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-custom-stage-workflow-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/custom-stage
+  stages:
+    - id: triage
+      tasks:
+        - id: summarize
+          title: Summarize issue
+          uses: mohist/agent
+          with:
+            prompt:
+              inline: "Summarize {{ issue.title }}"
+      checks:
+        - id: summary-exists
+          title: Summary exists
+          uses: mohist/artifact-exists
+          with:
+            path: summary.md
+`, 'utf-8');
+
+    try {
+      const resolved = resolveWorkflowDefinition(tempDir);
+      expect(validateWorkflowDefinition(resolved)).toEqual([]);
+      expect(resolved.snapshot.compiledStageDefinitions.map(stage => stage.stage)).toEqual(['triage']);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('explains builtin task and check source information', () => {
     expect(explainWorkflowItem('ai-review')).toMatchObject({
       kind: 'task',

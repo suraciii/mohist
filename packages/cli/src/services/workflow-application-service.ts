@@ -478,7 +478,7 @@ export class WorkflowApplicationService {
     return this.handleApprovalVerdictRepairOnRunningRun(run, input);
   }
 
-  scheduleFixReviewFindings(input: { issueId: string; stage: Stage.Check } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
+  scheduleFixReviewFindings(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
     return this.scheduleApprovalVerdictRepair(input);
   }
 

@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { Stage } from '../../types';
 import {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   MOHIST_DEFAULT_WORKFLOW_YAML,
@@ -16,6 +15,7 @@ import {
   type TaskDefinition,
   type WorkflowDefinition,
   type WorkflowDefinitionSnapshot,
+  type WorkflowStageId,
 } from '../model';
 import {
   parseWorkflowDefinitionSource,
@@ -46,7 +46,7 @@ export interface ResolvedWorkflowDefinition {
 export type ExplainedWorkflowItem =
   | {
     kind: 'task';
-    stage: Stage;
+    stage: WorkflowStageId;
     id: string;
     title: string;
     source: string;
@@ -58,7 +58,7 @@ export type ExplainedWorkflowItem =
   }
   | {
     kind: 'check';
-    stage: Stage;
+    stage: WorkflowStageId;
     id: string;
     title: string;
     source: string;
@@ -146,7 +146,7 @@ function compileFullCustomWorkflow(
       diagnostics.push({
         severity: 'error',
         path: `${stagePath}.id`,
-        message: 'stage id must be one of plan, build, check, integrate',
+        message: 'stage id must be a non-empty string',
       });
       continue;
     }
@@ -414,11 +414,10 @@ function compileReactionInputs(rawInputs: unknown): CheckFailurePolicy['inputFro
     .map(input => ({ ...input })) as CheckFailurePolicy['inputFrom'];
 }
 
-function parseStageId(value: unknown): Stage | null {
-  if (value === Stage.Plan || value === Stage.Build || value === Stage.Check || value === Stage.Integrate) {
-    return value;
-  }
-  return null;
+function parseStageId(value: unknown): WorkflowStageId | null {
+  if (typeof value !== 'string') return null;
+  const stage = value.trim();
+  return stage.length > 0 ? stage : null;
 }
 
 function resolveBuiltinDefault(): ResolvedWorkflowDefinition {
@@ -666,7 +665,7 @@ function applyCheckOverride(
 
 export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition = resolveWorkflowDefinition()): WorkflowDiagnostic[] {
   const diagnostics: WorkflowDiagnostic[] = [...resolved.diagnostics];
-  const seenStages = new Set<Stage>();
+  const seenStages = new Set<WorkflowStageId>();
 
   for (const [stageIndex, stage] of resolved.snapshot.compiledStageDefinitions.entries()) {
     const stagePath = `stages[${stageIndex}]`;

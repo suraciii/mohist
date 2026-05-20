@@ -6,6 +6,7 @@ import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
 import type { ExecutableTask } from '../../../src/workflow/task-runtime';
 import { createDefaultTaskDispatchFactoryRegistry } from '../../../src/workflow/task-runtime';
+import type { TaskDefinition } from '../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {
   return {
@@ -44,6 +45,17 @@ function makeContext(changeDir: string, requestedTask?: StageContext['requestedT
     requestedTask,
     emit: vi.fn(),
     log: vi.fn(),
+  };
+}
+
+function aiReviewSourceTask(): TaskDefinition {
+  return {
+    id: 'ai-review',
+    title: 'AI review',
+    uses: 'mohist/agent',
+    with: {
+      prompt: { ref: 'mohist/check/ai-review' },
+    },
   };
 }
 
@@ -86,6 +98,7 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
         executionKind: 'agent-session',
         attempt: 1,
         worktreePath: tmpRoot,
+        sourceTask: aiReviewSourceTask(),
       });
 
       expect(dispatchable).toMatchObject({
@@ -118,6 +131,7 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
         executionKind: 'agent-session',
         attempt: 1,
         worktreePath: tmpRoot,
+        sourceTask: aiReviewSourceTask(),
       });
 
       expect(dispatchable).toMatchObject({

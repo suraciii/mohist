@@ -168,6 +168,41 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('starts and completes a workflow with custom stage ids', () => {
+    const snapshot = createWorkflowDefinitionSnapshot({
+      definition: {
+        id: 'custom/stage-run',
+        stages: [
+          {
+            stage: 'triage',
+            tasks: [{ id: 'summarize', title: 'Summarize' }],
+            checks: [{ name: 'summary-ok', title: 'Summary OK' }],
+          },
+          {
+            stage: 'publish',
+            tasks: [{ id: 'notify', title: 'Notify' }],
+            checks: [],
+          },
+        ],
+      },
+    });
+
+    const { run } = WorkflowRun.startWorkflow({
+      id: 'run-custom',
+      issueId: 'issue-custom',
+      issueNumber: 188,
+      workflowDefinitionSnapshot: snapshot,
+    });
+
+    expect(run.currentStage).toBe('triage');
+    run.completeTask('triage', 'summarize', { status: 'completed' });
+    run.recordCheckResult('triage', { name: 'summary-ok', status: 'pass' });
+    expect(run.currentStage).toBe('publish');
+    run.completeTask('publish', 'notify', { status: 'completed' });
+    expect(run.nextWork()).toEqual({ kind: 'complete' });
+    expect(run.snapshot().status).toBe('passed');
+  });
+
   it('compiles WorkflowDefinition defensively so callers cannot mutate the source definition', () => {
     const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
     compiled[0].tasks[0].title = 'Mutated title';

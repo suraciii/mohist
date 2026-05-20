@@ -179,11 +179,11 @@ function createStageDefinition(stage: Stage): StageDefinition {
     [Stage.Plan]: {
       stage: Stage.Plan,
       tasks: [
-        { id: 'proposal', title: 'Generate proposal' },
-        { id: 'specs', title: 'Write specs' },
-        { id: 'design', title: 'Create design' },
-        { id: 'tasks', title: 'Generate tasks' },
-        { id: 'self-review', title: 'Self review' },
+        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/proposal' } } },
+        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/specs' } } },
+        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/design' } } },
+        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/tasks' } } },
+        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/self-review' } } },
       ],
       checks: [
         { name: 'proposal-complete', title: 'Proposal complete' },
@@ -232,7 +232,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
       on: {
         'code.changed': { reset: { tasks: ['ai-review'], checks: 'all', approval: true } },
       },
-      tasks: [{ id: 'ai-review', title: 'AI review' }],
+      tasks: [{ id: 'ai-review', title: 'AI review', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/check/ai-review' } } }],
       checks: [
         {
           name: 'health:check',

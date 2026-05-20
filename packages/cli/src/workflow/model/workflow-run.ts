@@ -1,4 +1,3 @@
-import { Stage } from '../../types';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
 import {
   cloneWorkflowDefinitionSnapshot,
@@ -7,6 +6,7 @@ import {
   type CheckPhase,
   type CheckPolicy,
   type CompiledStageDefinition,
+  type WorkflowStageId,
   type WorkflowDefinitionSnapshot,
 } from './workflow-definition';
 import { WorkflowDomainError } from './errors';
@@ -40,7 +40,7 @@ export interface TaskResetMetadata {
 
 export interface FailureDetails {
   reason: FailureReason;
-  stage: Stage;
+  stage: WorkflowStageId;
   taskId?: string;
   checkName?: string;
   message?: string;
@@ -114,30 +114,30 @@ export interface ApprovalInput {
 }
 
 export type WorkflowEvent =
-  | { type: 'workflow-started'; stage: Stage }
-  | { type: 'stage-started'; stage: Stage }
-  | { type: 'stage-retried'; stage: Stage }
-  | { type: 'task-completed'; stage: Stage; taskId: string }
-  | { type: 'task-failed'; stage: Stage; taskId: string; reason: FailureDetails }
-  | { type: 'task-invalidated'; stage: Stage; taskId: string; reason: string }
-  | { type: 'check-invalidated'; stage: Stage; checkName: string; reason: string }
-  | { type: 'check-recorded'; stage: Stage; checkName: string; status: CheckRunStatus }
-  | { type: 'fix-task-scheduled'; stage: Stage; taskId: string; causedBy: CausedByMetadata }
-  | { type: 'approval-requested'; stage: Stage }
-  | { type: 'approval-approved'; stage: Stage }
-  | { type: 'approval-rejected'; stage: Stage; reason: FailureDetails }
-  | { type: 'stage-completed'; stage: Stage }
-  | { type: 'stage-failed'; stage: Stage; reason: FailureDetails }
+  | { type: 'workflow-started'; stage: WorkflowStageId }
+  | { type: 'stage-started'; stage: WorkflowStageId }
+  | { type: 'stage-retried'; stage: WorkflowStageId }
+  | { type: 'task-completed'; stage: WorkflowStageId; taskId: string }
+  | { type: 'task-failed'; stage: WorkflowStageId; taskId: string; reason: FailureDetails }
+  | { type: 'task-invalidated'; stage: WorkflowStageId; taskId: string; reason: string }
+  | { type: 'check-invalidated'; stage: WorkflowStageId; checkName: string; reason: string }
+  | { type: 'check-recorded'; stage: WorkflowStageId; checkName: string; status: CheckRunStatus }
+  | { type: 'fix-task-scheduled'; stage: WorkflowStageId; taskId: string; causedBy: CausedByMetadata }
+  | { type: 'approval-requested'; stage: WorkflowStageId }
+  | { type: 'approval-approved'; stage: WorkflowStageId }
+  | { type: 'approval-rejected'; stage: WorkflowStageId; reason: FailureDetails }
+  | { type: 'stage-completed'; stage: WorkflowStageId }
+  | { type: 'stage-failed'; stage: WorkflowStageId; reason: FailureDetails }
   | { type: 'workflow-completed' }
   | { type: 'workflow-failed'; reason: FailureDetails }
-  | { type: 'delivery-frozen'; stage: Stage; freezePoint: FreezePoint };
+  | { type: 'delivery-frozen'; stage: WorkflowStageId; freezePoint: FreezePoint };
 
 export type WorkflowWork =
-  | { kind: 'task'; stage: Stage; taskId: string }
-  | { kind: 'check'; stage: Stage; checkName: string }
-  | { kind: 'await-approval'; stage: Stage }
+  | { kind: 'task'; stage: WorkflowStageId; taskId: string }
+  | { kind: 'check'; stage: WorkflowStageId; checkName: string }
+  | { kind: 'await-approval'; stage: WorkflowStageId }
   | { kind: 'complete' }
-  | { kind: 'blocked'; stage: Stage; reason: StageCompletionGuard }
+  | { kind: 'blocked'; stage: WorkflowStageId; reason: StageCompletionGuard }
   | { kind: 'failed'; reason: FailureDetails };
 
 export type StageCompletionGuard =
@@ -149,12 +149,12 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'run-task-pending'; taskId: string }
   | { complete: false; reason: 'run-task-failed'; taskId: string }
   | { complete: false; reason: 'run-task-skipped'; taskId: string }
-  | { complete: false; reason: 'dynamic-source-not-evaluated'; stage: Stage }
-  | { complete: false; reason: 'dynamic-source-missing'; stage: Stage }
-  | { complete: false; reason: 'dynamic-source-invalid'; stage: Stage }
-  | { complete: false; reason: 'dynamic-source-empty'; stage: Stage }
-  | { complete: false; reason: 'delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string; uses?: string }
-  | { complete: false; reason: 'approval-required'; stage: Stage };
+  | { complete: false; reason: 'dynamic-source-not-evaluated'; stage: WorkflowStageId }
+  | { complete: false; reason: 'dynamic-source-missing'; stage: WorkflowStageId }
+  | { complete: false; reason: 'dynamic-source-invalid'; stage: WorkflowStageId }
+  | { complete: false; reason: 'dynamic-source-empty'; stage: WorkflowStageId }
+  | { complete: false; reason: 'delivery-evidence-missing'; stage: WorkflowStageId; taskId?: string; checkName?: string; uses?: string }
+  | { complete: false; reason: 'approval-required'; stage: WorkflowStageId };
 
 export interface WorkflowDecision {
   events: WorkflowEvent[];
@@ -196,7 +196,7 @@ export interface ApprovalSnapshot {
 }
 
 export interface StageRunSnapshot {
-  stage: Stage;
+  stage: WorkflowStageId;
   status: StageRunStatus;
   order: number;
   attemptSequence?: number;
@@ -213,15 +213,15 @@ export interface WorkflowRunSnapshot {
   issueId: string;
   issueNumber: number;
   status: WorkflowRunStatus;
-  currentStage: Stage;
-  stageOrder: Stage[];
+  currentStage: WorkflowStageId;
+  stageOrder: WorkflowStageId[];
   workflowDefinitionSnapshot: WorkflowDefinitionSnapshot;
   stageRuns: StageRunSnapshot[];
   failure: FailureDetails | null;
 }
 
 export function getCheckFailurePolicy(
-  stage: Stage,
+  stage: WorkflowStageId,
   checkName: string,
   definitions: CompiledStageDefinition[],
 ): CheckFailurePolicy | null {
@@ -577,7 +577,7 @@ export class StageRun {
     this.checks = definition.checks.map(check => new CheckState(check.name, check.title));
   }
 
-  get stage(): Stage {
+  get stage(): WorkflowStageId {
     return this.definition.stage;
   }
 
@@ -873,7 +873,7 @@ export class StageRun {
 export class WorkflowRun {
   readonly stageRuns: StageRun[];
   status: WorkflowRunStatus = 'running';
-  currentStage: Stage;
+  currentStage: WorkflowStageId;
   failure: FailureDetails | null = null;
 
   private constructor(
@@ -930,7 +930,7 @@ export class WorkflowRun {
     };
   }
 
-  get stageOrder(): Stage[] {
+  get stageOrder(): WorkflowStageId[] {
     return this.definitions.map(definition => definition.stage);
   }
 
@@ -940,13 +940,13 @@ export class WorkflowRun {
     return stageRun;
   }
 
-  stageRun(stage: Stage): StageRun {
+  stageRun(stage: WorkflowStageId): StageRun {
     const stageRun = this.stageRuns.find(candidate => candidate.stage === stage);
     if (!stageRun) throw new WorkflowDomainError(`Stage ${stage} is not admitted by this workflow`);
     return stageRun;
   }
 
-  materializeTasks(stage: Stage, tasks: MaterializedTaskInput[], workSourceState?: 'missing' | 'invalid' | 'empty'): WorkflowDecision {
+  materializeTasks(stage: WorkflowStageId, tasks: MaterializedTaskInput[], workSourceState?: 'missing' | 'invalid' | 'empty'): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
@@ -991,7 +991,7 @@ export class WorkflowRun {
     return this.decision([]);
   }
 
-  completeTask(stage: Stage, taskId: string, result: TaskResultInput): WorkflowDecision {
+  completeTask(stage: WorkflowStageId, taskId: string, result: TaskResultInput): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
@@ -1068,7 +1068,7 @@ export class WorkflowRun {
     return this.maybeCompleteStage(stageRun, events);
   }
 
-  recordCheckResult(stage: Stage, result: CheckResultInput): WorkflowDecision {
+  recordCheckResult(stage: WorkflowStageId, result: CheckResultInput): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'running') throw new WorkflowDomainError(`Stage ${stage} is not running`);
@@ -1153,7 +1153,7 @@ export class WorkflowRun {
     }, events);
   }
 
-  approveStage(stage: Stage, input: ApprovalInput = {}): WorkflowDecision {
+  approveStage(stage: WorkflowStageId, input: ApprovalInput = {}): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'awaiting-approval' || !stageRun.approval) {
@@ -1172,7 +1172,7 @@ export class WorkflowRun {
     return this.completeStage(stageRun, [{ type: 'approval-approved', stage }]);
   }
 
-  rejectStage(stage: Stage, input: ApprovalInput = {}): WorkflowDecision {
+  rejectStage(stage: WorkflowStageId, input: ApprovalInput = {}): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.assertCurrentStage(stage);
     if (stageRun.status !== 'awaiting-approval' || !stageRun.approval) {
@@ -1192,14 +1192,14 @@ export class WorkflowRun {
     return this.fail(stageRun, failure, [{ type: 'approval-rejected', stage, reason: failure }]);
   }
 
-  startTaskAttempt(stage: Stage, taskId: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
+  startTaskAttempt(stage: WorkflowStageId, taskId: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
     if (this.status !== 'running') return;
     const stageRun = this.stageRun(stage);
     const task = stageRun.findTask(taskId);
     task.startWorkAttempt(now, evidence);
   }
 
-  startCheckAttempt(stage: Stage, checkName: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
+  startCheckAttempt(stage: WorkflowStageId, checkName: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
     if (this.status !== 'running') return;
     const stageRun = this.stageRun(stage);
     const check = stageRun.findCheck(checkName);
@@ -1252,7 +1252,7 @@ export class WorkflowRun {
     if (interrupted > 0) this.markWaitingForRecovery(stageRun, reason, diagnostic);
   }
 
-  retryStage(stage: Stage): WorkflowDecision {
+  retryStage(stage: WorkflowStageId): WorkflowDecision {
     if (this.status !== 'failed') {
       throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);
     }
@@ -1382,7 +1382,7 @@ export class WorkflowRun {
     return events;
   }
 
-  canRetryStage(stage: Stage): boolean {
+  canRetryStage(stage: WorkflowStageId): boolean {
     if (this.status !== 'failed') return false;
     if (this.currentStage !== stage) return false;
     const stageRun = this.stageRuns.find(candidate => candidate.stage === stage);
@@ -1393,7 +1393,7 @@ export class WorkflowRun {
     return this.findCurrentStageFailedAttempt(stageRun) !== null;
   }
 
-  rerunStage(stage: Stage): WorkflowDecision {
+  rerunStage(stage: WorkflowStageId): WorkflowDecision {
     const stageRun = this.assertCurrentStage(stage);
 
     this.status = 'running';
@@ -1552,7 +1552,7 @@ export class WorkflowRun {
     if (this.status !== 'running') throw new WorkflowDomainError(`WorkflowRun is ${this.status}`);
   }
 
-  private assertCurrentStage(stage: Stage): StageRun {
+  private assertCurrentStage(stage: WorkflowStageId): StageRun {
     const stageRun = this.stageRun(stage);
     if (stageRun.stage !== this.currentStage) {
       throw new WorkflowDomainError(`Stage ${stage} is not current stage ${this.currentStage}`);

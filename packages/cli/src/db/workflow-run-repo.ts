@@ -1,5 +1,4 @@
 import { DatabaseManager } from './database';
-import { Stage } from '../types';
 import {
   type CausedByMetadata,
   type StageRunSnapshot,
@@ -17,6 +16,7 @@ import {
   workflowDefinitionSnapshotFromUnknown,
 } from '../workflow/projection/workflow-run-snapshot';
 import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definition/default-workflow';
+import { Stage } from '../types';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';

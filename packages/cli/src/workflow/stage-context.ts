@@ -1,4 +1,4 @@
-import type { Stage, Issue, Project, IssueStatus } from '../types';
+import type { Issue, Project, IssueStatus } from '../types';
 import type { TasksFile } from '../artifacts/change-artifacts-manager';
 import type { AgentSession, AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { MergeBackResult, MergeMetadata } from '../git/worktree-manager';
@@ -11,7 +11,7 @@ import type { WorkflowRunService } from '../services/workflow-run-service';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { StageStateService } from '../services/stage-state-service';
 import type { WorkflowApplicationService } from '../services/workflow-application-service';
-import type { TaskRunSnapshot, WorkflowWork } from './model';
+import type { TaskRunSnapshot, WorkflowStageId, WorkflowWork } from './model';
 
 export interface AgentSessionRegistry {
   getOrCreate(ref: string, factory: () => Promise<AgentSession>): Promise<AgentSession>;
@@ -39,7 +39,7 @@ export class InMemoryAgentSessionRegistry implements AgentSessionRegistry {
   }
 }
 
-type StageType = Stage;
+type StageType = WorkflowStageId;
 
 export interface ChangeArtifactsManager {
   getChangeDir(issueNumber: number): string | null;
@@ -54,8 +54,8 @@ export interface ChangeArtifactsManager {
 }
 
 export interface IssueRepo {
-  updateStage(id: string, stage: Stage): Issue | null;
-  setApprovalState(id: string, state: { stage: Stage; status: string; output: unknown; requestedAt: string }): void;
+  updateStage(id: string, stage: WorkflowStageId): Issue | null;
+  setApprovalState(id: string, state: { stage: WorkflowStageId; status: string; output: unknown; requestedAt: string }): void;
   clearApprovalState(id: string): void;
   updateStatus(id: string, status: IssueStatus): Issue | null;
   findById(id: string): Issue | null;

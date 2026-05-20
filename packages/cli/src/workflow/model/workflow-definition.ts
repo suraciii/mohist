@@ -1,7 +1,8 @@
-import { Stage } from '../../types';
 import type { ResultContract } from '../../types/workflow-results';
 import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../uses-catalog';
 import { WorkflowDomainError } from './errors';
+
+export type WorkflowStageId = string;
 
 export type AgentPromptSource =
   | { ref: string }
@@ -122,7 +123,7 @@ export interface StageEventPolicy {
 export type WorkflowTasksFromSource = string;
 
 export interface StageDefinition {
-  stage: Stage;
+  stage: WorkflowStageId;
   tasks: TaskDefinition[];
   tasksFrom?: WorkflowTasksFromSource;
   checks: CheckDefinition[];
@@ -458,7 +459,7 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
     throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} requires at least one stage`);
   }
 
-  const seenStages = new Set<Stage>();
+  const seenStages = new Set<WorkflowStageId>();
   for (const stage of definition.stages) {
     if (seenStages.has(stage.stage)) {
       throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} declares duplicate stage ${stage.stage}`);

@@ -5,8 +5,8 @@ import type {
   WorkflowDefinition,
   WorkflowTasksFromSource,
   StageEventPolicy,
+  WorkflowStageId,
 } from '../model';
-import type { Stage } from '../../types';
 
 export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
   source?: TaskDefinition['source'];
@@ -19,8 +19,8 @@ export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'source' | 'na
 };
 
 export interface WorkflowStageSourceDefinition {
-  id?: Stage;
-  stage?: Stage;
+  id?: WorkflowStageId;
+  stage?: WorkflowStageId;
   tasks?: WorkflowTaskSourceDefinition[];
   tasksFrom?: WorkflowTasksFromSource;
   checks?: WorkflowCheckSourceDefinition[];

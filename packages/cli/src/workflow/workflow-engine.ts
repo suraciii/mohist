@@ -14,11 +14,11 @@ import type { ConfigInfo } from '../config/config-schema';
 import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { StageCompletionGuard, TaskRunSnapshot, WorkflowWork } from './model';
+import type { StageCompletionGuard, TaskRunSnapshot, WorkflowStageId, WorkflowWork } from './model';
 
 export interface PipelineResult {
   completed: boolean;
-  stage: Stage;
+  stage: WorkflowStageId;
   message?: string;
 }
 
@@ -44,7 +44,7 @@ export interface WorkflowEngineOptions {
 
 type StageAttemptRunInfo = {
   id: string;
-  stageRuns: Array<{ stage: Stage; attemptSequence?: number }>;
+  stageRuns: Array<{ stage: WorkflowStageId; attemptSequence?: number }>;
 };
 
 export class WorkflowEngine {
@@ -190,7 +190,7 @@ export class WorkflowEngine {
     return this.issueRepo.findById(issue.id) ?? issue;
   }
 
-  private getRunner(stage: Stage): StageRunner | null {
+  private getRunner(stage: WorkflowStageId): StageRunner | null {
     return this.runners.find(r => r.canHandle(stage)) ?? null;
   }
 
@@ -200,7 +200,7 @@ export class WorkflowEngine {
     return reason.message ?? `${reason.reason}: ${subject}`;
   }
 
-  private formatBlocked(stage: Stage, reason: StageCompletionGuard): string {
+  private formatBlocked(stage: WorkflowStageId, reason: StageCompletionGuard): string {
     if (reason.complete) return `Blocked at ${stage}`;
     const subject = 'taskId' in reason
       ? reason.taskId
@@ -212,13 +212,13 @@ export class WorkflowEngine {
     return `${reason.reason}: ${subject}`;
   }
 
-  private stageAttemptKey(workflowRunId: string, stage: Stage, attemptSequence: number): string {
+  private stageAttemptKey(workflowRunId: string, stage: WorkflowStageId, attemptSequence: number): string {
     return `${workflowRunId}:${stage}:${attemptSequence}`;
   }
 
   private stageAttemptKeyFromRun(
     workflowRun: StageAttemptRunInfo,
-    stage: Stage,
+    stage: WorkflowStageId,
   ): string {
     const stageAttemptSequence = workflowRun.stageRuns.find(candidate => candidate.stage === stage)?.attemptSequence ?? 1;
     return this.stageAttemptKey(workflowRun.id, stage, stageAttemptSequence);
@@ -248,7 +248,7 @@ export class WorkflowEngine {
 
   private async closeStageRegistryForRun(
     workflowRun: StageAttemptRunInfo | undefined,
-    stage: Stage,
+    stage: WorkflowStageId,
   ): Promise<void> {
     if (!workflowRun) return;
     await this.closeStageRegistry(this.stageAttemptKeyFromRun(workflowRun, stage));
@@ -263,7 +263,7 @@ export class WorkflowEngine {
     return work.kind;
   }
 
-  private getRejectedApprovalOutput(issueId: string, stage: Stage): unknown {
+  private getRejectedApprovalOutput(issueId: string, stage: WorkflowStageId): unknown {
     const run = this.workflowRunService?.getLatestRunForIssue(issueId);
     const stageRun = run?.stageRuns.find(candidate => candidate.stage === stage);
     return stageRun?.approvalStatus === 'rejected' ? stageRun.approvalOutput : undefined;
@@ -332,7 +332,7 @@ export class WorkflowEngine {
       if (work.kind === 'complete') {
         await this.closeAllStageRegistries();
         this.checkpointManager.deleteAll(currentIssue.number);
-        return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
+        return { completed: true, stage: run.currentStage, message: 'Pipeline completed' };
       }
 
       if (work.kind === 'failed') {
@@ -365,7 +365,7 @@ export class WorkflowEngine {
       if (latestRun?.status === 'passed') {
         await this.closeAllStageRegistries();
         this.checkpointManager.deleteAll(currentIssue.number);
-        return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
+        return { completed: true, stage: latestRun.currentStage, message: 'Pipeline completed' };
       }
       if (latestRun?.status === 'failed') {
         const failedStage = latestRun.stageRuns.find(stageRun => stageRun.status === 'failed');
@@ -386,7 +386,7 @@ export class WorkflowEngine {
       const decision = await this.resumeAfterMaterializingWork(issue, acpOptions);
       run = decision.run;
       work = decision.nextWork;
-      const nextStage = 'stage' in work ? work.stage : work.kind === 'failed' ? work.reason.stage : Stage.Done;
+      const nextStage = 'stage' in work ? work.stage : work.kind === 'failed' ? work.reason.stage : run.currentStage;
       const latestStageAttemptRun = this.workflowRunService?.getActiveRunForIssue(issue.id)
         ?? this.workflowRunService?.getLatestRunForIssue(issue.id)
         ?? run.snapshot();
@@ -416,7 +416,6 @@ export class WorkflowEngine {
   private shouldMaterializeBeforeWork(work: WorkflowWork): boolean {
     if (work.kind === 'task' || work.kind === 'check') return true;
     return work.kind === 'blocked'
-      && work.stage === Stage.Build
       && !work.reason.complete
       && work.reason.reason === 'dynamic-source-not-evaluated';
   }
