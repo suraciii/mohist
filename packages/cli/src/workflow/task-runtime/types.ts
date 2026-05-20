@@ -1,5 +1,5 @@
 import type { StageContext, StageTaskResult } from '../stage-context';
-import type { RequiredMarkerDefinition } from '../domain';
+import type { RequiredMarkerDefinition } from './agent-required-markers';
 
 export type TaskKind = 'agent-session' | 'service-call' | 'ralph-task';
 

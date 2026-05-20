@@ -1,5 +1,4 @@
 import { Stage } from '../../types';
-import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from './default-workflow';
 import { WorkflowDomainError } from './errors';
 import { cloneWorkflowDefinitionSnapshot, createWorkflowDefinitionSnapshot } from './workflow-definition';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
@@ -39,7 +38,7 @@ import type {
 export function getCheckFailurePolicy(
   stage: Stage,
   checkName: string,
-  definitions: CompiledStageDefinition[] = DEFAULT_STAGE_DEFINITIONS,
+  definitions: CompiledStageDefinition[],
 ): CheckFailurePolicy | null {
   return definitions
     .find(definition => definition.stage === stage)
@@ -418,14 +417,6 @@ export class StageRun {
     this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   }
 
-  get buildWorkSourceState(): WorkSourceState {
-    return this.workSourceState;
-  }
-
-  set buildWorkSourceState(state: WorkSourceState) {
-    this.workSourceState = state;
-  }
-
   nextTask(): TaskRun | null {
     return this.currentTasks().find(task => {
       if (task.terminal) return false;
@@ -609,7 +600,7 @@ export class StageRun {
     for (let index = this.tasks.length - 1; index >= 0; index--) {
       const task = this.tasks[index];
       const isRepairTask = [...repairTaskIds].some(fixTaskId => task.id === fixTaskId || task.id.startsWith(`${fixTaskId}:`));
-      const isRuntimeTask = (!staticTaskIds.has(task.id) && task.causedBy !== null) || task.id === 'rebase-branch';
+      const isRuntimeTask = !staticTaskIds.has(task.id) && task.causedBy !== null;
       if (isRepairTask || isRuntimeTask) {
         this.tasks.splice(index, 1);
       }
@@ -643,26 +634,6 @@ export class StageRun {
 
   resetWorkSourceState(): void {
     this.workSourceState = { evaluated: false };
-  }
-
-  recordBuildWorkSourceEvaluated(tasks: MaterializedTaskInput[]): void {
-    this.recordWorkSourceEvaluated(tasks);
-  }
-
-  recordBuildWorkSourceMissing(): void {
-    this.recordWorkSourceMissing();
-  }
-
-  recordBuildWorkSourceInvalid(): void {
-    this.recordWorkSourceInvalid();
-  }
-
-  recordBuildWorkSourceEmpty(): void {
-    this.recordWorkSourceEmpty();
-  }
-
-  resetBuildWorkSourceState(): void {
-    this.resetWorkSourceState();
   }
 
   materializeTaskForPersistence(id: string, title: string, order: number): TaskRun {
@@ -704,7 +675,6 @@ export class StageRun {
       failure: this.failure,
       freezePoint: this.freezePoint,
       workSourceState: this.hasDynamicWorkSource() ? this.workSourceState : undefined,
-      buildWorkSourceState: this.stage === Stage.Build ? this.workSourceState : undefined,
     };
   }
 
@@ -753,12 +723,15 @@ export class WorkflowRun {
           source: { type: 'runtime', id: 'runtime/custom' },
           capturedAt: input.now,
         })
-        : createDefaultWorkflowDefinitionSnapshot(input.now);
+        : null;
+    if (!workflowDefinitionSnapshot) {
+      throw new WorkflowDomainError('WorkflowRun requires a workflow definition snapshot');
+    }
     const run = new WorkflowRun(
       input.id,
       input.issueId,
       input.issueNumber,
-      input.definitions ?? workflowDefinitionSnapshot.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS,
+      input.definitions ?? workflowDefinitionSnapshot.compiledStageDefinitions,
       workflowDefinitionSnapshot,
     );
     const firstStage = run.currentStageRun();
@@ -809,15 +782,19 @@ export class WorkflowRun {
     return this.decision([]);
   }
 
-  scheduleRebaseTask(reason?: string): WorkflowDecision {
+  scheduleRuntimeTask(input: {
+    taskId: string;
+    title: string;
+    causedBy: CausedByMetadata;
+  }): WorkflowDecision {
     this.assertRunning();
     const stageRun = this.currentStageRun();
     if (stageRun.stage !== this.currentStage) {
-      throw new WorkflowDomainError(`Cannot schedule rebase in stage ${stageRun.stage}; current stage is ${this.currentStage}`);
+      throw new WorkflowDomainError(`Cannot schedule runtime task in stage ${stageRun.stage}; current stage is ${this.currentStage}`);
     }
 
-    const existingRebase = stageRun.tasks.find(t => t.id === 'rebase-branch' && !t.terminal);
-    if (existingRebase) {
+    const existingTask = stageRun.tasks.find(t => t.id === input.taskId && !t.terminal);
+    if (existingTask) {
       return this.decision([]);
     }
 
@@ -825,11 +802,7 @@ export class WorkflowRun {
       stageRun.status = 'running';
     }
 
-    const causedBy: CausedByMetadata = {
-      type: 'branch-changed',
-      message: reason ?? 'Target branch moved; rebase requested',
-    };
-    stageRun.appendAdHocTask('rebase-branch', 'Rebase branch', causedBy);
+    stageRun.appendAdHocTask(input.taskId, input.title, input.causedBy);
     return this.decision([]);
   }
 

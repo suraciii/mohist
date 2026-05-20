@@ -1,17 +1,16 @@
 import { DatabaseManager } from './database';
 import { Stage } from '../types';
 import {
-  DEFAULT_STAGE_DEFINITIONS,
-  createDefaultWorkflowDefinitionSnapshot,
   type CausedByMetadata,
-  type BuildWorkSourceState,
   type StageRunSnapshot,
   type TaskResetMetadata,
+  type WorkSourceState,
   type WorkItemAttempt,
   type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
   WorkflowRun as DomainWorkflowRun,
 } from '../workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definitions/default-workflow';
 import {
   freezePointFromStageSnapshot,
   hydrateWorkflowRun,
@@ -391,7 +390,7 @@ export class WorkflowRunRepo {
         id,
         issueId: data.issueId,
         issueNumber: data.issueNumber,
-        workflowDefinitionSnapshot: data.workflowDefinitionSnapshot,
+        workflowDefinitionSnapshot: data.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot(),
       });
       this.saveAggregate(run, data.startedBy ?? null);
       return this.loadRunningAggregate(data.issueId) ?? run;
@@ -482,12 +481,12 @@ export class WorkflowRunRepo {
         failure: null,
         freezePoint: null,
         workSourceState: stageRow.work_source_state
-          ? safeParseJson(stageRow.work_source_state) as BuildWorkSourceState
-          : undefined,
-        buildWorkSourceState: stageRow.build_work_source_state
-          ? safeParseJson(stageRow.build_work_source_state) as BuildWorkSourceState
+          ? safeParseJson(stageRow.work_source_state) as WorkSourceState
           : undefined,
       };
+      if (!stageSnapshot.workSourceState && stageRow.build_work_source_state) {
+        stageSnapshot.workSourceState = safeParseJson(stageRow.build_work_source_state) as WorkSourceState;
+      }
       const stageDefinition = stageDefinitions.find(definition => definition.stage === stageSnapshot.stage);
       stageSnapshot.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
       return stageSnapshot;
@@ -574,7 +573,7 @@ export class WorkflowRunRepo {
         ? existingStage?.completed_at ?? now
         : null;
       const approval = stageRun.approval;
-      const workSourceState = stageRun.workSourceState ?? stageRun.buildWorkSourceState;
+      const workSourceState = stageRun.workSourceState;
       const serializedWorkSourceState = workSourceState ? JSON.stringify(workSourceState) : null;
       const serializedBuildWorkSourceState = stageRun.stage === Stage.Build && workSourceState
         ? serializedWorkSourceState

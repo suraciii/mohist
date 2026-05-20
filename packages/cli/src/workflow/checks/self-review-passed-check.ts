@@ -1,6 +1,6 @@
 import type { Check, CheckContext, CheckResult } from './index';
 import { parseStructuredResult, buildStructuredResult, isParseError } from '../result-contracts';
-import { SELF_REVIEW_RESULT_CONTRACT } from '../domain';
+import { SELF_REVIEW_RESULT_CONTRACT } from './review-result-contracts';
 import { parseDimensions, readReportFile } from '../utils';
 
 export class SelfReviewPassedCheck implements Check {

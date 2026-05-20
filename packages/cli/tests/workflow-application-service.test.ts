@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { WorkflowApplicationService, type WorkflowRunProjectionPort, type WorkflowRunRepositoryPort } from '../src/services/workflow-application-service';
 import { WorkflowRun, createWorkflowDefinitionSnapshot, parseWorkflowDefinitionSource } from '../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 import { Stage } from '../src/types';
 import type { WorkflowAttemptEvidencePort } from '../src/services/attempt-reconciliation-service';
 
 function createRunningPlanRun(issueId = 'issue-1'): WorkflowRun {
-  return WorkflowRun.startWorkflow({ id: 'wr-1', issueId, issueNumber: 188 }).run;
+  return WorkflowRun.startWorkflow({ id: 'wr-1', issueId, issueNumber: 188, definitions: DEFAULT_STAGE_DEFINITIONS }).run;
 }
 
 describe('WorkflowApplicationService', () => {

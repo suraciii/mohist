@@ -8,7 +8,8 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, CompiledStageDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkSourceKind } from './domain';
+import type { CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkSourceKind } from './domain';
+import { inferWorkflowTaskUse } from './uses-catalog';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { readTasks } from '../openspec/ralph-executor';
@@ -449,8 +450,7 @@ export class GenericStageRunner implements StageRunner {
     const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
     if (!stageRun) return false;
 
-    const workSourceState = (stageRun as { workSourceState?: { evaluated?: boolean }; buildWorkSourceState?: { evaluated?: boolean } }).workSourceState
-      ?? (stageRun as { buildWorkSourceState?: { evaluated?: boolean } }).buildWorkSourceState;
+    const workSourceState = (stageRun as { workSourceState?: { evaluated?: boolean } }).workSourceState;
     if (!workSourceState?.evaluated) return true;
 
     const existingTaskIds = new Set(stageRun.tasks.map(task => this.persistedTaskId(task)));
@@ -586,7 +586,7 @@ export class GenericStageRunner implements StageRunner {
       }
     }
 
-    const runtimeTask = this.resolveRuntimeTask(stageDefinition, taskId);
+    const runtimeTask = this.resolveRuntimeTask(ctx, stageDefinition, taskId);
     if (runtimeTask) return runtimeTask;
 
     return null;
@@ -604,19 +604,19 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private resolveRuntimeTask(stageDefinition: CompiledStageDefinition, taskId: string): ExecutableTask | null {
+  private resolveRuntimeTask(ctx: StageContext, stageDefinition: CompiledStageDefinition, taskId: string): ExecutableTask | null {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     const task = this.sourceTaskDefinition(stageDefinition, taskId)
-      ?? this.buildRuntimeTaskDefinition(taskId)
-      ?? (baseTaskId !== taskId ? this.buildRuntimeTaskDefinition(baseTaskId) : null);
+      ?? this.runtimeTaskDefinition(ctx, taskId)
+      ?? (baseTaskId !== taskId ? this.runtimeTaskDefinition(ctx, baseTaskId) : null);
     if (!task) return null;
     const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, 'runtime')
       ?? (baseTaskId !== taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, 'runtime') : undefined);
-    if (!policy) return null;
+    const executionKind = policy?.kind ?? this.inferRuntimeTaskExecutionKind(task);
     return {
       taskId,
       title: task.title,
-      kind: this.toHandlerKind(policy.kind),
+      kind: this.toHandlerKind(executionKind),
     };
   }
 
@@ -624,18 +624,31 @@ export class GenericStageRunner implements StageRunner {
     return taskId.replace(/:\d+$/, '');
   }
 
-  private buildRuntimeTaskDefinition(taskId: string): { id: string; title: string } | null {
-    const runtimeTaskTitles: Record<string, string> = {
-      'rebase-branch': 'Rebase branch',
-      'fix-plan-review': 'Fix plan review findings',
-      'fix-build-health': 'Fix build health',
-      'fix-check-health': 'Fix check health',
-      'fix-integrate-health': 'Fix integrate health',
-      'fix-review-findings': 'Fix review findings',
-      'fix-merge-readiness': 'Fix merge readiness',
+  private runtimeTaskDefinition(ctx: StageContext, taskId: string): TaskDefinition | null {
+    const runtimeTask = ctx.workflowRun
+      ?.stageRuns.find(stage => stage.stage === ctx.issue.stage)
+      ?.tasks.find(task => {
+        const projectedTask = task as typeof task & { id?: string; taskId?: string; causedByType?: string | null; causedBy?: unknown };
+        const projectedTaskId = projectedTask.taskId ?? projectedTask.id;
+        const hasRuntimeCause = projectedTask.causedByType !== undefined
+          ? projectedTask.causedByType !== null
+          : projectedTask.causedBy !== undefined;
+        return projectedTaskId === taskId && hasRuntimeCause;
+      });
+    if (!runtimeTask) return null;
+    return {
+      id: taskId,
+      title: runtimeTask.title,
+      uses: inferWorkflowTaskUse(taskId),
+      source: 'builtin',
     };
-    const title = runtimeTaskTitles[taskId];
-    return title ? { id: taskId, title } : null;
+  }
+
+  private inferRuntimeTaskExecutionKind(task: TaskDefinition): TaskExecutionKind {
+    const uses = task.uses ?? inferWorkflowTaskUse(task.id);
+    if (uses === 'mohist/rebase') return 'rebase-task';
+    if (uses === 'mohist/openspec-sync' || uses === 'mohist/archive-change' || uses === 'mohist/merge' || uses === 'mohist/github-pr') return 'service-call';
+    return 'agent-session';
   }
 
   private toHandlerKind(kind: TaskExecutionKind): TaskKind {

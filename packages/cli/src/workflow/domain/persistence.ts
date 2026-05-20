@@ -1,7 +1,5 @@
 import { Stage } from '../../types';
 import {
-  DEFAULT_STAGE_DEFINITIONS,
-  createDefaultWorkflowDefinitionSnapshot,
   WorkflowRun,
   type CausedByMetadata,
   type CheckRunStatus,
@@ -13,6 +11,7 @@ import {
   type TaskRunStatus,
   type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
+  type WorkSourceState,
 } from './index';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
 
@@ -94,7 +93,10 @@ function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDet
 export function hydrateWorkflowRun(
   snapshot: WorkflowRunSnapshot,
 ): WorkflowRun {
-  const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot();
+  const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot;
+  if (!workflowDefinitionSnapshot) {
+    throw new Error('Cannot hydrate WorkflowRun without workflow definition snapshot');
+  }
   const definitions = workflowDefinitionSnapshot.compiledStageDefinitions;
   const workflow = WorkflowRun.startWorkflow({
     id: snapshot.id,
@@ -116,7 +118,8 @@ export function hydrateWorkflowRun(
     const stageDefinition = definitions.find(definition => definition.stage === stageSnapshot.stage);
     stageRun.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
     stageRun.failure = inferStageFailure(stageSnapshot.stage, { ...stageSnapshot, freezePoint: stageRun.freezePoint });
-    const workSourceState = stageSnapshot.workSourceState ?? stageSnapshot.buildWorkSourceState;
+    const legacyStageSnapshot = stageSnapshot as StageRunSnapshot & { buildWorkSourceState?: WorkSourceState };
+    const workSourceState = stageSnapshot.workSourceState ?? legacyStageSnapshot.buildWorkSourceState;
     if (workSourceState) {
       stageRun.workSourceState = workSourceState;
     }
@@ -166,10 +169,11 @@ export function hydrateWorkflowRun(
 export function repairWorkflowRunSnapshot(
   snapshot: WorkflowRunSnapshot,
 ): WorkflowRunSnapshot {
-  const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot();
-  const definitions: CompiledStageDefinition[] = workflowDefinitionSnapshot.compiledStageDefinitions.length > 0
-    ? workflowDefinitionSnapshot.compiledStageDefinitions
-    : DEFAULT_STAGE_DEFINITIONS;
+  const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot;
+  if (!workflowDefinitionSnapshot) {
+    throw new Error('Cannot repair WorkflowRun without workflow definition snapshot');
+  }
+  const definitions: CompiledStageDefinition[] = workflowDefinitionSnapshot.compiledStageDefinitions;
   const stageSnapshots = new Map(snapshot.stageRuns.map(stageRun => [stageRun.stage, stageRun]));
   const workflowRunning = snapshot.status === 'running';
 

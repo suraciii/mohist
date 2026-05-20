@@ -5,6 +5,8 @@ import { Stage } from '../types';
 import {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   MOHIST_DEFAULT_WORKFLOW_YAML,
+} from './definitions/default-workflow';
+import {
   cloneWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
   parseWorkflowDefinitionSource,

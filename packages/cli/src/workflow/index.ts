@@ -94,6 +94,9 @@ export {
 export {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   DEFAULT_STAGE_DEFINITIONS,
+} from './definitions/default-workflow';
+
+export {
   compileWorkflowDefinition,
   type WorkflowDefinition,
   type StageDefinition,

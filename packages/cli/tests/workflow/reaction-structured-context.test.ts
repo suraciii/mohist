@@ -379,7 +379,7 @@ describe('Reaction structured context: T-006', () => {
 
   describe('Default Check retry prompt shape', () => {
     it('review-passed retry uses a plain review.md prompt instead of input selectors', async () => {
-      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/domain');
+      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/definitions/default-workflow');
       const checkStage = DEFAULT_STAGE_DEFINITIONS.find(s => s.stage === 'check');
       expect(checkStage).toBeDefined();
 

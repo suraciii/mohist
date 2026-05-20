@@ -31,6 +31,14 @@ function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
   };
 }
 
+function scheduleRebaseTask(run: DomainWorkflowRun, reason: string) {
+  return run.scheduleRuntimeTask({
+    taskId: 'rebase-branch',
+    title: 'Rebase branch',
+    causedBy: { type: 'branch-changed', message: reason },
+  });
+}
+
 function makeMockContext(stage: Stage = Stage.Integrate, overrides?: Partial<StageContext>): StageContext {
   const eventBus = new EventBus();
   const emitSpy = vi.fn();
@@ -1061,7 +1069,7 @@ describe('StageRunner migration regression coverage', () => {
           workflowRun: {
             stageRuns: [{
               stage: Stage.Build,
-              buildWorkSourceState: { evaluated: true, tasks: ['T-001', 'T-002'] },
+              workSourceState: { evaluated: true, tasks: ['T-001', 'T-002'] },
               tasks: [
                 { id: 'row-1', taskId: 'T-001', title: 'Build first task', status: 'completed' as const },
                 { id: 'row-2', taskId: 'T-002', title: 'Build second task', status: 'pending' as const },
@@ -1098,7 +1106,7 @@ describe('StageRunner migration regression coverage', () => {
             materializeTasks,
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Build, tasks: [], buildWorkSourceState: { evaluated: false } }],
+            stageRuns: [{ stage: Stage.Build, tasks: [], workSourceState: { evaluated: false } }],
           } as any,
         });
 
@@ -1148,7 +1156,7 @@ describe('StageRunner migration regression coverage', () => {
             materializeTasks,
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Build, tasks: [], buildWorkSourceState: { evaluated: false } }],
+            stageRuns: [{ stage: Stage.Build, tasks: [], workSourceState: { evaluated: false } }],
           } as any,
         });
 
@@ -1198,7 +1206,7 @@ describe('StageRunner migration regression coverage', () => {
             materializeTasks,
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Build, tasks: [], buildWorkSourceState: { evaluated: false } }],
+            stageRuns: [{ stage: Stage.Build, tasks: [], workSourceState: { evaluated: false } }],
           } as any,
         });
 
@@ -1586,7 +1594,7 @@ describe('StageRunner migration regression coverage', () => {
       ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'fix-check-health' };
 
       const stageDefinition = createStageDefinition(Stage.Check);
-      const task = (runner as any).resolveRuntimeTask(stageDefinition, 'fix-check-health');
+      const task = (runner as any).resolveRuntimeTask(ctx, stageDefinition, 'fix-check-health');
       const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
         failedCheck: { name: 'health:check', status: 'fail', message: 'build failed' },
         attempt: 1,
@@ -1640,7 +1648,7 @@ describe('StageRunner migration regression coverage', () => {
       ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings:1' };
 
       const stageDefinition = createStageDefinition(Stage.Check);
-      const task = (runner as any).resolveRuntimeTask(stageDefinition, 'fix-review-findings:1');
+      const task = (runner as any).resolveRuntimeTask(ctx, stageDefinition, 'fix-review-findings:1');
       const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
         failedCheck: { name: 'review-passed', status: 'fail', message: 'Review failed' },
         attempt: 1,
@@ -1700,7 +1708,7 @@ describe('StageRunner migration regression coverage', () => {
       });
 
       const ctx = makeMockContext(Stage.Check);
-      const task = (runner as any).resolveRuntimeTask(stageDefinition, 'auto-fix-review:1');
+      const task = (runner as any).resolveRuntimeTask(ctx, stageDefinition, 'auto-fix-review:1');
       const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
         failedCheck: { name: 'review-passed', status: 'fail', message: 'Review failed' },
         attempt: 2,
@@ -1836,7 +1844,7 @@ describe('StageRunner migration regression coverage', () => {
             approveStage: vi.fn(),
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', title: 'Rebase branch', status: 'pending' }], checks: [] }],
+            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', taskId: 'rebase-branch', title: 'Rebase branch', status: 'pending', causedByType: 'branch-changed' }], checks: [] }],
           } as any,
         });
         ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'rebase-branch' };
@@ -1909,7 +1917,7 @@ describe('StageRunner migration regression coverage', () => {
             approveStage: vi.fn(),
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', title: 'Rebase branch', status: 'pending' }], checks: [] }],
+            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', taskId: 'rebase-branch', title: 'Rebase branch', status: 'pending', causedByType: 'branch-changed' }], checks: [] }],
           } as any,
         });
         ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'rebase-branch' };
@@ -2008,7 +2016,7 @@ describe('StageRunner migration regression coverage', () => {
       run.completeTask(Stage.Build, 'build-1', { status: 'completed' });
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
-      const decision = run.scheduleRebaseTask('Target branch moved');
+      const decision = scheduleRebaseTask(run, 'Target branch moved');
       expect(decision.events).toHaveLength(0);
 
       const checkStage = run.stageRun(Stage.Check);
@@ -2043,7 +2051,7 @@ describe('StageRunner migration regression coverage', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const rebaseTask = run.stageRun(Stage.Check).findTask('rebase-branch');
       expect(rebaseTask.status).toBe('pending');
@@ -2083,7 +2091,7 @@ describe('StageRunner migration regression coverage', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const decision = run.completeTask(Stage.Check, 'rebase-branch', { status: 'failed', reason: 'Rebase conflict' });
 
@@ -2120,7 +2128,7 @@ describe('StageRunner migration regression coverage', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const checkStage = run.stageRun(Stage.Check);
       checkStage.findCheck('review-passed').status = 'passed';
@@ -2170,7 +2178,7 @@ describe('StageRunner migration regression coverage', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const checkStage = run.stageRun(Stage.Check);
       checkStage.findCheck('review-passed').status = 'passed';
@@ -2226,7 +2234,7 @@ describe('StageRunner migration regression coverage', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const checkStage = run.stageRun(Stage.Check);
       checkStage.findCheck('review-passed').status = 'passed';
@@ -2279,7 +2287,7 @@ describe('StageRunner migration regression coverage', () => {
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const checkStage = run.stageRun(Stage.Check);
       checkStage.findCheck('review-passed').status = 'passed';

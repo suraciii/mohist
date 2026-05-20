@@ -4,7 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { Stage } from '../src/types';
-import { createWorkflowDefinitionSnapshot, MOHIST_DEFAULT_WORKFLOW_DEFINITION, type CheckFailurePolicy, type WorkflowDefinition } from '../src/workflow/domain';
+import { createWorkflowDefinitionSnapshot, type CheckFailurePolicy, type WorkflowDefinition } from '../src/workflow/domain';
+import { MOHIST_DEFAULT_WORKFLOW_DEFINITION } from '../src/workflow/definitions/default-workflow';
 import { explainWorkflowItem, getBuiltinDefaultWorkflowYaml, resolveWorkflowDefinition, validateWorkflowDefinition } from '../src/workflow/workflow-inspector';
 
 describe('workflow inspector', () => {

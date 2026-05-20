@@ -4,7 +4,7 @@ import type { AgentSessionTaskInput } from './types';
 import { emitStageTaskUpdate } from '../stage-context';
 import { AgentSession, createWorkflowSessionObservers, type AgentSessionOptions } from '../../agent-runtime';
 import { extractReactionOutput } from '../convergence';
-import type { RequiredMarkerDefinition } from '../domain';
+import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { isParseSuccess, validatePromiseMarkerFile } from '../result-contracts';
 
 export interface AgentSessionTaskHandlerDeps {
