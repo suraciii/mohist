@@ -7,7 +7,7 @@ import {
   projectWorkflowDeliveryRequirement,
   type StageDefinition,
   type WorkflowDefinition,
-} from '../src/workflow/domain';
+} from '../src/workflow/model';
 import {
   DEFAULT_STAGE_DEFINITIONS,
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,

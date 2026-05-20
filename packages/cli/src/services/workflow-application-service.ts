@@ -12,7 +12,7 @@ import {
   type WorkflowRecoverySummary,
   type WorkflowDefinitionSnapshot,
   type WorkItemAttemptState,
-} from '../workflow/domain';
+} from '../workflow/model';
 import { WorkflowRunProjection } from './workflow-run-projection';
 import type { WorkflowAttemptEvidencePort, AttemptReconciliationResult } from './attempt-reconciliation-service';
 import { AttemptReconciliationService } from './attempt-reconciliation-service';
@@ -107,7 +107,7 @@ export class WorkflowApplicationService {
       return { reconciled: false, interruptedCount: 0, reasons: [], interruptedAttempts: [] };
     }
 
-    const runningAttempts: import('../workflow/domain').WorkItemAttempt[] = [];
+    const runningAttempts: import('../workflow/model').WorkItemAttempt[] = [];
     for (const task of stageRun.tasks) {
       if (task.latestAttempt?.state === 'running') {
         runningAttempts.push(task.latestAttempt);
@@ -187,7 +187,7 @@ export class WorkflowApplicationService {
     };
   }
 
-  private findCurrentWorkItem(stageRun: import('../workflow/domain').StageRun): {
+  private findCurrentWorkItem(stageRun: import('../workflow/model').StageRun): {
     type: 'task' | 'check';
     id: string;
     title: string;
@@ -228,7 +228,7 @@ export class WorkflowApplicationService {
     return null;
   }
 
-  private findBlockingAttemptWorkItem(stageRun: import('../workflow/domain').StageRun): {
+  private findBlockingAttemptWorkItem(stageRun: import('../workflow/model').StageRun): {
     type: 'task' | 'check';
     id: string;
     title: string;
@@ -350,13 +350,13 @@ export class WorkflowApplicationService {
     return this.updateActiveRun(input.issueId, input, run => run.completeTask(input.stage, input.taskId, input.result));
   }
 
-  startTaskAttempt(input: { issueId: string; stage: Stage; taskId: string; evidence?: Partial<Pick<import('../workflow/domain').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
+  startTaskAttempt(input: { issueId: string; stage: Stage; taskId: string; evidence?: Partial<Pick<import('../workflow/model').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
     const run = this.loadActive(input.issueId);
     run.startTaskAttempt(input.stage, input.taskId, new Date().toISOString(), input.evidence);
     this.repo.saveAggregate(run);
   }
 
-  startCheckAttempt(input: { issueId: string; stage: Stage; checkName: string; evidence?: Partial<Pick<import('../workflow/domain').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
+  startCheckAttempt(input: { issueId: string; stage: Stage; checkName: string; evidence?: Partial<Pick<import('../workflow/model').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
     const run = this.loadActive(input.issueId);
     run.startCheckAttempt(input.stage, input.checkName, new Date().toISOString(), input.evidence);
     this.repo.saveAggregate(run);
@@ -543,7 +543,7 @@ export class WorkflowApplicationService {
     run.status = 'running';
     run.failure = null;
     stageRun.reopenForRepair();
-    const events: import('../workflow/domain').WorkflowEvent[] = [
+    const events: import('../workflow/model').WorkflowEvent[] = [
       { type: 'fix-task-scheduled', stage: input.stage, taskId: fixTask.id, causedBy },
     ];
     this.repo.saveAggregate(run, input.startedBy ?? null);

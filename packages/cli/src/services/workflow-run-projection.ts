@@ -5,7 +5,7 @@ import { IssueRepo } from '../db/issue-repo';
 import { IssueStatus, Stage, type CheckState, type CheckSuiteStatus } from '../types';
 import { eventBus, type EventBus } from './event-bus';
 import { StageStateService, type StageCheckStatus, type StageStateStatus, type StageTaskStatus } from './stage-state-service';
-import type { WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/domain';
+import type { WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/model';
 import { inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../workflow/uses-catalog';
 
 interface IssueProjectionRow {

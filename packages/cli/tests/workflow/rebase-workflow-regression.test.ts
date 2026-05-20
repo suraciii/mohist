@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   WorkflowRun,
   type StageDefinition,
-} from '../../src/workflow/domain';
+} from '../../src/workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definitions/default-workflow';
 import { Stage } from '../../src/types';
 

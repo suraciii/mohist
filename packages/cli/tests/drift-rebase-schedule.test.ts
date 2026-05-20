@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { evaluateBaseDrift, type BaseDriftInput, type GitFacts, type CandidateEvidence, type WorkflowFacts } from '../src/services/base-drift-service';
 import { Stage } from '../src/types';
-import type { WorkflowRunSnapshot, StageRunSnapshot } from '../src/workflow/domain';
+import type { WorkflowRunSnapshot, StageRunSnapshot } from '../src/workflow/model';
 
 function makeGitFacts(overrides: Partial<GitFacts> = {}): GitFacts {
   return {

@@ -24,7 +24,7 @@ import {
 } from '../../../src/workflow/definitions/default-workflow';
 import {
   type CompiledStageDefinition,
-} from '../../../src/workflow/domain';
+} from '../../../src/workflow/model';
 import {
   createTaskHandlerRegistry,
   defaultServiceCallTaskHandler,

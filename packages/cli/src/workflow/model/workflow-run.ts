@@ -1,5 +1,5 @@
-import { Stage } from '../../../types';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../../uses-catalog';
+import { Stage } from '../../types';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
 import {
   cloneWorkflowDefinitionSnapshot,
   createWorkflowDefinitionSnapshot,
@@ -8,8 +8,8 @@ import {
   type CheckPolicy,
   type CompiledStageDefinition,
   type WorkflowDefinitionSnapshot,
-} from '../definition';
-import { WorkflowDomainError } from '../errors';
+} from './workflow-definition';
+import { WorkflowDomainError } from './errors';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';

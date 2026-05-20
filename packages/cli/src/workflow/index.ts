@@ -103,4 +103,4 @@ export {
   type FailedCheckContext,
   type ReactionInputSelector,
   buildFailedCheckContext,
-} from './domain';
+} from './model';

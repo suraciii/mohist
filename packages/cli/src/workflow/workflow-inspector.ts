@@ -18,7 +18,7 @@ import {
   type WorkflowDefinition,
   type WorkflowSourceDefinition,
   type WorkflowDefinitionSnapshot,
-} from './domain';
+} from './model';
 import {
   getWorkflowUseDefinition,
   inferWorkflowCheckUse,

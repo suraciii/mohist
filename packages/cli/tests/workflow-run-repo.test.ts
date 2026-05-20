@@ -7,7 +7,7 @@ import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
-import { WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
+import { WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 import { Stage } from '../src/types';
 
