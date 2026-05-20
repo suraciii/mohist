@@ -380,7 +380,6 @@ workflow:
                 id: fix-review-findings
                 title: Fix review findings
                 uses: mohist/agent
-                emits: [code.changed]
                 with:
                   prompt:
                     inline: |
@@ -406,7 +405,7 @@ workflow:
         workSourceKind: 'runtime',
       });
       expect(check.invalidationPolicy?.entries).toContainEqual(expect.objectContaining({
-        triggerTaskId: 'fix-review-findings',
+        eventName: 'code.changed',
         invalidates: {
           tasks: ['ai-review'],
           checks: ['health:check', 'review-passed', 'merge-ready'],
@@ -440,6 +439,38 @@ workflow:
           severity: 'error',
           path: expect.stringContaining('workflow.stages[0].on.code.changed.reset'),
           message: 'reset must be a mapping with at least one target',
+        }),
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects task emits in custom workflow YAML', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-task-emits-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/task-emits
+  stages:
+    - id: check
+      tasks:
+        - id: fix
+          uses: mohist/agent
+          emits: [code.changed]
+          with:
+            prompt:
+              inline: Fix the code.
+      checks: []
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          path: expect.stringContaining('workflow.stages[0].tasks[0].emits'),
+          message: expect.stringContaining('task.emits is not supported'),
         }),
       ]);
     } finally {
@@ -602,7 +633,7 @@ function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
         title: task.title,
         uses: task.uses,
         with: task.with,
-        emits: nonEmpty(task.emits),
+        onSuccess: task.onSuccess,
         dependsOn: nonEmpty(task.dependsOn),
         resultContract: task.resultContract,
       })),
@@ -628,7 +659,7 @@ function toSemanticOnFailure(onFailure: CheckFailurePolicy | undefined): unknown
         title: onFailure.retry.task.title,
         uses: onFailure.retry.task.uses,
         with: onFailure.retry.task.with,
-        emits: nonEmpty(onFailure.retry.task.emits),
+        onSuccess: onFailure.retry.task.onSuccess,
         dependsOn: nonEmpty(onFailure.retry.task.dependsOn),
         resultContract: onFailure.retry.task.resultContract,
       }),

@@ -35,7 +35,6 @@ export interface AgentSessionTaskInput {
   cwd: string;
   stage: string;
   attempt: number;
-  emits?: string[];
   agentSessionRef?: string;
   artifactVerification?: (artifacts: string[]) => string[];
   retryPromptFactory?: (ctx: StageContext, attempt: number) => string | null;
@@ -48,7 +47,6 @@ export interface ServiceCallTaskInput {
   serviceFn: (ctx: StageContext) => Promise<unknown>;
   stage: string;
   attempt: number;
-  emits?: string[];
 }
 
 export type TaskHandler = (

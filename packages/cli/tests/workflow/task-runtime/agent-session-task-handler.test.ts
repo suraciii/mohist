@@ -187,7 +187,7 @@ describe('AgentSessionTaskHandler', () => {
     expect(verifyArtifacts).toHaveBeenCalled();
   });
 
-  it('returns code.changed when declared and the worktree signature changes', async () => {
+  it('returns code.changed when the worktree signature changes', async () => {
     executeMock.mockResolvedValue({
       success: true,
       text: 'done',
@@ -210,13 +210,12 @@ describe('AgentSessionTaskHandler', () => {
       cwd: '/tmp/worktree',
       stage: 'check',
       attempt: 1,
-      emits: ['code.changed'],
     }, ctx);
 
     expect(result.events).toEqual(['code.changed']);
   });
 
-  it('returns declared custom events from explicit workflow event markers', async () => {
+  it('returns custom events from explicit workflow event markers', async () => {
     executeMock.mockResolvedValue({
       success: true,
       text: '<workflow-event>docs.updated</workflow-event>\n<workflow-event>unknown.event</workflow-event>',
@@ -231,13 +230,11 @@ describe('AgentSessionTaskHandler', () => {
       cwd: '/tmp/worktree',
       stage: 'build',
       attempt: 1,
-      emits: ['docs.updated'],
     }, makeContext());
-
-    expect(result.events).toEqual(['docs.updated']);
+    expect(result.events).toEqual(['docs.updated', 'unknown.event']);
   });
 
-  it('returns declared custom events from JSON output events', async () => {
+  it('returns custom events from JSON output events', async () => {
     executeMock.mockResolvedValue({
       success: true,
       text: JSON.stringify({ events: ['docs.updated', 'unknown.event'] }),
@@ -252,10 +249,8 @@ describe('AgentSessionTaskHandler', () => {
       cwd: '/tmp/worktree',
       stage: 'build',
       attempt: 1,
-      emits: ['docs.updated'],
     }, makeContext());
-
-    expect(result.events).toEqual(['docs.updated']);
+    expect(result.events).toEqual(['docs.updated', 'unknown.event']);
   });
 
   it('continues the same agent session when a required marker is missing', async () => {

@@ -51,7 +51,9 @@ function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
   return {
     ...normalized,
     with: normalized.with ? { ...normalized.with } : undefined,
-    emits: normalized.emits ? [...normalized.emits] : undefined,
+    onSuccess: normalized.onSuccess ? {
+      emit: normalized.onSuccess.emit ? [...normalized.onSuccess.emit] : undefined,
+    } : undefined,
     dependsOn: normalized.dependsOn ? [...normalized.dependsOn] : undefined,
   };
 }
@@ -92,7 +94,6 @@ function cloneInvalidationPolicy(policy: InvalidationPolicy): InvalidationPolicy
   return {
     entries: policy.entries.map(entry => ({
       ...entry,
-      when: entry.when ? { ...entry.when } : undefined,
       invalidates: {
         tasks: entry.invalidates.tasks ? [...entry.invalidates.tasks] : undefined,
         checks: entry.invalidates.checks ? [...entry.invalidates.checks] : undefined,
@@ -296,58 +297,27 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkP
   if (eventPolicies.length === 0) return undefined;
 
   const entries: InvalidationPolicy['entries'] = [];
-  const taskDefinitions = [
-    ...stage.tasks,
-    ...stage.checks.flatMap(check => check.onFailure?.retry?.task ? [check.onFailure.retry.task] : []),
-  ];
-
-  for (const task of taskDefinitions) {
-    for (const eventName of task.emits ?? []) {
-      const eventPolicy = stage.on?.[eventName];
-      if (!eventPolicy) continue;
-      const invalidates: InvalidationPolicy['entries'][number]['invalidates'] = {};
-      if (eventPolicy.reset.tasks?.length) {
-        invalidates.tasks = [...eventPolicy.reset.tasks];
-      }
-      const checks = checkNamesForEventPolicy(stage, eventPolicy, checkPolicies);
-      if (checks?.length) {
-        invalidates.checks = checks;
-      }
-      if (eventPolicy.reset.approval) {
-        invalidates.approval = true;
-      }
-      entries.push({
-        trigger: 'task-completion',
-        eventName,
-        triggerTaskId: task.id,
-        reason: `${eventName} reset`,
-        invalidates,
-      });
+  for (const [eventName, eventPolicy] of eventPolicies) {
+    const invalidates: InvalidationPolicy['entries'][number]['invalidates'] = {};
+    if (eventPolicy.reset.tasks?.length) {
+      invalidates.tasks = [...eventPolicy.reset.tasks];
     }
+    const checks = checkNamesForEventPolicy(stage, eventPolicy, checkPolicies);
+    if (checks?.length) {
+      invalidates.checks = checks;
+    }
+    if (eventPolicy.reset.approval) {
+      invalidates.approval = true;
+    }
+    entries.push({
+      trigger: 'task-completion',
+      eventName,
+      reason: `${eventName} reset`,
+      invalidates,
+    });
   }
 
   return entries.length > 0 ? { entries } : undefined;
-}
-
-function compileRuntimeInvalidationPolicy(stage: StageDefinition, checkPolicies?: CheckPolicy[]): InvalidationPolicy | undefined {
-  if (!stage.on?.['code.changed']) return undefined;
-  const codeChangedPolicy = stage.on['code.changed'];
-  const checks = checkNamesForEventPolicy(stage, codeChangedPolicy, checkPolicies);
-  return {
-    entries: [
-      {
-        trigger: 'task-completion',
-        triggerTaskId: 'rebase-branch',
-        when: { shaChanged: true },
-        reason: 'code.changed reset',
-        invalidates: {
-          tasks: codeChangedPolicy.reset.tasks ? [...codeChangedPolicy.reset.tasks] : undefined,
-          checks,
-          approval: codeChangedPolicy.reset.approval,
-        },
-      },
-    ],
-  };
 }
 
 export function compileWorkflowDefinition(definition: WorkflowDefinition): CompiledStageDefinition[] {
@@ -405,15 +375,6 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
         entries: [
           ...(compiled.invalidationPolicy?.entries ?? []),
           ...eventInvalidationPolicy.entries,
-        ],
-      };
-    }
-    const runtimeInvalidationPolicy = compileRuntimeInvalidationPolicy(source, compiled.checkPolicies);
-    if (runtimeInvalidationPolicy) {
-      compiled.invalidationPolicy = {
-        entries: [
-          ...(compiled.invalidationPolicy?.entries ?? []),
-          ...runtimeInvalidationPolicy.entries,
         ],
       };
     }

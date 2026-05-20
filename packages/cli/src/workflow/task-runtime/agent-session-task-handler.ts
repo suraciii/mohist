@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import type { StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
 import { emitStageTaskUpdate } from '../stage-context';
@@ -23,12 +22,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
   ): Promise<StageTaskResult> {
     const startedAt = Date.now();
     const { taskId, title, prompt, cwd, stage, attempt } = input;
-    const worktreeBefore = input.emits?.includes('code.changed')
-      ? await captureWorktreeChangeState(ctx, cwd)
-      : null;
-    const artifactBefore = input.emits?.includes('plan.artifacts.changed')
-      ? capturePlanArtifactState(ctx)
-      : null;
+    const worktreeBefore = await captureWorktreeChangeState(ctx, cwd);
 
     emitStageTaskUpdate(
       ctx.eventBus,
@@ -93,7 +87,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         artifacts = input.artifactVerification([]);
       }
       const events = status === 'completed'
-        ? await raisedEventsForAgentTask(input, ctx, cwd, artifacts, result.text, worktreeBefore, artifactBefore)
+        ? await raisedEventsForAgentTask(ctx, cwd, result.text, worktreeBefore)
         : [];
 
       const structuredResult = extractReactionOutput({
@@ -196,9 +190,10 @@ interface WorktreeChangeState {
   signature: string | null;
 }
 
-type ArtifactChangeState = Map<string, string> | null;
-
 async function captureWorktreeChangeState(ctx: StageContext, cwd: string): Promise<WorktreeChangeState> {
+  if (typeof ctx.worktreeManager.getHeadSha !== 'function') {
+    return { headSha: null, signature: null };
+  }
   const [headSha, signature] = await Promise.all([
     ctx.worktreeManager.getHeadSha(cwd).catch(() => null),
     captureWorktreeSignature(ctx, cwd),
@@ -216,52 +211,39 @@ async function captureWorktreeSignature(ctx: StageContext, cwd: string): Promise
   if (ctx.worktreeManager.getWorktreeChangeSignature) {
     return ctx.worktreeManager.getWorktreeChangeSignature(cwd).catch(() => null);
   }
+  if (typeof ctx.worktreeManager.isWorktreeClean !== 'function') {
+    return null;
+  }
   return ctx.worktreeManager.isWorktreeClean(cwd)
     .then(clean => clean ? '' : 'dirty')
     .catch(() => null);
 }
 
 async function raisedEventsForAgentTask(
-  input: AgentSessionTaskInput,
   ctx: StageContext,
   cwd: string,
-  artifacts: string[],
   structuredOutput: unknown,
   worktreeBefore: WorktreeChangeState | null,
-  artifactBefore: ArtifactChangeState,
 ): Promise<string[]> {
-  const declared = input.emits ?? [];
-  if (declared.length === 0) return [];
-  const explicitlyRaised = new Set(extractDeclaredEventsFromAgentOutput(structuredOutput, declared));
   const events: string[] = [];
-  for (const eventName of declared) {
-    if (eventName === 'code.changed') {
-      if (await didWorktreeChange(ctx, cwd, worktreeBefore)) events.push(eventName);
-      continue;
-    }
-    if (eventName === 'plan.artifacts.changed') {
-      if (artifacts.length > 0 || didPlanArtifactsChange(ctx, artifactBefore)) events.push(eventName);
-      continue;
-    }
-    if (explicitlyRaised.has(eventName)) {
-      events.push(eventName);
-    }
+  if (await didWorktreeChange(ctx, cwd, worktreeBefore)) {
+    events.push('code.changed');
   }
+  events.push(...extractEventsFromAgentOutput(structuredOutput));
   return events;
 }
 
-function extractDeclaredEventsFromAgentOutput(output: unknown, declaredEvents: string[]): string[] {
-  if (declaredEvents.length === 0 || typeof output !== 'string') return [];
-  const declared = new Set(declaredEvents);
+function extractEventsFromAgentOutput(output: unknown): string[] {
+  if (typeof output !== 'string') return [];
   const events = new Set<string>();
   for (const eventName of extractWorkflowEventMarkers(output)) {
-    if (declared.has(eventName)) events.add(eventName);
+    events.add(eventName);
   }
 
   const structured = parseJsonObject(output);
   const values = structured ? stringArrayValue(structured.events) : [];
   for (const eventName of values) {
-    if (declared.has(eventName)) events.add(eventName);
+    events.add(eventName);
   }
   return [...events];
 }
@@ -291,42 +273,6 @@ function parseJsonObject(output: string): Record<string, unknown> | null {
 function stringArrayValue(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string');
-}
-
-function capturePlanArtifactState(ctx: StageContext): ArtifactChangeState {
-  const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-  if (!changeDir) return null;
-  return captureDirectoryState(changeDir);
-}
-
-function captureDirectoryState(root: string): ArtifactChangeState {
-  if (!fs.existsSync(root)) return null;
-  const state = new Map<string, string>();
-  const visit = (dir: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = path.join(dir, entry.name);
-      const relPath = path.relative(root, fullPath);
-      if (entry.isDirectory()) {
-        visit(fullPath);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const stat = fs.statSync(fullPath);
-      state.set(relPath, `${stat.size}:${stat.mtimeMs}`);
-    }
-  };
-  visit(root);
-  return state;
-}
-
-function didPlanArtifactsChange(ctx: StageContext, before: ArtifactChangeState): boolean {
-  const after = capturePlanArtifactState(ctx);
-  if (before === null || after === null) return before !== after;
-  if (before.size !== after.size) return true;
-  for (const [file, signature] of before.entries()) {
-    if (after.get(file) !== signature) return true;
-  }
-  return false;
 }
 
 async function satisfyRequiredMarkers(

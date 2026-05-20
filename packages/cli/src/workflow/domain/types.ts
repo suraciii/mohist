@@ -66,7 +66,9 @@ export interface TaskDefinition {
   source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
-  emits?: string[];
+  onSuccess?: {
+    emit?: string[];
+  };
   dependsOn?: string[];
   resultContract?: ResultContract;
 }
@@ -150,17 +152,12 @@ export interface RepairPolicy {
   inputFrom?: ReactionInputSelector[];
 }
 
-export type InvalidationTrigger = 'check-completion' | 'task-completion' | 'branch-rebase';
+export type InvalidationTrigger = 'task-completion';
 
 export interface InvalidationEntry {
   trigger: InvalidationTrigger;
   eventName?: string;
   triggerTaskId?: string;
-  when?: {
-    shaChanged?: boolean;
-    checkName?: string;
-    outputContains?: Record<string, unknown>;
-  };
   reason?: string;
   invalidates: {
     tasks?: string[];

@@ -17,7 +17,6 @@ import type {
   DeliveryMetadata,
   FailureDetails,
   FreezePoint,
-  InvalidationEntry,
   MaterializedTaskInput,
   StageCompletionGuard,
   StageRunSnapshot,
@@ -802,7 +801,9 @@ export class WorkflowRun {
         causedBy: result.causedBy ?? { type: 'system-policy', taskId, message: evidenceFailure },
       }
       : result;
-    this.assertTaskEventsDeclared(stageRun, taskId, new Set(effectiveResult.events ?? []));
+    if (effectiveResult.status === 'completed') {
+      effectiveResult.events = this.mergeTaskEvents(effectiveResult.events, this.taskSuccessEvents(stageRun, taskId));
+    }
 
     task.status = effectiveResult.status;
     task.attempts = effectiveResult.attempts ?? task.attempts + 1;
@@ -1131,7 +1132,6 @@ export class WorkflowRun {
         if (entry.trigger !== 'task-completion') continue;
         if (entry.triggerTaskId && entry.triggerTaskId !== task.id && entry.triggerTaskId !== baseTaskId) continue;
         if (entry.eventName && !raisedEvents.has(entry.eventName)) continue;
-        if (!this.evaluateInvalidationCondition(entry.when, task.output)) continue;
         const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
         for (const taskId of entry.invalidates.tasks ?? []) {
           try {
@@ -1514,35 +1514,6 @@ export class WorkflowRun {
     return status;
   }
 
-  private detectShaChanged(output: unknown): boolean {
-    const data = this.unwrapTaskOutput(output);
-    if (!data) return false;
-    if (data.shaChanged === true) return true;
-    const beforeBaseSha = typeof data.beforeBaseSha === 'string' ? data.beforeBaseSha : null;
-    const afterBaseSha = typeof data.afterBaseSha === 'string' ? data.afterBaseSha : null;
-    const beforeHeadSha = typeof data.beforeHeadSha === 'string' ? data.beforeHeadSha : null;
-    const afterHeadSha = typeof data.afterHeadSha === 'string' ? data.afterHeadSha : null;
-    if (!beforeBaseSha || !afterBaseSha || !beforeHeadSha || !afterHeadSha) return false;
-    return beforeBaseSha !== afterBaseSha || beforeHeadSha !== afterHeadSha;
-  }
-
-  private evaluateInvalidationCondition(when: InvalidationEntry['when'] | undefined, output: unknown): boolean {
-    if (!when) return true;
-    if (when.shaChanged !== undefined) {
-      const shaChanged = this.detectShaChanged(output);
-      if (shaChanged !== when.shaChanged) return false;
-    }
-    if (when.checkName !== undefined) return true;
-    if (when.outputContains !== undefined) {
-      const data = this.unwrapTaskOutput(output);
-      if (!data) return false;
-      for (const [key, value] of Object.entries(when.outputContains)) {
-        if (data[key] !== value) return false;
-      }
-    }
-    return true;
-  }
-
   private applyTaskCompletionInvalidation(stageRun: StageRun, taskId: string, result: TaskResultInput): WorkflowEvent[] {
     const events: WorkflowEvent[] = [];
     const policy = stageRun.definition.invalidationPolicy;
@@ -1554,7 +1525,6 @@ export class WorkflowRun {
       if (entry.trigger !== 'task-completion') continue;
       if (entry.triggerTaskId && entry.triggerTaskId !== taskId && entry.triggerTaskId !== baseTaskId) continue;
       if (entry.eventName && !raisedEvents.has(entry.eventName)) continue;
-      if (!this.evaluateInvalidationCondition(entry.when, result.output)) continue;
 
       if (entry.invalidates.tasks) {
         for (const t of entry.invalidates.tasks) {
@@ -1588,26 +1558,26 @@ export class WorkflowRun {
     return events;
   }
 
-  private assertTaskEventsDeclared(stageRun: StageRun, taskId: string, events: Set<string>): void {
-    if (events.size === 0) return;
+  private taskSuccessEvents(stageRun: StageRun, taskId: string): string[] {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
-    const declared = new Set<string>();
     const taskDefinitions = [
       ...stageRun.definition.tasks,
       ...stageRun.definition.checks.flatMap(check => check.onFailure?.retry?.task ? [check.onFailure.retry.task] : []),
     ];
     for (const task of taskDefinitions) {
       if (task.id === taskId || task.id === baseTaskId) {
-        for (const eventName of task.emits ?? []) {
-          declared.add(eventName);
-        }
+        return task.onSuccess?.emit ?? [];
       }
     }
-    for (const eventName of events) {
-      if (!declared.has(eventName)) {
-        throw new WorkflowDomainError(`Task ${taskId} raised undeclared event ${eventName}`);
-      }
+    return [];
+  }
+
+  private mergeTaskEvents(resultEvents: string[] | undefined, configuredEvents: string[]): string[] | undefined {
+    const merged = new Set<string>(resultEvents ?? []);
+    for (const eventName of configuredEvents) {
+      merged.add(eventName);
     }
+    return merged.size > 0 ? [...merged] : undefined;
   }
 
   private baseRuntimeTaskId(taskId: string): string {

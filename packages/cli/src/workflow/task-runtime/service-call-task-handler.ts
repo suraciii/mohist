@@ -51,7 +51,7 @@ export function createServiceCallTaskHandler(): (
         artifacts: [],
         attempts: attempt,
         duration,
-        events: serviceCallEvents(result, input.emits),
+        events: serviceCallEvents(result),
         output: {
           kind: 'service-call-task',
           stage,
@@ -100,15 +100,13 @@ export function createServiceCallTaskHandler(): (
 
 export const defaultServiceCallTaskHandler = createServiceCallTaskHandler();
 
-function serviceCallEvents(result: unknown, declaredEvents: string[] | undefined): string[] {
-  if (!declaredEvents || declaredEvents.length === 0) return [];
+function serviceCallEvents(result: unknown): string[] {
   if (!result || typeof result !== 'object') return [];
-  const declared = new Set(declaredEvents);
   const data = result as Record<string, unknown>;
   if (Array.isArray(data.events)) {
-    return data.events.filter((event): event is string => typeof event === 'string' && declared.has(event));
+    return data.events.filter((event): event is string => typeof event === 'string');
   }
-  if (declared.has('code.changed') && data.shaChanged === true) {
+  if (data.shaChanged === true) {
     return ['code.changed'];
   }
   return [];
