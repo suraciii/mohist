@@ -913,39 +913,6 @@ describe('API Routes', () => {
 
     });
 
-    describe('POST /api/issues/:number/skip-to-review', () => {
-      it('should transition to review stage and trigger pipeline', async () => {
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-skip-test-'));
-
-        try {
-          const project = await projectService.create({ name: 'SkipTest', path: tmpDir });
-          projectService.setCurrent(project);
-
-          const issue = issueService.create({ projectId: project.id, title: 'Skip Issue' });
-          const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test`);
-          fs.mkdirSync(changeDir, { recursive: true });
-          fs.writeFileSync(path.join(changeDir, 'tasks.json'), JSON.stringify({ version: 1, tasks: [] }));
-
-          const skipApp = new Hono();
-          const skipEventBus = new EventBus();
-          const skipAgentRunner = new AgentRunnerService(skipEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
-          skipApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, skipAgentRunner));
-          const skipServer = createTestServer(skipApp);
-
-          const response = await request(skipServer).post(`/api/issues/${issue.number}/skip-to-review`);
-
-          expect(response.status).toBe(202);
-          expect(response.body.success).toBe(true);
-
-          const issueRepo = stateManager.getIssueRepo();
-          const updated = issueRepo.findById(issue.id);
-          expect(updated?.stage).toBe(Stage.Check);
-        } finally {
-          fs.rmSync(tmpDir, { recursive: true, force: true });
-        }
-      });
-    });
-
     describe('POST /api/issues/:number/reopen', () => {
       it('reopens closed issue and does not auto-enqueue resume-pipeline', async () => {
         const issue = issueService.create({ projectId, title: 'Closed Issue' });
@@ -993,7 +960,7 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/reject', () => {
-      it('clears check checkpoint and stale review artifacts before restarting from build', async () => {
+      it('clears check checkpoint without mutating review artifacts before restarting from build', async () => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-reject-check-test-'));
 
         try {
@@ -1065,8 +1032,8 @@ describe('API Routes', () => {
           expect(rejectedCheckStage?.status).toBe('failed');
           expect(rejectedCheckStage?.approvalStatus).toBe('rejected');
           expect(checkpointRepo.get(issue.number, 'check')).toBeNull();
-          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
-          expect(fs.existsSync(path.join(changeDir, 'review-self-check.md'))).toBe(false);
+          expect(fs.readFileSync(path.join(changeDir, 'review.md'), 'utf-8')).toBe('# stale review');
+          expect(fs.readFileSync(path.join(changeDir, 'review-self-check.md'), 'utf-8')).toBe('# stale self check');
         } finally {
           fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -1743,7 +1710,7 @@ describe('API Routes', () => {
           expect(response.body.data.message).toContain('no repair task will be added');
           expect(response.body.data.message).toContain('rerunning check stage');
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+          expect(fs.readFileSync(path.join(changeDir, 'review.md'), 'utf-8')).toBe('stale review');
           expect(stateManager.getCoderSessionRepo().findById(runningSession.id)).toMatchObject({
             status: 'cancelled',
             failureReason: 'check rerun requested',
@@ -1831,7 +1798,7 @@ describe('API Routes', () => {
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
-          expect(fs.existsSync(path.join(changeDir, 'review.md'))).toBe(false);
+          expect(fs.readFileSync(path.join(changeDir, 'review.md'), 'utf-8')).toBe('stale review');
 
           const activeRun = workflowRunService.getActiveRunForIssue(issue.id);
           const checkRun = activeRun?.stageRuns.find(stageRun => stageRun.stage === Stage.Check);
@@ -2259,70 +2226,6 @@ describe('API Routes', () => {
         } finally {
           fs.rmSync(tmpRepairDir, { recursive: true, force: true });
         }
-      });
-    });
-
-    describe('POST /api/issues/:number/restart', () => {
-      it('returns deprecation error for any issue — restart has been removed', async () => {
-        const issue = createBlockedIssue('Merged Restart');
-        issueRepo.updateStage(issue.id, Stage.Done);
-        issueRepo.update(issue.id, { mergeState: MergeState.Merged });
-        const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus);
-        server = createRetryServer(agentRunner);
-
-        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-        expect(response.status).toBe(410);
-        expect(response.body.success).toBe(false);
-        expect(response.body.error).toContain('restart has been removed');
-        expect(response.body.error).toContain('retry');
-        expect(response.body.error).toContain('rerun');
-      });
-
-      it('returns deprecation error for integrate-stage issue', async () => {
-        const issue = createBlockedIssue('Integrate Restart');
-        issueRepo.updateStage(issue.id, Stage.Integrate);
-        const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus);
-        server = createRetryServer(agentRunner);
-
-        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-        expect(response.status).toBe(410);
-        expect(response.body.error).toContain('restart has been removed');
-
-        const updated = stateManager.getIssueRepo().findById(issue.id);
-        expect(updated?.stage).toBe(Stage.Integrate);
-        expect(updated?.status).toBe(IssueStatus.Blocked);
-      });
-
-      it('returns deprecation error without mutating stage', async () => {
-        const issue = createBlockedIssue('Restart Test');
-        issueRepo.updateStage(issue.id, Stage.Build);
-        const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus);
-        server = createRetryServer(agentRunner);
-
-        const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-        expect(response.status).toBe(410);
-        expect(response.body.success).toBe(false);
-        expect(response.body.error).toContain('restart has been removed');
-
-        const updated = stateManager.getIssueRepo().findById(issue.id);
-        expect(updated?.stage).toBe(Stage.Build);
-        expect(updated?.status).toBe(IssueStatus.Blocked);
-      });
-
-      it('returns 404 when issue not found', async () => {
-        const eventBus = new EventBus();
-        const agentRunner = new AgentRunnerService(eventBus);
-        server = createRetryServer(agentRunner);
-
-        const response = await request(server).post('/api/issues/999/restart');
-
-        expect(response.status).toBe(404);
       });
     });
 

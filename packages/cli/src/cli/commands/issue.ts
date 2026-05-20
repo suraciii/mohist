@@ -1040,24 +1040,15 @@ export function setupIssueCommands(program: Command): void {
   issue
     .command('resume <number>')
     .description('Resume a paused or interrupted issue')
-    .option('--skip-to-review', 'Skip plan stage and go directly to review (for OpenSpec workflow)')
-    .action(async (number, options) => {
+    .action(async (number) => {
       try {
-        const endpoint = options.skipToReview
-          ? `/issues/${number}/skip-to-review`
-          : `/issues/${number}/resume`;
-
         const response = await apiClient<ApiResponse>(
           'POST',
-          endpoint
+          `/issues/${number}/resume`
         );
 
         if (response.success) {
-          if (options.skipToReview) {
-            console.log(chalk.green(`✓ Issue #${number} resumed, skipped to review stage`));
-          } else {
-            console.log(chalk.green(`✓ Resumed issue #${number}`));
-          }
+          console.log(chalk.green(`✓ Resumed issue #${number}`));
           await renderIssueRecoveryFromApi(number);
         } else {
           console.error(chalk.red(`Error: ${response.error}`));

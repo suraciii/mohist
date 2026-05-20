@@ -1180,7 +1180,7 @@ describe('recoverIssues — false-done detection', () => {
     expect(recovered?.blockedReason).toBeUndefined();
   });
 
-  it('check-stage with mergeState=merged: transitioned to integrate during recovery', () => {
+  it('check-stage with mergeState=merged: preserves definition-driven stage during recovery', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Check Merged' });
     issueRepo.updateStatus(issue.id, IssueStatus.Active);
@@ -1201,7 +1201,7 @@ describe('recoverIssues — false-done detection', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Integrate);
+    expect(recovered?.stage).toBe(Stage.Check);
     expect(recovered?.status).toBe(IssueStatus.Active);
   });
 

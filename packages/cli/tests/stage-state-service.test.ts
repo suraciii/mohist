@@ -587,29 +587,6 @@ describe('StageStateService', () => {
       expect(checkState!.checkRepair!.stopReason).toBe('repair-running');
     });
 
-    it('projects checkRepair from legacy repair-review-findings task history', () => {
-      service.ensureStage(issueId, Stage.Check);
-      service.upsertTask(issueId, Stage.Check, {
-        taskId: 'repair-review-findings',
-        title: 'Repair review findings',
-        status: 'completed',
-        attempts: 1,
-      });
-      service.upsertCheck(issueId, Stage.Check, {
-        checkName: 'review-passed',
-        status: 'failed',
-        message: 'Legacy repair did not resolve review',
-      });
-
-      const states = service.getIssueStageState(issueId);
-      const checkState = states.find(s => s.stage === Stage.Check);
-
-      expect(checkState?.checkRepair).toBeDefined();
-      expect(checkState!.checkRepair!.lastRepairTask?.taskId).toBe('repair-review-findings');
-      expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
-      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
-    });
-
     it('does not project checkRepair when no repair evidence exists and review-passed is pending', () => {
       service.ensureStage(issueId, Stage.Check);
       service.upsertCheck(issueId, Stage.Check, {

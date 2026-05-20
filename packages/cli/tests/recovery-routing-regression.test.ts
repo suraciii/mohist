@@ -527,63 +527,6 @@ describe('Recovery routing regression tests', () => {
     });
   });
 
-  describe('POST /api/issues/:number/restart (deprecated)', () => {
-    let server: http.Server;
-
-    beforeEach(async () => {
-      const app = new Hono();
-      const eventBus = new EventBus();
-      const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
-      server = createTestServer(app);
-
-      const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
-      projectService.setCurrent(project);
-    });
-
-    it('returns 410 deprecation error without mutating stage or status', async () => {
-      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Blocked Issue' });
-      issueRepo.updateStage(issue.id, Stage.Build);
-      issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
-      issueRepo.updateBlockedReason(issue.id, 'Build failed');
-
-      const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-      expect(response.status).toBe(410);
-      expect(response.body.success).toBe(false);
-      expect(response.body.error).toContain('restart has been removed');
-      expect(response.body.error).toContain('retry');
-      expect(response.body.error).toContain('rerun');
-
-      const updated = issueRepo.findById(issue.id);
-      expect(updated?.stage).toBe(Stage.Build);
-      expect(updated?.status).toBe(IssueStatus.Blocked);
-      expect(updated?.blockedReason).toBe('Build failed');
-    });
-
-    it('returns deprecation error even for closed issues', async () => {
-      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Closed Issue' });
-      issueRepo.updateStatus(issue.id, IssueStatus.Closed);
-      issueRepo.updateStage(issue.id, Stage.Done);
-
-      const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-      expect(response.status).toBe(410);
-      expect(response.body.error).toContain('restart has been removed');
-    });
-
-    it('returns deprecation error for active issues', async () => {
-      const issue = issueService.create({ projectId: projectService.getCurrentId()!, title: 'Active Issue' });
-      issueRepo.updateStatus(issue.id, IssueStatus.Active);
-      issueRepo.updateStage(issue.id, Stage.Plan);
-
-      const response = await request(server).post(`/api/issues/${issue.number}/restart`);
-
-      expect(response.status).toBe(410);
-      expect(response.body.error).toContain('restart has been removed');
-    });
-  });
-
   describe('POST /api/issues/:number/retry', () => {
     let server: http.Server;
 

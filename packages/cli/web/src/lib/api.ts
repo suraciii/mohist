@@ -367,9 +367,6 @@ export const api = {
   runApprovalVerdictRepair: (number: number, stage: string) =>
     request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/stages/${stage}/approval-verdict-repair`, { method: 'POST' }),
 
-  repairReviewFindings: (number: number) =>
-    request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/stages/check/approval-verdict-repair`, { method: 'POST' }),
-
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
