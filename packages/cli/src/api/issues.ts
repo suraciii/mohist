@@ -29,7 +29,8 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/model';
+import { WorkflowDomainError, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/model';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow/workflow-run-snapshot';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
