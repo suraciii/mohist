@@ -582,13 +582,19 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(within(summary as HTMLElement).getByText(/#209/i)).toBeInTheDocument()
     })
 
-    it('does not render attention summary item for completed workflow without local merge state', () => {
+    it('does not render attention summary item for completed workflow that does not require local merge state', () => {
       const doneUnmergedIssue = makeIssue({
         number: 42,
         title: 'Completed but not merged',
         stage: Stage.Done,
         status: IssueStatus.Completed,
         mergeState: 'conflict',
+        deliveryRequirement: {
+          mode: 'handoff',
+          requiresLocalMerge: false,
+          requiresRemoteMerge: false,
+          falseDoneApplicable: false,
+        },
       })
       const queryClient = new QueryClient()
 
@@ -604,7 +610,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(summary).toBeNull()
     })
 
-    it('does not render Not merged label for done issue with null mergeState', () => {
+    it('renders Not merged label for done issue with null mergeState when local merge is required', () => {
       const doneUnmergedIssue = makeIssue({
         number: 43,
         title: 'Completed but missing merge result',
@@ -623,7 +629,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       )
 
       const summary = document.querySelector('.bg-amber-50')
-      expect(summary).toBeNull()
+      expect(summary).toBeTruthy()
+      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
+      expect(within(summary as HTMLElement).getByText(/Not merged/i)).toBeInTheDocument()
     })
 
     it('renders attention summary item with Needs action label for blocked issue', () => {

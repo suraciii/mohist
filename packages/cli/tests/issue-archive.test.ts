@@ -559,6 +559,24 @@ describe('IssueService archive', () => {
       expect(result.message).toContain('Skipped 1 false-done issue');
     });
 
+    it('should archive completed issues without local merge when the workflow does not require it', async () => {
+      const issue = issueRepo.create({ number: 1, projectId, title: 'PR Handoff Done' });
+      issueRepo.updateStage(issue.id, Stage.Done);
+      issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+      service.setDeliveryRequirementResolver(() => ({
+        mode: 'handoff',
+        requiresLocalMerge: false,
+        requiresRemoteMerge: false,
+        falseDoneApplicable: false,
+      }));
+
+      const result = await service.archiveAllCompleted(projectId);
+
+      expect(result.count).toBe(1);
+      expect(result.skipped).toBe(0);
+      expect(result.skippedNumbers).toEqual([]);
+    });
+
     it('should skip false-done issues (done/completed + non-merged mergeState) and report skipped', async () => {
       const issue1 = issueRepo.create({ number: 1, projectId, title: 'False Done Conflict' });
       issueRepo.updateStage(issue1.id, Stage.Done);
@@ -636,6 +654,24 @@ describe('IssueService archive — false-done guard', () => {
     issueRepo.updateStage(issue.id, Stage.Done);
     issueRepo.updateStatus(issue.id, IssueStatus.Completed);
     issueRepo.setMergeState(issue.id, MergeState.Merged);
+
+    const result = await service.archive(projectId, 1);
+
+    expect(result.issue.archivedAt).toBeDefined();
+    expect(result.falseDoneWarning).toBe(false);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('should NOT return falseDoneWarning when workflow delivery does not require local merge', async () => {
+    const issue = issueRepo.create({ number: 1, projectId, title: 'PR Handoff Done' });
+    issueRepo.updateStage(issue.id, Stage.Done);
+    issueRepo.updateStatus(issue.id, IssueStatus.Completed);
+    service.setDeliveryRequirementResolver(() => ({
+      mode: 'handoff',
+      requiresLocalMerge: false,
+      requiresRemoteMerge: false,
+      falseDoneApplicable: false,
+    }));
 
     const result = await service.archive(projectId, 1);
 

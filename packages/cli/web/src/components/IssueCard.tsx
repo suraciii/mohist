@@ -6,12 +6,15 @@ import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
+import { isFalseDoneIssue } from '../lib/delivery-requirement'
 
 export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check])
 
 const MERGE_STATE_LABELS: Record<string, string> = {
+  '': 'Not merged',
   'build-failed': 'Failed',
   conflict: 'Conflict',
+  'done-not-merged': 'Not merged',
   pending: 'Pending',
   merging: 'Merging',
 }
@@ -36,6 +39,9 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   }
   if (issue.status === IssueStatus.Closed) {
     return 'closed'
+  }
+  if (isFalseDoneIssue(issue)) {
+    return 'false-done'
   }
   if (issue.approvalState?.status === 'awaiting') {
     return 'approval'
@@ -73,6 +79,14 @@ function Badge({
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-white px-1.5 py-0.5 rounded" style={{ backgroundColor: '#f59e0b' }}>
         Approval
+      </span>
+    )
+  }
+  if (type === 'false-done') {
+    const label = MERGE_STATE_LABELS[mergeState ?? ''] ?? 'Not merged'
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-white bg-red-500 px-1.5 py-0.5 rounded">
+        {label}
       </span>
     )
   }

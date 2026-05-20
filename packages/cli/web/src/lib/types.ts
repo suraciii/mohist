@@ -50,6 +50,15 @@ export interface IssueStartEligibility {
   waitingForDelivery: IssuePrerequisiteSummary[]
 }
 
+export type WorkflowDeliveryMode = 'local-merge' | 'remote-merge' | 'handoff' | 'none'
+
+export interface WorkflowDeliveryRequirement {
+  mode: WorkflowDeliveryMode
+  requiresLocalMerge: boolean
+  requiresRemoteMerge: boolean
+  falseDoneApplicable: boolean
+}
+
 export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted'
 
 export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed'
@@ -81,6 +90,7 @@ export interface Issue {
   comments?: Comment[]
   approvalState?: ApprovalState
   mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | 'rebasing' | 'resolving' | 'blocked' | null
+  deliveryRequirement?: WorkflowDeliveryRequirement
   priority?: string | null
   model?: string | null
   stageModels?: Record<string, string> | null

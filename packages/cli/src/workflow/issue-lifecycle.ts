@@ -1,4 +1,4 @@
-import { Stage, IssueStatus, type Issue, type ApprovalStatus } from '../types';
+import { Stage, IssueStatus, type Issue, type ApprovalStatus, type WorkflowDeliveryRequirement } from '../types';
 import { MergeState } from '../types';
 
 export function isCurrentStageApproval(
@@ -33,10 +33,13 @@ export type MergeDeliveryStatus =
 
 export function classifyMergeDelivery(
   issue: Issue,
-  options?: { requireLocalMerge?: boolean },
+  options?: { requireLocalMerge?: boolean; deliveryRequirement?: Pick<WorkflowDeliveryRequirement, 'requiresLocalMerge'> },
 ): MergeDeliveryStatus {
   const { stage, status, mergeState } = issue;
-  const requireLocalMerge = options?.requireLocalMerge ?? true;
+  const requireLocalMerge = options?.deliveryRequirement?.requiresLocalMerge
+    ?? issue.deliveryRequirement?.requiresLocalMerge
+    ?? options?.requireLocalMerge
+    ?? true;
 
   if (stage === Stage.Done || status === IssueStatus.Completed) {
     if (!requireLocalMerge) {
