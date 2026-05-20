@@ -300,6 +300,7 @@ function compileCustomChecks(
       source: 'project',
       uses: typeof rawCheck.uses === 'string' ? rawCheck.uses : undefined,
       with: isRecord(rawCheck.with) ? { ...rawCheck.with } : undefined,
+      approvalEvidence: approvalEvidenceFromRaw(rawCheck.approvalEvidence),
     };
     const onFailure = compileCheckOnFailure(rawCheck.onFailure, checkPath, diagnostics);
     if (onFailure) check.onFailure = onFailure;
@@ -610,6 +611,7 @@ function applyStageChecks(
       source: 'project',
       uses: raw.uses,
       with: isRecord(raw.with) ? { ...raw.with } : undefined,
+      approvalEvidence: approvalEvidenceFromRaw(raw.approvalEvidence),
     });
   }
 }
@@ -628,6 +630,8 @@ function applyCheckOverride(
   check.source = 'project';
   if (typeof raw.uses === 'string') check.uses = raw.uses;
   if (isRecord(raw.with)) check.with = { ...raw.with };
+  const approvalEvidence = approvalEvidenceFromRaw(raw.approvalEvidence);
+  if (approvalEvidence) check.approvalEvidence = approvalEvidence;
   const maxAttempts = isRecord(raw.repair) ? raw.repair.maxAttempts : raw.maxAttempts;
   if (maxAttempts !== undefined) {
     if (typeof maxAttempts !== 'number') {
@@ -723,7 +727,7 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
         severity: 'error',
         path: stagePath,
         message: 'Custom approval stage must declare complete approval evidence checks for verdict, verification, and candidate roles',
-        suggestion: 'Set check.with.approvalEvidence.role to verdict, verification, and candidate; verdict/candidate roles also need snapshotField.',
+        suggestion: 'Set check.approvalEvidence.role to verdict, verification, and candidate; verdict/candidate roles also need snapshotField.',
       });
     }
   }
@@ -801,7 +805,7 @@ function inferTaskUseForStage(stage: CompiledStageDefinition, taskId: string): s
 function hasApprovalEvidenceShape(stage: CompiledStageDefinition): boolean {
   const roles = new Set<string>();
   for (const check of stage.checks) {
-    const evidence = check.with?.approvalEvidence;
+    const evidence = approvalEvidenceForCheck(check);
     if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) continue;
     const role = (evidence as Record<string, unknown>).role;
     if (typeof role !== 'string') continue;
@@ -813,9 +817,24 @@ function hasApprovalEvidenceShape(stage: CompiledStageDefinition): boolean {
 
 function hasAnyApprovalEvidence(stage: CompiledStageDefinition): boolean {
   return stage.checks.some(check => {
-    const evidence = check.with?.approvalEvidence;
+    const evidence = approvalEvidenceForCheck(check);
     return Boolean(evidence && typeof evidence === 'object' && !Array.isArray(evidence));
   });
+}
+
+function approvalEvidenceForCheck(check: CheckDefinition): unknown {
+  return check.approvalEvidence ?? check.with?.approvalEvidence;
+}
+
+function approvalEvidenceFromRaw(raw: unknown): CheckDefinition['approvalEvidence'] | undefined {
+  if (!isRecord(raw)) return undefined;
+  const role = raw.role;
+  if (role !== 'verdict' && role !== 'verification' && role !== 'candidate') return undefined;
+  const snapshotField = raw.snapshotField;
+  return {
+    role,
+    ...(typeof snapshotField === 'string' && snapshotField.length > 0 ? { snapshotField } : {}),
+  };
 }
 
 function isProjectDefinedStage(stage: CompiledStageDefinition): boolean {

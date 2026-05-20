@@ -1676,7 +1676,7 @@ export class WorkflowRun {
   }
 
   private approvalEvidenceSnapshotField(definition: CheckDefinition): string | null {
-    const evidence = definition.with?.approvalEvidence;
+    const evidence = definition.approvalEvidence ?? definition.with?.approvalEvidence;
     if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
     const snapshotField = (evidence as Record<string, unknown>).snapshotField;
     return typeof snapshotField === 'string' && snapshotField.length > 0 ? snapshotField : null;

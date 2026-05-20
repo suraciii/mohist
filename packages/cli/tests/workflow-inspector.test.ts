@@ -45,7 +45,17 @@ describe('workflow inspector', () => {
           path: '{{ artifacts.openspecChange }}/review.md',
           expect: '<promise>PASS</promise>',
         },
+        approvalEvidence: {
+          role: 'verdict',
+          snapshotField: 'snapshotSha',
+        },
       });
+      expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'health:check').with).not.toHaveProperty('approvalEvidence');
+      expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'merge-ready').with).toBeUndefined();
+      expect(yamlText).not.toContain('mohist/plan/fix-review');
+      expect(yamlText).not.toContain('mohist/build/fix-health');
+      expect(yamlText).not.toContain('mohist/check/fix-health');
+      expect(yamlText).not.toContain('mohist/integrate/fix-health');
 
       const resolved = resolveWorkflowDefinition(tempDir);
       expect(validateWorkflowDefinition(resolved)).toEqual([]);
@@ -363,15 +373,13 @@ workflow:
       checks:
         - id: health:check
           uses: mohist/health-gate
-          with:
-            approvalEvidence:
-              role: verification
+          approvalEvidence:
+            role: verification
         - id: review-passed
           uses: mohist/verdict
-          with:
-            approvalEvidence:
-              role: verdict
-              snapshotField: snapshotSha
+          approvalEvidence:
+            role: verdict
+            snapshotField: snapshotSha
           onFailure:
             retry:
               limit: 2
@@ -386,10 +394,9 @@ workflow:
                       Fix findings in {{ openspec.changeDir }}/review.md
         - id: merge-ready
           uses: mohist/merge-ready
-          with:
-            approvalEvidence:
-              role: candidate
-              snapshotField: candidateHeadSha
+          approvalEvidence:
+            role: candidate
+            snapshotField: candidateHeadSha
 `, 'utf-8');
 
     try {
@@ -585,6 +592,7 @@ function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
         title: check.title,
         uses: check.uses,
         with: check.with,
+        approvalEvidence: check.approvalEvidence,
         onFailure: toSemanticOnFailure(check.onFailure),
       })),
     })),

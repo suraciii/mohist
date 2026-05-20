@@ -5,6 +5,7 @@ import type {
   AgentPromptSource,
   CheckDefinition,
   CheckFailurePolicy,
+  ApprovalEvidenceMetadata,
   ApprovalPolicy,
   ApprovalEvidencePolicy,
   CheckPolicy,
@@ -61,6 +62,7 @@ function cloneOnFailure(check: CheckDefinition): CheckDefinition {
   const cloned = {
     ...check,
     with: check.with ? { ...check.with } : undefined,
+    approvalEvidence: check.approvalEvidence ? { ...check.approvalEvidence } : undefined,
   };
   if (!check.onFailure?.retry) return cloned;
   return {
@@ -163,11 +165,20 @@ function compileApprovalPolicy(stage: StageDefinition, existingPolicy?: Approval
   return undefined;
 }
 
-function approvalEvidenceRole(check: CheckDefinition): string | null {
-  const evidence = check.with?.approvalEvidence;
+function approvalEvidenceMetadata(check: CheckDefinition): ApprovalEvidenceMetadata | null {
+  const evidence = check.approvalEvidence ?? check.with?.approvalEvidence;
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
   const role = (evidence as Record<string, unknown>).role;
-  return typeof role === 'string' ? role : null;
+  if (role !== 'verdict' && role !== 'verification' && role !== 'candidate') return null;
+  const snapshotField = (evidence as Record<string, unknown>).snapshotField;
+  return {
+    role,
+    ...(typeof snapshotField === 'string' && snapshotField.length > 0 ? { snapshotField } : {}),
+  };
+}
+
+function approvalEvidenceRole(check: CheckDefinition): string | null {
+  return approvalEvidenceMetadata(check)?.role ?? null;
 }
 
 function compileApprovalEvidencePolicy(stage: StageDefinition): ApprovalEvidencePolicy | undefined {
@@ -228,7 +239,7 @@ function inferRepairTaskExecutionKind(task: TaskDefinition): TaskExecutionKind {
   if (task.uses === 'mohist/rebase') return 'rebase-task';
   if (task.uses === 'mohist/agent') {
     const promptKind = promptSourceKind(task);
-    if (promptKind === 'inline' || promptKind === 'file') return 'agent-session';
+    if (promptKind) return 'agent-session';
   }
   return 'repair-task';
 }

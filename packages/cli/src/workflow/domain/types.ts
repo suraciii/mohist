@@ -77,6 +77,7 @@ export interface CheckDefinition {
   source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
+  approvalEvidence?: ApprovalEvidenceMetadata;
   onFailure?: CheckFailureAction;
 }
 
@@ -132,6 +133,13 @@ export interface CheckPolicy {
 
 export interface ApprovalPolicy {
   checkName: string;
+}
+
+export type ApprovalEvidenceRole = 'verdict' | 'verification' | 'candidate';
+
+export interface ApprovalEvidenceMetadata {
+  role: ApprovalEvidenceRole;
+  snapshotField?: string;
 }
 
 export interface ApprovalEvidencePolicy {
