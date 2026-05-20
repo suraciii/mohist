@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,6 +34,8 @@ import { IssueStatus, MergeState, Stage, type Issue } from '../../src/types';
 
 type ExternalWorldOptions = {
   reviewFailuresBeforePass?: number;
+  healthFailuresBeforePass?: Partial<Record<string, number>>;
+  failTasks?: Partial<Record<string, string>>;
 };
 
 class WorkflowExternalWorld {
@@ -45,6 +47,7 @@ class WorkflowExternalWorld {
   readonly serviceCalls: string[] = [];
   codeChangeCounter = 0;
   private aiReviewAttempts = 0;
+  private readonly checkAttempts = new Map<string, number>();
 
   constructor(private readonly options: ExternalWorldOptions = {}) {
     this.worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-default-workflow-harness-'));
@@ -65,7 +68,19 @@ class WorkflowExternalWorld {
   agentTask(task: DispatchableTask): StageTaskResult {
     this.taskCalls.push(task.taskId);
     this.agentCalls.push(task.taskId);
-    switch (task.taskId) {
+    const baseTaskId = baseRuntimeTaskId(task.taskId);
+    const configuredFailure = this.options.failTasks?.[task.taskId] ?? this.options.failTasks?.[baseTaskId];
+    if (configuredFailure) {
+      return {
+        taskId: task.taskId,
+        title: task.title,
+        status: 'failed',
+        attempts: 1,
+        duration: 1,
+        reason: configuredFailure,
+      };
+    }
+    switch (baseTaskId) {
       case 'proposal':
         this.write('proposal.md', '# Proposal\n');
         return this.completed(task, ['proposal.md']);
@@ -172,6 +187,15 @@ class WorkflowExternalWorld {
             };
           default:
             if (checkName.startsWith('health:')) {
+              const attempt = this.nextCheckAttempt(checkName);
+              if (attempt <= (this.options.healthFailuresBeforePass?.[checkName] ?? 0)) {
+                return {
+                  name: checkName,
+                  status: 'fail',
+                  message: `${checkName} failed`,
+                  output: { kind: 'health-gate', command: 'fake', candidateHeadSha: 'candidate-head', attempt },
+                };
+              }
               return {
                 name: checkName,
                 status: 'pass',
@@ -285,6 +309,12 @@ class WorkflowExternalWorld {
         ...extraOutput,
       },
     };
+  }
+
+  private nextCheckAttempt(checkName: string): number {
+    const next = (this.checkAttempts.get(checkName) ?? 0) + 1;
+    this.checkAttempts.set(checkName, next);
+    return next;
   }
 
   private completed(
@@ -402,6 +432,10 @@ function stageDefinition(stage: Stage): CompiledStageDefinition | undefined {
   return DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === stage);
 }
 
+function baseRuntimeTaskId(taskId: string): string {
+  return taskId.replace(/:\d+$/, '');
+}
+
 describe('default workflow external-system harness', () => {
   let harnesses: DefaultWorkflowHarness[] = [];
 
@@ -467,7 +501,12 @@ describe('default workflow external-system harness', () => {
     expect(harness.world.agentCalls).toContain('fix-review-findings');
 
     const checkRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Check)!;
+    const aiReviewTask = checkRun.tasks.find(task => task.taskId === 'ai-review');
     expect(checkRun.tasks.filter(task => task.taskId === 'ai-review')).toHaveLength(1);
+    expect(aiReviewTask).toMatchObject({
+      status: 'completed',
+      attempts: 1,
+    });
     expect(checkRun.tasks.find(task => task.taskId === 'fix-review-findings')).toMatchObject({
       status: 'completed',
       events: ['code.changed'],
@@ -482,6 +521,118 @@ describe('default workflow external-system harness', () => {
     expect(harness.issueRepo.findById(harness.issue.id)).toMatchObject({
       stage: Stage.Done,
       status: IssueStatus.Completed,
+    });
+  });
+
+  it('runs two review repair cycles before reaching Check approval when the default retry limit allows it', async () => {
+    const harness = createHarness({ reviewFailuresBeforePass: 2 });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const checkBoundary = await harness.runUntilBoundary();
+    expect(checkBoundary).toMatchObject({ completed: false, stage: Stage.Check, message: 'Awaiting check approval' });
+
+    const checkRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Check)!;
+    expect(harness.world.agentCalls.filter(taskId => taskId === 'ai-review')).toHaveLength(3);
+    expect(checkRun.tasks.find(task => task.taskId === 'ai-review')).toMatchObject({
+      status: 'completed',
+      attempts: 1,
+    });
+    expect(checkRun.tasks.filter(task => baseRuntimeTaskId(task.taskId) === 'fix-review-findings')).toHaveLength(2);
+    expect(checkRun.checks.find(check => check.checkName === 'review-passed')).toMatchObject({
+      status: 'passed',
+    });
+  });
+
+  it('fails Check after the default review repair attempts are exhausted', async () => {
+    const harness = createHarness({ reviewFailuresBeforePass: 3 });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const failed = await harness.runUntilBoundary();
+    expect(failed.completed).toBe(false);
+    expect(failed.stage).toBe(Stage.Check);
+    expect(failed.message).toContain('review.md failed');
+
+    const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;
+    const checkRun = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Check)!;
+    expect(latest.status).toBe('failed');
+    expect(checkRun.status).toBe('failed');
+    expect(harness.world.agentCalls.filter(taskId => taskId === 'ai-review')).toHaveLength(3);
+    expect(checkRun.tasks.filter(task => baseRuntimeTaskId(task.taskId) === 'fix-review-findings')).toHaveLength(2);
+    expect(checkRun.checks.find(check => check.checkName === 'review-passed')).toMatchObject({
+      status: 'failed',
+    });
+    expect(harness.issueRepo.findById(harness.issue.id)).toMatchObject({
+      stage: Stage.Check,
+      status: IssueStatus.Blocked,
+    });
+  });
+
+  it('does not enter Build until Plan approval is recorded', async () => {
+    const harness = createHarness();
+
+    const firstBoundary = await harness.runUntilBoundary();
+    const secondBoundary = await harness.runUntilBoundary();
+
+    expect(firstBoundary).toMatchObject({ completed: false, stage: Stage.Plan, message: 'Awaiting plan approval' });
+    expect(secondBoundary).toMatchObject({ completed: false, stage: Stage.Plan, message: 'Awaiting plan approval' });
+    expect(harness.world.taskCalls).toEqual(['proposal', 'specs', 'design', 'tasks', 'self-review']);
+    expect(harness.issueRepo.findById(harness.issue.id)).toMatchObject({
+      stage: Stage.Plan,
+      status: IssueStatus.Active,
+    });
+  });
+
+  it('repairs a Build health failure from the default Build check policy before entering Check', async () => {
+    const harness = createHarness({ healthFailuresBeforePass: { 'health:build': 1 } });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const checkBoundary = await harness.runUntilBoundary();
+    expect(checkBoundary).toMatchObject({ completed: false, stage: Stage.Check, message: 'Awaiting check approval' });
+
+    const buildRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Build)!;
+    expect(buildRun.status).toBe('passed');
+    expect(buildRun.tasks.find(task => task.taskId === 'fix-build-health')).toMatchObject({
+      status: 'completed',
+    });
+    expect(buildRun.checks.find(check => check.checkName === 'health:build')).toMatchObject({
+      status: 'passed',
+    });
+    expect(harness.world.agentCalls).toContain('fix-build-health');
+    expect(harness.world.checkCalls.filter(checkName => checkName === 'health:build')).toHaveLength(2);
+  });
+
+  it('fails when a default repair task fails instead of continuing the stage', async () => {
+    const harness = createHarness({
+      healthFailuresBeforePass: { 'health:build': 1 },
+      failTasks: { 'fix-build-health': 'Unable to repair build health' },
+    });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const failed = await harness.runUntilBoundary();
+    expect(failed).toMatchObject({ completed: false, stage: Stage.Build, message: 'Unable to repair build health' });
+
+    const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;
+    const buildRun = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Build)!;
+    expect(latest.status).toBe('failed');
+    expect(buildRun.status).toBe('failed');
+    expect(buildRun.tasks.find(task => task.taskId === 'fix-build-health')).toMatchObject({
+      status: 'failed',
+      reason: 'Unable to repair build health',
+    });
+    expect(buildRun.checks.find(check => check.checkName === 'health:build')).toMatchObject({
+      status: 'pending',
+    });
+    expect(harness.issueRepo.findById(harness.issue.id)).toMatchObject({
+      stage: Stage.Build,
+      status: IssueStatus.Blocked,
     });
   });
 });
