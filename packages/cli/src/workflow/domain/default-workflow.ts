@@ -154,7 +154,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
             command: DEFAULT_CHECK_HEALTH_COMMAND,
             timeout: DEFAULT_HEALTH_TIMEOUT_MS,
           },
-          approvalEvidence: { role: 'verification' },
           onFailure: {
             retry: {
               limit: 1,
@@ -184,10 +183,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
             path: '{{ artifacts.openspecChange }}/review.md',
             expect: '<promise>PASS</promise>',
           },
-          approvalEvidence: {
-            role: 'verdict',
-            snapshotField: 'snapshotSha',
-          },
           onFailure: {
             retry: {
               limit: 2,
@@ -216,10 +211,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           id: 'merge-ready',
           title: 'Merge ready',
           uses: 'mohist/merge-ready',
-          approvalEvidence: {
-            role: 'candidate',
-            snapshotField: 'candidateHeadSha',
-          },
           onFailure: {
             retry: {
               limit: 1,

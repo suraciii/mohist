@@ -45,13 +45,11 @@ describe('workflow inspector', () => {
           path: '{{ artifacts.openspecChange }}/review.md',
           expect: '<promise>PASS</promise>',
         },
-        approvalEvidence: {
-          role: 'verdict',
-          snapshotField: 'snapshotSha',
-        },
       });
+      expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'review-passed')).not.toHaveProperty('approvalEvidence');
       expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'health:check').with).not.toHaveProperty('approvalEvidence');
       expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'merge-ready').with).toBeUndefined();
+      expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'merge-ready')).not.toHaveProperty('approvalEvidence');
       expect(yamlText).not.toContain('mohist/plan/fix-review');
       expect(yamlText).not.toContain('mohist/build/fix-health');
       expect(yamlText).not.toContain('mohist/check/fix-health');

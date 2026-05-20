@@ -254,11 +254,8 @@ export class WorkflowRunProjection {
   private checkSuiteCheckNames(snapshot: WorkflowRunSnapshot, stage: Stage): Set<string> {
     const stageDefinition = snapshot.workflowDefinitionSnapshot.compiledStageDefinitions.find(definition => definition.stage === stage);
     const names = new Set<string>();
-    const evidencePolicy = stageDefinition?.approvalEvidencePolicy;
-    if (evidencePolicy) {
-      names.add(evidencePolicy.verificationCheckName);
-      names.add(evidencePolicy.verdictCheckName);
-      names.add(evidencePolicy.candidateCheckName);
+    for (const check of stageDefinition?.checks ?? []) {
+      names.add(check.name);
     }
     if (stageDefinition?.approvalPolicy) {
       names.add(stageDefinition.approvalPolicy.checkName);

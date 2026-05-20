@@ -932,11 +932,9 @@ export class StageStateService {
     );
 
     const stageDefinition = stageDefinitionForStage(stage);
-    if (stageDefinition?.approvalEvidencePolicy) {
-      const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
-      if (convergence) {
-        stageState.convergence = convergence;
-      }
+    const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
+    if (convergence) {
+      stageState.convergence = convergence;
     }
 
     return stageState;
@@ -969,12 +967,10 @@ export class StageStateService {
 
       const stage = row.stage as Stage;
       const stageDefinition = stageDefinitionForStage(stage);
-      if (stageDefinition?.approvalEvidencePolicy) {
-        const repair = computeCheckRepairState(filteredTasks, stageState.checks, stageDefinition);
-        stageState.checkRepair = repair === null ? undefined : repair;
-        const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
-        stageState.convergence = convergence === null ? undefined : convergence;
-      }
+      const repair = computeCheckRepairState(filteredTasks, stageState.checks, stageDefinition);
+      stageState.checkRepair = repair === null ? undefined : repair;
+      const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
+      stageState.convergence = convergence === null ? undefined : convergence;
 
       return stageState;
     });
@@ -1029,13 +1025,9 @@ export class StageStateService {
 
       const status = stageRun.status as StageStateStatus;
 
-      const checkRepairRaw = stageDefinition?.approvalEvidencePolicy
-        ? computeCheckRepairState(tasks, checks, stageDefinition)
-        : null;
+      const checkRepairRaw = computeCheckRepairState(tasks, checks, stageDefinition);
 
-      const convergenceRaw = stageDefinition?.approvalEvidencePolicy
-        ? computeConvergenceState(tasks, checks, stageDefinition)
-        : null;
+      const convergenceRaw = computeConvergenceState(tasks, checks, stageDefinition);
 
       return {
         stage: stageRun.stage,

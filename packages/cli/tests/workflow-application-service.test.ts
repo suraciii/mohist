@@ -952,7 +952,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     expect(retry.available).toBe(false);
   });
 
-  it('projects blocked terminal check evidence as recoverable so the stage can be rerun', () => {
+  it('projects passed terminal checks as awaiting approval without evidence-specific recovery', () => {
     const run = createRunningPlanRun();
     run.completeTask(Stage.Plan, 'proposal', { status: 'completed' });
     run.completeTask(Stage.Plan, 'specs', { status: 'completed' });
@@ -996,12 +996,8 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
       },
     });
 
-    expect(run.nextWork()).toEqual({
-      kind: 'blocked',
-      stage: Stage.Check,
-      reason: { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check },
-    });
-    expect(run.workflowRecoverySummary()).toBe('running');
+    expect(run.nextWork()).toEqual({ kind: 'await-approval', stage: Stage.Check });
+    expect(run.workflowRecoverySummary()).toBe('awaiting-approval');
 
     const repo: WorkflowRunRepositoryPort = {
       createOrLoadActiveAggregate: () => run,
@@ -1014,8 +1010,7 @@ describe('WorkflowApplicationService.checkRetryAvailability', () => {
     const service = new WorkflowApplicationService(repo, projection);
 
     const recovery = service.getRecoveryProjection('issue-1');
-    expect(recovery?.currentWorkItem).toBeNull();
-    expect(recovery?.workflowSummaryState).toBe('waiting-for-recovery');
-    expect(recovery?.allowedActions).toContain('rerun');
+    expect(recovery?.workflowSummaryState).toBe('awaiting-approval');
+    expect(recovery?.allowedActions).not.toContain('rerun');
   });
 });

@@ -1407,9 +1407,6 @@ export class WorkflowRun {
     const workSourceGuard = this.evaluateWorkSourceFailureGuard(stageRun);
     if (workSourceGuard) return workSourceGuard;
 
-    const checkEvidenceGuard = this.evaluateCheckReviewEvidenceGuard(stageRun);
-    if (!checkEvidenceGuard.complete) return checkEvidenceGuard;
-
     const deliveryEvidenceGuard = this.evaluateDeliveryEvidenceGuard(stageRun);
     if (!deliveryEvidenceGuard.complete) return deliveryEvidenceGuard;
 
@@ -1471,23 +1468,6 @@ export class WorkflowRun {
   private checkLocksCode(stageRun: StageRun, checkName: string): boolean {
     const use = getWorkflowUseDefinition(this.checkUse(stageRun, checkName));
     return use?.locksCode === true;
-  }
-
-  private evaluateCheckReviewEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
-    const evidence = this.approvalEvidence(stageRun);
-    if (!evidence) return { complete: true };
-    if (evidence.verdict.check.status !== 'passed' || evidence.verification.check.status !== 'passed' || evidence.candidate.check.status !== 'passed') {
-      return { complete: false, reason: 'check-review-evidence-missing', stage: stageRun.stage };
-    }
-    const verdictSnapshot = this.approvalEvidenceSnapshot(evidence.verdict.definition, evidence.verdict.check.output);
-    const candidateSnapshot = this.approvalEvidenceSnapshot(evidence.candidate.definition, evidence.candidate.check.output);
-    if (!verdictSnapshot || !candidateSnapshot) {
-      return { complete: false, reason: 'check-review-evidence-missing', stage: stageRun.stage };
-    }
-    if (verdictSnapshot !== candidateSnapshot) {
-      return { complete: false, reason: 'check-review-evidence-stale', stage: stageRun.stage };
-    }
-    return { complete: true };
   }
 
   private completeStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
@@ -1554,7 +1534,7 @@ export class WorkflowRun {
     }
 
     const evidence = this.approvalEvidence(stageRun);
-    if (!evidence) return null;
+    if (!evidence) return this.buildGenericApprovalOutput(stageRun, verificationEvidence);
     if (evidence.verdict.check.status !== 'passed' || evidence.candidate.check.status !== 'passed') return null;
     if (!evidence.verdict.check.output || typeof evidence.verdict.check.output !== 'object') return null;
     if (!evidence.candidate.check.output || typeof evidence.candidate.check.output !== 'object') return null;
@@ -1598,6 +1578,17 @@ export class WorkflowRun {
       checkedAt: verification.runCount > 0 ? new Date().toISOString() : '',
       candidateHeadSha: (output.candidateHeadSha as string) ?? undefined,
       baseSha: (output.baseSha as string) ?? undefined,
+    };
+  }
+
+  private buildGenericApprovalOutput(stageRun: StageRun, verificationEvidence: VerificationEvidence | null): unknown {
+    const passedChecks = stageRun.checks
+      .filter(check => check.status === 'passed')
+      .map(check => check.name);
+    return {
+      result: 'PASS',
+      checks: passedChecks,
+      verificationEvidence,
     };
   }
 

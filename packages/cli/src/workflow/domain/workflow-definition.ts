@@ -431,8 +431,11 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
       workSources: compileWorkSources(source),
       checkPolicies: compileCheckPolicies(source),
       approvalPolicy: compileApprovalPolicy(source),
-      approvalEvidencePolicy: compileApprovalEvidencePolicy(source),
     };
+    const approvalEvidencePolicy = compileApprovalEvidencePolicy(source);
+    if (approvalEvidencePolicy) {
+      compiled.approvalEvidencePolicy = approvalEvidencePolicy;
+    }
     const repairPoliciesFromChecks = compileRepairPoliciesFromChecks(source);
     if (repairPoliciesFromChecks.length > 0) {
       compiled.repairPolicies = repairPoliciesFromChecks;
