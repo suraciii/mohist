@@ -222,7 +222,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
     [Stage.Check]: {
       stage: Stage.Check,
       on: {
-        'code.changed': { reset: 'checks-and-approval' },
+        'code.changed': { reset: { tasks: ['ai-review'], checks: 'all', approval: true } },
       },
       tasks: [{ id: 'ai-review', title: 'AI review' }],
       checks: [
@@ -289,7 +289,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
           {
             trigger: 'task-completion',
             triggerTaskId: 'fix-review-findings',
-            reason: 'code.changed reset checks-and-approval',
+            reason: 'code.changed reset',
             invalidates: { tasks: ['ai-review'], checks: ['health:check', 'review-passed', 'merge-ready'], approval: true },
           },
           {
@@ -1678,7 +1678,7 @@ describe('StageRunner migration regression coverage', () => {
     it('generic Check resolves project-defined retry tasks without builtin task ids', () => {
       const stageDefinition: StageDefinition = {
         stage: Stage.Check,
-        on: { 'code.changed': { reset: 'checks-and-approval' } },
+        on: { 'code.changed': { reset: { tasks: ['ai-review'], checks: 'all', approval: true } } },
         tasks: [{ id: 'ai-review', title: 'AI review' }],
         checks: [{
           name: 'review-passed',

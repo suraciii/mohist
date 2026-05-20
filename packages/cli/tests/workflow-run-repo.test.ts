@@ -207,7 +207,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
       type: 'task-invalidated',
       stage: Stage.Check,
       taskId: 'ai-review',
-      reason: 'code.changed reset checks-and-approval',
+      reason: 'code.changed reset',
     });
     expect(loaded.stageRun(Stage.Check).findTask('ai-review')?.status).toBe('pending');
   });

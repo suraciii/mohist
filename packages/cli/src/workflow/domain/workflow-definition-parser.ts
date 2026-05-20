@@ -95,7 +95,13 @@ function parseStageSource(
     tasks,
     tasksFrom: source.tasksFrom,
     checks,
-    on: source.on ? Object.fromEntries(Object.entries(source.on).map(([event, policy]) => [event, { ...policy }])) : undefined,
+    on: source.on ? Object.fromEntries(Object.entries(source.on).map(([event, policy]) => [event, {
+      reset: {
+        tasks: policy.reset.tasks ? [...policy.reset.tasks] : undefined,
+        checks: Array.isArray(policy.reset.checks) ? [...policy.reset.checks] : policy.reset.checks,
+        approval: policy.reset.approval,
+      },
+    }])) : undefined,
     requiresApproval: source.approval || undefined,
     approvalCheckName: source.approval ? 'user-approval' : undefined,
   };
