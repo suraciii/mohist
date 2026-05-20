@@ -64,6 +64,7 @@ export interface WorkflowTask {
   attempts: number;
   duration: number;
   artifacts: string[];
+  events: string[];
   output: unknown | null;
   reason: string | null;
   causedByType: string | null;
@@ -141,6 +142,7 @@ interface WorkflowTaskRow {
   attempts: number;
   duration: number;
   artifacts: string;
+  events: string;
   output: string | null;
   reason: string | null;
   caused_by_type: string | null;
@@ -234,6 +236,7 @@ function rowToWorkflowTask(row: WorkflowTaskRow): WorkflowTask {
     attempts: row.attempts,
     duration: row.duration,
     artifacts: JSON.parse(row.artifacts || '[]'),
+    events: JSON.parse(row.events || '[]'),
     output: row.output ? JSON.parse(row.output) : null,
     reason: row.reason,
     causedByType: row.caused_by_type,
@@ -309,6 +312,7 @@ function taskRowToSnapshot(row: WorkflowTaskRow): StageRunSnapshot['tasks'][numb
     attempts: row.attempts,
     duration: row.duration,
     artifacts: JSON.parse(row.artifacts || '[]'),
+    events: JSON.parse(row.events || '[]'),
     output: safeParseJson(row.output),
     reason: row.reason,
     causedBy: causedByFromTask(row),
@@ -666,6 +670,7 @@ export class WorkflowRunRepo {
           attempts: task.attempts,
           duration: task.duration,
           artifacts: task.artifacts,
+          events: task.events,
           output: task.output,
           reason: task.reason,
           causedByType: task.causedBy?.type ?? null,
@@ -973,6 +978,7 @@ export class WorkflowRunRepo {
       attempts: 0,
       duration: 0,
       artifacts: [],
+      events: [],
       output: null,
       reason: data.reason ?? null,
       causedByType: data.causedByType ?? null,
@@ -1050,6 +1056,7 @@ export class WorkflowRunRepo {
     attempts?: number;
     duration?: number;
     artifacts?: string[];
+    events?: string[];
     output?: unknown | null;
     reason?: string | null;
     causedByType?: string | null;
@@ -1070,6 +1077,7 @@ export class WorkflowRunRepo {
     const attempts = data.attempts ?? (existing ? existing.attempts : 0);
     const duration = data.duration ?? 0;
     const artifacts = data.artifacts ? JSON.stringify(data.artifacts) : (existing?.artifacts ?? '[]');
+    const events = data.events ? JSON.stringify(data.events) : (existing?.events ?? '[]');
 
     if (existing) {
       const completedAt = status === 'completed' || status === 'failed'
@@ -1080,7 +1088,7 @@ export class WorkflowRunRepo {
         : data.startedAt ?? existing.started_at ?? now;
       this.db.run(
         `UPDATE workflow_tasks
-         SET status = ?, attempts = ?, duration = ?, artifacts = ?, output = ?, reason = ?,
+         SET status = ?, attempts = ?, duration = ?, artifacts = ?, events = ?, output = ?, reason = ?,
              caused_by_type = ?, caused_by_check_name = ?, caused_by_task_id = ?,
              started_at = ?, completed_at = ?, updated_at = ?
          WHERE id = ?`,
@@ -1089,6 +1097,7 @@ export class WorkflowRunRepo {
           attempts,
           duration,
           artifacts,
+          events,
           data.output !== undefined ? JSON.stringify(data.output) : existing.output,
           data.reason !== undefined ? data.reason : existing.reason,
           data.causedByType !== undefined ? data.causedByType : existing.caused_by_type,
@@ -1104,12 +1113,13 @@ export class WorkflowRunRepo {
     } else {
       this.db.run(
         `INSERT INTO workflow_tasks
-         (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, output,
+         (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, events, output,
           reason, caused_by_type, caused_by_check_name, caused_by_task_id, started_at, completed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, data.workflowRunId, data.stageRunId, data.taskId, data.title, status, taskOrder,
           attempts, duration, artifacts,
+          events,
           data.output !== undefined ? JSON.stringify(data.output) : null,
           data.reason ?? null, data.causedByType ?? null, data.causedByCheckName ?? null, data.causedByTaskId ?? null,
           data.startedAt ?? now, data.completedAt ?? null, now, now,

@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import type { StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
 import { emitStageTaskUpdate } from '../stage-context';
@@ -22,6 +23,12 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
   ): Promise<StageTaskResult> {
     const startedAt = Date.now();
     const { taskId, title, prompt, cwd, stage, attempt } = input;
+    const worktreeBefore = input.emits?.includes('code.changed')
+      ? await captureWorktreeChangeState(ctx, cwd)
+      : null;
+    const artifactBefore = input.emits?.includes('plan.artifacts.changed')
+      ? capturePlanArtifactState(ctx)
+      : null;
 
     emitStageTaskUpdate(
       ctx.eventBus,
@@ -85,12 +92,16 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
       if (status === 'completed' && input.artifactVerification) {
         artifacts = input.artifactVerification([]);
       }
+      const events = status === 'completed'
+        ? await raisedEventsForAgentTask(input, ctx, cwd, artifacts, worktreeBefore, artifactBefore)
+        : [];
 
       const structuredResult = extractReactionOutput({
         taskId,
         title,
         status,
         artifacts,
+        events,
         attempts: attempt,
         duration,
         output: {
@@ -158,6 +169,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         title,
         status: 'failed',
         artifacts: [],
+        events: [],
         attempts: attempt,
         duration,
         output: {
@@ -177,6 +189,87 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
 }
 
 export const defaultAgentSessionTaskHandler = createAgentSessionTaskHandler();
+
+interface WorktreeChangeState {
+  headSha: string | null;
+  clean: boolean | null;
+}
+
+type ArtifactChangeState = Map<string, string> | null;
+
+async function captureWorktreeChangeState(ctx: StageContext, cwd: string): Promise<WorktreeChangeState> {
+  const [headSha, clean] = await Promise.all([
+    ctx.worktreeManager.getHeadSha(cwd).catch(() => null),
+    ctx.worktreeManager.isWorktreeClean(cwd).catch(() => null),
+  ]);
+  return { headSha, clean };
+}
+
+async function didWorktreeChange(ctx: StageContext, cwd: string, before: WorktreeChangeState | null): Promise<boolean> {
+  if (!before) return false;
+  const after = await captureWorktreeChangeState(ctx, cwd);
+  return before.headSha !== after.headSha || before.clean !== after.clean;
+}
+
+async function raisedEventsForAgentTask(
+  input: AgentSessionTaskInput,
+  ctx: StageContext,
+  cwd: string,
+  artifacts: string[],
+  worktreeBefore: WorktreeChangeState | null,
+  artifactBefore: ArtifactChangeState,
+): Promise<string[]> {
+  const declared = input.emits ?? [];
+  if (declared.length === 0) return [];
+  const events: string[] = [];
+  for (const eventName of declared) {
+    if (eventName === 'code.changed') {
+      if (await didWorktreeChange(ctx, cwd, worktreeBefore)) events.push(eventName);
+      continue;
+    }
+    if (eventName === 'plan.artifacts.changed') {
+      if (artifacts.length > 0 || didPlanArtifactsChange(ctx, artifactBefore)) events.push(eventName);
+      continue;
+    }
+  }
+  return events;
+}
+
+function capturePlanArtifactState(ctx: StageContext): ArtifactChangeState {
+  const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+  if (!changeDir) return null;
+  return captureDirectoryState(changeDir);
+}
+
+function captureDirectoryState(root: string): ArtifactChangeState {
+  if (!fs.existsSync(root)) return null;
+  const state = new Map<string, string>();
+  const visit = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      const relPath = path.relative(root, fullPath);
+      if (entry.isDirectory()) {
+        visit(fullPath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const stat = fs.statSync(fullPath);
+      state.set(relPath, `${stat.size}:${stat.mtimeMs}`);
+    }
+  };
+  visit(root);
+  return state;
+}
+
+function didPlanArtifactsChange(ctx: StageContext, before: ArtifactChangeState): boolean {
+  const after = capturePlanArtifactState(ctx);
+  if (before === null || after === null) return before !== after;
+  if (before.size !== after.size) return true;
+  for (const [file, signature] of before.entries()) {
+    if (after.get(file) !== signature) return true;
+  }
+  return false;
+}
 
 async function satisfyRequiredMarkers(
   session: AgentSession,

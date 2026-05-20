@@ -164,6 +164,7 @@ export class WorkflowEngine {
       attempts: task.attempts,
       duration: task.duration,
       artifacts: task.artifacts,
+      events: [],
       output: task.output,
       reason: task.reason,
       causedBy: task.causedByType

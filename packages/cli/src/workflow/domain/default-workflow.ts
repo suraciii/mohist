@@ -18,6 +18,14 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
   stages: [
     {
       id: Stage.Plan,
+      on: {
+        'plan.artifacts.changed': {
+          reset: 'checks-and-approval',
+          tasks: ['self-review'],
+          checks: ['self-review-passed'],
+          approval: true,
+        },
+      },
       tasks: [
         { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } } },
         { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/specs' } } },
@@ -60,6 +68,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-plan-review',
                 title: 'Fix plan review findings',
                 uses: 'mohist/agent',
+                emits: ['plan.artifacts.changed'],
                 with: {
                   prompt: {
                     inline: [
@@ -71,6 +80,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                       '{{ artifacts.openspecChange }}',
                       '',
                       'Do not edit self-review.md.',
+                      'The workflow will run self-review again after your artifact changes.',
                     ].join('\n'),
                   },
                 },

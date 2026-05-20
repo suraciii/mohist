@@ -1471,11 +1471,11 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
-          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed', events: ['code.changed'] } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
-          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed', events: ['code.changed'] } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after second repair', output: { verdict: 'FAIL', summary: 'Still failing after second repair' } } });
@@ -1571,7 +1571,7 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
-          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed', events: ['code.changed'] } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
@@ -2006,11 +2006,11 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Initial review failure', output: { verdict: 'FAIL', summary: 'Initial review failure' } } });
-          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings', result: { status: 'completed', events: ['code.changed'] } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after repair', output: { verdict: 'FAIL', summary: 'Still failing after repair' } } });
-          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed', events: ['code.changed'] } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after second repair', output: { verdict: 'FAIL', summary: 'Still failing after second repair' } } });
