@@ -364,6 +364,7 @@ export class BuildStageRunner extends BaseStageRunner {
           attempts: 0,
           duration: 0,
           artifacts: [],
+          events: [],
           output: null,
           reason: null,
           causedBy: null,

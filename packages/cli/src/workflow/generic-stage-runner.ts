@@ -106,6 +106,7 @@ export class GenericStageRunner implements StageRunner {
           attempts: result.attempts,
           duration: result.duration,
           artifacts: result.artifacts,
+          events: result.events,
           output: result.output,
           reason: result.reason,
           causedBy: result.causedBy,

@@ -317,6 +317,7 @@ function compileInvalidationPolicyFromStageEvents(stage: StageDefinition, checkP
       }
       entries.push({
         trigger: 'task-completion',
+        eventName,
         triggerTaskId: task.id,
         reason: `${eventName} reset ${eventPolicy.reset}`,
         invalidates,

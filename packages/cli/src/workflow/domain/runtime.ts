@@ -52,6 +52,7 @@ export class TaskRun {
   attempts = 0;
   duration = 0;
   artifacts: string[] = [];
+  events: string[] = [];
   output: unknown | null = null;
   reason: string | null = null;
   causedBy: CausedByMetadata | null = null;
@@ -76,6 +77,7 @@ export class TaskRun {
     this.attempts = 0;
     this.duration = 0;
     this.artifacts = [];
+    this.events = [];
     this.output = null;
     this.reason = null;
     this.causedBy = null;
@@ -92,6 +94,7 @@ export class TaskRun {
       attempts: this.attempts,
       duration: this.duration,
       artifacts: [...this.artifacts],
+      events: [...this.events],
       output: this.output,
       reason: this.reason,
       causedBy: this.causedBy,
@@ -119,12 +122,13 @@ export class TaskRun {
     return this.latestAttempt;
   }
 
-  completeWorkAttempt(result: { output?: unknown; artifacts?: string[]; duration?: number; reason?: string }, now: string): WorkItemAttempt | null {
+  completeWorkAttempt(result: { output?: unknown; artifacts?: string[]; events?: string[]; duration?: number; reason?: string }, now: string): WorkItemAttempt | null {
     if (!this.latestAttempt || this.latestAttempt.state !== 'running') return null;
     this.status = 'completed';
     this.attempts = this.latestAttempt.attemptNumber;
     this.output = result.output ?? this.output;
     this.artifacts = result.artifacts ?? this.artifacts;
+    this.events = result.events ?? this.events;
     this.duration = result.duration ?? this.duration;
     this.reason = result.reason ?? this.reason;
     this.latestAttempt = {
@@ -798,11 +802,13 @@ export class WorkflowRun {
         causedBy: result.causedBy ?? { type: 'system-policy', taskId, message: evidenceFailure },
       }
       : result;
+    this.assertTaskEventsDeclared(stageRun, taskId, new Set(effectiveResult.events ?? []));
 
     task.status = effectiveResult.status;
     task.attempts = effectiveResult.attempts ?? task.attempts + 1;
     task.duration = effectiveResult.duration ?? task.duration;
     task.artifacts = effectiveResult.artifacts ?? task.artifacts;
+    task.events = effectiveResult.events ?? task.events;
     task.output = effectiveResult.output ?? task.output;
     task.reason = effectiveResult.reason ?? task.reason;
     task.causedBy = effectiveResult.causedBy ?? task.causedBy;
@@ -810,7 +816,7 @@ export class WorkflowRun {
     if (task.latestAttempt?.state === 'running') {
       const attemptNow = new Date().toISOString();
       if (effectiveResult.status === 'completed') {
-        task.completeWorkAttempt({ output: effectiveResult.output, artifacts: effectiveResult.artifacts, duration: effectiveResult.duration }, attemptNow);
+        task.completeWorkAttempt({ output: effectiveResult.output, artifacts: effectiveResult.artifacts, events: effectiveResult.events, duration: effectiveResult.duration }, attemptNow);
       } else if (effectiveResult.status === 'failed' || effectiveResult.status === 'skipped') {
         task.failWorkAttempt(effectiveResult.reason ?? 'Task failed', null, attemptNow);
       }
@@ -1120,9 +1126,11 @@ export class WorkflowRun {
     for (const task of stageRun.tasks) {
       if (task.status !== 'completed') continue;
       const baseTaskId = this.baseRuntimeTaskId(task.id);
+      const raisedEvents = new Set(task.events);
       for (const entry of policy.entries) {
         if (entry.trigger !== 'task-completion') continue;
         if (entry.triggerTaskId && entry.triggerTaskId !== task.id && entry.triggerTaskId !== baseTaskId) continue;
+        if (entry.eventName && !raisedEvents.has(entry.eventName)) continue;
         if (!this.evaluateInvalidationCondition(entry.when, task.output)) continue;
         const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
         for (const taskId of entry.invalidates.tasks ?? []) {
@@ -1540,10 +1548,12 @@ export class WorkflowRun {
     const policy = stageRun.definition.invalidationPolicy;
     if (!policy) return events;
     const baseTaskId = this.baseRuntimeTaskId(taskId);
+    const raisedEvents = new Set(result.events ?? []);
 
     for (const entry of policy.entries) {
       if (entry.trigger !== 'task-completion') continue;
       if (entry.triggerTaskId && entry.triggerTaskId !== taskId && entry.triggerTaskId !== baseTaskId) continue;
+      if (entry.eventName && !raisedEvents.has(entry.eventName)) continue;
       if (!this.evaluateInvalidationCondition(entry.when, result.output)) continue;
 
       if (entry.invalidates.tasks) {
@@ -1576,6 +1586,28 @@ export class WorkflowRun {
       }
     }
     return events;
+  }
+
+  private assertTaskEventsDeclared(stageRun: StageRun, taskId: string, events: Set<string>): void {
+    if (events.size === 0) return;
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    const declared = new Set<string>();
+    const taskDefinitions = [
+      ...stageRun.definition.tasks,
+      ...stageRun.definition.checks.flatMap(check => check.onFailure?.retry?.task ? [check.onFailure.retry.task] : []),
+    ];
+    for (const task of taskDefinitions) {
+      if (task.id === taskId || task.id === baseTaskId) {
+        for (const eventName of task.emits ?? []) {
+          declared.add(eventName);
+        }
+      }
+    }
+    for (const eventName of events) {
+      if (!declared.has(eventName)) {
+        throw new WorkflowDomainError(`Task ${taskId} raised undeclared event ${eventName}`);
+      }
+    }
   }
 
   private baseRuntimeTaskId(taskId: string): string {

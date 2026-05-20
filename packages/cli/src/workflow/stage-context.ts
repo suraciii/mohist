@@ -178,6 +178,7 @@ export interface StageTaskResult {
   title: string;
   status: 'completed' | 'failed' | 'skipped';
   artifacts: string[];
+  events?: string[];
   output?: unknown;
   attemptEvidence?: {
     executionId?: string;

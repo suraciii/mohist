@@ -789,7 +789,7 @@ describe('WorkflowRun domain aggregate', () => {
     });
 
     expect(firstFailure.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings' });
-    const fix = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+    const fix = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
 
     expect(fix.events).toContainEqual({
       type: 'task-invalidated',
@@ -822,6 +822,41 @@ describe('WorkflowRun domain aggregate', () => {
       output: null,
     });
     expect(fix.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+  });
+
+  it('does not invalidate stage state when a task declares but does not raise an event', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
+
+    const decision = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+
+    expect(decision.events).toEqual([{ type: 'task-completed', stage: Stage.Check, taskId: 'fix-review-findings' }]);
+    expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'completed' });
+    expect(run.stageRun(Stage.Check).findCheck('review-passed')).toMatchObject({ status: 'pending' });
+    expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'review-passed' });
+  });
+
+  it('rejects task result events that were not declared by the task definition', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'custom',
+      stages: [
+        {
+          stage: Stage.Build,
+          tasks: [{ id: 'custom-task', title: 'Custom task', emits: ['code.changed'] }],
+          checks: [],
+        },
+      ],
+    });
+    const run = startRun(definitions);
+
+    expect(() => run.completeTask(Stage.Build, 'custom-task', { status: 'completed', events: ['docs.updated'] }))
+      .toThrow(/raised undeclared event docs.updated/);
   });
 
   it('retries a failed task and resets same-stage downstream work while preserving earlier completed tasks', () => {
@@ -965,7 +1000,7 @@ describe('WorkflowRun domain aggregate', () => {
       message: 'Review failed',
       output: { verdict: 'FAIL', reviewReport: 'old report' },
     });
-    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
 
     const checkStage = run.stageRun(Stage.Check);
     checkStage.findTask('ai-review').status = 'completed';
@@ -1541,7 +1576,7 @@ describe('WorkflowRun domain aggregate', () => {
       expect(fixTask).toBeDefined();
       expect(fixTask.status).toBe('pending');
 
-      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
       run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
       run.recordCheckResult(Stage.Check, {
@@ -1550,7 +1585,7 @@ describe('WorkflowRun domain aggregate', () => {
         message: 'Review failed second time',
         output: { verdict: 'FAIL' },
       });
-      run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed' });
+      run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed', events: ['code.changed'] });
 
       const checkStage = run.stageRun(Stage.Check);
       checkStage.findTask('ai-review').status = 'completed';
@@ -1590,7 +1625,7 @@ describe('WorkflowRun domain aggregate', () => {
         message: 'Review failed',
         output: { verdict: 'FAIL' },
       });
-      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
 
       const rerun = run.rerunStage(Stage.Check);
       const checkStage = run.stageRun(Stage.Check);
@@ -1615,7 +1650,7 @@ describe('WorkflowRun domain aggregate', () => {
         output: { verdict: 'FAIL', summary: 'First failure' },
       });
 
-      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+      run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
 
       run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
 
@@ -2035,7 +2070,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
-    const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+    const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
 
     expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'pending' });
     expect(fixDecision.events).toContainEqual(expect.objectContaining({
@@ -2055,14 +2090,14 @@ describe('WorkflowRun domain aggregate', () => {
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
-    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed' });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
 
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed', artifacts: ['ai-review'] });
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed again' });
 
     expect(run.stageRun(Stage.Check).findTask('fix-review-findings:1')).toMatchObject({ status: 'pending' });
-    const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed' });
+    const fixDecision = run.completeTask(Stage.Check, 'fix-review-findings:1', { status: 'completed', events: ['code.changed'] });
 
     expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({ status: 'pending' });
     expect(fixDecision.events).toContainEqual(expect.objectContaining({

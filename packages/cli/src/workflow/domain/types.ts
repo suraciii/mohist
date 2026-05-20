@@ -154,6 +154,7 @@ export type InvalidationTrigger = 'check-completion' | 'task-completion' | 'bran
 
 export interface InvalidationEntry {
   trigger: InvalidationTrigger;
+  eventName?: string;
   triggerTaskId?: string;
   when?: {
     shaChanged?: boolean;
@@ -258,6 +259,7 @@ export interface TaskResultInput {
   output?: unknown;
   reason?: string;
   causedBy?: CausedByMetadata;
+  events?: string[];
 }
 
 export interface CheckResultInput {
@@ -336,6 +338,7 @@ export interface TaskRunSnapshot {
   attempts: number;
   duration: number;
   artifacts: string[];
+  events: string[];
   output: unknown | null;
   reason: string | null;
   causedBy: CausedByMetadata | null;
