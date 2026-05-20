@@ -1145,17 +1145,9 @@ export interface WorkflowCheckFailurePolicy {
   maxAttempts: number
 }
 
-export interface WorkflowApprovalEvidencePolicy {
-  verdictCheckName: string
-  verificationCheckName?: string
-  candidateCheckName?: string
-  convergenceTaskId?: string
-}
-
 export interface WorkflowStageDefinition {
   stage: Stage
   checkFailurePolicies?: WorkflowCheckFailurePolicy[]
-  approvalEvidencePolicy?: WorkflowApprovalEvidencePolicy
 }
 
 export interface WorkflowRun {

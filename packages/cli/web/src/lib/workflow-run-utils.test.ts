@@ -18,7 +18,7 @@ function baseWorkflowRun(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
 }
 
 describe('workflowRunToStageStateMap', () => {
-  it('projects check repair state from stage definition approval verdict policy', () => {
+  it('projects check repair state from stage definition check failure policy', () => {
     const run = baseWorkflowRun({
       currentStage: Stage.Plan,
       workflowDefinition: {
@@ -29,7 +29,6 @@ describe('workflowRunToStageStateMap', () => {
         stageDefinitions: [
           {
             stage: Stage.Plan,
-            approvalEvidencePolicy: { verdictCheckName: 'quality-approved' },
             checkFailurePolicies: [
               {
                 checkName: 'quality-approved',
@@ -47,7 +46,6 @@ describe('workflowRunToStageStateMap', () => {
           status: 'failed',
           definition: {
             stage: Stage.Plan,
-            approvalEvidencePolicy: { verdictCheckName: 'quality-approved' },
             checkFailurePolicies: [
               {
                 checkName: 'quality-approved',

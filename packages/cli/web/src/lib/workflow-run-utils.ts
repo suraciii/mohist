@@ -36,18 +36,15 @@ function extractUnresolvedSummary(output: unknown, message: string | null): stri
   return message ?? null
 }
 
-function approvalVerdictRepairPolicy(definition?: WorkflowStageDefinition | null): WorkflowCheckFailurePolicy | null {
-  const verdictCheckName = definition?.approvalEvidencePolicy?.verdictCheckName ?? 'review-passed'
-  return definition?.checkFailurePolicies?.find(policy => policy.checkName === verdictCheckName) ?? {
-    checkName: verdictCheckName,
-    fixTaskId: 'fix-review-findings',
-    fixTaskTitle: 'Fix review findings',
-    maxAttempts: 1,
-  }
+function checkRepairPolicy(definition?: WorkflowStageDefinition | null): WorkflowCheckFailurePolicy | null {
+  return definition?.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')
+    ?? definition?.checkFailurePolicies?.find(policy => policy.fixTaskId === 'fix-review-findings')
+    ?? definition?.checkFailurePolicies?.[0]
+    ?? null
 }
 
 function computeCheckRepair(tasks: StageTaskState[], checks: StageCheckState[], definition?: WorkflowStageDefinition | null): CheckRepairState | undefined {
-  const policy = approvalVerdictRepairPolicy(definition)
+  const policy = checkRepairPolicy(definition)
   if (!policy) return undefined
 
   const repairTasks = tasks.filter(task => isTaskAttemptForBase(task.taskId, policy.fixTaskId))
@@ -153,10 +150,8 @@ export function workflowRunToStageStateMap(workflowRun: WorkflowRun): Map<string
       deliveryMetadata: sr.deliveryMetadata ?? null,
     }
     const definition = sr.definition ?? workflowRun.workflowDefinition?.stageDefinitions?.find(candidate => candidate.stage === sr.stage) ?? null
-    if (definition?.approvalEvidencePolicy) {
-      const checkRepair = computeCheckRepair(tasks, checks, definition)
-      if (checkRepair) stageState.checkRepair = checkRepair
-    }
+    const checkRepair = computeCheckRepair(tasks, checks, definition)
+    if (checkRepair) stageState.checkRepair = checkRepair
     map.set(sr.stage, stageState)
   }
   return map
