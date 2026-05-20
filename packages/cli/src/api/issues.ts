@@ -4111,7 +4111,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is in ${issue.stage} stage. Use start instead of retry.` } satisfies ApiResponse, 400);
       }
 
-      const deliveryStatus = classifyMergeDelivery(issue);
+      const deliveryStatus = classifyMergeDelivery(issue, { deliveryRequirement: getDeliveryRequirement(issue) });
       if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
         return c.json({
           success: false,

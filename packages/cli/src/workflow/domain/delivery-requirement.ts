@@ -62,6 +62,12 @@ function checkDeliveryRole(check: CheckDefinition): WorkflowDeliveryRole {
   return deliveryRoleForUse(check.uses ?? inferWorkflowCheckUse(check.name));
 }
 
+function checkRetryTaskDeliveryRole(stage: CompiledStageDefinition, check: CheckDefinition): WorkflowDeliveryRole | null {
+  const task = check.onFailure?.retry?.task;
+  if (!task) return null;
+  return taskDeliveryRole(stage, task);
+}
+
 function runtimePolicyDeliveryRole(policy: TaskExecutionPolicy): WorkflowDeliveryRole {
   return deliveryRoleForUse(inferWorkflowTaskUse(policy.taskId, policy.kind));
 }
@@ -83,6 +89,9 @@ export function projectWorkflowDeliveryRequirement(
     roles.push(tasksFromDeliveryRole(stage));
     roles.push(...stage.tasks.map(task => taskDeliveryRole(stage, task)));
     roles.push(...stage.checks.map(checkDeliveryRole));
+    roles.push(...stage.checks
+      .map(check => checkRetryTaskDeliveryRole(stage, check))
+      .filter((role): role is WorkflowDeliveryRole => role !== null));
     roles.push(...(stage.taskExecutionPolicies ?? [])
       .filter(policy => policy.workSourceKind === 'runtime')
       .map(runtimePolicyDeliveryRole));

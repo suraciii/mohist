@@ -216,6 +216,42 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
+  it('projects delivery role from check retry tasks', () => {
+    const definition: WorkflowDefinition = {
+      id: 'custom/retry-delivery',
+      stages: [
+        {
+          stage: Stage.Integrate,
+          tasks: [],
+          checks: [
+            {
+              name: 'delivery-needed',
+              title: 'Delivery needed',
+              uses: 'mohist/artifact-exists',
+              onFailure: {
+                retry: {
+                  limit: 1,
+                  task: {
+                    id: 'open-pr-after-check',
+                    title: 'Open pull request after failed check',
+                    uses: 'mohist/github-pr',
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(projectWorkflowDeliveryRequirement(createWorkflowDefinitionSnapshot({ definition }))).toEqual({
+      mode: 'handoff',
+      requiresLocalMerge: false,
+      requiresRemoteMerge: false,
+      falseDoneApplicable: false,
+    });
+  });
+
   it('compiles WorkflowDefinition defensively so callers cannot mutate the source definition', () => {
     const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
     compiled[0].tasks[0].title = 'Mutated title';
