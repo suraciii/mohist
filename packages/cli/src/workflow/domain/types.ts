@@ -319,8 +319,6 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'dynamic-source-missing'; stage: Stage }
   | { complete: false; reason: 'dynamic-source-invalid'; stage: Stage }
   | { complete: false; reason: 'dynamic-source-empty'; stage: Stage }
-  | { complete: false; reason: 'check-review-evidence-missing'; stage: Stage }
-  | { complete: false; reason: 'check-review-evidence-stale'; stage: Stage }
   | { complete: false; reason: 'delivery-evidence-missing'; stage: Stage; taskId?: string; checkName?: string; uses?: string }
   | { complete: false; reason: 'approval-required'; stage: Stage };
 
