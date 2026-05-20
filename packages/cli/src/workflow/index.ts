@@ -5,10 +5,6 @@ export {
 } from './workflow-engine';
 
 export {
-  BaseStageRunner,
-} from './base-stage-runner';
-
-export {
   type StageRunner,
 } from './stage-runner';
 

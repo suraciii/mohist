@@ -6,7 +6,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const srcRoot = path.join(repoRoot, 'src');
 
 const guardedFiles = [
-  'workflow/base-stage-runner.ts',
+  'workflow/generic-stage-runner.ts',
   'workflow/workflow-engine.ts',
   'api/issues.ts',
   'openspec/ralph-executor.ts',
