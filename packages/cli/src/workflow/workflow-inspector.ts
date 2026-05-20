@@ -48,7 +48,7 @@ export type ExplainedWorkflowItem =
     source: string;
     uses: string;
     dependsOn: string[];
-    resultContract?: string;
+    requiredMarkers?: number;
     selfRepair?: boolean;
     useDescription?: string;
   }
@@ -126,6 +126,7 @@ function compileFullCustomWorkflow(
     ? workflow.id
     : 'project/custom';
   const name = typeof workflow.name === 'string' ? workflow.name : undefined;
+  const artifacts = compileWorkflowArtifacts(workflow.artifacts, filePath, diagnostics);
   const rawStages = Array.isArray(workflow.stages) ? workflow.stages : [];
   const stages: WorkflowSourceDefinition['stages'] = [];
 
@@ -163,9 +164,30 @@ function compileFullCustomWorkflow(
   }
 
   return {
-    definition: parseWorkflowDefinitionSource({ id, name, stages }, { taskSource: 'project', checkSource: 'project' }),
+    definition: parseWorkflowDefinitionSource({ id, name, artifacts, stages }, { taskSource: 'project', checkSource: 'project' }),
     diagnostics,
   };
+}
+
+function compileWorkflowArtifacts(
+  rawArtifacts: unknown,
+  filePath: string,
+  diagnostics: WorkflowDiagnostic[],
+): Record<string, string> | undefined {
+  if (rawArtifacts === undefined) return undefined;
+  if (!isRecord(rawArtifacts)) {
+    diagnostics.push({ severity: 'error', path: `${filePath}:workflow.artifacts`, message: 'artifacts must be a mapping of name to path template' });
+    return undefined;
+  }
+  const artifacts: Record<string, string> = {};
+  for (const [name, value] of Object.entries(rawArtifacts)) {
+    if (typeof value !== 'string') {
+      diagnostics.push({ severity: 'error', path: `${filePath}:workflow.artifacts.${name}`, message: 'artifact value must be a string path template' });
+      continue;
+    }
+    artifacts[name] = value;
+  }
+  return Object.keys(artifacts).length > 0 ? artifacts : undefined;
 }
 
 function compileCustomTasks(
@@ -737,7 +759,7 @@ function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): Expl
     source: task.source ?? 'builtin',
     uses,
     dependsOn: task.dependsOn ?? [],
-    resultContract: task.resultContract?.kind,
+    requiredMarkers: Array.isArray(task.with?.requiredMarkers) ? task.with.requiredMarkers.length : undefined,
     selfRepair: task.selfRepairPolicy?.enabled,
     useDescription: useDefinition?.description,
   };

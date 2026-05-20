@@ -1,8 +1,10 @@
+import * as fs from 'fs';
 import type { StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
 import { emitStageTaskUpdate } from '../stage-context';
 import { AgentSession, createWorkflowSessionObservers, type AgentSessionOptions } from '../../agent-runtime';
 import { extractReactionOutput } from '../convergence';
+import type { RequiredMarkerDefinition } from '../domain';
 
 export interface AgentSessionTaskHandlerDeps {
   createSession?: (options: AgentSessionOptions) => Promise<AgentSession>;
@@ -72,11 +74,14 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         taskLocalSession = true;
       }
       const result = await session!.execute(prompt, { kind: 'task', title });
+      const markerResult = result.success
+        ? await satisfyRequiredMarkers(session!, input.requiredMarkers, title)
+        : { success: true, missing: [] as RequiredMarkerDefinition[], attempts: 0 };
       const duration = Date.now() - startedAt;
-      const status = result.success ? 'completed' : 'failed';
+      const status = result.success && markerResult.success ? 'completed' : 'failed';
 
       let artifacts: string[] = [];
-      if (result.success && input.artifactVerification) {
+      if (status === 'completed' && input.artifactVerification) {
         artifacts = input.artifactVerification([]);
       }
 
@@ -119,16 +124,16 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
           stage,
           attempt,
           success: result.success,
-          error: result.error,
+          error: result.error ?? (markerResult.success ? undefined : `Missing required marker in ${markerResult.missing.map(marker => marker.path).join(', ')}`),
           acpSessionId: result.acpSessionId,
           agentSessionRef: input.agentSessionRef,
           result: {
             ...(structuredResult ?? {}),
             structuredOutput: result.text,
           },
-          summary: result.success
+          summary: status === 'completed'
             ? `${title} completed`
-            : `${title} failed: ${result.error ?? 'unknown error'}`,
+            : `${title} failed: ${result.error ?? `missing required marker in ${markerResult.missing.map(marker => marker.path).join(', ')}`}`,
         },
       };
     } catch (err) {
@@ -171,3 +176,61 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
 }
 
 export const defaultAgentSessionTaskHandler = createAgentSessionTaskHandler();
+
+async function satisfyRequiredMarkers(
+  session: AgentSession,
+  markers: RequiredMarkerDefinition[] | undefined,
+  title: string,
+): Promise<{ success: true; missing: RequiredMarkerDefinition[]; attempts: number } | { success: false; missing: RequiredMarkerDefinition[]; attempts: number }> {
+  if (!markers || markers.length === 0) return { success: true, missing: [], attempts: 0 };
+
+  let missing = missingRequiredMarkers(markers);
+  if (missing.length === 0) return { success: true, missing, attempts: 0 };
+
+  const maxAttempts = Math.max(...missing.map(marker => marker.onMissing?.maxAttempts ?? 0));
+  if (maxAttempts <= 0 || missing.some(marker => marker.onMissing?.action !== 'continue-session')) {
+    return { success: false, missing, attempts: 0 };
+  }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await session.execute(buildMissingMarkerPrompt(missing), { kind: 'task', title: `${title} marker completion` });
+    missing = missingRequiredMarkers(markers);
+    if (missing.length === 0) return { success: true, missing, attempts: attempt };
+  }
+
+  return { success: false, missing, attempts: maxAttempts };
+}
+
+function missingRequiredMarkers(markers: RequiredMarkerDefinition[]): RequiredMarkerDefinition[] {
+  return markers.filter(marker => {
+    const content = readMarkerFile(marker.path);
+    if (content === null) return true;
+    const upper = content.toUpperCase();
+    return !marker.markers.some(candidate => upper.includes(candidate.toUpperCase()));
+  });
+}
+
+function readMarkerFile(filePath: string): string | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return content.length > 0 ? content : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildMissingMarkerPrompt(markers: RequiredMarkerDefinition[]): string {
+  const lines = [
+    'The previous response did not satisfy the required workflow marker contract.',
+    '',
+    'Update the following file(s) so each contains exactly one valid required marker from its allowed set.',
+    'Do not change unrelated files.',
+    '',
+  ];
+  for (const marker of markers) {
+    lines.push(`- ${marker.path}`);
+    lines.push(`  Allowed markers: ${marker.markers.join(', ')}`);
+  }
+  return lines.join('\n');
+}

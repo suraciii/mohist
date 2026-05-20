@@ -16,4 +16,5 @@ export {
 } from './check-registry';
 
 export { ArtifactExistsCheck } from './artifact-exists-check';
+export { ArtifactMarkerCheck } from './artifact-marker-check';
 export { ShellCommandCheck } from './shell-command-check';

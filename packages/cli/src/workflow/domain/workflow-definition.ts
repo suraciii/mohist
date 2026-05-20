@@ -455,6 +455,7 @@ export function cloneWorkflowDefinition(definition: WorkflowDefinition): Workflo
     ...definition,
     stages: definition.stages.map(cloneStageDefinition),
     defaults: definition.defaults ? { ...definition.defaults } : undefined,
+    artifacts: definition.artifacts ? { ...definition.artifacts } : undefined,
   };
 }
 

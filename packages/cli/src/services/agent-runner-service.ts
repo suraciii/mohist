@@ -38,7 +38,7 @@ import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-s
 import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
 import { createCheckRegistry } from '../workflow/checks/check-registry';
-import { DEFAULT_STAGE_DEFINITIONS, projectWorkflowDeliveryRequirement, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS, createWorkflowTemplateContextFromValues, projectWorkflowDeliveryRequirement, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
 import { AiReviewCheck } from '../workflow/checks/ai-review-check';
 import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
 import { MergeReadyCheck } from '../workflow/checks/merge-ready-check';
@@ -52,7 +52,7 @@ import { CodeCompilesCheck } from '../workflow/checks/code-compiles-check';
 import { BuildTestCheck } from '../workflow/checks/build-test-check';
 import { IntegrationHealthGatePreviewCheck } from '../workflow/checks/integration-health-gate-preview-check';
 import { HealthGateCheck } from '../workflow/checks/health-gate-check';
-import { ArtifactExistsCheck, ShellCommandCheck } from '../workflow/checks';
+import { ArtifactExistsCheck, ArtifactMarkerCheck, ShellCommandCheck } from '../workflow/checks';
 import { DEFAULT_HEALTH_GATE_POLICIES, loadHealthGatePolicies, loadWorkflow } from '../workflow/workflow-loader';
 import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/workflow-inspector';
 
@@ -174,11 +174,33 @@ export function createDefaultCheckRegistry(input: {
         })));
       }
       if (check.uses === 'mohist/artifact-exists' && typeof check.with?.path === 'string') {
-        registry.register(check.name, () => Promise.resolve(new ArtifactExistsCheck(check.name, check.with!.path as string)));
+        registry.register(check.name, (ctx) => Promise.resolve(new ArtifactExistsCheck(check.name, renderCheckPath(ctx, check.with!.path as string, worktreePath, workflowDefinitionSnapshot))));
+      }
+      if ((check.uses === 'mohist/marker' || check.uses === 'mohist/verdict') && typeof check.with?.path === 'string' && typeof check.with?.expect === 'string') {
+        registry.register(check.name, (ctx) => Promise.resolve(new ArtifactMarkerCheck(
+          check.name,
+          renderCheckPath(ctx, check.with!.path as string, worktreePath, workflowDefinitionSnapshot),
+          check.with!.expect as string,
+        )));
       }
     }
   }
   return registry;
+}
+
+function renderCheckPath(
+  ctx: import('../workflow').CheckContext,
+  template: string,
+  worktreePath: string,
+  workflowDefinitionSnapshot: import('../workflow/domain').WorkflowDefinitionSnapshot | undefined,
+): string {
+  return renderWorkflowTemplate(template, createWorkflowTemplateContextFromValues({
+    issueNumber: ctx.issue.number,
+    issueTitle: ctx.issue.title,
+    changeDir: ctx.changeDir,
+    worktreePath,
+    artifacts: workflowDefinitionSnapshot?.resolvedDefinition.artifacts,
+  }));
 }
 
 export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {

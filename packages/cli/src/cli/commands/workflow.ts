@@ -114,7 +114,7 @@ export function renderWorkflowExplanation(item: ExplainedWorkflowItem, output: C
 
   if (item.kind === 'task') {
     output.write(`Depends on: ${item.dependsOn.length > 0 ? item.dependsOn.join(', ') : 'none'}`);
-    if (item.resultContract) output.write(`Result contract: ${item.resultContract}`);
+    if (item.requiredMarkers) output.write(`Required markers: ${item.requiredMarkers}`);
     if (item.selfRepair) output.write('Self repair: enabled');
   } else {
     output.write(`Phase: ${item.phase}`);

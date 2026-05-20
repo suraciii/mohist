@@ -12,6 +12,9 @@ const DEFAULT_HEALTH_TIMEOUT_MS = 5 * 60 * 1000;
 export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
   id: 'mohist/default',
   name: 'Mohist default issue delivery workflow',
+  artifacts: {
+    openspecChange: '{{ openspec.changeDir }}',
+  },
   stages: [
     {
       id: Stage.Plan,
@@ -20,16 +23,36 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/specs' } } },
         { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/design' } } },
         { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/tasks' } } },
-        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/self-review' } }, resultContract: SELF_REVIEW_RESULT_CONTRACT },
+        {
+          id: 'self-review',
+          title: 'Self review',
+          uses: 'mohist/agent',
+          with: {
+            session: 'plan-artifacts',
+            prompt: { ref: 'mohist/plan/self-review' },
+            requiredMarkers: [
+              {
+                path: '{{ artifacts.openspecChange }}/self-review.md',
+                markers: SELF_REVIEW_RESULT_CONTRACT.allowedMarkers,
+                onMissing: { action: 'continue-session', maxAttempts: 1 },
+              },
+            ],
+          },
+        },
       ],
       checks: [
-        { id: 'proposal-complete', title: 'Proposal complete' },
-        { id: 'specs-complete', title: 'Specs complete' },
-        { id: 'design-complete', title: 'Design complete' },
+        { id: 'proposal-complete', title: 'Proposal complete', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/proposal.md' } },
+        { id: 'specs-complete', title: 'Specs complete', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/specs' } },
+        { id: 'design-complete', title: 'Design complete', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/design.md' } },
         { id: 'tasks-valid', title: 'Tasks valid' },
         {
           id: 'self-review-passed',
           title: 'Self review passed',
+          uses: 'mohist/marker',
+          with: {
+            path: '{{ artifacts.openspecChange }}/self-review.md',
+            expect: '<promise>PASS</promise>',
+          },
           onFailure: {
             retry: {
               limit: 1,
@@ -89,8 +112,16 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           id: 'ai-review',
           title: 'AI review',
           uses: 'mohist/agent',
-          with: { prompt: { ref: 'mohist/check/ai-review' } },
-          resultContract: REVIEW_RESULT_CONTRACT,
+          with: {
+            prompt: { ref: 'mohist/check/ai-review' },
+            requiredMarkers: [
+              {
+                path: '{{ artifacts.openspecChange }}/review.md',
+                markers: REVIEW_RESULT_CONTRACT.allowedMarkers,
+                onMissing: { action: 'continue-session', maxAttempts: 1 },
+              },
+            ],
+          },
           selfRepairPolicy: REVIEW_SELF_REPAIR_POLICY,
         },
       ],
@@ -120,8 +151,10 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'review-passed',
           title: 'Review passed',
-          uses: 'mohist/verdict',
+          uses: 'mohist/marker',
           with: {
+            path: '{{ artifacts.openspecChange }}/review.md',
+            expect: '<promise>PASS</promise>',
             approvalEvidence: {
               role: 'verdict',
               snapshotField: 'snapshotSha',
@@ -140,7 +173,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                     inline: [
                       'Fix the blocking findings in:',
                       '',
-                      '{{ openspec.changeDir }}/review.md',
+                      '{{ artifacts.openspecChange }}/review.md',
                       '',
                       'Apply the minimal code changes required.',
                       'Do not edit review.md.',
