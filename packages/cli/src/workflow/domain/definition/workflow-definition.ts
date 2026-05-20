@@ -1,25 +1,195 @@
-import { Stage } from '../../types';
-import { WorkflowDomainError } from './errors';
-import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../uses-catalog';
-import type {
-  AgentPromptSource,
-  CheckDefinition,
-  CheckFailurePolicy,
-  ApprovalPolicy,
-  CheckPolicy,
-  CompiledStageDefinition,
-  InvalidationPolicy,
-  RepairPolicy,
-  StageDefinition,
-  TaskDefinition,
-  WorkflowDefinition,
-  WorkflowDefinitionSnapshot,
-  WorkflowDefinitionSource,
-  WorkSourceKind,
-  TaskExecutionKind,
-  TaskExecutionPolicy,
-  WorkSourceDefinition,
-} from './types';
+import { Stage } from '../../../types';
+import type { ResultContract } from '../../../types/workflow-results';
+import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../../uses-catalog';
+import { WorkflowDomainError } from '../errors';
+
+export type AgentPromptSource =
+  | { ref: string }
+  | { file: string }
+  | { inline: string };
+
+export interface TaskDefinition {
+  id: string;
+  title: string;
+  source?: 'builtin' | 'project';
+  uses?: string;
+  with?: Record<string, unknown>;
+  onSuccess?: {
+    emit?: string[];
+  };
+  dependsOn?: string[];
+  resultContract?: ResultContract;
+}
+
+export interface CheckDefinition {
+  name: string;
+  title: string;
+  source?: 'builtin' | 'project';
+  uses?: string;
+  with?: Record<string, unknown>;
+  onFailure?: CheckFailureAction;
+}
+
+export interface CheckFailureRetry {
+  limit: number;
+  task: TaskDefinition;
+  inputFrom?: ReactionInputSelector[];
+}
+
+export interface CheckFailureAction {
+  retry?: CheckFailureRetry;
+}
+
+export interface CheckFailurePolicy {
+  checkName: string;
+  fixTaskId: string;
+  fixTaskTitle: string;
+  maxAttempts: number;
+  inputFrom?: ReactionInputSelector[];
+}
+
+export type WorkSourceKind = 'static' | 'ralph' | 'runtime';
+
+export interface WorkSourceDefinition {
+  kind: WorkSourceKind;
+  taskIds?: string[];
+}
+
+export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task' | 'repair-task' | 'rebase-task';
+
+export interface TaskExecutionPolicy {
+  taskId: string;
+  kind: TaskExecutionKind;
+  workSourceKind?: WorkSourceKind;
+  agentSessionRef?: string;
+}
+
+export type CheckPhase = 'pre-task' | 'post-task' | 'approval';
+
+export interface CheckPolicy {
+  checkName: string;
+  phase: CheckPhase;
+}
+
+export interface ApprovalPolicy {
+  checkName: string;
+}
+
+export type ReactionInputSelector =
+  | { type: 'failed-check-output' }
+  | { type: 'check-items'; filter?: 'blocking' | 'all' }
+  | { type: 'task-output'; taskId: string }
+  | { type: 'artifact'; path: string }
+  | { type: 'snapshot' }
+  | { type: 'prior-task-outputs' };
+
+export interface RepairPolicy {
+  checkName: string;
+  fixTaskId: string;
+  fixTaskTitle: string;
+  maxAttempts: number;
+  inputFrom?: ReactionInputSelector[];
+}
+
+export type InvalidationTrigger = 'task-completion';
+
+export interface InvalidationEntry {
+  trigger: InvalidationTrigger;
+  eventName?: string;
+  triggerTaskId?: string;
+  reason?: string;
+  invalidates: {
+    tasks?: string[];
+    checks?: string[];
+    approval?: boolean;
+  };
+}
+
+export interface InvalidationPolicy {
+  entries: InvalidationEntry[];
+}
+
+export interface StageResetAction {
+  tasks?: string[];
+  checks?: 'all' | string[];
+  approval?: boolean;
+}
+
+export interface StageEventPolicy {
+  reset: StageResetAction;
+}
+
+export type WorkflowTasksFromSource = string;
+
+export interface StageDefinition {
+  stage: Stage;
+  tasks: TaskDefinition[];
+  tasksFrom?: WorkflowTasksFromSource;
+  checks: CheckDefinition[];
+  on?: Record<string, StageEventPolicy>;
+  requiresApproval?: boolean;
+  approvalCheckName?: string;
+}
+
+export type CompiledStageDefinition = StageDefinition & {
+  checkFailurePolicies?: CheckFailurePolicy[];
+  workSources?: WorkSourceDefinition[];
+  taskExecutionPolicies?: TaskExecutionPolicy[];
+  checkPolicies: CheckPolicy[];
+  approvalPolicy?: ApprovalPolicy;
+  repairPolicies?: RepairPolicy[];
+  invalidationPolicy?: InvalidationPolicy;
+};
+
+export interface WorkflowDefinition {
+  id: string;
+  name?: string;
+  stages: StageDefinition[];
+  defaults?: Record<string, unknown>;
+  artifacts?: Record<string, string>;
+}
+
+export type WorkflowDefinitionSource =
+  | { type: 'builtin'; id: string }
+  | { type: 'project'; path: string }
+  | { type: 'runtime'; id: string };
+
+export interface WorkflowDefinitionSnapshot {
+  workflowId: string;
+  name?: string;
+  source: WorkflowDefinitionSource;
+  resolvedDefinition: WorkflowDefinition;
+  compiledStageDefinitions: CompiledStageDefinition[];
+  capturedAt: string;
+}
+
+export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
+  source?: TaskDefinition['source'];
+};
+
+export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'source' | 'name'> & {
+  id?: string;
+  name?: string;
+  source?: CheckDefinition['source'];
+};
+
+export interface WorkflowStageSourceDefinition {
+  id?: Stage;
+  stage?: Stage;
+  tasks?: WorkflowTaskSourceDefinition[];
+  tasksFrom?: WorkflowTasksFromSource;
+  checks?: WorkflowCheckSourceDefinition[];
+  on?: Record<string, StageEventPolicy>;
+  approval?: boolean;
+}
+
+export interface WorkflowSourceDefinition {
+  id: string;
+  name?: string;
+  artifacts?: Record<string, string>;
+  defaults?: Record<string, unknown>;
+  stages: WorkflowStageSourceDefinition[];
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

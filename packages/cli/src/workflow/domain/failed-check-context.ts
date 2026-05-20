@@ -1,5 +1,14 @@
 import type { WorkflowItem, WorkflowSnapshot } from '../../types/workflow-results';
-import type { FailedCheckContext } from './types';
+
+export interface FailedCheckContext {
+  checkName: string;
+  verdict: 'PASS' | 'FAIL';
+  blockingItems: WorkflowItem[];
+  nonBlockingItems: WorkflowItem[];
+  sourceArtifactRefs?: string[];
+  snapshot?: WorkflowSnapshot;
+  priorTaskOutputs?: Record<string, unknown>[];
+}
 
 export function buildFailedCheckContext(
   failedCheck: { name: string; status: string; message?: string; output?: unknown },

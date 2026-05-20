@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Stage } from '../src/types';
-import { freezePointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/domain/persistence';
+import { freezePointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/domain/snapshot';
 import type { StageDefinition, StageRunSnapshot, WorkflowRunSnapshot } from '../src/workflow/domain';
 
 describe('workflow run persistence helpers', () => {

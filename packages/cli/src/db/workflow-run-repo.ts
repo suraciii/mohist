@@ -16,7 +16,7 @@ import {
   hydrateWorkflowRun,
   repairWorkflowRunSnapshot,
   workflowDefinitionSnapshotFromUnknown,
-} from '../workflow/domain/persistence';
+} from '../workflow/domain/snapshot';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
