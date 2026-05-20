@@ -2027,7 +2027,7 @@ describe('API Routes', () => {
       });
     });
 
-    describe('POST /api/issues/:number/check/repair-review-findings', () => {
+    describe('POST /api/issues/:number/stages/:stage/approval-verdict-repair', () => {
       it('reuses the WorkflowRun-scheduled repair without enqueueing duplicate resume work', async () => {
         const tmpRepairDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-repair-test-'));
 
@@ -2090,7 +2090,7 @@ describe('API Routes', () => {
           ));
           const repairServer = createTestServer(repairApp);
 
-          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
 
           expect(response.status).toBe(200);
           expect(response.body.success).toBe(true);
@@ -2156,7 +2156,7 @@ describe('API Routes', () => {
           ));
           const repairServer = createTestServer(repairApp);
 
-          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
 
           expect(response.status).toBe(200);
           expect(response.body.success).toBe(true);
@@ -2206,7 +2206,7 @@ describe('API Routes', () => {
           ));
           const repairServer = createTestServer(repairApp);
 
-          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
 
           expect(response.status).toBe(409);
           expect(response.body.success).toBe(false);
@@ -2267,7 +2267,7 @@ describe('API Routes', () => {
           ));
           const repairServer = createTestServer(repairApp);
 
-          const response = await request(repairServer).post(`/api/issues/${issue.number}/check/repair-review-findings`);
+          const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
 
           expect(response.status).toBe(409);
           expect(response.body.success).toBe(false);

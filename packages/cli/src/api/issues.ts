@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StateManager } from '../server/state-manager';
@@ -4525,9 +4525,9 @@ export function createIssueRoutes(
     }
   });
 
-  app.post('/:number/check/repair-review-findings', async (c) => {
+  const handleApprovalVerdictRepair = async (c: Context, requestedStage?: Stage) => {
     try {
-      const number = parseInt(c.req.param('number'));
+      const number = parseInt(c.req.param().number ?? '', 10);
       const projectId = getCurrentProjectId();
       if (!projectId) {
         return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
@@ -4538,8 +4538,9 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
       }
 
-      if (issue.stage !== Stage.Check) {
-        return c.json({ success: false, error: `Issue #${number} is not in check stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
+      const stage = requestedStage ?? issue.stage;
+      if (issue.stage !== stage) {
+        return c.json({ success: false, error: `Issue #${number} is not in ${stage} stage (current: ${issue.stage})` } satisfies ApiResponse, 409);
       }
 
       const workflowApplicationService = createWorkflowApplicationService();
@@ -4554,7 +4555,7 @@ export function createIssueRoutes(
 
       const result = workflowApplicationService.scheduleApprovalVerdictRepair({
         issueId: issue.id,
-        stage: Stage.Check,
+        stage,
         tasksPath,
         startedBy: 'approval-verdict-repair',
       });
@@ -4606,7 +4607,7 @@ export function createIssueRoutes(
         case 'not-check-stage':
           return c.json({
             success: false,
-            error: `Issue #${number} is not in check stage`,
+            error: `Issue #${number} does not have approval verdict repair available in ${stage} stage`,
           } satisfies ApiResponse, 409);
         case 'not-available':
           return c.json({
@@ -4617,6 +4618,18 @@ export function createIssueRoutes(
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
+  };
+
+  app.post('/:number/stages/:stage/approval-verdict-repair', async (c) => {
+    const stageParam = c.req.param('stage') as Stage;
+    if (!Object.values(Stage).includes(stageParam)) {
+      return c.json({ success: false, error: `Invalid stage: ${stageParam}` } satisfies ApiResponse, 400);
+    }
+    return handleApprovalVerdictRepair(c, stageParam);
+  });
+
+  app.post('/:number/check/repair-review-findings', async (c) => {
+    return handleApprovalVerdictRepair(c, Stage.Check);
   });
 
   return app;
