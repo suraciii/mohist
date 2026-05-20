@@ -13,6 +13,8 @@ import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
 import { EventBus, AgentRunnerService } from '../src/services';
+import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { StateManager } from '../src/server/state-manager';
 import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
@@ -95,8 +97,18 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
     const app = new Hono();
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-    app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
+    app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
     return { app, agentRunner };
+  }
+
+  function recordFailedPlanWork(issueId: string, issueNumber: number): void {
+    const workflowApplicationService = new WorkflowApplicationService(db);
+    workflowApplicationService.startWorkflow({ issueId, issueNumber });
+    workflowApplicationService.startTaskAttempt({ issueId, stage: Stage.Plan, taskId: 'proposal', evidence: { executionId: 'plan-proposal-failed' } });
+    workflowApplicationService.completeTask({ issueId, stage: Stage.Plan, taskId: 'proposal', result: { status: 'failed', error: 'Plan stage failed' } });
+    issueRepo.updateStage(issueId, Stage.Plan);
+    issueRepo.updateStatus(issueId, IssueStatus.Blocked);
+    issueRepo.updateBlockedReason(issueId, 'Plan stage failed');
   }
 
   function createChangeDir(issueNumber: number): string {
@@ -119,6 +131,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       createChangeDir(issue.number);
 
@@ -144,6 +157,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       const changeDir = createChangeDir(issue.number);
 
@@ -172,6 +186,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       createChangeDir(issue.number);
 
@@ -194,6 +209,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       createChangeDir(issue.number);
 
@@ -216,6 +232,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       createChangeDir(issue.number);
 
@@ -240,6 +257,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       createChangeDir(issue.number);
 
@@ -262,6 +280,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       createChangeDir(issue.number);
 
@@ -286,6 +305,7 @@ describe('#215 recovery regression: Plan fails while generating tasks.json', () 
       issueRepo.updateStage(issue.id, Stage.Plan);
       issueRepo.updateStatus(issue.id, IssueStatus.Blocked);
       issueRepo.updateBlockedReason(issue.id, 'Plan stage failed');
+      recordFailedPlanWork(issue.id, issue.number);
 
       const changeDir = createChangeDir(issue.number);
       fs.writeFileSync(

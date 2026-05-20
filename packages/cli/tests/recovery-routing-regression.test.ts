@@ -547,26 +547,25 @@ describe('Recovery routing regression tests', () => {
       const app = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner));
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
       return createTestServer(app);
     }
 
-    it('rejects retry when no checkpoint exists (no backlog reset)', async () => {
+    it('rejects retry when no WorkflowRun exists (no backlog reset)', async () => {
       const issue = createBlockedIssue('No Checkpoint');
 
       server = createRetryApp();
       const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
       expect(response.status).toBe(409);
-      expect(response.body.error).toContain('checkpoint');
-      expect(response.body.error).toContain('rerun');
+      expect(response.body.error).toContain('No workflow run found');
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.stage).toBe(Stage.Build);
       expect(updated?.status).toBe(IssueStatus.Blocked);
     });
 
-    it('rejects retry when no checkpoint exists - does not reset to backlog', async () => {
+    it('rejects retry when no WorkflowRun exists - does not reset to backlog', async () => {
       const issue = createBlockedIssue('No Backlog Reset');
 
       server = createRetryApp();
@@ -588,7 +587,7 @@ describe('Recovery routing regression tests', () => {
       const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
       expect(response.status).toBe(409);
-      expect(response.body.error).toContain('not blocked');
+      expect(response.body.error).toContain('No workflow run found');
     });
 
     it('rejects retry for merged issues', async () => {
@@ -614,7 +613,7 @@ describe('Recovery routing regression tests', () => {
       expect(response.body.error).toContain('manual intervention');
     });
 
-    it('succeeds with checkpoint and enqueues resume-pipeline', async () => {
+    it('succeeds with failed WorkflowRun work and enqueues resume-pipeline', async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-retry-'));
 
       try {
@@ -634,6 +633,14 @@ describe('Recovery routing regression tests', () => {
         const issue = testIssueService.create({ projectId: project.id, title: 'Retry With Checkpoint' });
         testIssueRepo.updateStage(issue.id, Stage.Build);
         testIssueRepo.blockIssue(issue.id, 'Build interrupted');
+        const workflowRunService = new WorkflowRunService(testDb);
+        const workflowApplicationService = new WorkflowApplicationService(testDb);
+        workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+        completePlanToApproval(workflowApplicationService, issue.id);
+        workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+        workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+        workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-failed' } });
+        workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'failed', error: 'Build failed' } });
 
         const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test-change`);
         fs.mkdirSync(changeDir, { recursive: true });
@@ -649,7 +656,7 @@ describe('Recovery routing regression tests', () => {
           exists: () => true,
         } as any;
 
-        app.route('/api/issues', createIssueRoutes(testIssueService, testProjectService, testStateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, testStateManager.getPipelineCheckpointRepo()));
+        app.route('/api/issues', createIssueRoutes(testIssueService, testProjectService, testStateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, testStateManager.getPipelineCheckpointRepo(), undefined, undefined, undefined, workflowRunService));
         server = createTestServer(app);
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);

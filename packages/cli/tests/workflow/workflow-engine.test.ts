@@ -267,7 +267,7 @@ describe('WorkflowEngine aggregate retry startup', () => {
 
     expect(workflowRunService.canRetryStage).toHaveBeenCalledWith(issue.id, Stage.Plan);
     expect(service.retryStage).not.toHaveBeenCalled();
-    expect(service.resumeDecision).toHaveBeenCalledWith(issue.id, { tasksPath: '/tmp/change/tasks.json' });
+    expect(service.resumeDecision).toHaveBeenCalledWith(issue.id);
   });
 
   it('preserves rejected approval feedback before retryStage clears approval state', async () => {
@@ -300,7 +300,6 @@ describe('WorkflowEngine aggregate retry startup', () => {
     expect(service.retryStage).toHaveBeenCalledWith({
       issueId: issue.id,
       stage: Stage.Plan,
-      tasksPath: '/tmp/change/tasks.json',
       startedBy: 'retry',
     });
     expect(runner.capturedContexts[0].rejectionFeedback).toBe('Please rewrite the plan');

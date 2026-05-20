@@ -427,11 +427,16 @@ describe('IssueTaskQueue', () => {
       expect(runningRecords[0].issueId).toBe(issue.id);
     });
 
-    it('should not reclassify tasks started during queue recovery when issue recovery also runs', () => {
+    it('should not reclassify tasks started during queue recovery when issue recovery also runs', async () => {
       const project = setupProject();
       const issue = setupIssue(project.id);
       issueRepo.updateStage(issue.id, Stage.Integrate);
       issueRepo.setMergeState(issue.id, MergeState.Merged);
+      const workflowRunService = {
+        getActiveRunForIssue: () => ({ currentStage: Stage.Integrate }),
+        getLatestRunForIssue: () => ({ workflowDefinition: null }),
+        getDatabaseManager: () => db,
+      } as any;
 
       taskQueueRepo.insert({
         issueId: issue.id,
@@ -441,13 +446,25 @@ describe('IssueTaskQueue', () => {
         priority: 0,
       });
 
-      const service = createService();
+      const service = new AgentRunnerService(
+        eventBus, undefined, issueRepo, 8,
+        undefined, undefined, projectRepo,
+        createHangingWorktreeManager(),
+        taskQueueRepo,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        workflowRunService,
+      );
       service.recoverFromQueue();
       service.recoverIssues();
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
-      const runningRecords = taskQueueRepo.findAllRunning();
-      expect(runningRecords).toHaveLength(1);
-      expect(runningRecords[0].issueId).toBe(issue.id);
+      const records = taskQueueRepo.findByIssueId(issue.id);
+      expect(records).toHaveLength(1);
+      expect(records[0].issueId).toBe(issue.id);
+      expect(records[0].status).not.toBe('pending');
 
       const recoveredIssue = issueRepo.findById(issue.id);
       expect(recoveredIssue!.status).not.toBe(IssueStatus.Interrupted);

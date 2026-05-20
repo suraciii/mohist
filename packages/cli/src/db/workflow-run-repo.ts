@@ -18,7 +18,6 @@ import {
   repairWorkflowRunSnapshot,
   workflowDefinitionSnapshotFromUnknown,
 } from '../workflow/domain/persistence';
-import fs from 'fs';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -367,53 +366,6 @@ function approvalFromStageRow(row: WorkflowStageRunRow): StageRunSnapshot['appro
   };
 }
 
-function readBuildTasks(tasksPath?: string): Array<{
-  id: string;
-  title: string;
-  order?: number;
-  dependsOn?: string[];
-  passes?: boolean;
-  attempts?: number;
-  durations?: number[];
-  error?: string | null;
-}> {
-  if (!tasksPath || !fs.existsSync(tasksPath)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf-8')) as {
-      tasks?: Array<{
-        id?: unknown;
-        title?: unknown;
-        order?: unknown;
-        dependsOn?: unknown;
-        passes?: unknown;
-        attempts?: unknown;
-        durations?: unknown;
-        error?: unknown;
-      }>;
-    };
-    if (!Array.isArray(parsed.tasks)) return [];
-    return parsed.tasks.flatMap((task, index) => {
-      if (typeof task.id !== 'string') return [];
-      return [{
-        id: task.id,
-        title: typeof task.title === 'string' ? task.title : task.id,
-        order: typeof task.order === 'number' ? task.order : index,
-        dependsOn: Array.isArray(task.dependsOn)
-          ? task.dependsOn.filter((dep): dep is string => typeof dep === 'string')
-          : [],
-        passes: typeof task.passes === 'boolean' ? task.passes : undefined,
-        attempts: typeof task.attempts === 'number' ? task.attempts : undefined,
-        durations: Array.isArray(task.durations)
-          ? task.durations.filter((duration): duration is number => typeof duration === 'number')
-          : undefined,
-        error: typeof task.error === 'string' ? task.error : null,
-      }];
-    });
-  } catch {
-    return [];
-  }
-}
-
 function orderCheckSnapshots(stage: Stage, checks: StageRunSnapshot['checks']): StageRunSnapshot['checks'] {
   const definition = DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === stage);
   if (!definition) return checks;
@@ -428,11 +380,10 @@ export class WorkflowRunRepo {
     issueId: string;
     issueNumber: number;
     startedBy?: string | null;
-    tasksPath?: string;
     workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
   }): DomainWorkflowRun {
     return this.db.transaction(() => {
-      const existing = this.loadRunningAggregate(data.issueId, { tasksPath: data.tasksPath });
+      const existing = this.loadRunningAggregate(data.issueId);
       if (existing) return existing;
 
       const id = `wr_${data.issueNumber}_${Date.now()}`;
@@ -443,41 +394,41 @@ export class WorkflowRunRepo {
         workflowDefinitionSnapshot: data.workflowDefinitionSnapshot,
       });
       this.saveAggregate(run, data.startedBy ?? null);
-      return this.loadRunningAggregate(data.issueId, { tasksPath: data.tasksPath }) ?? run;
+      return this.loadRunningAggregate(data.issueId) ?? run;
     });
   }
 
-  loadActiveAggregate(issueId: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+  loadActiveAggregate(issueId: string): DomainWorkflowRun | null {
     const row = this.db.get<WorkflowRunRow>(
       `SELECT * FROM workflow_runs WHERE issue_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1`,
       [issueId],
     );
     if (!row) return null;
-    return this.loadAggregateByRow(row, options);
+    return this.loadAggregateByRow(row);
   }
 
-  loadRunningAggregate(issueId: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+  loadRunningAggregate(issueId: string): DomainWorkflowRun | null {
     const row = this.db.get<WorkflowRunRow>(
       `SELECT * FROM workflow_runs WHERE issue_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 1`,
       [issueId],
     );
     if (!row) return null;
-    return this.loadAggregateByRow(row, options);
+    return this.loadAggregateByRow(row);
   }
 
-  loadLatestAggregate(issueId: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+  loadLatestAggregate(issueId: string): DomainWorkflowRun | null {
     const row = this.db.get<WorkflowRunRow>(
       `SELECT * FROM workflow_runs WHERE issue_id = ? AND status != 'cancelled' ORDER BY created_at DESC LIMIT 1`,
       [issueId],
     );
     if (!row) return null;
-    return this.loadAggregateByRow(row, options);
+    return this.loadAggregateByRow(row);
   }
 
-  loadAggregateById(id: string, options: { tasksPath?: string } = {}): DomainWorkflowRun | null {
+  loadAggregateById(id: string): DomainWorkflowRun | null {
     const row = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [id]);
     if (!row) return null;
-    return this.loadAggregateByRow(row, options);
+    return this.loadAggregateByRow(row);
   }
 
   saveAggregate(run: DomainWorkflowRun, startedBy?: string | null): void {
@@ -487,12 +438,9 @@ export class WorkflowRunRepo {
     });
   }
 
-  private loadAggregateByRow(row: WorkflowRunRow, options: { tasksPath?: string }): DomainWorkflowRun {
+  private loadAggregateByRow(row: WorkflowRunRow): DomainWorkflowRun {
     return this.db.transaction(() => {
-      const repaired = repairWorkflowRunSnapshot(
-        this.snapshotFromRows(row),
-        readBuildTasks(options.tasksPath),
-      );
+      const repaired = repairWorkflowRunSnapshot(this.snapshotFromRows(row));
       this.saveAggregateSnapshot(repaired, row.started_by);
       const freshRow = this.db.get<WorkflowRunRow>('SELECT * FROM workflow_runs WHERE id = ?', [row.id]) ?? row;
       return hydrateWorkflowRun(this.snapshotFromRows(freshRow));

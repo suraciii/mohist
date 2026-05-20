@@ -671,7 +671,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     });
   });
 
-  it('read-repairs partial active WorkflowRun data without losing current task or check visibility', () => {
+  it('loads partial active WorkflowRun data without importing tasks.json side effects', () => {
     const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'workflowrun-read-repair-'));
     tempDirs.push(projectPath);
     const tasksPath = path.join(projectPath, 'tasks.json');
@@ -709,23 +709,21 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
       ['wr_partial_e2e/build/health:build', 'wr_partial_e2e', 'wr_partial_e2e/build', 'health:build', 'Build health gate', now, now],
     );
 
-    const repaired = workflowRunRepo.loadActiveAggregate(issueId, { tasksPath })!.snapshot();
-    const build = repaired.stageRuns.find(stage => stage.stage === Stage.Build)!;
+    const loaded = workflowRunRepo.loadActiveAggregate(issueId)!.snapshot();
+    const build = loaded.stageRuns.find(stage => stage.stage === Stage.Build)!;
     const latest = workflowRunService.getActiveRunForIssue(issueId)!;
     const stageProjection = stageStateService.getIssueStageStateFromWorkflowRun(latest);
 
-    expect(repaired.stageRuns.find(stage => stage.stage === Stage.Plan)?.tasks.map(task => task.id)).toEqual(['proposal', 'specs', 'design', 'tasks', 'self-review']);
-    expect(repaired.stageRuns.find(stage => stage.stage === Stage.Integrate)?.tasks.map(task => task.id)).toEqual(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge']);
+    expect(loaded.stageRuns.find(stage => stage.stage === Stage.Plan)?.tasks.map(task => task.id)).toEqual(['proposal', 'specs', 'design', 'tasks', 'self-review']);
+    expect(loaded.stageRuns.find(stage => stage.stage === Stage.Integrate)?.tasks.map(task => task.id)).toEqual(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge']);
     expect(build.tasks).toEqual([
       expect.objectContaining({ id: 'T-001', status: 'running', output: { progress: 'halfway' } }),
-      expect.objectContaining({ id: 'T-002', status: 'pending', output: null }),
     ]);
     expect(build.checks).toEqual([expect.objectContaining({ name: 'health:build', status: 'pending' })]);
     expect(stageProjection.find(stage => stage.stage === Stage.Build)).toMatchObject({
       status: 'running',
       tasks: [
         expect.objectContaining({ taskId: 'T-001', status: 'running', output: { progress: 'halfway' } }),
-        expect.objectContaining({ taskId: 'T-002', status: 'pending', output: null }),
       ],
       checks: [expect.objectContaining({ checkName: 'health:build', status: 'pending' })],
     });

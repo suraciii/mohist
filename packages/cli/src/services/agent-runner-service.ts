@@ -13,7 +13,7 @@ import {
 } from '../workflow';
 import { createCheckpointManager } from '../workflow/checkpoint-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { IssueStatus, type Issue, MergeState } from '../types';
+import { IssueStatus, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage, STAGE_TRANSITIONS } from '../types';
 import { load } from '../config/config-loader';
@@ -25,10 +25,7 @@ import type { StageStateService } from './stage-state-service';
 import type { WorkflowRunService } from './workflow-run-service';
 import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
-import { findChangeDir } from '../openspec/detector';
 import { WorktreeManager } from '../git/worktree-manager';
-import * as fs from 'fs';
-import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
 import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoader, createDefaultStaticTaskLoader } from '../workflow/task-runtime';
 import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-session-task-handler';
@@ -520,36 +517,10 @@ export class AgentRunnerService {
         return;
       }
 
-      if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
-        if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
-          log.info('Merged Check-stage issue preserves definition-driven stage state', {
-            issueNumber: issue.number,
-            action: 'stage preserved',
-          });
-          return;
-        }
-
-        if (issue.stage === Stage.Integrate) {
-          log.info('Integrating issue — recovery preserves Integrate stage', {
-            issueNumber: issue.number,
-            stage: issue.stage,
-            action: 'status remains active, stage preserved',
-          });
-          return;
-        }
-
-        if (issue.stage === Stage.Done) {
-          log.info('Done issue with merge evidence — no recovery action needed', {
-            issueNumber: issue.number,
-            action: 'status remains active',
-          });
-          return;
-        }
-
-        log.info('Issue has merge evidence; preserving definition-driven stage state', {
+      if ((issue.stage === Stage.Done || issue.status === IssueStatus.Completed) && deliveryStatus === 'merged') {
+        log.info('Completed issue with delivery evidence needs no recovery action', {
           issueNumber: issue.number,
-          stage: issue.stage,
-          action: 'stage preserved',
+          action: 'terminal issue preserved',
         });
         return;
       }
@@ -567,243 +538,19 @@ export class AgentRunnerService {
           stage: issue.approvalState!.stage ?? issue.stage,
           action: 'stage/status reconciled, awaiting approval preserved',
         });
-      } else if (issue.stage === Stage.Check || issue.stage === Stage.Plan) {
-        const recoveredOutput = this.recoverApprovalOutput(issue);
-        this.issueRepo.setApprovalState(issue.id, {
-          stage: issue.stage,
-          status: 'awaiting',
-          output: recoveredOutput,
-          requestedAt: new Date().toISOString(),
-        });
-        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        this.issueRepo.updateBlockedReason(issue.id, null);
-        log.info('Recovered review-stage issue', {
-          issueNumber: issue.number,
-          stage: issue.stage,
-          action: 'status=active, approval restored',
-        });
-      } else if (issue.stage === Stage.Integrate) {
-        this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        this.issueRepo.updateBlockedReason(issue.id, null);
-        log.info('Recovered integrate-stage issue', {
-          issueNumber: issue.number,
-          stage: issue.stage,
-          action: 'status=active, stage preserved, Integrate stage can be resumed',
-        });
-      } else if (issue.stage === Stage.Build && this.projectRepo && this.worktreeManager) {
-        this.recoverBuildStageIssue(issue);
       } else {
         this.issueRepo.updateStatus(issue.id, IssueStatus.Interrupted);
+        this.issueRepo.updateBlockedReason(issue.id, null);
+        this.issueRepo.clearApprovalState(issue.id);
         this.cleanupOrphanedCoderSessions(issue.id, issue.number);
         log.info('Recovered orphaned issue', {
           issueNumber: issue.number,
           stage: issue.stage,
-          action: 'status=interrupted, stage preserved, checkpoint preserved',
+          action: 'status=interrupted, no active WorkflowRun to resume',
         });
       }
     } catch (err) {
       log.error('Failed to recover orphaned issue', {
-        issueNumber: issue.number,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private recoverApprovalOutput(issue: Issue): Record<string, unknown> | null {
-    if (!this.projectRepo || !this.worktreeManager) return null;
-    const project = this.projectRepo.findById(issue.projectId);
-    if (!project) return null;
-    const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
-    if (!worktreePath) return null;
-    const changeDir = findChangeDir(worktreePath, issue.number);
-    if (!changeDir) return null;
-
-    if (issue.stage === Stage.Plan) {
-      const selfReviewPath = path.join(changeDir, 'self-review.md');
-      try {
-        if (fs.existsSync(selfReviewPath)) {
-          const content = fs.readFileSync(selfReviewPath, 'utf-8').trim();
-          if (content) {
-            return {
-              stage: Stage.Plan,
-              issueNumber: issue.number,
-              selfReviewNotes: content,
-            };
-          }
-        }
-      } catch {}
-    }
-
-    return null;
-  }
-
-  private recoverBuildStageIssue(issue: Issue): void {
-    const MAX_RETRIES = 3;
-
-    const project = this.projectRepo!.findById(issue.projectId);
-    if (!project) {
-      const reason = `Project 已不存在 (projectId: ${issue.projectId})`;
-      this.issueRepo!.blockIssue(issue.id, reason);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.emitBlocked(issue, 'Project 已不存在', issue.retryCount ?? 0);
-
-      log.info('Recovered build-stage orphan — project not found', {
-        issueNumber: issue.number,
-        action: 'status=blocked, project lookup failed',
-      });
-      return;
-    }
-
-    const worktreePath = this.worktreeManager!.getPath(project.name, issue.number);
-    if (!worktreePath) {
-      const reason = `Worktree 已不存在 (project: ${project.name}, issue: #${issue.number})`;
-      this.issueRepo!.blockIssue(issue.id, reason);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.emitBlocked(issue, 'Worktree 已不存在', issue.retryCount ?? 0);
-
-      log.info('Recovered build-stage orphan — no worktree found', {
-        issueNumber: issue.number,
-        action: 'status=blocked, worktree not found',
-      });
-      return;
-    }
-
-    const changeDir = findChangeDir(worktreePath, issue.number);
-    if (!changeDir) {
-      const reason = `变更目录不存在 (issue: #${issue.number})`;
-      this.issueRepo!.blockIssue(issue.id, reason);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.emitBlocked(issue, '变更目录不存在', issue.retryCount ?? 0);
-      log.info('Recovered build-stage orphan — missing change directory', {
-        issueNumber: issue.number,
-        action: 'status=blocked, no change directory found',
-      });
-      return;
-    }
-
-    const tasksPath = path.join(changeDir, 'tasks.json');
-    if (!fs.existsSync(tasksPath)) {
-      const reason = `tasks.json 不存在 (${tasksPath})`;
-      this.issueRepo!.blockIssue(issue.id, reason);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.emitBlocked(issue, 'tasks.json 不存在', issue.retryCount ?? 0);
-
-      log.info('Recovered build-stage orphan — missing tasks.json', {
-        issueNumber: issue.number,
-        action: 'status=blocked, change directory exists but no tasks.json',
-      });
-      return;
-    }
-
-    let tasksFile: { version: number; tasks: Array<{ id: string; passes: boolean }> };
-    try {
-      const raw = fs.readFileSync(tasksPath, 'utf-8');
-      tasksFile = JSON.parse(raw);
-    } catch {
-      const reason = `tasks.json 格式损坏 (${tasksPath})`;
-      this.issueRepo!.blockIssue(issue.id, reason);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.emitBlocked(issue, 'tasks.json 格式损坏', issue.retryCount ?? 0);
-
-      log.info('Recovered build-stage orphan — malformed tasks.json', {
-        issueNumber: issue.number,
-        action: 'status=blocked, tasks.json parse failed',
-      });
-      return;
-    }
-
-    if (!tasksFile.tasks || !Array.isArray(tasksFile.tasks)) {
-      const reason = `tasks.json 缺少 tasks 数组 (${tasksPath})`;
-      this.issueRepo!.blockIssue(issue.id, reason);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.emitBlocked(issue, 'tasks.json 缺少 tasks 数组', issue.retryCount ?? 0);
-
-      log.info('Recovered build-stage orphan — malformed tasks.json', {
-        issueNumber: issue.number,
-        action: 'status=blocked, tasks.json missing tasks array',
-      });
-      return;
-    }
-
-    const allPass = tasksFile.tasks.every(t => t.passes === true);
-    if (allPass) {
-      this.issueRepo!.updateStatus(issue.id, IssueStatus.Active);
-      this.issueRepo!.updateRetryCount(issue.id, 0);
-      this.issueRepo!.updateBlockedReason(issue.id, null);
-      this.issueRepo!.clearApprovalState(issue.id);
-      this.closeActiveStageExecutions(issue, 'build all-pass recovery will resume pipeline');
-
-      try {
-        this.enqueue(issue.id, 'resume-pipeline');
-        log.info('Recovered build-stage orphan — all tasks pass, resume enqueued for verification', {
-          issueNumber: issue.number,
-          totalTasks: tasksFile.tasks.length,
-          action: 'resume-pipeline, build/check gates must run before approval',
-        });
-      } catch (enqueueErr) {
-        const failReason = `自动恢复启动失败: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)} (${tasksFile.tasks.length}/${tasksFile.tasks.length} 任务完成)`;
-        this.issueRepo!.blockIssue(issue.id, failReason);
-        this.emitBlocked(issue, failReason, issue.retryCount ?? 0);
-        log.info('Recovered build-stage orphan — all-pass resume enqueue failed', {
-          issueNumber: issue.number,
-          action: 'status=blocked, enqueue failed',
-        });
-      }
-    } else {
-      const passed = tasksFile.tasks.filter(t => t.passes === true).length;
-      const pending = tasksFile.tasks.filter(t => t.passes !== true);
-      const pendingIds = pending.map(t => t.id).join(', ');
-      const currentRetryCount = issue.retryCount ?? 0;
-      const newRetryCount = currentRetryCount + 1;
-
-      if (newRetryCount > MAX_RETRIES) {
-        const reason = `${passed}/${tasksFile.tasks.length} 任务完成，${pendingIds} 待完成 — 已自动重试 ${MAX_RETRIES} 次仍失败，需人工介入`;
-        this.issueRepo!.blockIssue(issue.id, reason);
-        this.issueRepo!.updateRetryCount(issue.id, newRetryCount);
-        this.issueRepo!.clearApprovalState(issue.id);
-        this.emitBlocked(issue, reason, newRetryCount);
-        log.info('Recovered build-stage orphan — max retries reached', {
-          issueNumber: issue.number,
-          action: `status=blocked, ${passed}/${tasksFile.tasks.length} tasks, retries exhausted`,
-        });
-      } else {
-        const reason = `${passed}/${tasksFile.tasks.length} 任务完成，${pendingIds} 待完成 — 第 ${newRetryCount}/${MAX_RETRIES} 次自动重试`;
-        this.issueRepo!.updateRetryCount(issue.id, newRetryCount);
-        this.issueRepo!.updateBlockedReason(issue.id, reason);
-        this.issueRepo!.clearApprovalState(issue.id);
-
-        try {
-          this.enqueue(issue.id, 'resume-pipeline');
-          log.info('Recovered build-stage orphan — auto-retry enqueued', {
-            issueNumber: issue.number,
-            action: `retry ${newRetryCount}/${MAX_RETRIES}, ${passed}/${tasksFile.tasks.length} tasks`,
-          });
-        } catch (enqueueErr) {
-          const failReason = `自动重试启动失败: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)} (${passed}/${tasksFile.tasks.length} 任务完成)`;
-          this.issueRepo!.blockIssue(issue.id, failReason);
-          this.emitBlocked(issue, failReason, newRetryCount);
-          log.info('Recovered build-stage orphan — auto-retry enqueue failed', {
-            issueNumber: issue.number,
-            action: 'status=blocked, enqueue failed',
-          });
-        }
-      }
-    }
-  }
-
-  private closeActiveStageExecutions(issue: Issue, reason: string): void {
-    if (!this.stageExecutionRepo) return;
-    try {
-      const closed = this.stageExecutionRepo.closeActiveByIssueId(issue.id, 'failed');
-      if (closed > 0) {
-        log.info('Closed stale active stage executions during recovery', {
-          issueNumber: issue.number,
-          closed,
-          reason,
-        });
-      }
-    } catch (err) {
-      log.warn('Failed to close stale active stage executions during recovery', {
         issueNumber: issue.number,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -1291,9 +1038,7 @@ export class AgentRunnerService {
     if (issue.status !== IssueStatus.Blocked) return false;
     if (!this.workflowRunService) return false;
     try {
-      const recovery = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).getRecoveryProjection(issue.id, {
-        tasksPath: this.getIssueTasksPath(issue),
-      });
+      const recovery = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).getRecoveryProjection(issue.id);
       return recovery?.latestAttemptState === 'interrupted' && recovery.allowedActions.includes('resume');
     } catch (error) {
       log.warn('Failed to evaluate blocked issue recovery projection', {
@@ -1308,31 +1053,19 @@ export class AgentRunnerService {
     if (issue.status !== IssueStatus.Blocked) return false;
     if (!this.workflowRunService) return false;
 
-    let tasksPath: string | undefined;
     try {
-      tasksPath = this.getIssueTasksPath(issue);
       const availability = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).checkRetryAvailability({
         issueId: issue.id,
         stage: issue.stage,
-        tasksPath,
       });
       return availability.available;
     } catch (error) {
       log.warn('Failed to evaluate blocked issue retry availability', {
         issueNumber: issue.number,
-        tasksPath,
         error: error instanceof Error ? error.message : String(error),
       });
       return false;
     }
-  }
-
-  private getIssueTasksPath(issue: Issue): string | undefined {
-    if (!this.projectRepo || !this.worktreeManager) return undefined;
-    const project = this.projectRepo.findById(issue.projectId);
-    const worktreePath = project ? this.worktreeManager.getPath(project.name, issue.number) : null;
-    const changeDir = worktreePath ? findChangeDir(worktreePath, issue.number) : null;
-    return changeDir ? path.join(changeDir, 'tasks.json') : undefined;
   }
 
   private async runPipelineToCompletion(

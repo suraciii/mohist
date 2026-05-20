@@ -1,6 +1,6 @@
 import { DatabaseManager } from '../db/database';
 import { Stage } from '../types';
-import { DEFAULT_STAGE_DEFINITIONS, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/convergence';
@@ -321,35 +321,6 @@ export function normalizeTaskStatus(raw: string): StageTaskStatus {
   }
 }
 
-interface StaticTaskDef {
-  taskId: string;
-  title: string;
-  order: number;
-}
-
-const REAL_TASK_IDS: Record<Stage, Set<string>> = {
-  [Stage.Plan]: new Set(['proposal', 'specs', 'design', 'tasks', 'self-review', 'repair-plan-artifacts', 'fix-plan-health']),
-  [Stage.Build]: new Set(['fix-build-health', 'repair-build']),
-  [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-merge', 'fix-check-health']),
-  [Stage.Integrate]: new Set(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge', 'merge-branch', 'verify-merge', 'repair-merge', 'rebase-branch', 'fix-integrate-health']),
-  [Stage.Done]: new Set([]),
-  [Stage.Backlog]: new Set([]),
-};
-
-function isRealTask(stage: Stage, taskId: string): boolean {
-  const allowed = REAL_TASK_IDS[stage];
-  if (!allowed) {
-    return taskId.startsWith('repair-') || taskId.startsWith('fix-');
-  }
-  if ([...allowed].some(baseTaskId => isTaskAttemptForBase(taskId, baseTaskId))) {
-    return true;
-  }
-  if (stage === Stage.Build && /^T-\d+$/.test(taskId)) {
-    return true;
-  }
-  return false;
-}
-
 interface TaskExplanationDef {
   title: string;
   reason?: string;
@@ -402,53 +373,35 @@ const RUNTIME_TASK_EXPLANATIONS: Record<string, TaskExplanationDef> = {
   },
 };
 
-const PLAN_TASK_DEFS: StaticTaskDef[] = [];
-
-const CHECK_TASK_DEFS: StaticTaskDef[] = [];
-
-const INTEGRATE_TASK_DEFS: StaticTaskDef[] = [
-  { taskId: 'integrate:spec-sync', title: 'Sync specs', order: 0 },
-  { taskId: 'integrate:archive-change', title: 'Archive change', order: 1 },
-  { taskId: 'integrate:merge', title: 'Merge branch', order: 2 },
-];
-
-const STATIC_TASK_DEFS: Partial<Record<Stage, StaticTaskDef[]>> = {
-  [Stage.Plan]: PLAN_TASK_DEFS,
-  [Stage.Check]: CHECK_TASK_DEFS,
-  [Stage.Integrate]: INTEGRATE_TASK_DEFS,
-};
-
 function isTaskAttemptForBase(taskId: string, baseTaskId: string): boolean {
   return taskId === baseTaskId || taskId.startsWith(`${baseTaskId}:`);
 }
 
-function stageDefinitionForStage(stage: Stage, stageDefinition?: CompiledStageDefinition): CompiledStageDefinition | undefined {
-  return stageDefinition ?? DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === stage);
-}
-
 function approvalVerdictCheckName(stageDefinition?: CompiledStageDefinition): string {
+  if (!stageDefinition) return '';
   const policies = [
-    ...(stageDefinition?.repairPolicies ?? []),
-    ...(stageDefinition?.checkFailurePolicies ?? []),
+    ...(stageDefinition.repairPolicies ?? []),
+    ...(stageDefinition.checkFailurePolicies ?? []),
   ];
-  return policies.find(policy => policy.checkName === 'review-passed')?.checkName
-    ?? policies.find(policy => policy.fixTaskId === 'fix-review-findings')?.checkName
-    ?? policies[0]?.checkName
-    ?? 'review-passed';
+  return policies[0]?.checkName ?? '';
 }
 
-function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { fixTaskId: string; maxAttempts: number } {
+function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { checkName: string; fixTaskId: string; maxAttempts: number } | null {
   const verdictCheckName = approvalVerdictCheckName(stageDefinition);
+  if (!stageDefinition || !verdictCheckName) return null;
   const policy = stageDefinition?.repairPolicies?.find(candidate => candidate.checkName === verdictCheckName)
     ?? stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === verdictCheckName);
+  if (!policy) return null;
   return {
-    fixTaskId: policy?.fixTaskId ?? 'fix-review-findings',
-    maxAttempts: policy?.maxAttempts ?? 0,
+    checkName: verdictCheckName,
+    fixTaskId: policy.fixTaskId,
+    maxAttempts: policy.maxAttempts,
   };
 }
 
 function isApprovalVerdictFixTask(taskId: string, stageDefinition?: CompiledStageDefinition): boolean {
   const repairPolicy = approvalVerdictRepairPolicy(stageDefinition);
+  if (!repairPolicy) return false;
   return isTaskAttemptForBase(taskId, repairPolicy.fixTaskId);
 }
 
@@ -477,8 +430,9 @@ function computeCheckRepairState(
   checks: StageCheckState[],
   stageDefinition?: CompiledStageDefinition,
 ): CheckRepairState | null {
-  const verdictCheckName = approvalVerdictCheckName(stageDefinition);
   const repairPolicy = approvalVerdictRepairPolicy(stageDefinition);
+  if (!repairPolicy) return null;
+  const verdictCheckName = repairPolicy.checkName;
   const fixTasks = tasks.filter(task => isApprovalVerdictFixTask(task.taskId, stageDefinition));
 
   if (fixTasks.length === 0) {
@@ -576,7 +530,17 @@ function computeConvergenceState(
   checks: StageCheckState[],
   stageDefinition?: CompiledStageDefinition,
 ): WorkflowConvergenceState | null {
-  const fixTasks = tasks.filter(task => isApprovalVerdictFixTask(task.taskId, stageDefinition));
+  const fixTasks = stageDefinition
+    ? tasks.filter(task => isApprovalVerdictFixTask(task.taskId, stageDefinition))
+    : tasks.filter(task => task.source === 'dynamic' && task.status === 'completed' && extractReactionOutput({
+      taskId: task.taskId,
+      title: task.title,
+      status: 'completed',
+      artifacts: task.artifacts,
+      attempts: task.attempts,
+      duration: task.duration,
+      output: task.output,
+    }));
 
   const failedCheck = checks.find(c => c.status === 'failed' || c.status === 'error');
 
@@ -610,7 +574,10 @@ function computeConvergenceState(
     if (structured?.repairedItemIds) {
       directlyRepairedCount += structured.repairedItemIds.length;
     }
-    if (isApprovalVerdictFixTask(task.taskId, stageDefinition) && task.status === 'completed') {
+    const isReactionTask = stageDefinition
+      ? isApprovalVerdictFixTask(task.taskId, stageDefinition)
+      : task.source === 'dynamic';
+    if (isReactionTask && task.status === 'completed') {
       const reaction = extractReactionOutput({
         taskId: task.taskId,
         title: task.title,
@@ -705,7 +672,6 @@ export class StageStateService {
            VALUES (?, ?, 'running', 0, ?, ?)`,
           [issueId, stage, now, now],
         );
-        this.seedStaticTasks(issueId, stage);
       } else {
         this.db.run(
           `UPDATE stage_states SET attempts = attempts + 1, status = 'running', started_at = ?, completed_at = NULL, updated_at = ?
@@ -714,21 +680,6 @@ export class StageStateService {
         );
       }
     });
-  }
-
-  private seedStaticTasks(issueId: string, stage: Stage): void {
-    const defs = STATIC_TASK_DEFS[stage];
-    if (!defs) return;
-
-    const now = new Date().toISOString();
-    for (const def of defs) {
-      this.db.run(
-        `INSERT OR IGNORE INTO stage_tasks
-         (issue_id, stage, task_id, title, status, source, task_order, attempts, duration, artifacts, output, started_at, completed_at, updated_at)
-         VALUES (?, ?, ?, ?, 'pending', 'static', ?, 0, 0, '[]', NULL, NULL, NULL, ?)`,
-        [issueId, stage, def.taskId, def.title, def.order, now],
-      );
-    }
   }
 
   upsertTask(issueId: string, stage: Stage, input: UpsertTaskInput): void {
@@ -856,15 +807,13 @@ export class StageStateService {
     );
 
     const allTasks = taskRows.map(rowToStageTask);
-    const filteredTasks = allTasks.filter(t => isRealTask(stage, t.taskId));
     const stageState = rowToStageStateRead(
       stateRow,
-      filteredTasks,
+      allTasks,
       checkRows.map(rowToStageCheck),
     );
 
-    const stageDefinition = stageDefinitionForStage(stage);
-    const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
+    const convergence = computeConvergenceState(allTasks, stageState.checks, undefined);
     if (convergence) {
       stageState.convergence = convergence;
     }
@@ -888,18 +837,15 @@ export class StageStateService {
         [issueId, row.stage],
       );
       const allTasks = taskRows.map(rowToStageTask);
-      const filteredTasks = allTasks.filter(t => isRealTask(row.stage as Stage, t.taskId));
       const stageState = rowToStageStateRead(
         row,
-        filteredTasks,
+        allTasks,
         checkRows.map(rowToStageCheck),
       );
 
-      const stage = row.stage as Stage;
-      const stageDefinition = stageDefinitionForStage(stage);
-      const repair = computeCheckRepairState(filteredTasks, stageState.checks, stageDefinition);
+      const repair = computeCheckRepairState(allTasks, stageState.checks, undefined);
       stageState.checkRepair = repair === null ? undefined : repair;
-      const convergence = computeConvergenceState(filteredTasks, stageState.checks, stageDefinition);
+      const convergence = computeConvergenceState(allTasks, stageState.checks, undefined);
       stageState.convergence = convergence === null ? undefined : convergence;
 
       return stageState;
