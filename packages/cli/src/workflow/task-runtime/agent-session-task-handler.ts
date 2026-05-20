@@ -93,7 +93,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         artifacts = input.artifactVerification([]);
       }
       const events = status === 'completed'
-        ? await raisedEventsForAgentTask(input, ctx, cwd, artifacts, worktreeBefore, artifactBefore)
+        ? await raisedEventsForAgentTask(input, ctx, cwd, artifacts, result.text, worktreeBefore, artifactBefore)
         : [];
 
       const structuredResult = extractReactionOutput({
@@ -129,6 +129,7 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
         title,
         status,
         artifacts,
+        events,
         attempts: attempt,
         duration,
         output: {
@@ -192,23 +193,32 @@ export const defaultAgentSessionTaskHandler = createAgentSessionTaskHandler();
 
 interface WorktreeChangeState {
   headSha: string | null;
-  clean: boolean | null;
+  signature: string | null;
 }
 
 type ArtifactChangeState = Map<string, string> | null;
 
 async function captureWorktreeChangeState(ctx: StageContext, cwd: string): Promise<WorktreeChangeState> {
-  const [headSha, clean] = await Promise.all([
+  const [headSha, signature] = await Promise.all([
     ctx.worktreeManager.getHeadSha(cwd).catch(() => null),
-    ctx.worktreeManager.isWorktreeClean(cwd).catch(() => null),
+    captureWorktreeSignature(ctx, cwd),
   ]);
-  return { headSha, clean };
+  return { headSha, signature };
 }
 
 async function didWorktreeChange(ctx: StageContext, cwd: string, before: WorktreeChangeState | null): Promise<boolean> {
   if (!before) return false;
   const after = await captureWorktreeChangeState(ctx, cwd);
-  return before.headSha !== after.headSha || before.clean !== after.clean;
+  return before.headSha !== after.headSha || before.signature !== after.signature;
+}
+
+async function captureWorktreeSignature(ctx: StageContext, cwd: string): Promise<string | null> {
+  if (ctx.worktreeManager.getWorktreeChangeSignature) {
+    return ctx.worktreeManager.getWorktreeChangeSignature(cwd).catch(() => null);
+  }
+  return ctx.worktreeManager.isWorktreeClean(cwd)
+    .then(clean => clean ? '' : 'dirty')
+    .catch(() => null);
 }
 
 async function raisedEventsForAgentTask(
@@ -216,11 +226,13 @@ async function raisedEventsForAgentTask(
   ctx: StageContext,
   cwd: string,
   artifacts: string[],
+  structuredOutput: unknown,
   worktreeBefore: WorktreeChangeState | null,
   artifactBefore: ArtifactChangeState,
 ): Promise<string[]> {
   const declared = input.emits ?? [];
   if (declared.length === 0) return [];
+  const explicitlyRaised = new Set(extractDeclaredEventsFromAgentOutput(structuredOutput, declared));
   const events: string[] = [];
   for (const eventName of declared) {
     if (eventName === 'code.changed') {
@@ -231,8 +243,54 @@ async function raisedEventsForAgentTask(
       if (artifacts.length > 0 || didPlanArtifactsChange(ctx, artifactBefore)) events.push(eventName);
       continue;
     }
+    if (explicitlyRaised.has(eventName)) {
+      events.push(eventName);
+    }
   }
   return events;
+}
+
+function extractDeclaredEventsFromAgentOutput(output: unknown, declaredEvents: string[]): string[] {
+  if (declaredEvents.length === 0 || typeof output !== 'string') return [];
+  const declared = new Set(declaredEvents);
+  const events = new Set<string>();
+  for (const eventName of extractWorkflowEventMarkers(output)) {
+    if (declared.has(eventName)) events.add(eventName);
+  }
+
+  const structured = parseJsonObject(output);
+  const values = structured ? stringArrayValue(structured.events) : [];
+  for (const eventName of values) {
+    if (declared.has(eventName)) events.add(eventName);
+  }
+  return [...events];
+}
+
+function extractWorkflowEventMarkers(output: string): string[] {
+  const events: string[] = [];
+  const regex = /<workflow-event>\s*([^<]+?)\s*<\/workflow-event>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(output)) !== null) {
+    const eventName = match[1]?.trim();
+    if (eventName) events.push(eventName);
+  }
+  return events;
+}
+
+function parseJsonObject(output: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(output);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringArrayValue(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
 }
 
 function capturePlanArtifactState(ctx: StageContext): ArtifactChangeState {

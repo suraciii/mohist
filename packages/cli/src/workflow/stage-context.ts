@@ -139,6 +139,7 @@ export interface WorktreeManager {
   mergeApprovedCandidate(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string, metadata?: MergeMetadata): Promise<{ targetBranch: string; baseSha: string; candidateHeadSha: string; landedSha: string; rebased?: boolean } | { failingStep: 'merge'; targetBranch: string; baseSha: string; candidateHeadSha: string; conflictFiles?: string[]; error: string }>;
   getHeadSha(worktreePath: string): Promise<string>;
   isWorktreeClean(worktreePath: string): Promise<boolean>;
+  getWorktreeChangeSignature?(worktreePath: string): Promise<string>;
   createCheckConvergenceCommit(worktreePath: string, issueNumber: number): Promise<import('../git/worktree-manager').ConvergenceCommitResult>;
   checkSquashMergeability(projectPath: string, projectName: string, issueNumber: number, baseBranch?: string): Promise<{ kind: 'merge-ready'; strategy: 'squash'; targetBranch: string; baseSha: string; candidateHeadSha: string; mergeBaseSha: string; canMerge: boolean; conflictFiles: string[]; checkedAt: string; error?: string }>;
 }

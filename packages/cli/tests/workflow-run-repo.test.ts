@@ -162,6 +162,56 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     });
   });
 
+  it('restores task events so retry can reapply event invalidation after reload', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_events', issueId, issueNumber });
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.approveStage(Stage.Plan, { output: { approved: true } });
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass' });
+
+    repo.saveAggregate(run, 'tester');
+    const loaded = repo.loadAggregateById(run.id)!;
+    expect(loaded.stageRun(Stage.Check).findTask('fix-review-findings')?.events).toEqual(['code.changed']);
+
+    const checkStage = loaded.stageRun(Stage.Check);
+    checkStage.findTask('ai-review').status = 'completed';
+    const staleReview = checkStage.findCheck('review-passed');
+    staleReview.status = 'failed';
+    staleReview.message = 'Review failed again from stale report';
+    checkStage.status = 'failed';
+    checkStage.failure = {
+      reason: 'check-unrepaired',
+      stage: Stage.Check,
+      checkName: 'review-passed',
+      message: 'Review failed again from stale report',
+    };
+    loaded.status = 'failed';
+    loaded.failure = checkStage.failure;
+
+    const retry = loaded.retryStage(Stage.Check);
+
+    expect(retry.events).toContainEqual({
+      type: 'task-invalidated',
+      stage: Stage.Check,
+      taskId: 'ai-review',
+      reason: 'code.changed reset checks-and-approval',
+    });
+    expect(loaded.stageRun(Stage.Check).findTask('ai-review')?.status).toBe('pending');
+  });
+
   it('saves run, stage, task, check, approval, failure, and freeze changes in one aggregate transaction', () => {
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_freeze', issueId, issueNumber });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {

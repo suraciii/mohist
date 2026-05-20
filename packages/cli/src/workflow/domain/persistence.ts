@@ -124,6 +124,7 @@ export function hydrateWorkflowRun(
       task.attempts = taskSnapshot.attempts;
       task.duration = taskSnapshot.duration;
       task.artifacts = [...taskSnapshot.artifacts];
+      task.events = [...taskSnapshot.events];
       task.output = taskSnapshot.output;
       task.reason = taskSnapshot.reason;
       task.causedBy = isCausedByMetadata(taskSnapshot.causedBy) ? { ...taskSnapshot.causedBy } : null;
