@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { IssueStatus, Stage, type WorkflowDeliveryRequirement } from '../lib/types'
+import { IssueStatus, Stage, type Issue, type WorkflowDeliveryRequirement } from '../lib/types'
 import { isCompletedWithoutLocalMergeRequirement, isFalseDoneIssue } from '../lib/delivery-requirement'
 
 interface MergeStatePanelProps {
   issueNumber: number
-  mergeState: string | null | undefined
-  stage: string
-  status: string
+  mergeState: Issue['mergeState']
+  stage: Stage
+  status: IssueStatus
   deliveryRequirement?: WorkflowDeliveryRequirement
 }
 
@@ -21,7 +21,7 @@ export function MergeStatePanel({ issueNumber, mergeState, stage, status, delive
     },
   })
 
-  const issueLifecycle = { stage: stage as Stage, status: status as IssueStatus, mergeState, deliveryRequirement }
+  const issueLifecycle = { stage, status, mergeState, deliveryRequirement }
 
   if (isFalseDoneIssue(issueLifecycle)) {
     return (
