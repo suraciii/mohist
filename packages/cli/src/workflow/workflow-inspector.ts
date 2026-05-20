@@ -4,6 +4,7 @@ import * as yaml from 'yaml';
 import { Stage } from '../types';
 import {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
+  MOHIST_DEFAULT_WORKFLOW_YAML,
   cloneWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
   parseWorkflowDefinitionSource,
@@ -66,6 +67,10 @@ export type ExplainedWorkflowItem =
   };
 
 type WorkflowOverrideDocument = Record<string, unknown>;
+
+export function getBuiltinDefaultWorkflowYaml(): string {
+  return MOHIST_DEFAULT_WORKFLOW_YAML;
+}
 
 export function resolveWorkflowDefinition(cwd: string = process.cwd()): ResolvedWorkflowDefinition {
   const overridePath = findWorkflowOverridePath(cwd);
@@ -196,7 +201,9 @@ function compileCustomTasks(
       uses: rawTask.uses,
       with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
       emits: arrayValue(rawTask.emits).filter((value): value is string => typeof value === 'string'),
-      dependsOn: arrayValue(rawTask.needs).filter((value): value is string => typeof value === 'string'),
+      dependsOn: arrayValue(rawTask.dependsOn ?? rawTask.needs).filter((value): value is string => typeof value === 'string'),
+      resultContract: isRecord(rawTask.resultContract) ? rawTask.resultContract as unknown as TaskDefinition['resultContract'] : undefined,
+      selfRepairPolicy: isRecord(rawTask.selfRepairPolicy) ? rawTask.selfRepairPolicy as unknown as TaskDefinition['selfRepairPolicy'] : undefined,
     };
     if (task.uses === 'mohist/agent' && !hasAgentPromptSource(task.with)) {
       diagnostics.push({
@@ -251,25 +258,26 @@ function compileCustomChecks(
   const checks: CheckDefinition[] = [];
   for (const [checkIndex, rawCheck] of rawChecks.entries()) {
     const checkPath = `${stagePath}.checks[${checkIndex}]`;
-    if (!isRecord(rawCheck) || typeof rawCheck.id !== 'string' || typeof rawCheck.uses !== 'string') {
-      diagnostics.push({ severity: 'error', path: checkPath, message: 'check requires id and uses' });
+    if (!isRecord(rawCheck) || typeof rawCheck.id !== 'string') {
+      diagnostics.push({ severity: 'error', path: checkPath, message: 'check requires id' });
       continue;
     }
-    if (!isWorkflowUseAllowed(rawCheck.uses, 'check')) {
+    const uses = typeof rawCheck.uses === 'string' ? rawCheck.uses : inferWorkflowCheckUse(rawCheck.id);
+    if (!isWorkflowUseAllowed(uses, 'check')) {
       diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${rawCheck.uses}' is not allowed as a check` });
       continue;
     }
-    if (rawCheck.uses === 'mohist/shell' && (!isRecord(rawCheck.with) || typeof rawCheck.with.command !== 'string')) {
+    if (uses === 'mohist/shell' && (!isRecord(rawCheck.with) || typeof rawCheck.with.command !== 'string')) {
       diagnostics.push({ severity: 'error', path: `${checkPath}.with.command`, message: `Shell check '${rawCheck.id}' requires with.command` });
     }
-    if (rawCheck.uses === 'mohist/artifact-exists' && (!isRecord(rawCheck.with) || typeof rawCheck.with.path !== 'string')) {
+    if (typeof rawCheck.uses === 'string' && uses === 'mohist/artifact-exists' && (!isRecord(rawCheck.with) || typeof rawCheck.with.path !== 'string')) {
       diagnostics.push({ severity: 'error', path: `${checkPath}.with.path`, message: `Artifact check '${rawCheck.id}' requires with.path` });
     }
     const check: CheckDefinition = {
       name: rawCheck.id,
       title: typeof rawCheck.title === 'string' ? rawCheck.title : rawCheck.id,
       source: 'project',
-      uses: rawCheck.uses,
+      uses: typeof rawCheck.uses === 'string' ? rawCheck.uses : undefined,
       with: isRecord(rawCheck.with) ? { ...rawCheck.with } : undefined,
     };
     const onFailure = compileCheckOnFailure(rawCheck.onFailure, checkPath, diagnostics);

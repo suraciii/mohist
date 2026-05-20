@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { Stage } from '../src/types';
-import { createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
-import { explainWorkflowItem, resolveWorkflowDefinition, validateWorkflowDefinition } from '../src/workflow/workflow-inspector';
+import { createWorkflowDefinitionSnapshot, MOHIST_DEFAULT_WORKFLOW_DEFINITION, type CheckFailurePolicy, type WorkflowDefinition } from '../src/workflow/domain';
+import { explainWorkflowItem, getBuiltinDefaultWorkflowYaml, resolveWorkflowDefinition, validateWorkflowDefinition } from '../src/workflow/workflow-inspector';
 
 describe('workflow inspector', () => {
   it('resolves the builtin default workflow used by runtime', () => {
@@ -18,6 +19,57 @@ describe('workflow inspector', () => {
       Stage.Check,
       Stage.Integrate,
     ]);
+  });
+
+  it('exposes a complete default workflow YAML that round-trips to the builtin definition', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-default-workflow-yaml-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    const yamlText = getBuiltinDefaultWorkflowYaml();
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), yamlText, 'utf-8');
+
+    try {
+      const parsed = yaml.parse(yamlText);
+      expect(parsed.workflow.id).toBe('mohist/default');
+      expect(parsed.workflow.stages[0].tasks.find((task: any) => task.id === 'self-review').resultContract).toEqual({
+        kind: 'promise-marker',
+        required: true,
+        outputSource: { type: 'artifact', path: 'self-review.md' },
+        allowedMarkers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+      });
+      expect(parsed.workflow.stages[2].tasks.find((task: any) => task.id === 'ai-review').selfRepairPolicy).toEqual({
+        enabled: true,
+        allowedScopes: [
+          'formatting',
+          'typos',
+          'missing-obvious-guards',
+          'small-test-expectation-updates',
+          'import-cleanup',
+          'dead-code-removal',
+        ],
+        maxAttempts: 3,
+        requiresVerification: true,
+        disallowedReasons: [
+          'product-behavior-change',
+          'public-contract-modification',
+          'data-safety-risk',
+          'security-posture-change',
+          'merge-strategy-change',
+          'architectural-judgment-required',
+          'cross-file-refactoring',
+          'ambiguous-solution',
+          'user-decision-required',
+          'out-of-current-scope',
+        ],
+      });
+
+      const resolved = resolveWorkflowDefinition(tempDir);
+      expect(validateWorkflowDefinition(resolved)).toEqual([]);
+      expect(toSemanticWorkflowDefinition(resolved.snapshot.resolvedDefinition)).toEqual(
+        toSemanticWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION),
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('validates missing task dependencies with actionable diagnostics', () => {
@@ -522,3 +574,63 @@ workflow:
     }
   });
 });
+
+function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
+  return {
+    id: definition.id,
+    name: definition.name,
+    defaults: definition.defaults,
+    stages: definition.stages.map(stage => compact({
+      stage: stage.stage,
+      tasksFrom: stage.tasksFrom,
+      approval: stage.requiresApproval,
+      approvalCheckName: stage.approvalCheckName,
+      on: stage.on,
+      tasks: stage.tasks.map(task => compact({
+        id: task.id,
+        title: task.title,
+        uses: task.uses,
+        with: task.with,
+        emits: nonEmpty(task.emits),
+        dependsOn: nonEmpty(task.dependsOn),
+        resultContract: task.resultContract,
+        selfRepairPolicy: task.selfRepairPolicy,
+      })),
+      checks: stage.checks.map(check => compact({
+        name: check.name,
+        title: check.title,
+        uses: check.uses,
+        with: check.with,
+        onFailure: toSemanticOnFailure(check.onFailure),
+      })),
+    })),
+  };
+}
+
+function toSemanticOnFailure(onFailure: CheckFailurePolicy | undefined): unknown {
+  if (!onFailure?.retry) return undefined;
+  return {
+    retry: compact({
+      limit: onFailure.retry.limit,
+      inputFrom: onFailure.retry.inputFrom,
+      task: compact({
+        id: onFailure.retry.task.id,
+        title: onFailure.retry.task.title,
+        uses: onFailure.retry.task.uses,
+        with: onFailure.retry.task.with,
+        emits: nonEmpty(onFailure.retry.task.emits),
+        dependsOn: nonEmpty(onFailure.retry.task.dependsOn),
+        resultContract: onFailure.retry.task.resultContract,
+        selfRepairPolicy: onFailure.retry.task.selfRepairPolicy,
+      }),
+    }),
+  };
+}
+
+function nonEmpty<T>(values: T[] | undefined): T[] | undefined {
+  return values && values.length > 0 ? values : undefined;
+}
+
+function compact<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
+}

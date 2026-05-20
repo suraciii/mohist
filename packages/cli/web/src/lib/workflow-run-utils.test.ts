@@ -59,12 +59,13 @@ describe('workflowRunToStageStateMap', () => {
           },
           tasks: [
             {
+              id: 'task-1',
               taskId: 'repair-quality',
               title: 'Repair quality',
               status: 'completed',
               taskOrder: 1,
               attempts: 1,
-              duration: null,
+              duration: 0,
               artifacts: [],
               output: null,
               reason: null,

@@ -1,7 +1,7 @@
 import { Stage } from '../../types';
 import { REVIEW_RESULT_CONTRACT, REVIEW_SELF_REPAIR_POLICY, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
 import type { CompiledStageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
-import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './workflow-definition-parser';
+import { parseWorkflowDefinitionSource, workflowDefinitionSourceToYaml, type WorkflowSourceDefinition } from './workflow-definition-parser';
 import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
 
 const DEFAULT_PLAN_HEALTH_COMMAND = 'npm ci && npm run typecheck';
@@ -210,6 +210,8 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = parseWorkf
   MOHIST_DEFAULT_WORKFLOW_SOURCE,
   { taskSource: 'builtin', checkSource: 'builtin' },
 );
+
+export const MOHIST_DEFAULT_WORKFLOW_YAML = workflowDefinitionSourceToYaml(MOHIST_DEFAULT_WORKFLOW_SOURCE);
 
 export const DEFAULT_STAGE_DEFINITIONS: CompiledStageDefinition[] = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
 
