@@ -256,7 +256,7 @@ export class GenericStageRunner implements StageRunner {
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
     if (!stageDefinition) return;
     const reviewTask = this.reviewProducerTask(stageDefinition);
-    const verdictCheck = this.approvalEvidenceCheck(stageDefinition, 'verdict');
+    const verdictCheck = this.repairableVerdictCheck(stageDefinition);
     if (!reviewTask || !verdictCheck) return;
 
     const fixReviewEvents = events.filter(
@@ -345,21 +345,16 @@ export class GenericStageRunner implements StageRunner {
     }
   }
 
-  private approvalEvidenceCheck(stageDefinition: CompiledStageDefinition, role: 'verdict' | 'verification' | 'candidate'): CheckDefinition | null {
-    const policy = stageDefinition.approvalEvidencePolicy;
+  private repairableVerdictCheck(stageDefinition: CompiledStageDefinition): CheckDefinition | null {
+    const policy = (stageDefinition.repairPolicies ?? stageDefinition.checkFailurePolicies ?? [])[0];
     if (!policy) return null;
-    const checkNameByRole = {
-      verdict: policy.verdictCheckName,
-      verification: policy.verificationCheckName,
-      candidate: policy.candidateCheckName,
-    };
-    return stageDefinition.checks.find(check => check.name === checkNameByRole[role]) ?? null;
+    return stageDefinition.checks.find(check => check.name === policy.checkName) ?? null;
   }
 
   private reviewProducerTask(stageDefinition: CompiledStageDefinition): TaskDefinition | null {
     const verdictRepairTaskIds = new Set(
       (stageDefinition.repairPolicies ?? [])
-        .filter(policy => this.approvalEvidenceCheck(stageDefinition, 'verdict')?.name === policy.checkName)
+        .filter(policy => this.repairableVerdictCheck(stageDefinition)?.name === policy.checkName)
         .map(policy => policy.fixTaskId),
     );
     const eventInvalidatedTaskIds = new Set(
@@ -807,7 +802,6 @@ export class GenericStageRunner implements StageRunner {
       'fix-integrate-health': 'Fix integrate health',
       'fix-review-findings': 'Fix review findings',
       'fix-merge-readiness': 'Fix merge readiness',
-      'check:converge-review-snapshot': 'Converge review snapshot',
     };
     const title = runtimeTaskTitles[taskId];
     return title ? { id: taskId, title } : null;

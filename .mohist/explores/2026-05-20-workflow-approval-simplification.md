@@ -24,10 +24,10 @@ code.changed
 ```
 
 ## 决策与结论
-- 默认 workflow 不再声明 `approvalEvidence`。
+- Workflow 定义、编译结果和运行时都不再支持 `approvalEvidence`。
 - Approval 的前提统一为当前 stage 的所有 checks passed。
 - 代码变更导致的 stale/重跑由 `on.code.changed.reset` 负责表达。
-- 历史 snapshot 中的 `approvalEvidence` 可作为兼容读取，但不再作为默认 YAML 的产品概念。
+- `verification`、`verdict`、`candidate` 不再是 Mohist workflow 的内置审批角色。
 
 ## 开放问题
 - 如果未来需要更强的 snapshot 绑定，应优先考虑 check 自己的输出约束或通用 stale/reset 语义，而不是重新引入审批专用 evidence role。

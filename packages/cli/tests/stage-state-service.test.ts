@@ -654,7 +654,7 @@ describe('StageStateService', () => {
       expect(checkState?.checkRepair?.unresolvedSummary).toBe('Primitive tool_call_update.output missing metadata');
     });
 
-    it('projects checkRepair from custom approval evidence policy outside Check', () => {
+    it('projects checkRepair from custom retry policy outside Check', () => {
       const snapshot = createWorkflowDefinitionSnapshot({
         definition: {
           id: 'custom-plan-review-state',
@@ -667,13 +667,11 @@ describe('StageStateService', () => {
                   name: 'verify-plan',
                   title: 'Verify plan',
                   uses: 'mohist/health-gate',
-                  with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } },
                 },
                 {
                   name: 'plan-verdict',
                   title: 'Plan verdict',
                   uses: 'mohist/verdict',
-                  with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
                   onFailure: {
                     retry: {
                       limit: 2,
@@ -685,7 +683,6 @@ describe('StageStateService', () => {
                   name: 'plan-candidate',
                   title: 'Plan candidate',
                   uses: 'mohist/merge-ready',
-                  with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
                 },
               ],
               requiresApproval: true,

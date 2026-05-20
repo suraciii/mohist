@@ -300,7 +300,6 @@ function compileCustomChecks(
       source: 'project',
       uses: typeof rawCheck.uses === 'string' ? rawCheck.uses : undefined,
       with: isRecord(rawCheck.with) ? { ...rawCheck.with } : undefined,
-      approvalEvidence: approvalEvidenceFromRaw(rawCheck.approvalEvidence),
     };
     const onFailure = compileCheckOnFailure(rawCheck.onFailure, checkPath, diagnostics);
     if (onFailure) check.onFailure = onFailure;
@@ -611,7 +610,6 @@ function applyStageChecks(
       source: 'project',
       uses: raw.uses,
       with: isRecord(raw.with) ? { ...raw.with } : undefined,
-      approvalEvidence: approvalEvidenceFromRaw(raw.approvalEvidence),
     });
   }
 }
@@ -630,8 +628,6 @@ function applyCheckOverride(
   check.source = 'project';
   if (typeof raw.uses === 'string') check.uses = raw.uses;
   if (isRecord(raw.with)) check.with = { ...raw.with };
-  const approvalEvidence = approvalEvidenceFromRaw(raw.approvalEvidence);
-  if (approvalEvidence) check.approvalEvidence = approvalEvidence;
   const maxAttempts = isRecord(raw.repair) ? raw.repair.maxAttempts : raw.maxAttempts;
   if (maxAttempts !== undefined) {
     if (typeof maxAttempts !== 'number') {
@@ -647,7 +643,6 @@ function applyCheckOverride(
 export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition = resolveWorkflowDefinition()): WorkflowDiagnostic[] {
   const diagnostics: WorkflowDiagnostic[] = [...resolved.diagnostics];
   const seenStages = new Set<Stage>();
-  const isFullCustomWorkflow = resolved.sourceChain[0] !== 'mohist/default';
 
   for (const [stageIndex, stage] of resolved.snapshot.compiledStageDefinitions.entries()) {
     const stagePath = `stages[${stageIndex}]`;
@@ -721,15 +716,6 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
         diagnostics.push({ severity: 'error', path: `${stagePath}.repairPolicies`, message: `Repair policy references unknown check '${repair.checkName}'` });
       }
     }
-
-    if (isFullCustomWorkflow && stage.requiresApproval && isProjectDefinedStage(stage) && hasAnyApprovalEvidence(stage) && !hasApprovalEvidenceShape(stage)) {
-      diagnostics.push({
-        severity: 'error',
-        path: stagePath,
-        message: 'Custom approval stage must declare complete approval evidence checks for verdict, verification, and candidate roles',
-        suggestion: 'Set check.approvalEvidence.role to verdict, verification, and candidate; verdict/candidate roles also need snapshotField.',
-      });
-    }
   }
 
   return diagnostics;
@@ -800,45 +786,6 @@ function inferTaskUseForStage(stage: CompiledStageDefinition, taskId: string): s
   const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
     ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
   return inferWorkflowTaskUse(taskId, policy?.kind);
-}
-
-function hasApprovalEvidenceShape(stage: CompiledStageDefinition): boolean {
-  const roles = new Set<string>();
-  for (const check of stage.checks) {
-    const evidence = approvalEvidenceForCheck(check);
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) continue;
-    const role = (evidence as Record<string, unknown>).role;
-    if (typeof role !== 'string') continue;
-    if ((role === 'verdict' || role === 'candidate') && typeof (evidence as Record<string, unknown>).snapshotField !== 'string') continue;
-    roles.add(role);
-  }
-  return roles.has('verdict') && roles.has('verification') && roles.has('candidate');
-}
-
-function hasAnyApprovalEvidence(stage: CompiledStageDefinition): boolean {
-  return stage.checks.some(check => {
-    const evidence = approvalEvidenceForCheck(check);
-    return Boolean(evidence && typeof evidence === 'object' && !Array.isArray(evidence));
-  });
-}
-
-function approvalEvidenceForCheck(check: CheckDefinition): unknown {
-  return check.approvalEvidence ?? check.with?.approvalEvidence;
-}
-
-function approvalEvidenceFromRaw(raw: unknown): CheckDefinition['approvalEvidence'] | undefined {
-  if (!isRecord(raw)) return undefined;
-  const role = raw.role;
-  if (role !== 'verdict' && role !== 'verification' && role !== 'candidate') return undefined;
-  const snapshotField = raw.snapshotField;
-  return {
-    role,
-    ...(typeof snapshotField === 'string' && snapshotField.length > 0 ? { snapshotField } : {}),
-  };
-}
-
-function isProjectDefinedStage(stage: CompiledStageDefinition): boolean {
-  return stage.tasks.some(task => task.source === 'project') || stage.checks.some(check => check.source === 'project');
 }
 
 function hasAgentPromptSource(withConfig: Record<string, unknown> | undefined): boolean {

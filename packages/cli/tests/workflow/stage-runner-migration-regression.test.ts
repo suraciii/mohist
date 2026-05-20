@@ -18,6 +18,19 @@ import { EventBus } from '../../src/services/event-bus';
 import { WorkflowRun } from '../../src/workflow/domain';
 import * as RalphExecutor from '../../src/openspec/ralph-executor';
 
+function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
+  return {
+    kind: 'merge-ready',
+    targetBranch: 'master',
+    strategy: 'squash',
+    baseSha: 'base-sha',
+    candidateHeadSha,
+    mergeBaseSha: 'base-sha',
+    canMerge: true,
+    conflictFiles: [],
+  };
+}
+
 function makeMockContext(stage: Stage = Stage.Integrate, overrides?: Partial<StageContext>): StageContext {
   const eventBus = new EventBus();
   const emitSpy = vi.fn();
@@ -216,7 +229,6 @@ function createStageDefinition(stage: Stage): StageDefinition {
         {
           name: 'health:check',
           title: 'Check health gate',
-          with: { approvalEvidence: { role: 'verification', snapshotField: 'candidateHeadSha' } },
           onFailure: {
             retry: {
               limit: 1,
@@ -227,7 +239,6 @@ function createStageDefinition(stage: Stage): StageDefinition {
         {
           name: 'review-passed',
           title: 'Review passed',
-          with: { approvalEvidence: { role: 'verdict', snapshotField: 'snapshotSha' } },
           onFailure: {
             retry: {
               limit: 1,
@@ -244,7 +255,6 @@ function createStageDefinition(stage: Stage): StageDefinition {
         {
           name: 'merge-ready',
           title: 'Merge ready',
-          with: { approvalEvidence: { role: 'candidate', snapshotField: 'candidateHeadSha' } },
           onFailure: {
             retry: {
               limit: 1,
@@ -262,7 +272,6 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { taskId: 'fix-review-findings', kind: 'agent-session', workSourceKind: 'runtime' },
         { taskId: 'fix-merge-readiness', kind: 'rebase-task', workSourceKind: 'runtime' },
         { taskId: 'rebase-branch', kind: 'agent-session', workSourceKind: 'runtime' },
-        { taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' },
       ],
       checkPolicies: [
         { checkName: 'health:check', phase: 'post-task' },
@@ -270,13 +279,6 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { checkName: 'merge-ready', phase: 'post-task' },
       ],
       approvalPolicy: { checkName: 'user-approval' },
-      approvalEvidencePolicy: {
-        verdictCheckName: 'review-passed',
-        verificationCheckName: 'health:check',
-        candidateCheckName: 'merge-ready',
-        convergenceTaskId: 'check:converge-review-snapshot',
-        convergenceTaskTitle: 'Converge review snapshot',
-      },
       repairPolicies: [
         { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
         { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
@@ -2359,7 +2361,7 @@ describe('StageRunner migration regression coverage', () => {
       expect(checkStage.approval).toBeNull();
     });
 
-    it('convergence commit invalidates stale health and merge-ready evidence before approval', () => {
+    it('does not schedule review snapshot convergence before approval', () => {
       const run = WorkflowRun.startWorkflow({
         id: 'run-1',
         issueId: 'issue-1',
@@ -2398,20 +2400,19 @@ describe('StageRunner migration regression coverage', () => {
       });
 
       const checkStage = run.stageRun(Stage.Check);
-      const convergenceTask = checkStage.findTask('check:converge-review-snapshot');
-      expect(convergenceTask.status).toBe('pending');
+      expect(checkStage.tasks.some(task => task.id === 'check:converge-review-snapshot')).toBe(false);
 
-      const decision = run.completeTask(Stage.Check, 'check:converge-review-snapshot', {
-        status: 'completed',
-        output: { snapshotSha: 'new-head' },
+      const decision = run.recordCheckResult(Stage.Check, {
+        name: 'merge-ready',
+        status: 'pass',
+        output: mergeReadyOutput('old-head'),
       });
 
-      expect(checkStage.findCheck('health:check').status).toBe('pending');
-      expect(checkStage.findCheck('merge-ready').status).toBe('pending');
-      expect(checkStage.approval).toBeNull();
-      expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'health:check' });
-      expect(decision.events.filter((event: any) => event.type === 'check-invalidated').map((event: any) => event.checkName))
-        .toEqual(expect.arrayContaining(['health:check']));
+      expect(checkStage.findCheck('health:check').status).toBe('passed');
+      expect(checkStage.findCheck('merge-ready').status).toBe('passed');
+      expect(checkStage.approval?.status).toBe('awaiting');
+      expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
+      expect(decision.events.some((event: any) => event.type === 'check-invalidated')).toBe(false);
     });
 
     it('generic fix-review-findings invalidates persisted review artifact only after WorkflowRun accepts invalidation', async () => {
@@ -2466,17 +2467,10 @@ describe('StageRunner migration regression coverage', () => {
         ...createStageDefinition(Stage.Check),
         tasks: [{ id: 'custom-review', title: 'Custom review', uses: 'mohist/agent' }],
         checks: [
-          { name: 'verify-custom', title: 'Verify custom', with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } } },
-          { name: 'custom-verdict', title: 'Custom verdict', with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } } },
-          { name: 'custom-candidate', title: 'Custom candidate', with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } } },
+          { name: 'verify-custom', title: 'Verify custom' },
+          { name: 'custom-verdict', title: 'Custom verdict' },
+          { name: 'custom-candidate', title: 'Custom candidate' },
         ],
-        approvalEvidencePolicy: {
-          verificationCheckName: 'verify-custom',
-          verdictCheckName: 'custom-verdict',
-          candidateCheckName: 'custom-candidate',
-          convergenceTaskId: 'check:converge-review-snapshot',
-          convergenceTaskTitle: 'Converge review snapshot',
-        },
         repairPolicies: [{ checkName: 'custom-verdict', fixTaskId: 'fix-custom-review', fixTaskTitle: 'Fix custom review', maxAttempts: 1 }],
         invalidationPolicy: {
           entries: [

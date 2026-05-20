@@ -371,13 +371,8 @@ workflow:
       checks:
         - id: health:check
           uses: mohist/health-gate
-          approvalEvidence:
-            role: verification
         - id: review-passed
           uses: mohist/verdict
-          approvalEvidence:
-            role: verdict
-            snapshotField: snapshotSha
           onFailure:
             retry:
               limit: 2
@@ -392,9 +387,6 @@ workflow:
                       Fix findings in {{ openspec.changeDir }}/review.md
         - id: merge-ready
           uses: mohist/merge-ready
-          approvalEvidence:
-            role: candidate
-            snapshotField: candidateHeadSha
 `, 'utf-8');
 
     try {
@@ -590,7 +582,6 @@ function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
         title: check.title,
         uses: check.uses,
         with: check.with,
-        approvalEvidence: check.approvalEvidence,
         onFailure: toSemanticOnFailure(check.onFailure),
       })),
     })),

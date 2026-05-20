@@ -352,7 +352,7 @@ describe('WorkflowApplicationService', () => {
     expect(result.decision.nextWork.kind).toBe('failed');
   });
 
-  it('schedules approval verdict repair from the stage definition instead of Check defaults', () => {
+  it('schedules approval repair from the stage retry policy instead of Check defaults', () => {
     const workflowDefinitionSnapshot = createWorkflowDefinitionSnapshot({
       definition: parseWorkflowDefinitionSource({
         id: 'custom/approval-repair',
@@ -365,7 +365,6 @@ describe('WorkflowApplicationService', () => {
                 id: 'quality-approved',
                 title: 'Quality approved',
                 uses: 'mohist/verdict',
-                with: { approvalEvidence: { role: 'verdict' } },
                 onFailure: {
                   retry: {
                     limit: 2,
@@ -377,13 +376,11 @@ describe('WorkflowApplicationService', () => {
                 id: 'quality-verification',
                 title: 'Quality verification',
                 uses: 'mohist/health-gate',
-                with: { approvalEvidence: { role: 'verification' } },
               },
               {
                 id: 'quality-candidate',
                 title: 'Quality candidate',
                 uses: 'mohist/merge-ready',
-                with: { approvalEvidence: { role: 'candidate' } },
               },
             ],
             approval: true,

@@ -462,15 +462,6 @@ export class WorkflowApplicationService {
     return this.scheduleRebaseTask({ issueId: input.issueId, reason, tasksPath: input.tasksPath, sessionId: input.sessionId, startedBy: input.startedBy });
   }
 
-  markStaleEvidence(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    return this.updateActiveRun(input.issueId, input, run => {
-      const stageRun = run.stageRun(input.stage);
-      stageRun.markStaleEvidence();
-      const events: import('../workflow/domain').WorkflowEvent[] = [{ type: 'evidence-stale-marked', stage: input.stage, reason: 'Base drift invalidated evidence' }];
-      return { events, nextWork: run.nextWork() };
-    });
-  }
-
   scheduleApprovalVerdictRepair(input: { issueId: string; stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
     const run = this.repo.loadActiveAggregate(input.issueId, { tasksPath: input.tasksPath });
     if (!run) {
@@ -502,10 +493,14 @@ export class WorkflowApplicationService {
 
   private doScheduleApprovalVerdictRepair(run: WorkflowRun, input: { stage: Stage } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision; repairTaskId: string | null; repairStatus: CheckRepairScheduleStatus } {
     const stageRun = run.stageRun(input.stage);
-    const configuredVerdictCheckName = stageRun.definition.approvalEvidencePolicy?.verdictCheckName;
-    const policy = configuredVerdictCheckName
-      ? stageRun.definition.checkFailurePolicies?.find(p => p.checkName === configuredVerdictCheckName)
-      : null;
+    const policy = stageRun.definition.checkFailurePolicies?.find(candidate =>
+      stageRun.checks.some(check => check.name === candidate.checkName && check.status === 'failed'),
+    ) ?? stageRun.definition.checkFailurePolicies?.find(candidate =>
+      stageRun.tasks.some(task =>
+        (task.id === candidate.fixTaskId || task.id.startsWith(`${candidate.fixTaskId}:`)) &&
+        (task.status === 'pending' || task.status === 'running'),
+      ),
+    ) ?? stageRun.definition.checkFailurePolicies?.[0];
     if (!policy) {
       return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'not-check-stage' };
     }

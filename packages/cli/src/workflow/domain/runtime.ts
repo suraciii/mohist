@@ -7,7 +7,6 @@ import type {
   ApprovalInput,
   ApprovalSnapshot,
   CausedByMetadata,
-  CheckDefinition,
   CheckFailurePolicy,
   CheckPhase,
   CheckPolicy,
@@ -26,7 +25,6 @@ import type {
   TaskResultInput,
   TaskRunSnapshot,
   TaskRunStatus,
-  VerificationEvidence,
   WorkItemAttempt,
   WorkSourceState,
   WorkflowDecision,
@@ -550,8 +548,7 @@ export class StageRun {
     for (let index = this.tasks.length - 1; index >= 0; index--) {
       const task = this.tasks[index];
       const isRepairTask = [...repairTaskIds].some(fixTaskId => task.id === fixTaskId || task.id.startsWith(`${fixTaskId}:`));
-      const convergenceTaskId = this.definition.approvalEvidencePolicy?.convergenceTaskId;
-      const isRuntimeTask = task.causedBy !== null || task.id === 'rebase-branch' || (Boolean(convergenceTaskId) && task.id === convergenceTaskId);
+      const isRuntimeTask = task.causedBy !== null || task.id === 'rebase-branch';
       if (isRepairTask || isRuntimeTask) {
         this.tasks.splice(index, 1);
       }
@@ -624,21 +621,14 @@ export class StageRun {
     return check;
   }
 
-  requestApproval(now: string, output: unknown = null, verificationEvidence: VerificationEvidence | null = null): void {
+  requestApproval(now: string, output: unknown = null): void {
     this.status = 'awaiting-approval';
     this.approval = {
       status: 'awaiting',
       output,
-      verificationEvidence,
       requestedAt: now,
       respondedAt: null,
     };
-  }
-
-  markStaleEvidence(): void {
-    if (this.approval) {
-      this.approval.staleEvidenceDetected = true;
-    }
   }
 
   snapshot(): StageRunSnapshot {
@@ -850,9 +840,6 @@ export class WorkflowRun {
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
     const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, effectiveResult);
     events.push(...invalidationEvents);
-    if (taskId === stageRun.definition.approvalEvidencePolicy?.convergenceTaskId && effectiveResult.status === 'completed') {
-      events.push(...this.invalidateStaleCheckEvidenceAfterConvergence(stageRun, effectiveResult));
-    }
     if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
     return this.maybeCompleteStage(stageRun, events);
   }
@@ -873,7 +860,7 @@ export class WorkflowRun {
       throw new WorkflowDomainError(`Check ${result.name} cannot run before earlier checks pass`);
     }
 
-    const normalizedOutput = this.normalizeCheckOutput(stageRun, result) ?? null;
+    const normalizedOutput = result.output ?? null;
     const evidenceFailure = result.status === 'pass'
       ? this.workflowUseEvidenceFailure(this.checkUse(stageRun, result.name), normalizedOutput)
       : null;
@@ -903,22 +890,6 @@ export class WorkflowRun {
     }
 
     const events: WorkflowEvent[] = [{ type: 'check-recorded', stage, checkName: check.name, status: check.status }];
-    if (!evidenceFailure && this.needsCheckConvergenceTask(stageRun, result)) {
-      const causedBy: CausedByMetadata = {
-        type: 'system-policy',
-        checkName: result.name,
-        message: 'Converge review snapshot before approval',
-      };
-      const evidencePolicy = stageRun.definition.approvalEvidencePolicy;
-      const task = stageRun.appendAdHocTask(
-        evidencePolicy?.convergenceTaskId ?? 'check:converge-review-snapshot',
-        evidencePolicy?.convergenceTaskTitle ?? 'Converge review snapshot',
-        causedBy,
-      );
-      check.status = 'pending';
-      events.push({ type: 'fix-task-scheduled', stage, taskId: task.id, causedBy });
-      return this.decision(events);
-    }
     if (effectiveStatus === 'pending' || effectiveStatus === 'pass') {
       if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
       return this.maybeCompleteStage(stageRun, events);
@@ -964,10 +935,7 @@ export class WorkflowRun {
     if (stageRun.status !== 'awaiting-approval' || !stageRun.approval) {
       throw new WorkflowDomainError(`Stage ${stage} is not awaiting approval`);
     }
-    if (stageRun.approval.staleEvidenceDetected) {
-      throw new WorkflowDomainError(`Approval cannot be submitted: evidence is stale due to base drift or rebase. Please rebase or rerun checks before approving.`);
-    }
-    const guard = this.evaluateStageCompletionGuard(stageRun, { includeApprovalEvidence: false });
+    const guard = this.evaluateStageCompletionGuard(stageRun, { includeApproval: false });
     if (!guard.complete) {
       return { events: [], nextWork: { kind: 'blocked', stage, reason: guard } };
     }
@@ -1363,12 +1331,11 @@ export class WorkflowRun {
   }
 
   private maybeCompleteStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
-    const guard = this.evaluateStageCompletionGuard(stageRun, { includeApprovalEvidence: false });
+    const guard = this.evaluateStageCompletionGuard(stageRun, { includeApproval: false });
     if (!guard.complete) return this.decision(events);
     if (stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
       if (!stageRun.approval) {
-        const verificationEvidence = this.extractVerificationEvidence(stageRun);
-        stageRun.requestApproval(new Date().toISOString(), this.buildApprovalOutput(stageRun, verificationEvidence), verificationEvidence);
+        stageRun.requestApproval(new Date().toISOString(), this.buildApprovalOutput(stageRun));
         events.push({ type: 'approval-requested', stage: stageRun.stage });
       } else if (stageRun.approval.status === 'awaiting') {
         stageRun.status = 'awaiting-approval';
@@ -1390,7 +1357,7 @@ export class WorkflowRun {
 
   private evaluateStageCompletionGuard(
     stageRun: StageRun,
-    options: { includeApprovalEvidence?: boolean } = {},
+    options: { includeApproval?: boolean } = {},
   ): StageCompletionGuard {
     for (const taskDef of stageRun.definition.tasks) {
       const taskRun = stageRun.tasks.find(t => t.id === taskDef.id);
@@ -1414,7 +1381,7 @@ export class WorkflowRun {
       if (!taskRun.terminal) return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
     }
 
-    if ((options.includeApprovalEvidence ?? true) && stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
+    if ((options.includeApproval ?? true) && stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
       return { complete: false, reason: 'approval-required', stage: stageRun.stage };
     }
 
@@ -1517,160 +1484,20 @@ export class WorkflowRun {
     return { events, nextWork: this.nextWork() };
   }
 
-  private buildApprovalOutput(stageRun: StageRun, verificationEvidence: VerificationEvidence | null): unknown {
+  private buildApprovalOutput(stageRun: StageRun): unknown {
     const approvalCheckName = stageRun.definition.approvalPolicy?.checkName ?? stageRun.definition.approvalCheckName;
     if (!approvalCheckName) return null;
 
-    if (stageRun.stage === Stage.Plan) {
-      const selfReview = stageRun.checks.find(check => check.name === 'self-review-passed');
-      if (selfReview?.status !== 'passed') return null;
-      if (!selfReview.output || typeof selfReview.output !== 'object') return null;
-      const selfReviewOutput = selfReview.output as Record<string, unknown>;
-      return {
-        result: selfReviewOutput.verdict,
-        selfReviewNotes: selfReviewOutput.selfReviewNotes,
-        dimensions: selfReviewOutput.dimensions,
-      };
-    }
-
-    const evidence = this.approvalEvidence(stageRun);
-    if (!evidence) return this.buildGenericApprovalOutput(stageRun, verificationEvidence);
-    if (evidence.verdict.check.status !== 'passed' || evidence.candidate.check.status !== 'passed') return null;
-    if (!evidence.verdict.check.output || typeof evidence.verdict.check.output !== 'object') return null;
-    if (!evidence.candidate.check.output || typeof evidence.candidate.check.output !== 'object') return null;
-    const reviewOutput = evidence.verdict.check.output as Record<string, unknown>;
-    const mergeReadySnapshot = evidence.candidate.check.output as Record<string, unknown>;
-    const snapshotSha = this.approvalEvidenceSnapshot(evidence.verdict.definition, evidence.verdict.check.output);
-    if (!snapshotSha) return null;
-
-    if (evidence.verification.check.status !== 'passed') {
-      return {
-        error: `Cannot request approval: ${evidence.verification.check.name} has not passed`,
-      };
-    }
-    const verificationOutput = evidence.verification.check.output as Record<string, unknown> | undefined;
-    if (verificationOutput?.enabled === false) {
-      return { error: `Cannot request approval: ${evidence.verification.check.name} is disabled by policy and cannot serve as approval evidence` };
-    }
-
-    return {
-      result: reviewOutput.verdict,
-      reviewReport: reviewOutput.reviewReport,
-      dimensions: reviewOutput.dimensions,
-      snapshotSha,
-      mergeReadySnapshot,
-      verificationEvidence,
-    };
-  }
-
-  private extractVerificationEvidence(stageRun: StageRun): VerificationEvidence | null {
-    const evidence = this.approvalEvidence(stageRun);
-    const verification = evidence?.verification.check;
-    if (!verification || verification.status !== 'passed' || !verification.output) return null;
-    const output = verification.output as Record<string, unknown>;
-    return {
-      checkName: verification.name,
-      status: verification.status === 'passed' ? 'pass' : verification.status === 'failed' ? 'fail' : verification.status,
-      command: (output.command as string) ?? '',
-      duration: (output.duration as number) ?? 0,
-      summary: (output.summary as string) ?? (output.message as string) ?? '',
-      logExcerpt: (output.logExcerpt as string) ?? '',
-      checkedAt: verification.runCount > 0 ? new Date().toISOString() : '',
-      candidateHeadSha: (output.candidateHeadSha as string) ?? undefined,
-      baseSha: (output.baseSha as string) ?? undefined,
-    };
-  }
-
-  private buildGenericApprovalOutput(stageRun: StageRun, verificationEvidence: VerificationEvidence | null): unknown {
     const passedChecks = stageRun.checks
       .filter(check => check.status === 'passed')
-      .map(check => check.name);
+      .map(check => ({
+        name: check.name,
+        output: check.output,
+      }));
     return {
       result: 'PASS',
       checks: passedChecks,
-      verificationEvidence,
     };
-  }
-
-  private normalizeCheckOutput(stageRun: StageRun, result: CheckResultInput): unknown {
-    const evidence = this.approvalEvidence(stageRun);
-    if (!evidence || result.name !== evidence.verdict.definition.name || result.status !== 'pass') return result.output;
-    if (!result.output || typeof result.output !== 'object') return result.output;
-    if (this.approvalEvidenceSnapshot(evidence.verdict.definition, result.output)) return result.output;
-    const convergenceTaskId = stageRun.definition.approvalEvidencePolicy?.convergenceTaskId ?? 'check:converge-review-snapshot';
-    const convergenceTask = stageRun.tasks.find(task => task.id === convergenceTaskId);
-    const convergenceOutput = convergenceTask?.output as { snapshotSha?: unknown } | null;
-    if (typeof convergenceOutput?.snapshotSha !== 'string' || convergenceOutput.snapshotSha.length === 0) return result.output;
-    const snapshotField = this.approvalEvidenceSnapshotField(evidence.verdict.definition);
-    if (!snapshotField) return result.output;
-    return { ...(result.output as Record<string, unknown>), [snapshotField]: convergenceOutput.snapshotSha };
-  }
-
-  private needsCheckConvergenceTask(stageRun: StageRun, result: CheckResultInput): boolean {
-    const evidence = this.approvalEvidence(stageRun);
-    if (!evidence || result.name !== evidence.verdict.definition.name || result.status !== 'pass') return false;
-    if (!result.output || typeof result.output !== 'object') return false;
-    if (this.approvalEvidenceSnapshot(evidence.verdict.definition, result.output)) return false;
-    const convergenceTaskId = stageRun.definition.approvalEvidencePolicy?.convergenceTaskId ?? 'check:converge-review-snapshot';
-    return !stageRun.tasks.some(task => task.id === convergenceTaskId);
-  }
-
-  private invalidateStaleCheckEvidenceAfterConvergence(stageRun: StageRun, result: TaskResultInput): WorkflowEvent[] {
-    const data = this.unwrapTaskOutput(result.output);
-    const snapshotSha = typeof data?.snapshotSha === 'string' ? data.snapshotSha : null;
-    if (!snapshotSha) return [];
-
-    const events: WorkflowEvent[] = [];
-    const evidence = this.approvalEvidence(stageRun);
-    const checks = evidence ? [evidence.verification, evidence.candidate] : [];
-    for (const { definition, check } of checks) {
-      if (check.status === 'pending') continue;
-      const checkSnapshot = this.approvalEvidenceSnapshot(definition, check.output);
-      if (checkSnapshot === snapshotSha) continue;
-      stageRun.resetCheck(check.name);
-      events.push({
-        type: 'check-invalidated',
-        stage: stageRun.stage,
-        checkName: check.name,
-        reason: 'Review convergence changed candidate snapshot; re-run verification evidence',
-      });
-    }
-    return events;
-  }
-
-  private approvalEvidence(stageRun: StageRun): {
-    verdict: { definition: CheckDefinition; check: CheckState };
-    verification: { definition: CheckDefinition; check: CheckState };
-    candidate: { definition: CheckDefinition; check: CheckState };
-  } | null {
-    const policy = stageRun.definition.approvalEvidencePolicy;
-    if (!policy) return null;
-    const verdict = this.approvalEvidenceCheck(stageRun, policy.verdictCheckName);
-    const verification = this.approvalEvidenceCheck(stageRun, policy.verificationCheckName);
-    const candidate = this.approvalEvidenceCheck(stageRun, policy.candidateCheckName);
-    if (!verdict || !verification || !candidate) return null;
-    return { verdict, verification, candidate };
-  }
-
-  private approvalEvidenceCheck(stageRun: StageRun, checkName: string): { definition: CheckDefinition; check: CheckState } | null {
-    const definition = stageRun.definition.checks.find(check => check.name === checkName);
-    if (!definition) return null;
-    return { definition, check: stageRun.findCheck(definition.name) };
-  }
-
-  private approvalEvidenceSnapshot(definition: CheckDefinition, output: unknown): string | null {
-    const snapshotField = this.approvalEvidenceSnapshotField(definition);
-    if (!snapshotField) return null;
-    const data = this.unwrapTaskOutput(output);
-    const value = data?.[snapshotField];
-    return typeof value === 'string' && value.length > 0 ? value : null;
-  }
-
-  private approvalEvidenceSnapshotField(definition: CheckDefinition): string | null {
-    const evidence = definition.approvalEvidence ?? definition.with?.approvalEvidence;
-    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-    const snapshotField = (evidence as Record<string, unknown>).snapshotField;
-    return typeof snapshotField === 'string' && snapshotField.length > 0 ? snapshotField : null;
   }
 
   private toCheckStatus(status: CheckResultInput['status']): CheckRunStatus {

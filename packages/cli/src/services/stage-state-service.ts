@@ -56,7 +56,6 @@ export interface StageApprovalState {
   output: unknown;
   requestedAt: string | null;
   respondedAt: string | null;
-  staleEvidenceDetected?: boolean;
 }
 
 export interface StageFailureDetails {
@@ -357,7 +356,6 @@ export interface SetApprovalInput {
   output?: unknown;
   requestedAt?: string | null;
   respondedAt?: string | null;
-  staleEvidenceDetected?: boolean;
 }
 
 export function normalizeCheckStatus(raw: string): StageCheckStatus {
@@ -502,7 +500,14 @@ function stageDefinitionForStage(stage: Stage, stageDefinition?: CompiledStageDe
 }
 
 function approvalVerdictCheckName(stageDefinition?: CompiledStageDefinition): string {
-  return stageDefinition?.approvalEvidencePolicy?.verdictCheckName ?? 'review-passed';
+  const policies = [
+    ...(stageDefinition?.repairPolicies ?? []),
+    ...(stageDefinition?.checkFailurePolicies ?? []),
+  ];
+  return policies.find(policy => policy.checkName === 'review-passed')?.checkName
+    ?? policies.find(policy => policy.fixTaskId === 'fix-review-findings')?.checkName
+    ?? policies[0]?.checkName
+    ?? 'review-passed';
 }
 
 function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { fixTaskId: string; maxAttempts: number } {
@@ -1019,7 +1024,6 @@ export class StageStateService {
           output: stageRun.approvalOutput,
           requestedAt: stageRun.approvalRequestedAt,
           respondedAt: stageRun.approvalRespondedAt,
-          staleEvidenceDetected: stageRun.staleEvidenceDetected ?? false,
         };
       }
 
