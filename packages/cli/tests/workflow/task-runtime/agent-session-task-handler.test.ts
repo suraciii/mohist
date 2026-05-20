@@ -187,6 +187,77 @@ describe('AgentSessionTaskHandler', () => {
     expect(verifyArtifacts).toHaveBeenCalled();
   });
 
+  it('returns code.changed when declared and the worktree signature changes', async () => {
+    executeMock.mockResolvedValue({
+      success: true,
+      text: 'done',
+      acpSessionId: 'ses-code-changed',
+    });
+    const ctx = makeContext();
+    ctx.worktreeManager = {
+      getHeadSha: vi.fn().mockResolvedValue('same-head'),
+      isWorktreeClean: vi.fn().mockResolvedValue(false),
+      getWorktreeChangeSignature: vi.fn()
+        .mockResolvedValueOnce(' M existing.ts')
+        .mockResolvedValueOnce(' M existing.ts\n M new-change.ts'),
+    } as any;
+
+    const handler = createAgentSessionTaskHandler();
+    const result = await handler({
+      taskId: 'fix-review-findings',
+      title: 'Fix review findings',
+      prompt: 'Fix review findings',
+      cwd: '/tmp/worktree',
+      stage: 'check',
+      attempt: 1,
+      emits: ['code.changed'],
+    }, ctx);
+
+    expect(result.events).toEqual(['code.changed']);
+  });
+
+  it('returns declared custom events from explicit workflow event markers', async () => {
+    executeMock.mockResolvedValue({
+      success: true,
+      text: '<workflow-event>docs.updated</workflow-event>\n<workflow-event>unknown.event</workflow-event>',
+      acpSessionId: 'ses-custom-event',
+    });
+
+    const handler = createAgentSessionTaskHandler();
+    const result = await handler({
+      taskId: 'docs-task',
+      title: 'Docs task',
+      prompt: 'Update docs',
+      cwd: '/tmp/worktree',
+      stage: 'build',
+      attempt: 1,
+      emits: ['docs.updated'],
+    }, makeContext());
+
+    expect(result.events).toEqual(['docs.updated']);
+  });
+
+  it('returns declared custom events from JSON output events', async () => {
+    executeMock.mockResolvedValue({
+      success: true,
+      text: JSON.stringify({ events: ['docs.updated', 'unknown.event'] }),
+      acpSessionId: 'ses-json-event',
+    });
+
+    const handler = createAgentSessionTaskHandler();
+    const result = await handler({
+      taskId: 'docs-task',
+      title: 'Docs task',
+      prompt: 'Update docs',
+      cwd: '/tmp/worktree',
+      stage: 'build',
+      attempt: 1,
+      emits: ['docs.updated'],
+    }, makeContext());
+
+    expect(result.events).toEqual(['docs.updated']);
+  });
+
   it('continues the same agent session when a required marker is missing', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-required-marker-'));
     const markerPath = path.join(tempDir, 'self-review.md');

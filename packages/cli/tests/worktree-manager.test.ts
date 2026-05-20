@@ -139,6 +139,39 @@ describe('WorktreeManager', () => {
     return path.join(tmpDir, '.mohist', 'projects', PROJECT_NAME, 'worktrees', `issue-${issueNumber}`);
   }
 
+  it('builds a change signature from status, diffs, and untracked file signatures', async () => {
+    const wm = new WorktreeManager();
+    const untrackedPath = path.join(tmpDir, 'new-file.txt');
+    fs.writeFileSync(untrackedPath, 'new content', 'utf-8');
+    execFileMock.mockImplementation((_cmd, args, _opts, cb) => {
+      const gitArgs = args as string[];
+      if (gitArgs[0] === 'status') {
+        cb?.(null, mockStdout(' M src/existing.ts\n?? new-file.txt'), '');
+        return;
+      }
+      if (gitArgs[0] === 'diff' && !gitArgs.includes('--cached')) {
+        cb?.(null, mockStdout('unstaged diff'), '');
+        return;
+      }
+      if (gitArgs[0] === 'diff' && gitArgs.includes('--cached')) {
+        cb?.(null, mockStdout('staged diff'), '');
+        return;
+      }
+      if (gitArgs[0] === 'ls-files') {
+        cb?.(null, mockStdout('new-file.txt\0'), '');
+        return;
+      }
+      cb?.(new Error(`unexpected git call ${gitArgs.join(' ')}`) as any, '', '');
+    });
+
+    const signature = await wm.getWorktreeChangeSignature(tmpDir);
+
+    expect(signature).toContain('M src/existing.ts');
+    expect(signature).toContain('unstaged diff');
+    expect(signature).toContain('staged diff');
+    expect(signature).toContain('new-file.txt:');
+  });
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wtm-test-'));
     fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });

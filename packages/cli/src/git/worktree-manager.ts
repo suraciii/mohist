@@ -38,6 +38,23 @@ function parseStatusLines(stdout: string): string[] {
   return stdout.trim().split('\n').map(l => l.trim()).filter(Boolean);
 }
 
+function untrackedSignature(worktreePath: string, nulSeparatedFiles: string): string {
+  return nulSeparatedFiles
+    .split('\0')
+    .filter(Boolean)
+    .sort()
+    .map(file => {
+      const fullPath = path.join(worktreePath, file);
+      try {
+        const stat = fs.statSync(fullPath);
+        return `${file}:${stat.size}:${stat.mtimeMs}`;
+      } catch {
+        return `${file}:missing`;
+      }
+    })
+    .join('\n');
+}
+
 function getWorktreeBaseDir(projectName: string): string {
   const home = process.env.HOME || '';
   const slug = slugify(projectName);
@@ -1214,6 +1231,21 @@ export class WorktreeManager {
       { cwd: worktreePath },
     );
     return !stdout.trim();
+  }
+
+  async getWorktreeChangeSignature(worktreePath: string): Promise<string> {
+    const [status, unstagedDiff, stagedDiff, untrackedFiles] = await Promise.all([
+      execFileAsync('git', ['status', '--porcelain', '--ignore-submodules'], { cwd: worktreePath }).then(result => result.stdout.trim()),
+      execFileAsync('git', ['diff', '--no-ext-diff', '--ignore-submodules'], { cwd: worktreePath }).then(result => result.stdout),
+      execFileAsync('git', ['diff', '--cached', '--no-ext-diff', '--ignore-submodules'], { cwd: worktreePath }).then(result => result.stdout),
+      execFileAsync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: worktreePath }).then(result => result.stdout),
+    ]);
+    return [
+      status,
+      unstagedDiff,
+      stagedDiff,
+      untrackedSignature(worktreePath, untrackedFiles),
+    ].join('\n---mohist-worktree-signature---\n');
   }
 
   async createCheckConvergenceCommit(worktreePath: string, issueNumber: number): Promise<ConvergenceCommitResult> {
