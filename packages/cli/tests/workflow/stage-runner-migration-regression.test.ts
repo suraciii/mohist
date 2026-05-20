@@ -2449,6 +2449,80 @@ describe('StageRunner migration regression coverage', () => {
       expect(checkpointDeletes).toEqual([{ stage: 'check', step: 'ai-review' }]);
     });
 
+    it('generic review repair convergence follows accepted invalidation events', async () => {
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-generic-review-convergence-'));
+      const changeDir = path.join(tmpRoot, 'change');
+      fs.mkdirSync(changeDir, { recursive: true });
+
+      const runner = new GenericStageRunner({
+        taskLoaderRegistry: createBasicTaskLoaderRegistry(),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        checkRegistry: createBasicCheckRegistry({}),
+        getStageDefinition: createStageDefinition,
+        worktreePath: tmpRoot,
+      });
+      const run = WorkflowRun.startWorkflow({
+        id: 'run-1',
+        issueId: 'issue-1',
+        issueNumber: 188,
+        definitions: [
+          createStageDefinition(Stage.Plan),
+          createStageDefinition(Stage.Build),
+          createStageDefinition(Stage.Check),
+          createStageDefinition(Stage.Integrate),
+        ],
+      }).run;
+      const checkStage = run.stageRun(Stage.Check);
+      checkStage.start();
+      checkStage.findTask('ai-review').status = 'completed';
+      checkStage.findCheck('review-passed').status = 'pending';
+      checkStage.findCheck('review-passed').output = { verdict: 'FAIL', blockingItems: ['F-001'] };
+      checkStage.tasks.push({
+        id: 'fix-review-findings',
+        title: 'Fix review findings',
+        status: 'completed',
+        attempts: 1,
+        artifacts: [],
+        events: ['code.changed'],
+        output: {
+          attemptedItemIds: ['F-001'],
+          resolvedItemIds: ['F-001'],
+          unresolvedItemIds: [],
+        },
+        reason: null,
+        causedBy: null,
+        latestAttempt: null,
+        duration: 1,
+        terminal: true,
+        resetForFreshAttempt: vi.fn(),
+        startWorkAttempt: vi.fn(),
+        completeWorkAttempt: vi.fn(),
+        failWorkAttempt: vi.fn(),
+        snapshot: vi.fn(),
+      } as any);
+      const ctx = makeMockContext(Stage.Check, {
+        artifactManager: {
+          getChangeDir: vi.fn().mockReturnValue(changeDir),
+          createChangeDir: vi.fn(),
+        } as any,
+        workflowRun: run,
+      });
+
+      (runner as any).applyAcceptedTaskSideEffects(ctx, [
+        { type: 'task-completed', stage: Stage.Check, taskId: 'fix-review-findings' },
+        { type: 'check-invalidated', stage: Stage.Check, checkName: 'review-passed', reason: 'code.changed reset' },
+      ]);
+
+      const verificationContext = JSON.parse(fs.readFileSync(path.join(changeDir, '.verification-context.json'), 'utf-8'));
+      expect(verificationContext).toMatchObject({
+        failedCheckName: 'review-passed',
+        attemptedItemIds: ['F-001'],
+        resolvedItemIds: ['F-001'],
+        unresolvedItemIds: [],
+        reactionAttempt: 1,
+      });
+    });
+
     it('generic review artifact invalidation follows custom review producer task ids', async () => {
       const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-generic-custom-review-'));
       const changeDir = path.join(tmpRoot, 'change');

@@ -139,6 +139,26 @@ describe('ServiceCallTaskHandler', () => {
     expect(emitCalls).toEqual(['started', 'completed']);
   });
 
+  it('merges explicit service events with shaChanged code.changed event', async () => {
+    const handler = createServiceCallTaskHandler();
+    const ctx = makeContext();
+    const serviceFn = vi.fn().mockResolvedValue({
+      events: ['docs.updated', 'code.changed'],
+      shaChanged: true,
+    });
+    const input: ServiceCallTaskInput = {
+      taskId: 'fix-merge-readiness',
+      title: 'Fix merge readiness',
+      serviceFn,
+      stage: 'check',
+      attempt: 1,
+    };
+
+    const result = await handler(input, ctx);
+
+    expect(result.events).toEqual(['docs.updated', 'code.changed']);
+  });
+
   it('records duration for both success and failure cases', async () => {
     const handler = createServiceCallTaskHandler();
     const ctx = makeContext();

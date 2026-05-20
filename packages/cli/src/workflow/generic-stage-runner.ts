@@ -260,10 +260,10 @@ export class GenericStageRunner implements StageRunner {
     const verdictCheck = this.repairableVerdictCheck(stageDefinition);
     if (!reviewTask || !verdictCheck) return;
 
-    const fixReviewEvents = events.filter(
-      event => event.type === 'task-completed' && this.taskInvalidatesCheck(stageDefinition, event.taskId, verdictCheck.name),
+    const verdictInvalidated = events.some(
+      event => event.type === 'check-invalidated' && event.checkName === verdictCheck.name,
     );
-    if (fixReviewEvents.length > 0) {
+    if (verdictInvalidated) {
       this.persistReactionConvergenceFromWorkflow(ctx, stageDefinition, verdictCheck);
     }
 
@@ -347,7 +347,13 @@ export class GenericStageRunner implements StageRunner {
   }
 
   private repairableVerdictCheck(stageDefinition: CompiledStageDefinition): CheckDefinition | null {
-    const policy = (stageDefinition.repairPolicies ?? stageDefinition.checkFailurePolicies ?? [])[0];
+    const policies = [
+      ...(stageDefinition.repairPolicies ?? []),
+      ...(stageDefinition.checkFailurePolicies ?? []),
+    ];
+    const policy = policies.find(candidate => candidate.checkName === 'review-passed')
+      ?? policies.find(candidate => this.baseRuntimeTaskId(candidate.fixTaskId) === 'fix-review-findings')
+      ?? policies[0];
     if (!policy) return null;
     return stageDefinition.checks.find(check => check.name === policy.checkName) ?? null;
   }
@@ -366,15 +372,6 @@ export class GenericStageRunner implements StageRunner {
     return stageDefinition.tasks.find(task => eventInvalidatedTaskIds.has(task.id) && !verdictRepairTaskIds.has(task.id))
       ?? stageDefinition.tasks.find(task => task.uses === 'mohist/agent')
       ?? null;
-  }
-
-  private taskInvalidatesCheck(stageDefinition: CompiledStageDefinition, taskId: string, checkName: string): boolean {
-    const baseTaskId = this.baseRuntimeTaskId(taskId);
-    return (stageDefinition.invalidationPolicy?.entries ?? []).some(entry => {
-      if (entry.trigger !== 'task-completion') return false;
-      if (entry.triggerTaskId !== taskId && entry.triggerTaskId !== baseTaskId) return false;
-      return entry.invalidates.checks?.includes(checkName) ?? false;
-    });
   }
 
   private async runRequestedCheck(ctx: StageContext): Promise<StageRunResult> {
