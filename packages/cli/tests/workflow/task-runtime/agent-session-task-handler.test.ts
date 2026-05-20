@@ -272,6 +272,46 @@ describe('AgentSessionTaskHandler', () => {
     }
   });
 
+  it('does not accept duplicate promise markers as a satisfied required marker', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-duplicate-marker-'));
+    const markerPath = path.join(tempDir, 'self-review.md');
+    executeMock.mockImplementation(async () => {
+      fs.writeFileSync(markerPath, '<promise>PASS</promise>\n<promise>FAIL</promise>', 'utf-8');
+      return {
+        success: true,
+        text: 'done',
+        acpSessionId: 'ses-marker',
+      };
+    });
+
+    try {
+      const handler = createAgentSessionTaskHandler();
+      const ctx = makeContext();
+      const input: AgentSessionTaskInput = {
+        taskId: 'self-review',
+        title: 'Self review',
+        prompt: 'Generate self review',
+        cwd: tempDir,
+        stage: 'plan',
+        attempt: 1,
+        requiredMarkers: [
+          {
+            path: markerPath,
+            markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+            onMissing: { action: 'continue-session', maxAttempts: 1 },
+          },
+        ],
+      };
+
+      const result = await handler(input, ctx);
+
+      expect(result.status).toBe('failed');
+      expect(executeMock).toHaveBeenCalledTimes(2);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('emits started then completed/failed stage_task_update events in correct order', async () => {
     const emitCalls: string[] = [];
     const ctx = makeContext();

@@ -220,6 +220,19 @@ export function buildStructuredResult(result: ParseSuccess): StructuredWorkflowR
   };
 }
 
+export function promiseMarkerContractForPath(path: string): ResultContract {
+  return {
+    kind: 'promise-marker',
+    required: true,
+    outputSource: { type: 'artifact', path },
+    allowedMarkers: [...PROMISE_MARKERS] as ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+  };
+}
+
+export function validatePromiseMarkerFile(path: string, sourceContent: string | null): ParseResult {
+  return parseStructuredResult(promiseMarkerContractForPath(path), sourceContent);
+}
+
 export function isParseError(result: ParseResult): result is ParseError {
   return result.ok === false;
 }

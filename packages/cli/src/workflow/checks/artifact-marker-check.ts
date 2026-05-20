@@ -2,6 +2,15 @@ import * as fs from 'fs';
 import type { Check, CheckContext, CheckResult } from './index';
 import { extractFixSuggestions, parseDimensions } from '../utils';
 import { Log } from '../../util/log';
+import {
+  buildStructuredResult,
+  isParseError,
+  promiseMarkerContractForPath,
+  validatePromiseMarkerFile,
+  type ParseError,
+} from '../result-contracts';
+import { extractRepairResultFromArtifact } from '../task-runtime/self-repair';
+import { REVIEW_SELF_REPAIR_POLICY } from '../domain';
 
 const log = Log.create({ service: 'artifact-marker-check' });
 
@@ -13,30 +22,40 @@ export class ArtifactMarkerCheck implements Check {
   ) {}
 
   async run(ctx: CheckContext): Promise<CheckResult> {
-    if (!fs.existsSync(this.filePath)) {
+    const content = readMarkerFile(this.filePath);
+    const parsed = validatePromiseMarkerFile(this.filePath, content);
+    if (isParseError(parsed)) {
       return {
         name: this.name,
         status: 'fail',
-        message: `${this.filePath} not found`,
-        output: { kind: 'artifact-marker', path: this.filePath, expect: this.expectMarker },
+        message: describeParseError(parsed),
+        output: { kind: 'artifact-marker', path: this.filePath, expect: this.expectMarker, error: parsed.error },
       };
     }
-    const content = fs.readFileSync(this.filePath, 'utf-8');
-    const matchedMarker = markerIn(content, [this.expectMarker]);
-    const anyPromiseMarker = markerIn(content, ['<promise>PASS</promise>', '<promise>FAIL</promise>']);
-    if (matchedMarker) {
-      return {
-        name: this.name,
-        status: 'pass',
-        message: `${this.expectMarker} found in ${this.filePath}`,
-        output: await this.enrichOutput(ctx, content, markerOutput(this.filePath, matchedMarker)),
-      };
-    }
+    const matched = parsed.marker.toUpperCase() === this.expectMarker.toUpperCase();
+    const structured = buildStructuredResult(parsed);
+    const repairResult = extractRepairResultFromArtifact(
+      promiseMarkerContractForPath(this.filePath),
+      content,
+      REVIEW_SELF_REPAIR_POLICY,
+    );
+    const finalStructured = {
+      ...structured,
+      ...(repairResult.repairedItemIds.length > 0 ? { repairedItemIds: repairResult.repairedItemIds } : {}),
+      ...(repairResult.verification.length > 0 ? { verification: repairResult.verification } : {}),
+    };
+
     return {
       name: this.name,
-      status: 'fail',
-      message: `${this.expectMarker} not found in ${this.filePath}`,
-      output: await this.enrichOutput(ctx, content, markerOutput(this.filePath, anyPromiseMarker)),
+      status: matched ? 'pass' : 'fail',
+      message: matched ? `${this.expectMarker} found in ${this.filePath}` : `${this.expectMarker} not found in ${this.filePath}`,
+      output: await this.enrichOutput(ctx, content ?? '', {
+        kind: 'artifact-marker',
+        path: this.filePath,
+        marker: parsed.marker,
+        verdict: parsed.verdict,
+        structuredResult: finalStructured,
+      }),
     };
   }
 
@@ -80,21 +99,27 @@ export class ArtifactMarkerCheck implements Check {
   }
 }
 
-function markerOutput(path: string, marker: string | null): Record<string, unknown> {
-  const verdict = marker?.toUpperCase().includes('PASS')
-    ? 'PASS'
-    : marker?.toUpperCase().includes('FAIL')
-      ? 'FAIL'
-      : undefined;
-  return {
-    kind: 'artifact-marker',
-    path,
-    marker,
-    ...(verdict ? { verdict } : {}),
-  };
+function readMarkerFile(filePath: string): string | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return content.trim().length > 0 ? content : null;
+  } catch {
+    return null;
+  }
 }
 
-function markerIn(content: string, markers: string[]): string | null {
-  const upper = content.toUpperCase();
-  return markers.find(marker => upper.includes(marker.toUpperCase())) ?? null;
+function describeParseError(err: ParseError): string {
+  switch (err.error) {
+    case 'source-missing':
+      return `${err.source} not found or empty`;
+    case 'no-marker':
+      return `No valid promise marker found in ${err.source}`;
+    case 'duplicate-markers':
+      return `Multiple promise markers found in ${err.source}`;
+    case 'malformed-marker':
+      return `Malformed promise marker in ${err.source}: ${err.raw}`;
+    case 'source-unavailable':
+      return `Output source ${err.source} unavailable${err.cause ? `: ${err.cause}` : ''}`;
+  }
 }
