@@ -42,7 +42,7 @@ describe('Reaction structured context: T-006', () => {
 
   describe('buildFailedCheckContext', () => {
     it('extracts blocking items from structured check output', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',
@@ -71,7 +71,7 @@ describe('Reaction structured context: T-006', () => {
     });
 
     it('separates pre-existing and out-of-scope items as non-blocking', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',
@@ -96,7 +96,7 @@ describe('Reaction structured context: T-006', () => {
     });
 
     it('excludes resolved items from blocking', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',
@@ -119,7 +119,7 @@ describe('Reaction structured context: T-006', () => {
     });
 
     it('handles missing structured result gracefully', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',
@@ -135,7 +135,7 @@ describe('Reaction structured context: T-006', () => {
     });
 
     it('passes snapshot metadata', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',
@@ -156,7 +156,7 @@ describe('Reaction structured context: T-006', () => {
     });
 
     it('passes prior task outputs when provided', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const priorTaskOutputs = [{ taskId: 'ai-review', status: 'completed', output: { summary: 'done' } }];
       const failedCheck = {
@@ -175,7 +175,7 @@ describe('Reaction structured context: T-006', () => {
       writeArtifact(changeDir, 'review.md', '<promise>FAIL</promise>');
 
       const { default: adapter } = await import('../../src/workflow/task-runtime/repair-fix-adapter');
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const capturedPrompts: string[] = [];
       const mockHandler = async (input: any) => {
@@ -353,7 +353,7 @@ describe('Reaction structured context: T-006', () => {
 
   describe('review-fix-task: structured prompt', () => {
     it('builds structured prompt with blocking items from FailedCheckContext', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',
@@ -379,7 +379,7 @@ describe('Reaction structured context: T-006', () => {
 
   describe('Default Check retry prompt shape', () => {
     it('review-passed retry uses a plain review.md prompt instead of input selectors', async () => {
-      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/definitions/default-workflow');
+      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/definition/default-workflow');
       const checkStage = DEFAULT_STAGE_DEFINITIONS.find(s => s.stage === 'check');
       expect(checkStage).toBeDefined();
 
@@ -434,7 +434,7 @@ describe('Reaction structured context: T-006', () => {
 
   describe('Multiple blocking items passed together', () => {
     it('all blocking items from one failed review are available in reaction context', async () => {
-      const { buildFailedCheckContext } = await import('../../src/workflow/reaction-context');
+      const { buildFailedCheckContext } = await import('../../src/workflow/repair/reaction-context');
 
       const failedCheck = {
         name: 'review-passed',

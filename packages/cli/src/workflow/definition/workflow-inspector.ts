@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { Stage } from '../types';
+import { Stage } from '../../types';
 import {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   MOHIST_DEFAULT_WORKFLOW_YAML,
-} from './definitions/default-workflow';
+} from './default-workflow';
 import {
   cloneWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
@@ -16,7 +16,7 @@ import {
   type TaskDefinition,
   type WorkflowDefinition,
   type WorkflowDefinitionSnapshot,
-} from './model';
+} from '../model';
 import {
   parseWorkflowDefinitionSource,
   type WorkflowSourceDefinition,
@@ -26,7 +26,7 @@ import {
   inferWorkflowCheckUse,
   inferWorkflowTaskUse,
   isWorkflowUseAllowed,
-} from './uses-catalog';
+} from '../uses-catalog';
 
 export type WorkflowDiagnosticSeverity = 'error' | 'warning';
 

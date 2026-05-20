@@ -7,7 +7,7 @@ import {
   type ExplainedWorkflowItem,
   type ResolvedWorkflowDefinition,
   type WorkflowDiagnostic,
-} from '../../workflow/workflow-inspector';
+} from '../../workflow/definition/workflow-inspector';
 import { inferWorkflowCheckUse, inferWorkflowTaskUse } from '../../workflow/uses-catalog';
 
 export interface CliOutput {

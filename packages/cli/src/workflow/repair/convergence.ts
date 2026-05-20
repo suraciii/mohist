@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ReactionTaskOutput, WorkflowConvergenceState, WorkflowItem } from '../types/workflow-results';
-import type { CheckResult, StageTaskResult } from './stage-context';
-import { Log } from '../util/log';
+import type { ReactionTaskOutput, WorkflowConvergenceState, WorkflowItem } from '../../types/workflow-results';
+import type { CheckResult, StageTaskResult } from '../stage-context';
+import { Log } from '../../util/log';
 
 const log = Log.create({ service: 'convergence' });
 

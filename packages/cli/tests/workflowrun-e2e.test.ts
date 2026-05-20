@@ -15,7 +15,7 @@ import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { IssueStatus, MergeState, Stage } from '../src/types';
 import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/model';
-import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definition/default-workflow';
 
 describe('WorkflowRun aggregate end-to-end regressions', () => {
   let db: DatabaseManager;

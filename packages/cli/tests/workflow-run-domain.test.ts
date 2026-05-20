@@ -11,7 +11,7 @@ import {
   DEFAULT_STAGE_DEFINITIONS,
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   MOHIST_DEFAULT_WORKFLOW_SOURCE,
-} from '../src/workflow/definitions/default-workflow';
+} from '../src/workflow/definition/default-workflow';
 import { Stage } from '../src/types';
 
 function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): WorkflowRun {

@@ -65,7 +65,7 @@ describe('runHealthFixTask', () => {
   });
 
   it('runs health fix as an explicit stage task with transient output and no artifacts', async () => {
-    const { runHealthFixTask } = await import('../../src/workflow/health-fix-task');
+    const { runHealthFixTask } = await import('../../src/workflow/repair/health-fix-task');
     const changeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-health-fix-'));
     fs.writeFileSync(path.join(changeDir, 'proposal.md'), '# Proposal');
     fs.writeFileSync(path.join(changeDir, 'design.md'), '# Design');
