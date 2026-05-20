@@ -320,6 +320,57 @@ describe('judgment-checks: shared parser regression', () => {
     });
   });
 
+  describe('ArtifactMarkerCheck', () => {
+    it('uses the strict promise marker parser and preserves structured review output', async () => {
+      const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+      const reviewPath = path.join(changeDir, 'review.md');
+      writeArtifact(changeDir, 'review.md', [
+        '<promise>FAIL</promise>',
+        '',
+        '- [ID: bug-1]',
+        '  Severity: blocking',
+        '  Evidence: Missing guard',
+        '  Status: open',
+      ].join('\n'));
+
+      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>');
+      const result = await check.run(makeCheckContext(changeDir));
+
+      expect(result.status).toBe('fail');
+      expect((result.output as any).verdict).toBe('FAIL');
+      expect((result.output as any).reviewReport).toContain('Missing guard');
+      expect((result.output as any).structuredResult.items).toHaveLength(1);
+      expect((result.output as any).structuredResult.items[0].id).toBe('bug-1');
+    });
+
+    it('fails duplicate promise markers instead of passing on contains', async () => {
+      const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+      const reviewPath = path.join(changeDir, 'review.md');
+      writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n<promise>FAIL</promise>\n');
+
+      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>');
+      const result = await check.run(makeCheckContext(changeDir));
+
+      expect(result.status).toBe('fail');
+      expect(result.message).toContain('Multiple promise markers');
+      expect((result.output as any).error).toBe('duplicate-markers');
+    });
+
+    it('preserves self-review notes and dimensions for self-review marker checks', async () => {
+      const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+      const reviewPath = path.join(changeDir, 'self-review.md');
+      writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n\n### Quality: PASS\n');
+
+      const check = new ArtifactMarkerCheck('self-review-passed', reviewPath, '<promise>PASS</promise>');
+      const result = await check.run(makeCheckContext(changeDir));
+
+      expect(result.status).toBe('pass');
+      expect((result.output as any).selfReviewNotes).toContain('Quality');
+      expect((result.output as any).structuredResult.verdict).toBe('PASS');
+      expect((result.output as any).dimensions).toEqual([{ name: 'Quality', status: 'PASS' }]);
+    });
+  });
+
   describe('structured item policy validation', () => {
     it('extracts blocking items from FAIL output', async () => {
       const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');

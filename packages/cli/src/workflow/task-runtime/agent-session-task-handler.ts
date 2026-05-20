@@ -5,6 +5,7 @@ import { emitStageTaskUpdate } from '../stage-context';
 import { AgentSession, createWorkflowSessionObservers, type AgentSessionOptions } from '../../agent-runtime';
 import { extractReactionOutput } from '../convergence';
 import type { RequiredMarkerDefinition } from '../domain';
+import { isParseSuccess, validatePromiseMarkerFile } from '../result-contracts';
 
 export interface AgentSessionTaskHandlerDeps {
   createSession?: (options: AgentSessionOptions) => Promise<AgentSession>;
@@ -204,9 +205,9 @@ async function satisfyRequiredMarkers(
 function missingRequiredMarkers(markers: RequiredMarkerDefinition[]): RequiredMarkerDefinition[] {
   return markers.filter(marker => {
     const content = readMarkerFile(marker.path);
-    if (content === null) return true;
-    const upper = content.toUpperCase();
-    return !marker.markers.some(candidate => upper.includes(candidate.toUpperCase()));
+    const parsed = validatePromiseMarkerFile(marker.path, content);
+    if (!isParseSuccess(parsed)) return true;
+    return !marker.markers.some(candidate => candidate.toUpperCase() === parsed.marker.toUpperCase());
   });
 }
 
