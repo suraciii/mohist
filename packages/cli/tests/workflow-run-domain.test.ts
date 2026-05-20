@@ -4,7 +4,6 @@ import {
   WorkflowRun,
   compileWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
-  projectWorkflowDeliveryRequirement,
   type StageDefinition,
   type WorkflowDefinition,
 } from '../src/workflow/model';
@@ -166,100 +165,6 @@ describe('WorkflowRun domain aggregate', () => {
     expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'runtime',
-    });
-  });
-
-  it('projects local merge delivery from the default workflow definition', () => {
-    const snapshot = createWorkflowDefinitionSnapshot({
-      definition: MOHIST_DEFAULT_WORKFLOW_DEFINITION,
-      source: { type: 'builtin', id: MOHIST_DEFAULT_WORKFLOW_DEFINITION.id },
-      capturedAt: '2026-05-20T00:00:00.000Z',
-    });
-
-    expect(projectWorkflowDeliveryRequirement(snapshot)).toEqual({
-      mode: 'local-merge',
-      requiresLocalMerge: true,
-      requiresRemoteMerge: false,
-      falseDoneApplicable: true,
-    });
-  });
-
-  it('projects handoff delivery when the workflow creates a PR but does not wait for merge', () => {
-    const definition: WorkflowDefinition = {
-      id: 'custom/pr-handoff',
-      stages: [
-        { stage: Stage.Plan, tasks: [], checks: [] },
-        { stage: Stage.Build, tasks: [], checks: [] },
-        { stage: Stage.Check, tasks: [], checks: [] },
-        {
-          stage: Stage.Integrate,
-          tasks: [{ id: 'open-pr', title: 'Open pull request', uses: 'mohist/github-pr' }],
-          checks: [{ name: 'pr-ready', title: 'PR ready', uses: 'mohist/pr-ready' }],
-        },
-      ],
-    };
-
-    expect(projectWorkflowDeliveryRequirement(createWorkflowDefinitionSnapshot({ definition }))).toEqual({
-      mode: 'handoff',
-      requiresLocalMerge: false,
-      requiresRemoteMerge: false,
-      falseDoneApplicable: false,
-    });
-  });
-
-  it('projects remote merge delivery when the workflow waits for PR merge evidence', () => {
-    const definition: WorkflowDefinition = {
-      id: 'custom/pr-merge',
-      stages: [
-        {
-          stage: Stage.Integrate,
-          tasks: [{ id: 'open-pr', title: 'Open pull request', uses: 'mohist/github-pr' }],
-          checks: [{ name: 'pr-merged', title: 'PR merged', uses: 'mohist/pr-merged' }],
-        },
-      ],
-    };
-
-    expect(projectWorkflowDeliveryRequirement(createWorkflowDefinitionSnapshot({ definition }))).toEqual({
-      mode: 'remote-merge',
-      requiresLocalMerge: false,
-      requiresRemoteMerge: true,
-      falseDoneApplicable: false,
-    });
-  });
-
-  it('projects delivery role from check retry tasks', () => {
-    const definition: WorkflowDefinition = {
-      id: 'custom/retry-delivery',
-      stages: [
-        {
-          stage: Stage.Integrate,
-          tasks: [],
-          checks: [
-            {
-              name: 'delivery-needed',
-              title: 'Delivery needed',
-              uses: 'mohist/artifact-exists',
-              onFailure: {
-                retry: {
-                  limit: 1,
-                  task: {
-                    id: 'open-pr-after-check',
-                    title: 'Open pull request after failed check',
-                    uses: 'mohist/github-pr',
-                  },
-                },
-              },
-            },
-          ],
-        },
-      ],
-    };
-
-    expect(projectWorkflowDeliveryRequirement(createWorkflowDefinitionSnapshot({ definition }))).toEqual({
-      mode: 'handoff',
-      requiresLocalMerge: false,
-      requiresRemoteMerge: false,
-      falseDoneApplicable: false,
     });
   });
 

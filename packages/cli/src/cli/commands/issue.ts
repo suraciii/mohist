@@ -406,9 +406,6 @@ export function setupIssueCommands(program: Command): void {
             const labels = formatLabels(issue.labels).padEnd(20);
             const titlePart = issue.title.substring(0, 40);
 
-            const mergeStatus = classifyMergeDelivery(issue);
-            const mergeWarning = mergeStatus === 'done-not-merged' ? chalk.red.bold(' [UNMERGED]') : '';
-
             const waitingWarning = issue.startEligibility?.waitingForDelivery?.length
               ? chalk.yellow.bold(` [Waiting for #${issue.startEligibility.waitingForDelivery[0].number}]`)
               : '';
@@ -418,9 +415,9 @@ export function setupIssueCommands(program: Command): void {
                 ? chalk.gray(formatArchivedAt(issue.archivedAt)).padEnd(24)
                 : '';
               const suffix = issue.archivedAt && !options.archived ? chalk.gray(' (archived)') : '';
-              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}${mergeWarning}${waitingWarning}`);
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart.padEnd(42)}${archivedCol}${suffix}${waitingWarning}`);
             } else {
-              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}${mergeWarning}${waitingWarning}`);
+              console.log(`  ${id} ${priority} ${stage} ${status} ${labels} ${titlePart}${waitingWarning}`);
             }
           });
           console.log();
@@ -473,7 +470,6 @@ export function setupIssueCommands(program: Command): void {
             'not-ready': chalk.gray,
             'not-merged': chalk.yellow,
             unknown: chalk.gray,
-            'done-not-merged': chalk.red,
             integrating: chalk.cyan,
           };
           const mergeColor = mergeStatusColors[mergeStatus] || chalk.white;
@@ -489,7 +485,6 @@ export function setupIssueCommands(program: Command): void {
             'not-ready': 'Not ready for merge',
             'not-merged': 'Not merged',
             unknown: 'Unknown',
-            'done-not-merged': 'DONE BUT NOT MERGED',
             integrating: 'Integrating',
           };
           console.log(`  Merge: ${mergeColor(mergeStatusLabels[mergeStatus])}`);
@@ -498,10 +493,6 @@ export function setupIssueCommands(program: Command): void {
             const sourceBranch = `mo/issue-${issue.number}`;
             const targetBranch = issue.baseBranch;
             console.log(`  Branch: ${chalk.cyan(sourceBranch)} → ${chalk.cyan(targetBranch)}`);
-          }
-
-          if (mergeStatus === 'done-not-merged') {
-            console.log(chalk.red.bold('  WARNING: This issue is marked done/completed but has not been merged!'));
           }
 
           if (issue.archivedAt) {
@@ -835,7 +826,7 @@ export function setupIssueCommands(program: Command): void {
             } else {
               console.log(chalk.green(`✓ Archived ${archived} completed issue(s)`));
               if (skipped > 0) {
-                console.log(chalk.yellow(`  Skipped ${skipped} false-done issue(s) (not merged): #${skippedNumbers.join(', #')}`));
+                console.log(chalk.yellow(`  Skipped ${skipped} issue(s): #${skippedNumbers.join(', #')}`));
               }
             }
             if (message) {

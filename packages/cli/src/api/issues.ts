@@ -29,7 +29,7 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import { WorkflowDomainError, projectWorkflowDeliveryRequirement, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/model';
+import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/model';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
@@ -111,7 +111,7 @@ function isAttentionIssue(issue: Issue): boolean {
     return true;
   }
   const delivery = classifyMergeDelivery(issue);
-  if (delivery === 'blocked' || delivery === 'build-failed' || delivery === 'conflict' || delivery === 'done-not-merged') {
+  if (delivery === 'blocked' || delivery === 'build-failed' || delivery === 'conflict') {
     return true;
   }
   return false;
@@ -715,21 +715,9 @@ export function createIssueRoutes(
 
   const activeWorkflowRunExists = (issueId: string): boolean => Boolean(workflowRunService?.getActiveRunForIssue(issueId));
 
-  const getDeliveryRequirement = (issue: Issue) => {
-    const run = workflowRunService?.getLatestRunForIssue(issue.id);
-    return projectWorkflowDeliveryRequirement(workflowDefinitionSnapshotFromUnknown(run?.workflowDefinition));
-  };
-
-  const withDeliveryRequirement = <T extends Issue>(issue: T): T => ({
-    ...issue,
-    deliveryRequirement: getDeliveryRequirement(issue),
-  });
-
   const filterByAttentionWithDefinition = (issues: Issue[]): Issue[] => (
-    issues.map(withDeliveryRequirement).filter(isAttentionIssue)
+    issues.filter(isAttentionIssue)
   );
-
-  issueService.setDeliveryRequirementResolver(getDeliveryRequirement);
 
   const getLifecycleStartRejection = (issue: Issue): string | null => {
     if (issue.status === IssueStatus.Blocked) {
@@ -918,7 +906,6 @@ export function createIssueRoutes(
         );
         return {
           ...issue,
-          deliveryRequirement: getDeliveryRequirement(issue),
           projectName: project?.name || 'unknown',
           ...buildDriftResponse(driftState),
         };
@@ -938,7 +925,6 @@ export function createIssueRoutes(
           );
           return {
             ...issue,
-            deliveryRequirement: getDeliveryRequirement(issue),
             projectName: project?.name || 'unknown',
             ...buildDriftResponse(driftState),
             prerequisites: view?.prerequisites ?? [],
@@ -1026,7 +1012,6 @@ export function createIssueRoutes(
         success: true,
         data: {
           ...issue,
-          deliveryRequirement: getDeliveryRequirement(issue),
           prerequisites: view.prerequisites,
           startEligibility: view.startEligibility,
         }
@@ -1077,7 +1062,7 @@ export function createIssueRoutes(
 
       const { cleanup } = await c.req.json().catch(() => ({ cleanup: true }));
       const result = await issueService.archive(projectId, number, { cleanup: cleanup !== false });
-      return c.json({ success: true, data: { issue: withDeliveryRequirement(result.issue), warning: result.warning, message: `Issue #${number} archived` } } satisfies ApiResponse);
+      return c.json({ success: true, data: { issue: result.issue, warning: result.warning, message: `Issue #${number} archived` } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
@@ -1102,7 +1087,7 @@ export function createIssueRoutes(
       }
 
       const result = await issueService.unarchive(projectId, number);
-      return c.json({ success: true, data: { issue: withDeliveryRequirement(result), message: `Issue #${number} unarchived` } } satisfies ApiResponse);
+      return c.json({ success: true, data: { issue: result, message: `Issue #${number} unarchived` } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
@@ -1340,7 +1325,6 @@ export function createIssueRoutes(
         success: true,
         data: {
           ...refreshedIssue,
-          deliveryRequirement: getDeliveryRequirement(refreshedIssue),
           projectName: project?.name || 'unknown',
           projectPath: project?.path || '',
           baseBranch: project?.baseBranch || 'main',
@@ -1441,7 +1425,7 @@ export function createIssueRoutes(
 
       const response: ApiResponse<Issue> = {
         success: true,
-        data: updated ? withDeliveryRequirement(updated) : undefined
+        data: updated ?? undefined
       };
       return c.json(response);
     } catch (error) {
@@ -1807,7 +1791,7 @@ export function createIssueRoutes(
 
       const response: ApiResponse = {
         success: true,
-        data: { issue: withDeliveryRequirement(closedIssue), message: `Issue #${number} closed` }
+        data: { issue: closedIssue, message: `Issue #${number} closed` }
       };
       return c.json(response);
     } catch (error) {
@@ -1838,7 +1822,7 @@ export function createIssueRoutes(
       return c.json({
         success: true,
         data: {
-          issue: withDeliveryRequirement(refreshedIssue ?? issue),
+          issue: refreshedIssue ?? issue,
           message: `Issue #${number} reopened at stage ${issue.stage}.`,
         }
       });
@@ -1882,7 +1866,7 @@ export function createIssueRoutes(
         return c.json({
           success: true,
           data: {
-            issue: withDeliveryRequirement(issueService.getByNumber(projectId, number) ?? resumedIssue),
+            issue: issueService.getByNumber(projectId, number) ?? resumedIssue,
             taskId: result.taskId,
             status: result.status,
             queuePosition: result.queuePosition,
@@ -1894,7 +1878,7 @@ export function createIssueRoutes(
       return c.json({
         success: true,
         data: {
-          issue: withDeliveryRequirement(issueService.getByNumber(projectId, number) ?? resumedIssue),
+          issue: issueService.getByNumber(projectId, number) ?? resumedIssue,
           message: `Issue #${number} resumed at stage ${issue.stage}.`,
         }
       } satisfies ApiResponse);
@@ -1933,7 +1917,7 @@ export function createIssueRoutes(
 
       const response: ApiResponse = {
         success: true,
-        data: { issue: withDeliveryRequirement(issue), message: `Issue #${number} worktree cleaned up` }
+        data: { issue, message: `Issue #${number} worktree cleaned up` }
       };
       return c.json(response);
     } catch (error) {
@@ -3439,7 +3423,7 @@ export function createIssueRoutes(
         return c.json({ success: false, error: `Issue #${number} is in ${issue.stage} stage. Use start instead of retry.` } satisfies ApiResponse, 400);
       }
 
-      const deliveryStatus = classifyMergeDelivery(issue, { deliveryRequirement: getDeliveryRequirement(issue) });
+      const deliveryStatus = classifyMergeDelivery(issue);
       if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
         return c.json({
           success: false,

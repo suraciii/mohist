@@ -266,14 +266,14 @@ describe('GET /api/issues scope filtering', () => {
       expect(response.body.data.some((i: any) => i.number === issue.number)).toBe(true);
     });
 
-    it('returns done-not-merged issues', async () => {
+    it('does not return completed issues without successful merge evidence as attention items', async () => {
       const issue = createIssue({ stage: Stage.Done, status: IssueStatus.Completed });
       issueRepo.setMergeState(issue.id, MergeState.Pending);
 
       const response = await request(server).get('/api/issues?attention=true');
 
       expect(response.status).toBe(200);
-      expect(response.body.data.some((i: any) => i.number === issue.number)).toBe(true);
+      expect(response.body.data.some((i: any) => i.number === issue.number)).toBe(false);
     });
 
     it('returns merge conflict delivery blockers', async () => {
