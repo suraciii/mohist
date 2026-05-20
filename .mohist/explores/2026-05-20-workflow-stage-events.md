@@ -7,7 +7,7 @@
 
 ## 关键发现
 - Workflow internal event 是引擎事实，例如 task-completed、check-recorded、approval-requested。它们用于日志、状态投影和调度，不应该成为用户建模业务流程的主轴。
-- Stage event 是 workflow 作者定义的语义事件，例如 `code.changed`、`plan.artifacts.changed`、`docs.updated`。它表达“这个语义发生后，哪些 task/check/approval 失效”。
+- Stage event 是 workflow 作者定义的语义事件，例如 `code.changed`、`plan.changed`、`docs.updated`。它表达“这个语义发生后，哪些 task/check/approval 失效”。
 - Task 可以自由抛出自定义 stage event。预定义全部 event 会破坏通用 workflow 的目标。
 - Task 自身 contract 应声明它可能 raise 哪些事件，workflow YAML 不应该在每个 task 上重复声明 task 能力。否则用户会误以为事件是否发生由 YAML 控制，而不是由 task runtime 的事实判断控制。
 - YAML task 级 `emits` 不适合作为 capability allowlist。更好的语义是 `onSuccess.emit`：用户显式配置“这个 task 成功后，workflow 视为额外事件发生”。
@@ -74,5 +74,5 @@ code.changed      reset          ai-review task
 - 在 task definition 增加 `onSuccess.emit`，用于成功后无条件追加 workflow stage events。
 - 在 task runtime contract/catalog 中声明内置 task 可能 raise 的事件，例如 `mohist/agent` / `mohist/rebase` 可 raise `code.changed`。
 - 修改 WorkflowRun：task completion 时合并 task result events 与 `onSuccess.emit`，并不再用 YAML `emits` 校验。
-- 更新默认 workflow：`fix-review-findings`、`fix-check-health`、`fix-merge-readiness` 不再声明 `emits: [code.changed]`；`fix-plan-review` 改为 `onSuccess.emit: [plan.artifacts.changed]`。
+- 更新默认 workflow：`fix-review-findings`、`fix-check-health`、`fix-merge-readiness` 不再声明 `emits: [code.changed]`；`fix-plan-review` 改为 `onSuccess.emit: [plan.changed]`。
 - 更新测试，覆盖 task result event、onSuccess.emit、旧 `emits` capability 移除后的 YAML 输出。

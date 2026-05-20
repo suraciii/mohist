@@ -19,7 +19,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
     {
       id: Stage.Plan,
       on: {
-        'plan.artifacts.changed': {
+        'plan.changed': {
           reset: {
             tasks: ['self-review'],
             checks: ['self-review-passed'],
@@ -69,7 +69,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-plan-review',
                 title: 'Fix plan review findings',
                 uses: 'mohist/agent',
-                onSuccess: { emit: ['plan.artifacts.changed'] },
+                onSuccess: { emit: ['plan.changed'] },
                 with: {
                   prompt: {
                     inline: [
