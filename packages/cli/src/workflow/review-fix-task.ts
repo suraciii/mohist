@@ -5,7 +5,8 @@ import { createWorkflowSessionObservers } from '../agent-runtime';
 import { formatAgentPrompt } from '../agents/agent-prompt-schema';
 import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
 import { loadAgentConfig } from '../agents/agent-config';
-import { buildFailedCheckContext, type FailedCheckContext } from './model';
+import { buildFailedCheckContext } from './reaction-context';
+import type { FailedCheckContext } from '../types/workflow-results';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'review-fix-task' });

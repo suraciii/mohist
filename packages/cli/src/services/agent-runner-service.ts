@@ -32,7 +32,7 @@ import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-s
 import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
 import { createCheckRegistry } from '../workflow/checks/check-registry';
-import { createWorkflowTemplateContextFromValues, renderWorkflowTemplate } from '../workflow/model';
+import { createWorkflowTemplateContextFromValues, renderWorkflowTemplate } from '../workflow/template';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definitions/default-workflow';
 import { AiReviewCheck } from '../workflow/checks/ai-review-check';
 import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
