@@ -647,7 +647,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
         output: { targetBranch: 'main', baseSha: 'base123', candidateHeadSha: 'head456', landedSha: 'landed789', rebased: true },
       },
     });
-    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Integrate, result: { name: 'health:integrate', status: 'fail', message: 'post-merge build failed' } });
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Integrate, result: { name: 'health:integrate', status: 'fail', message: 'post-delivery health failed' } });
 
     const latest = workflowRunService.getLatestRunForIssue(issueId)!;
     const integrate = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Integrate)!;
@@ -656,7 +656,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(latest.status).toBe('failed');
     expect(integrate.tasks.find(task => task.taskId === 'integrate:merge')?.output).toMatchObject({ landedSha: 'landed789', targetBranch: 'main' });
     expect(integrate.tasks.some(task => task.taskId === 'fix-integrate-health')).toBe(false);
-    expect(stageProjection.failure).toMatchObject({ reason: 'post-delivery-check-failed', checkName: 'health:integrate', message: 'post-merge build failed' });
+    expect(stageProjection.failure).toMatchObject({ reason: 'post-delivery-check-failed', checkName: 'health:integrate', message: 'post-delivery health failed' });
     expect(stageProjection.deliveryMetadata?.merge).toMatchObject({ landedSha: 'landed789', targetBranch: 'main', rebased: true });
     expect(stageProjection.deliveryMetadata?.frozen).toBe(true);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Integrate, status: IssueStatus.Blocked });

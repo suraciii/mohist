@@ -1,5 +1,3 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../lib/api'
 import { IssueStatus, Stage, type Issue, type WorkflowDeliveryRequirement } from '../lib/types'
 import { isCompletedWithoutLocalMergeRequirement, isFalseDoneIssue } from '../lib/delivery-requirement'
 
@@ -12,16 +10,10 @@ interface MergeStatePanelProps {
 }
 
 export function MergeStatePanel({ issueNumber, mergeState, stage, status, deliveryRequirement }: MergeStatePanelProps) {
-  const queryClient = useQueryClient()
-
-  const retryMutation = useMutation({
-    mutationFn: () => api.retryMerge(issueNumber),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-    },
-  })
-
   const issueLifecycle = { stage, status, mergeState, deliveryRequirement }
+  const recoveryText = stage === Stage.Integrate
+    ? 'Use the workflow recovery actions for this issue to rerun the stage or resume execution.'
+    : 'Move the issue through the workflow again so the configured delivery task can run.'
 
   if (isFalseDoneIssue(issueLifecycle)) {
     return (
@@ -144,18 +136,8 @@ export function MergeStatePanel({ issueNumber, mergeState, stage, status, delive
           <span className="text-sm font-medium text-red-800">Build verification failed</span>
         </div>
         <p className="mt-1 text-xs text-red-600">
-          Build check failed before merge. The merge was not performed. Review the changes and retry.
+          Build check failed before merge. The merge was not performed. {recoveryText}
         </p>
-        <button
-          onClick={() => retryMutation.mutate()}
-          disabled={retryMutation.isPending}
-          className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-        >
-          {retryMutation.isPending ? 'Rebasing and retrying...' : 'Rebase and Retry'}
-        </button>
-        {retryMutation.error && (
-          <div className="mt-2 text-xs text-red-500">{retryMutation.error.message}</div>
-        )}
       </div>
     )
   }
@@ -170,18 +152,8 @@ export function MergeStatePanel({ issueNumber, mergeState, stage, status, delive
           <span className="text-sm font-medium text-amber-800">Merge conflict</span>
         </div>
         <p className="mt-1 text-xs text-amber-600">
-          The merge could not be completed due to conflicting changes. Resolve the conflict and retry.
+          The merge could not be completed due to conflicting changes. {recoveryText}
         </p>
-        <button
-          onClick={() => retryMutation.mutate()}
-          disabled={retryMutation.isPending}
-          className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
-        >
-          {retryMutation.isPending ? 'Rebasing and retrying...' : 'Rebase and Retry'}
-        </button>
-        {retryMutation.error && (
-          <div className="mt-2 text-xs text-amber-500">{retryMutation.error.message}</div>
-        )}
       </div>
     )
   }
@@ -230,18 +202,8 @@ export function MergeStatePanel({ issueNumber, mergeState, stage, status, delive
           <span className="text-sm font-medium text-red-800">Merge blocked</span>
         </div>
         <p className="mt-1 text-xs text-red-600">
-          Merge could not be completed. Review and retry manually.
+          Merge could not be completed. {recoveryText}
         </p>
-        <button
-          onClick={() => retryMutation.mutate()}
-          disabled={retryMutation.isPending}
-          className="mt-3 rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-        >
-          {retryMutation.isPending ? 'Rebasing and retrying...' : 'Rebase and Retry'}
-        </button>
-        {retryMutation.error && (
-          <div className="mt-2 text-xs text-red-500">{retryMutation.error.message}</div>
-        )}
       </div>
     )
   }

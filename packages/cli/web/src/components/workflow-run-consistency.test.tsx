@@ -590,7 +590,7 @@ describe('WorkflowRun-backed task and check data consistency', () => {
               checkName: 'health:integrate',
               title: 'Delivery health check',
               status: 'failed',
-              message: 'post-merge build failed',
+              message: 'post-delivery health failed',
               output: { manualIntervention: true },
               runCount: 1,
               lastRunAt: null,
@@ -602,13 +602,13 @@ describe('WorkflowRun-backed task and check data consistency', () => {
           reason: 'post-delivery-check-failed',
           stage: Stage.Integrate,
           checkName: 'health:integrate',
-          message: 'post-merge build failed',
+          message: 'post-delivery health failed',
         },
         deliveryMetadata: {
           specSync: { status: 'completed', output: null },
           archive: { status: 'completed', output: { archivePath: 'openspec/changes/archive/188' } },
           merge: { status: 'completed', output: mergeOutput, ...mergeOutput },
-          health: { status: 'failed', message: 'post-merge build failed', output: { manualIntervention: true } },
+          health: { status: 'failed', message: 'post-delivery health failed', output: { manualIntervention: true } },
           frozen: true,
         },
       } as WorkflowStageRun,
@@ -627,6 +627,6 @@ describe('WorkflowRun-backed task and check data consistency', () => {
     expect(screen.getByText('Delivery Evidence')).toBeTruthy()
     expect(screen.getByText(/main: base123 -> head567 -> landed9/)).toBeTruthy()
     expect(screen.getAllByText('Delivery health check').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('post-merge build failed').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('post-delivery health failed').length).toBeGreaterThanOrEqual(1)
   })
 })

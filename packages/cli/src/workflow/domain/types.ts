@@ -12,7 +12,6 @@ export type FailureReason =
   | 'check-unrepaired'
   | 'approval-rejected'
   | 'post-delivery-check-failed'
-  | 'post-merge-health-failed'
   | 'work-interrupted';
 
 export interface CausedByMetadata {

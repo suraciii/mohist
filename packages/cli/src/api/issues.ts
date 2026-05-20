@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StateManager } from '../server/state-manager';
-import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, MergeState, normalizePriority } from '../types';
+import { ApiResponse, Issue, Stage, IssueStatus, Comment, Priority, normalizePriority } from '../types';
 import { IssueService } from '../services';
 import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
@@ -1152,34 +1152,6 @@ export function createIssueRoutes(
 
       const result = await issueService.unarchive(projectId, number);
       return c.json({ success: true, data: { issue: withDeliveryRequirement(result), message: `Issue #${number} unarchived` } } satisfies ApiResponse);
-    } catch (error) {
-      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
-    }
-  });
-
-  app.get('/merge-blocked', async (c) => {
-    try {
-      const projectId = c.req.query('projectId') || getCurrentProjectId();
-      if (!projectId) {
-        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
-      }
-
-      const issueRepo = stateManager.getIssueRepo();
-      if (!issueRepo) {
-        return c.json({ success: false, error: 'IssueRepo not configured' } satisfies ApiResponse, 500);
-      }
-
-      const blockedIssues = issueRepo.findByMergeStates([MergeState.Blocked])
-        .filter(issue => issue.projectId === projectId);
-
-      const blockedEntries = blockedIssues.map(issue => ({
-        issueNumber: issue.number,
-        title: issue.title,
-        conflictingFiles: [],
-        blockedAt: issue.updatedAt,
-      }));
-
-      return c.json({ success: true, data: blockedEntries } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
@@ -3426,48 +3398,6 @@ export function createIssueRoutes(
         error: error instanceof Error ? error.message : 'Unknown error'
       };
       return c.json(response, 500);
-    }
-  });
-
-  app.post('/:number/merge', async (c) => {
-    try {
-      const number = parseInt(c.req.param('number'));
-      const projectId = getCurrentProjectId();
-
-      if (!projectId) {
-        return c.json({ success: false, error: 'No active project' } satisfies ApiResponse, 400);
-      }
-
-      const issue = issueService.getByNumber(projectId, number);
-      if (!issue) {
-        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
-      }
-
-      if (issue.stage !== Stage.Integrate) {
-        return c.json({
-          success: false,
-          error: `Direct merge is not allowed: issue is in ${issue.stage} stage. Use Check approval to route through Integrate stage, or retry a blocked Integrate issue.`
-        } satisfies ApiResponse, 409);
-      }
-
-      if (!agentRunner) {
-        return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
-      }
-
-      const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
-
-      return c.json({
-        success: true,
-        data: {
-          issue: issueService.getByNumber(projectId, number),
-          taskId: result.taskId,
-          status: result.status,
-          queuePosition: result.queuePosition,
-          message: `Issue #${number} direct merge bypass prevented — routed to Integrate stage via resume-pipeline`,
-        },
-      } satisfies ApiResponse, 202);
-    } catch (error) {
-      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
   });
 

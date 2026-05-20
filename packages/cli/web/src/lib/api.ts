@@ -240,9 +240,6 @@ export const api = {
     }
   },
 
-  retryMerge: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry-merge`, { method: 'POST' }),
-
   rerunIssue: (number: number) =>
     request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/rerun`, { method: 'POST' }),
 
