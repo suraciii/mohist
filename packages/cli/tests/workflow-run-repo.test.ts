@@ -206,7 +206,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(retry.events).toContainEqual({
       type: 'task-invalidated',
       stage: Stage.Check,
-      taskId: 'ai-review',
+      taskId: 'ai-review:2',
       reason: 'code.changed reset',
     });
     expect(loaded.stageRun(Stage.Check).findTask('ai-review')?.status).toBe('pending');
@@ -472,7 +472,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     }>(
       `SELECT caused_by_type, reset_by_type, reset_by_task_id, reset_by_event_name, reset_reason
        FROM workflow_tasks WHERE stage_run_id = ? AND task_id = ?`,
-      [`${run.id}/check`, 'ai-review'],
+      [`${run.id}/check`, 'ai-review:1'],
     )!;
     const loaded = repo.loadAggregateById(run.id)!;
     const aiReview = loaded.stageRun(Stage.Check).findTask('ai-review');
@@ -495,7 +495,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
       },
     });
     expect(loaded.workflowRecoverySummary()).toBe('running');
-    expect(loaded.nextWork()).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+    expect(loaded.nextWork()).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review:1' });
   });
 
   it('keeps workflow-policy reset provenance after starting the fresh attempt', () => {

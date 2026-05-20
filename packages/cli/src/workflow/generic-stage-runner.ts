@@ -268,7 +268,7 @@ export class GenericStageRunner implements StageRunner {
     }
 
     const aiReviewCompleted = events.some(
-      event => event.type === 'task-completed' && event.taskId === reviewTask.id,
+      event => event.type === 'task-completed' && this.baseRuntimeTaskId(event.taskId) === reviewTask.id,
     );
     if (aiReviewCompleted) {
       const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
@@ -277,7 +277,7 @@ export class GenericStageRunner implements StageRunner {
       }
     }
 
-    if (!events.some(event => event.type === 'task-invalidated' && event.taskId === reviewTask.id)) return;
+    if (!events.some(event => event.type === 'task-invalidated' && this.baseRuntimeTaskId(event.taskId) === reviewTask.id)) return;
     this.invalidateReviewArtifactForRereview(ctx, reviewTask.id);
   }
 
@@ -730,13 +730,15 @@ export class GenericStageRunner implements StageRunner {
 
       if (workSource.kind === 'static') {
         const allowedTaskIds = new Set(workSource.taskIds ?? stageDefinition.tasks.map(task => task.id));
-        if (!allowedTaskIds.has(taskId)) continue;
-        const taskDef = this.taskLoaderRegistry.get('static')?.load(ctx).find(task => task.taskId === taskId);
+        const baseTaskId = this.baseRuntimeTaskId(taskId);
+        if (!allowedTaskIds.has(taskId) && !allowedTaskIds.has(baseTaskId)) continue;
+        const taskDef = this.taskLoaderRegistry.get('static')?.load(ctx).find(task => task.taskId === taskId || task.taskId === baseTaskId);
         if (!taskDef) continue;
-        const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, workSource.kind);
+        const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, workSource.kind)
+          ?? (baseTaskId !== taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, workSource.kind) : undefined);
         return {
           ...taskDef,
-          taskId: taskDef.taskId,
+          taskId,
           title: taskDef.title,
           kind: this.toHandlerKind(policy?.kind ?? taskDef.kind),
         };
@@ -845,10 +847,11 @@ export class GenericStageRunner implements StageRunner {
   }
 
   private taskWorkSourceKind(ctx: StageContext, stageDefinition: CompiledStageDefinition, taskId: string): WorkSourceKind | undefined {
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
     for (const workSource of stageDefinition.workSources ?? []) {
       if (workSource.kind === 'static') {
         const allowedTaskIds = new Set(workSource.taskIds ?? stageDefinition.tasks.map(task => task.id));
-        if (allowedTaskIds.has(taskId)) return workSource.kind;
+        if (allowedTaskIds.has(taskId) || allowedTaskIds.has(baseTaskId)) return workSource.kind;
         continue;
       }
 

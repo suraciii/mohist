@@ -794,7 +794,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(fix.events).toContainEqual({
       type: 'task-invalidated',
       stage: Stage.Check,
-      taskId: 'ai-review',
+      taskId: 'ai-review:1',
       reason: 'code.changed reset',
     });
     expect(fix.events).toContainEqual({
@@ -816,6 +816,11 @@ describe('WorkflowRun domain aggregate', () => {
         message: 'code.changed reset',
       },
     });
+    expect(run.stageRun(Stage.Check).tasks.find(task => task.id === 'ai-review')).toMatchObject({
+      status: 'completed',
+      artifacts: ['ai-review'],
+    });
+    expect(run.stageRun(Stage.Check).findTask('ai-review:1')).toBe(run.stageRun(Stage.Check).findTask('ai-review'));
     expect(run.stageRun(Stage.Check).findCheck('review-passed')).toMatchObject({
       status: 'pending',
       message: null,
@@ -829,7 +834,27 @@ describe('WorkflowRun domain aggregate', () => {
       output: null,
     });
     expect(run.workflowRecoverySummary()).toBe('running');
-    expect(fix.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+    expect(fix.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review:1' });
+  });
+
+  it('uses only the current task run for stage progress', () => {
+    const run = startRun();
+    advanceToBuild(run);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', message: 'Review failed' });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
+
+    const staleReview = run.stageRun(Stage.Check).tasks.find(task => task.id === 'ai-review')!;
+    staleReview.status = 'failed';
+    staleReview.reason = 'stale review failure retained for history';
+    run.completeTask(Stage.Check, 'ai-review:1', { status: 'completed' });
+
+    expect(run.nextWork()).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'health:check' });
+    expect(run.workflowRecoverySummary()).toBe('running');
   });
 
   it('does not invalidate stage state when a task declares but does not raise an event', () => {
@@ -1080,7 +1105,7 @@ describe('WorkflowRun domain aggregate', () => {
       message: null,
       output: null,
     });
-    expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+    expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review:2' });
   });
 
   it('fails unrepaired checks with check-unrepaired and traceable metadata', () => {
@@ -1653,7 +1678,7 @@ describe('WorkflowRun domain aggregate', () => {
 
       const fixTaskCountAfter = run.stageRun(Stage.Check).tasks.filter(t => t.id.startsWith('fix-review-findings')).length;
       expect(fixTaskCountAfter).toBe(fixTaskCountBefore);
-      expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+      expect(retry.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review:4' });
     });
 
     it('does not resurrect old repair tasks when rerunning Check', () => {
@@ -1677,7 +1702,7 @@ describe('WorkflowRun domain aggregate', () => {
       const checkStage = run.stageRun(Stage.Check);
 
       expect(checkStage.tasks.map(task => task.id)).not.toContain('fix-review-findings');
-      expect(rerun.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+      expect(rerun.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review:1' });
     });
 
     it('records review-passed check result after repair completion and re-run', () => {
@@ -2123,7 +2148,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(fixDecision.events).toContainEqual(expect.objectContaining({
       type: 'task-invalidated',
       stage: Stage.Check,
-      taskId: 'ai-review',
+      taskId: 'ai-review:1',
       reason: 'code.changed reset',
     }));
   });
@@ -2150,7 +2175,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(fixDecision.events).toContainEqual(expect.objectContaining({
       type: 'task-invalidated',
       stage: Stage.Check,
-      taskId: 'ai-review',
+      taskId: 'ai-review:2',
     }));
     expect(fixDecision.events).toContainEqual(expect.objectContaining({
       type: 'check-invalidated',

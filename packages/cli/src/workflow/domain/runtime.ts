@@ -46,6 +46,10 @@ export function getCheckFailurePolicy(
     ?.checkFailurePolicies?.find(policy => policy.checkName === checkName) ?? null;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export class TaskRun {
   status: TaskRunStatus = 'pending';
   dependsOn: string[] = [];
@@ -423,7 +427,7 @@ export class StageRun {
   }
 
   nextTask(): TaskRun | null {
-    return this.tasks.find(task => {
+    return this.currentTasks().find(task => {
       if (task.terminal) return false;
       return task.dependsOn.every(depId => this.tasks.find(dep => dep.id === depId)?.succeeded);
     }) ?? null;
@@ -457,15 +461,60 @@ export class StageRun {
   }
 
   allRequiredTasksTerminal(): boolean {
-    return this.tasks.every(task => task.terminal);
+    return this.currentTasks().every(task => task.terminal);
   }
 
   allRequiredTasksSucceeded(): boolean {
-    return this.tasks.every(task => task.status === 'completed');
+    return this.currentTasks().every(task => task.status === 'completed');
   }
 
   hasFailedTask(): boolean {
-    return this.tasks.some(task => task.status === 'failed' || task.status === 'skipped');
+    return this.currentTasks().some(task => task.status === 'failed' || task.status === 'skipped');
+  }
+
+  currentTasks(): TaskRun[] {
+    const latestByBaseTaskId = new Map<string, TaskRun>();
+    for (const task of this.tasks) {
+      const baseTaskId = this.baseRuntimeTaskId(task.id);
+      const existing = latestByBaseTaskId.get(baseTaskId);
+      if (!existing || task.order > existing.order || (task.order === existing.order && task.id.localeCompare(existing.id) > 0)) {
+        latestByBaseTaskId.set(baseTaskId, task);
+      }
+    }
+    return this.tasks.filter(task => latestByBaseTaskId.get(this.baseRuntimeTaskId(task.id)) === task);
+  }
+
+  appendTaskRun(taskId: string, resetBy: TaskResetMetadata): TaskRun {
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    const latest = this.latestTaskRun(baseTaskId);
+    if (!latest) throw new WorkflowDomainError(`Task ${taskId} does not exist in stage ${this.stage}`);
+    const nextIndex = this.nextTaskRunIndex(baseTaskId);
+    const id = `${baseTaskId}:${nextIndex}`;
+    const task = new TaskRun(id, latest.title, latest.order + 1);
+    task.dependsOn = [...latest.dependsOn];
+    task.resetBy = resetBy;
+    this.tasks.push(task);
+    this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    return task;
+  }
+
+  private latestTaskRun(baseTaskId: string): TaskRun | undefined {
+    return this.tasks
+      .filter(task => this.baseRuntimeTaskId(task.id) === baseTaskId)
+      .sort((a, b) => b.order - a.order || b.id.localeCompare(a.id))[0];
+  }
+
+  private nextTaskRunIndex(baseTaskId: string): number {
+    let max = this.tasks.some(task => task.id === baseTaskId) ? 0 : -1;
+    for (const task of this.tasks) {
+      const match = task.id.match(new RegExp(`^${escapeRegExp(baseTaskId)}:(\\d+)$`));
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+    return max + 1;
+  }
+
+  private baseRuntimeTaskId(taskId: string): string {
+    return taskId.replace(/:\d+$/, '');
   }
 
   allChecksPassed(): boolean {
@@ -473,7 +522,9 @@ export class StageRun {
   }
 
   findTask(taskId: string): TaskRun {
-    const task = this.tasks.find(candidate => candidate.id === taskId);
+    const task = taskId === this.baseRuntimeTaskId(taskId)
+      ? this.currentTasks().find(candidate => this.baseRuntimeTaskId(candidate.id) === taskId)
+      : this.tasks.find(candidate => candidate.id === taskId);
     if (!task) throw new WorkflowDomainError(`Task ${taskId} does not exist in stage ${this.stage}`);
     return task;
   }
@@ -1143,13 +1194,13 @@ export class WorkflowRun {
         const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
         for (const taskId of entry.invalidates.tasks ?? []) {
           try {
-            stageRun.resetTask(taskId, {
+            const newTaskRun = stageRun.appendTaskRun(taskId, {
               type: 'workflow-policy',
               taskId: task.id,
               eventName: entry.eventName,
               message: reason,
             });
-            events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId, reason });
+            events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: newTaskRun.id, reason });
           } catch {
             // Task may not belong to this stage definition.
           }
@@ -1227,7 +1278,7 @@ export class WorkflowRun {
     if (this.status === 'passed') return { kind: 'complete' };
     if (this.status === 'failed') return { kind: 'failed', reason: this.failure! };
     const stageRun = this.currentStageRun();
-    const failedTask = stageRun.tasks.find(task => task.status === 'failed' || task.status === 'skipped');
+    const failedTask = stageRun.currentTasks().find(task => task.status === 'failed' || task.status === 'skipped');
     if (failedTask) {
       const failure: FailureDetails = {
         reason: 'task-failed',
@@ -1280,7 +1331,7 @@ export class WorkflowRun {
     const latestRunningAttempt = this.findCurrentStageRunningAttempt(stageRun);
     if (latestRunningAttempt) return 'running';
 
-    const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
+    const failedTask = stageRun.currentTasks().find(t => t.status === 'failed' || t.status === 'skipped');
     const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
     if (failedTask || failedCheck) return 'waiting-for-recovery';
 
@@ -1310,7 +1361,7 @@ export class WorkflowRun {
   }
 
   private findCurrentStageRunningAttempt(stageRun: StageRun): WorkItemAttempt | null {
-    for (const task of stageRun.tasks) {
+    for (const task of stageRun.currentTasks()) {
       if (task.latestAttempt?.state === 'running') return task.latestAttempt;
     }
     for (const check of stageRun.checks) {
@@ -1320,7 +1371,7 @@ export class WorkflowRun {
   }
 
   private findCurrentStageInterruptedAttempt(stageRun: StageRun): WorkItemAttempt | null {
-    for (const task of stageRun.tasks) {
+    for (const task of stageRun.currentTasks()) {
       if (task.latestAttempt?.state === 'interrupted') return task.latestAttempt;
     }
     for (const check of stageRun.checks) {
@@ -1330,7 +1381,7 @@ export class WorkflowRun {
   }
 
   private findCurrentStageFailedAttempt(stageRun: StageRun): WorkItemAttempt | null {
-    for (const task of stageRun.tasks) {
+    for (const task of stageRun.currentTasks()) {
       if (task.latestAttempt?.state === 'failed') return task.latestAttempt;
     }
     for (const check of stageRun.checks) {
@@ -1381,7 +1432,7 @@ export class WorkflowRun {
     options: { includeApproval?: boolean } = {},
   ): StageCompletionGuard {
     for (const taskDef of stageRun.definition.tasks) {
-      const taskRun = stageRun.tasks.find(t => t.id === taskDef.id);
+      const taskRun = stageRun.currentTasks().find(t => this.baseRuntimeTaskId(t.id) === taskDef.id);
       if (!taskRun) return { complete: false, reason: 'missing-static-task', taskId: taskDef.id };
       if (taskRun.status !== 'completed') return { complete: false, reason: 'static-task-not-successful', taskId: taskDef.id, status: taskRun.status };
     }
@@ -1398,7 +1449,7 @@ export class WorkflowRun {
     const deliveryEvidenceGuard = this.evaluateDeliveryEvidenceGuard(stageRun);
     if (!deliveryEvidenceGuard.complete) return deliveryEvidenceGuard;
 
-    for (const taskRun of stageRun.tasks) {
+    for (const taskRun of stageRun.currentTasks()) {
       if (!taskRun.terminal) return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
     }
 
@@ -1410,7 +1461,7 @@ export class WorkflowRun {
   }
 
   private evaluateDeliveryEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
-    for (const taskRun of stageRun.tasks) {
+    for (const taskRun of stageRun.currentTasks()) {
       if (taskRun.status !== 'completed') continue;
       const uses = this.taskUse(stageRun, taskRun.id);
       const evidence = validateWorkflowUseEvidence(uses, taskRun.output);
@@ -1437,10 +1488,12 @@ export class WorkflowRun {
   }
 
   private taskUse(stageRun: StageRun, taskId: string): string {
-    const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId);
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId || task.id === baseTaskId);
     const policy = stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
+      ?? (baseTaskId !== taskId ? stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === baseTaskId) : undefined)
       ?? stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-    return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
+    return taskDefinition?.uses ?? inferWorkflowTaskUse(baseTaskId, policy?.kind);
   }
 
   private taskLocksCode(stageRun: StageRun, taskId: string): boolean {
@@ -1543,13 +1596,13 @@ export class WorkflowRun {
         for (const t of entry.invalidates.tasks) {
           try {
             const reason = entry.reason ?? `Policy invalidation after ${taskId}`;
-            stageRun.resetTask(t, {
+            const task = stageRun.appendTaskRun(t, {
               type: 'workflow-policy',
               taskId,
               eventName: entry.eventName,
               message: reason,
             });
-            events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: t, reason });
+            events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: task.id, reason });
           } catch {
             // task not in stage, skip
           }

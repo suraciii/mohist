@@ -84,8 +84,8 @@ export class DefaultWorkflowExternalWorld {
 
   agentTask(task: DispatchableTask): StageTaskResult {
     this.taskCalls.push(task.taskId);
-    this.agentCalls.push(task.taskId);
     const baseTaskId = baseRuntimeTaskId(task.taskId);
+    this.agentCalls.push(baseTaskId);
     const configuredFailure = this.scenario.failAgentTasks?.[task.taskId] ?? this.scenario.failAgentTasks?.[baseTaskId];
     if (configuredFailure) return this.failed(task, configuredFailure);
 
