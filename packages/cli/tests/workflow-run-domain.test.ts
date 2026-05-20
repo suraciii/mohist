@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_STAGE_DEFINITIONS,
-  MOHIST_DEFAULT_WORKFLOW_DEFINITION,
-  MOHIST_DEFAULT_WORKFLOW_SOURCE,
   WorkflowDomainError,
   WorkflowRun,
   compileWorkflowDefinition,
@@ -11,6 +8,11 @@ import {
   type StageDefinition,
   type WorkflowDefinition,
 } from '../src/workflow/domain';
+import {
+  DEFAULT_STAGE_DEFINITIONS,
+  MOHIST_DEFAULT_WORKFLOW_DEFINITION,
+  MOHIST_DEFAULT_WORKFLOW_SOURCE,
+} from '../src/workflow/definitions/default-workflow';
 import { Stage } from '../src/types';
 
 function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): WorkflowRun {
@@ -20,6 +22,14 @@ function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): W
     issueNumber: 188,
     definitions,
   }).run;
+}
+
+function scheduleRebaseTask(run: WorkflowRun, reason: string) {
+  return run.scheduleRuntimeTask({
+    taskId: 'rebase-branch',
+    title: 'Rebase branch',
+    causedBy: { type: 'branch-changed', message: reason },
+  });
 }
 
 function completePlanTasks(run: WorkflowRun): void {
@@ -475,7 +485,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(buildStage.failure).toBeNull();
     expect(buildStage.approval).toBeNull();
     expect(buildStage.tasks).toEqual([]);
-    expect(buildStage.buildWorkSourceState).toEqual({ evaluated: false });
+    expect(buildStage.workSourceState).toEqual({ evaluated: false });
     expect(buildStage.findCheck('health:build')).toMatchObject({
       status: 'pending',
       message: null,
@@ -571,7 +581,7 @@ describe('WorkflowRun domain aggregate', () => {
       { id: 'T-002', title: 'Second build task', order: 1, dependsOn: ['T-001'] },
     ]);
     const buildStage = run.stageRun(Stage.Build);
-    expect(buildStage.buildWorkSourceState).toMatchObject({
+    expect(buildStage.workSourceState).toMatchObject({
       evaluated: true,
       tasks: [
         { id: 'T-001', title: 'First build task', order: 0 },
@@ -582,7 +592,7 @@ describe('WorkflowRun domain aggregate', () => {
     const decision = run.rerunStage(Stage.Build);
 
     expect(buildStage.tasks).toEqual([]);
-    expect(buildStage.buildWorkSourceState).toEqual({ evaluated: false });
+    expect(buildStage.workSourceState).toEqual({ evaluated: false });
     expect(decision.nextWork).toEqual({
       kind: 'blocked',
       stage: Stage.Build,
@@ -703,7 +713,7 @@ describe('WorkflowRun domain aggregate', () => {
 
     expect(run.status).toBe('running');
     expect(buildStage.tasks).toEqual([]);
-    expect(buildStage.buildWorkSourceState).toEqual({ evaluated: false });
+    expect(buildStage.workSourceState).toEqual({ evaluated: false });
     expect(buildStage.findCheck('health:build')).toMatchObject({ status: 'pending', runCount: 0 });
     expect(decision.nextWork).toEqual({
       kind: 'blocked',
@@ -1853,7 +1863,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-check' } });
     run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-check') });
-    run.scheduleRebaseTask('target branch moved');
+    scheduleRebaseTask(run, 'Target branch moved before review');
 
     const decision = run.completeTask(Stage.Check, 'rebase-branch', { status: 'failed', reason: 'rebase conflict' });
 
@@ -1873,7 +1883,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
     run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-old') });
-    run.scheduleRebaseTask('target branch moved');
+    scheduleRebaseTask(run, 'Target branch moved before review');
     run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', events: ['code.changed'], output: { shaChanged: true, beforeBaseSha: 'a', afterBaseSha: 'b', beforeHeadSha: 'c', afterHeadSha: 'd' } });
 
     expect(run.stageRun(Stage.Check).findTask('ai-review').status).toBe('pending');
@@ -1891,7 +1901,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
     run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-old') });
-    run.scheduleRebaseTask('target branch moved');
+    scheduleRebaseTask(run, 'Target branch moved before review');
     run.completeTask(Stage.Check, 'rebase-branch', {
       status: 'completed',
       events: ['code.changed'],
@@ -1917,7 +1927,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-same' } });
     run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-same') });
-    run.scheduleRebaseTask('target branch backported');
+    scheduleRebaseTask(run, 'Target branch moved');
     run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: false } });
 
     expect(run.stageRun(Stage.Check).findTask('ai-review').status).toBe('completed');
@@ -1963,7 +1973,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
     expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
 
-    run.scheduleRebaseTask('target branch backported');
+    scheduleRebaseTask(run, 'Target branch moved');
 
     const decision = run.completeTask(Stage.Plan, 'rebase-branch', {
       status: 'completed',
@@ -1989,7 +1999,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
     expect(run.stageRun(Stage.Check).approval?.status).toBe('awaiting');
 
-    run.scheduleRebaseTask('target branch backported');
+    scheduleRebaseTask(run, 'Target branch moved');
 
     const decision = run.completeTask(Stage.Check, 'rebase-branch', {
       status: 'completed',
@@ -2019,14 +2029,14 @@ describe('WorkflowRun domain aggregate', () => {
       stage: Stage.Build,
       reason: { complete: false, reason: 'dynamic-source-missing', stage: Stage.Build },
     });
-    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+    expect(run.stageRun(Stage.Build).workSourceState).toMatchObject({
       evaluated: true,
       missing: true,
     });
 
     const decision = run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
 
-    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+    expect(run.stageRun(Stage.Build).workSourceState).toMatchObject({
       evaluated: true,
       tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
     });
@@ -2084,7 +2094,7 @@ describe('WorkflowRun domain aggregate', () => {
 
     run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
     run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
-    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+    expect(run.stageRun(Stage.Build).workSourceState).toMatchObject({
       evaluated: true,
       tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
     });
@@ -2092,7 +2102,7 @@ describe('WorkflowRun domain aggregate', () => {
     const decision = run.materializeTasks(Stage.Build, [], state);
 
     expect(run.status).toBe('running');
-    expect(run.stageRun(Stage.Build).buildWorkSourceState).toMatchObject({
+    expect(run.stageRun(Stage.Build).workSourceState).toMatchObject({
       evaluated: true,
       [state]: true,
     });
@@ -2113,7 +2123,7 @@ describe('WorkflowRun domain aggregate', () => {
     const checkDefinition = DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check)!;
     expect(checkDefinition.tasks.map(task => task.id)).toEqual(['ai-review']);
 
-    run.scheduleRebaseTask('Target branch moved before review');
+    scheduleRebaseTask(run, 'Target branch moved before review');
     run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
 
     const rebaseTask = run.stageRun(Stage.Check).findTask('rebase-branch');

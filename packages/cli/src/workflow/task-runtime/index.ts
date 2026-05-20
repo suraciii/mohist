@@ -54,6 +54,10 @@ export {
 } from './task-dispatch-factory-registry';
 
 export {
+  type RequiredMarkerDefinition,
+} from './agent-required-markers';
+
+export {
   createRalphTaskLoader,
 } from './ralph-task-loader';
 

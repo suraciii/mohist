@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_STAGE_DEFINITIONS,
   WorkflowRun,
   type StageDefinition,
 } from '../../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definitions/default-workflow';
 import { Stage } from '../../src/types';
 
 function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): WorkflowRun {
@@ -13,6 +13,14 @@ function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): W
     issueNumber: 188,
     definitions,
   }).run;
+}
+
+function scheduleRebaseTask(run: WorkflowRun, reason: string) {
+  return run.scheduleRuntimeTask({
+    taskId: 'rebase-branch',
+    title: 'Rebase branch',
+    causedBy: { type: 'branch-changed', message: reason },
+  });
 }
 
 function startRunWithBuildTask(): WorkflowRun {
@@ -55,7 +63,7 @@ function advanceToCheck(run: WorkflowRun): void {
 function startCheckWithRebase(run: WorkflowRun): WorkflowRun {
   advanceToCheck(run);
   run.completeTask(Stage.Check, 'ai-review', { status: 'completed' });
-  run.scheduleRebaseTask('Target branch moved');
+  scheduleRebaseTask(run, 'Target branch moved');
   return run;
 }
 
@@ -70,14 +78,14 @@ describe('Rebase workflow regression: T-005', () => {
       run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
-      const decision1 = run.scheduleRebaseTask('Target branch moved');
+      const decision1 = scheduleRebaseTask(run, 'Target branch moved');
       expect(decision1.events).toHaveLength(0);
 
       const checkStage = run.stageRun(Stage.Check);
       const rebaseTasks = checkStage.tasks.filter(t => t.id === 'rebase-branch');
       expect(rebaseTasks).toHaveLength(1);
 
-      const decision2 = run.scheduleRebaseTask('Target branch moved again');
+      const decision2 = scheduleRebaseTask(run, 'Target branch moved');
       expect(decision2.events).toHaveLength(0);
 
       const rebaseTasksAfter = checkStage.tasks.filter(t => t.id === 'rebase-branch');
@@ -89,7 +97,7 @@ describe('Rebase workflow regression: T-005', () => {
       const rebaseTask = run.stageRun(Stage.Check).findTask('rebase-branch');
       rebaseTask.status = 'completed';
 
-      run.scheduleRebaseTask('Second rebase after completion');
+      scheduleRebaseTask(run, 'main branch advanced');
       const rebaseTasks = run.stageRun(Stage.Check).tasks.filter(t => t.id === 'rebase-branch');
       expect(rebaseTasks).toHaveLength(2);
     });
@@ -100,7 +108,7 @@ describe('Rebase workflow regression: T-005', () => {
       rebaseTask.status = 'failed';
       rebaseTask.reason = 'Rebase conflict';
 
-      run.scheduleRebaseTask('Retry after failure');
+      scheduleRebaseTask(run, 'main branch advanced');
       const rebaseTasks = run.stageRun(Stage.Check).tasks.filter(t => t.id === 'rebase-branch');
       expect(rebaseTasks).toHaveLength(2);
     });
@@ -114,7 +122,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       expect(run.stageRun(Stage.Plan).status).toBe('awaiting-approval');
 
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'main branch advanced');
 
       expect(run.stageRun(Stage.Plan).status).toBe('running');
     });
@@ -124,7 +132,7 @@ describe('Rebase workflow regression: T-005', () => {
       completePlanTasks(run);
       passPlanChecks(run);
 
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const nextWork = run.nextWork();
       expect(nextWork).toEqual({ kind: 'task', stage: Stage.Plan, taskId: 'rebase-branch' });
@@ -137,7 +145,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
 
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       expect(run.stageRun(Stage.Plan).approval?.status).toBe('awaiting');
     });
@@ -353,7 +361,7 @@ describe('Rebase workflow regression: T-005', () => {
       run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
-      run.scheduleRebaseTask('Target branch moved');
+      scheduleRebaseTask(run, 'main branch advanced');
 
       const checkStage = run.stageRun(Stage.Check);
       const rebaseTask = checkStage.tasks.find(t => t.id === 'rebase-branch');
@@ -371,12 +379,12 @@ describe('Rebase workflow regression: T-005', () => {
       run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
       run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
 
-      run.scheduleRebaseTask('main branch advanced');
+      scheduleRebaseTask(run, 'Target branch moved');
 
       const rebaseTask = run.stageRun(Stage.Check).findTask('rebase-branch');
       expect(rebaseTask.causedBy).toEqual({
         type: 'branch-changed',
-        message: 'main branch advanced',
+        message: 'Target branch moved',
       });
     });
 

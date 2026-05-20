@@ -253,12 +253,6 @@ function compileTaskExecutionPolicies(stage: StageDefinition, compiled: Partial<
     policies.set(policyKey(policy), policy);
   }
 
-  for (const policy of compileRuntimeTaskExecutionPolicies(stage)) {
-    if (!policies.has(policyKey(policy))) {
-      policies.set(policyKey(policy), policy);
-    }
-  }
-
   for (const check of stage.checks) {
     const task = check.onFailure?.retry?.task;
     if (!task) continue;
@@ -273,12 +267,6 @@ function compileTaskExecutionPolicies(stage: StageDefinition, compiled: Partial<
   }
 
   return policies.size > 0 ? [...policies.values()] : undefined;
-}
-
-function compileRuntimeTaskExecutionPolicies(_stage: StageDefinition): TaskExecutionPolicy[] {
-  return [
-    { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
-  ];
 }
 
 function allCheckNames(stage: StageDefinition, checkPolicies?: CheckPolicy[]): string[] {

@@ -10,6 +10,7 @@ import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
 import { WorkflowRun } from '../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 
 let projectCounter = 0;
@@ -24,6 +25,13 @@ function createMockWorktreeManager() {
     rebaseOntoMaster: vi.fn().mockResolvedValue({ success: true, conflicts: [] }),
     abortRebase: vi.fn().mockResolvedValue(undefined),
   };
+}
+
+function startDefaultWorkflowRun(input: { id: string; issueId: string; issueNumber: number }) {
+  return WorkflowRun.startWorkflow({
+    ...input,
+    definitions: DEFAULT_STAGE_DEFINITIONS,
+  });
 }
 
 describe('T-005: rejected approval retry regressions', () => {
@@ -315,7 +323,7 @@ describe('T-005: rejected approval retry regressions', () => {
 
   describe('AC-3: canRetryStage predicate from domain aggregate', () => {
     it('canRetryStage returns true for failed WorkflowRun at current stage due to rejected approval', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-1',
         issueId: 'issue-test-1',
         issueNumber: 1,
@@ -335,7 +343,7 @@ describe('T-005: rejected approval retry regressions', () => {
     });
 
     it('canRetryStage returns false when WorkflowRun is not failed', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-2',
         issueId: 'issue-test-2',
         issueNumber: 2,
@@ -346,7 +354,7 @@ describe('T-005: rejected approval retry regressions', () => {
     });
 
     it('canRetryStage returns false when failed WorkflowRun currentStage differs from requested stage', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-3',
         issueId: 'issue-test-3',
         issueNumber: 3,
@@ -365,7 +373,7 @@ describe('T-005: rejected approval retry regressions', () => {
     });
 
     it('canRetryStage does not mutate the stored WorkflowRun', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-4',
         issueId: 'issue-test-4',
         issueNumber: 4,
@@ -389,7 +397,7 @@ describe('T-005: rejected approval retry regressions', () => {
     });
 
     it('canRetryStage reports non-retryable for a stage that is failed but not the current stage', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-5',
         issueId: 'issue-test-5',
         issueNumber: 5,
@@ -414,7 +422,7 @@ describe('T-005: rejected approval retry regressions', () => {
 
   describe('AC-4: rejection feedback persisted in WorkflowRun', () => {
     it('rejectStage stores the rejection feedback as approval output', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-6',
         issueId: 'issue-test-6',
         issueNumber: 6,
@@ -440,7 +448,7 @@ describe('T-005: rejected approval retry regressions', () => {
 
   describe('AC-5: retryStage resets Plan stage for a new attempt', () => {
     it('retryStage on Plan run that failed mid-stage resets from the first incomplete task', () => {
-      const { run } = WorkflowRun.startWorkflow({
+      const { run } = startDefaultWorkflowRun({
         id: 'wr-test-8b',
         issueId: 'issue-test-8b',
         issueNumber: 81,

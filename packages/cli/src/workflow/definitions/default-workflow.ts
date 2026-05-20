@@ -1,8 +1,8 @@
 import { Stage } from '../../types';
-import { REVIEW_RESULT_CONTRACT, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
-import type { CompiledStageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
-import { parseWorkflowDefinitionSource, workflowDefinitionSourceToYaml, type WorkflowSourceDefinition } from './workflow-definition-parser';
-import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
+import { REVIEW_RESULT_CONTRACT, SELF_REVIEW_RESULT_CONTRACT } from '../checks/review-result-contracts';
+import type { CompiledStageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from '../domain/types';
+import { parseWorkflowDefinitionSource, workflowDefinitionSourceToYaml, type WorkflowSourceDefinition } from '../domain/workflow-definition-parser';
+import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from '../domain/workflow-definition';
 
 const DEFAULT_PLAN_HEALTH_COMMAND = 'npm ci && npm run typecheck';
 const DEFAULT_BUILD_HEALTH_COMMAND = 'npm ci && npm run build';

@@ -13,6 +13,7 @@ import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { ConfigInfo } from '../../src/config/config-schema';
 import { WorkflowRun, type WorkflowWork } from '../../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definitions/default-workflow';
 
 class CapturingRunner implements StageRunner {
   capturedContexts: StageContext[] = [];
@@ -98,7 +99,7 @@ function makeEngine(options: {
 }
 
 function makeSequencedWorkflowService(issue: Issue, work: WorkflowWork[]): WorkflowApplicationRuntime {
-  const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
+  const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions: DEFAULT_STAGE_DEFINITIONS });
   let index = 0;
   const next = () => work[index++] ?? { kind: 'complete' as const };
   return {

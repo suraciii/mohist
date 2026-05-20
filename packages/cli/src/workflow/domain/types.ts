@@ -42,15 +42,6 @@ export type AgentPromptSource =
   | { file: string }
   | { inline: string };
 
-export interface RequiredMarkerDefinition {
-  path: string;
-  markers: string[];
-  onMissing?: {
-    action: 'continue-session';
-    maxAttempts?: number;
-  };
-}
-
 export interface WorkItemAttempt {
   state: WorkItemAttemptState;
   attemptNumber: number;
@@ -114,8 +105,6 @@ export type WorkSourceState =
   | { evaluated: true; invalid: true }
   | { evaluated: true; empty: true }
   | { evaluated: false };
-
-export type BuildWorkSourceState = WorkSourceState;
 
 export interface WorkSourceDefinition {
   kind: WorkSourceKind;
@@ -378,7 +367,6 @@ export interface StageRunSnapshot {
   failure: FailureDetails | null;
   freezePoint: FreezePoint | null;
   workSourceState?: WorkSourceState;
-  buildWorkSourceState?: BuildWorkSourceState;
 }
 
 export interface WorkflowRunSnapshot {

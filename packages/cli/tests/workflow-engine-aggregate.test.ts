@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { Stage, IssueStatus, type Issue } from '../src/types';
 import { WorkflowEngine } from '../src/workflow/workflow-engine';
 import { EventBus } from '../src/services/event-bus';
-import { DEFAULT_STAGE_DEFINITIONS, WorkflowRun } from '../src/workflow/domain';
+import { WorkflowRun } from '../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 import type { WorkflowApplicationRuntime } from '../src/workflow/stage-context';
 import type {
   ChangeArtifactsManager,
@@ -27,6 +28,14 @@ function makeIssue(stage: Stage = Stage.Backlog): Issue {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+}
+
+function scheduleRebaseTask(run: WorkflowRun, reason: string) {
+  return run.scheduleRuntimeTask({
+    taskId: 'rebase-branch',
+    title: 'Rebase branch',
+    causedBy: { type: 'branch-changed', message: reason },
+  });
 }
 
 function makeIssueRepo(issue: Issue): IssueRepo {
@@ -150,7 +159,7 @@ describe('WorkflowEngine aggregate progression', () => {
 
   it('keeps failed stage local with aggregate failure reason visible', async () => {
     const issue = makeIssue(Stage.Backlog);
-    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions: DEFAULT_STAGE_DEFINITIONS });
 
     const service: WorkflowApplicationRuntime = {
       startWorkflow: vi.fn(() => ({ run, decision: { events: [], nextWork: run.nextWork() } })),
@@ -196,7 +205,7 @@ describe('WorkflowEngine aggregate progression', () => {
 
   it('resumes interrupted recovery instead of routing it through retryStage', async () => {
     const issue = makeIssue(Stage.Build);
-    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions: DEFAULT_STAGE_DEFINITIONS });
     run.completeTask(Stage.Plan, 'proposal', { status: 'completed' });
     run.completeTask(Stage.Plan, 'specs', { status: 'completed' });
     run.completeTask(Stage.Plan, 'design', { status: 'completed' });
@@ -380,7 +389,7 @@ describe('WorkflowEngine aggregate progression', () => {
       run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
     }
     run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
-    run.scheduleRebaseTask('target branch moved before Build task materialization');
+    scheduleRebaseTask(run, 'Target branch moved');
     expect(run.currentStage).toBe(Stage.Build);
     expect(run.nextWork()).toEqual({ kind: 'task', stage: Stage.Build, taskId: 'rebase-branch' });
 
@@ -457,7 +466,7 @@ describe('WorkflowEngine aggregate progression', () => {
       resumeDecision: vi.fn(() => ({ run, nextWork: run.nextWork() })),
       completeTask: vi.fn(({ stage, taskId, result }) => ({ run, decision: run.completeTask(stage, taskId, result) })),
       recordCheckResult: vi.fn(({ stage, result }) => ({ run, decision: run.recordCheckResult(stage, result) })),
-      materializeTasks: vi.fn(({ stage, tasks, workSourceState, buildWorkSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, workSourceState ?? buildWorkSourceState) })),
+      materializeTasks: vi.fn(({ stage, tasks, workSourceState }) => ({ run, decision: run.materializeTasks(stage, tasks, workSourceState) })),
       approveStage: vi.fn(({ stage, approval }) => ({ run, decision: run.approveStage(stage, approval) })),
       retryStage: vi.fn(({ stage }) => ({ run, decision: run.retryStage(stage) })),
     };

@@ -34,7 +34,6 @@ export interface WorkflowCommandOptions {
   startedBy?: string | null;
   workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
   workSourceState?: 'missing' | 'invalid' | 'empty';
-  buildWorkSourceState?: 'missing' | 'invalid' | 'empty';
 }
 
 type CheckRepairScheduleStatus = 'scheduled' | 'already-running' | 'exhausted' | 'not-check-stage' | 'not-available';
@@ -343,8 +342,8 @@ export class WorkflowApplicationService {
     return { run, decision };
   }
 
-  materializeTasks(input: { issueId: string; stage: Stage; tasks: MaterializedTaskInput[]; workSourceState?: 'missing' | 'invalid' | 'empty'; buildWorkSourceState?: 'missing' | 'invalid' | 'empty' } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    return this.updateActiveRun(input.issueId, input, run => run.materializeTasks(input.stage, input.tasks, input.workSourceState ?? input.buildWorkSourceState));
+  materializeTasks(input: { issueId: string; stage: Stage; tasks: MaterializedTaskInput[]; workSourceState?: 'missing' | 'invalid' | 'empty' } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
+    return this.updateActiveRun(input.issueId, input, run => run.materializeTasks(input.stage, input.tasks, input.workSourceState));
   }
 
   completeTask(input: { issueId: string; stage: Stage; taskId: string; result: TaskResultInput } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
@@ -453,7 +452,14 @@ export class WorkflowApplicationService {
   }
 
   scheduleRebaseTask(input: { issueId: string; reason?: string } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {
-    return this.updateActiveRun(input.issueId, input, run => run.scheduleRebaseTask(input.reason));
+    return this.updateActiveRun(input.issueId, input, run => run.scheduleRuntimeTask({
+      taskId: 'rebase-branch',
+      title: 'Rebase branch',
+      causedBy: {
+        type: 'branch-changed',
+        message: input.reason ?? 'Target branch moved; rebase requested',
+      },
+    }));
   }
 
   scheduleRebaseForDrift(input: { issueId: string; baseBranch: string; observedBaseSha: string; currentBaseSha: string } & WorkflowCommandOptions): { run: WorkflowRun; decision: WorkflowDecision } {

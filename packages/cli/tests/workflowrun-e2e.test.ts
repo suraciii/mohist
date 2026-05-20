@@ -14,7 +14,8 @@ import { WorkflowRunProjection } from '../src/services/workflow-run-projection';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { IssueStatus, MergeState, Stage } from '../src/types';
-import { createWorkflowDefinitionSnapshot, DEFAULT_STAGE_DEFINITIONS, WorkflowRun } from '../src/workflow/domain';
+import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 
 describe('WorkflowRun aggregate end-to-end regressions', () => {
   let db: DatabaseManager;
@@ -234,7 +235,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
   });
 
   it('rejects a passed projection that did not reach the workflow terminal stage', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_impossible_check', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_impossible_check', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     run.status = 'passed';
     run.currentStage = Stage.Check;
     for (const stageRun of run.stageRuns) {
@@ -372,7 +373,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
 
   it('rejects mergeState-only Done projection without terminal stage task/check completion', () => {
     issueRepo.update(issueId, { mergeState: MergeState.Merged });
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_merge_only_done', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_merge_only_done', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     run.status = 'passed';
     run.currentStage = Stage.Integrate;
     for (const stageRun of run.stageRuns) {
@@ -390,7 +391,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
   });
 
   it('rejects a passed projection when an earlier declared stage was not completed', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_incomplete_earlier_stage', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_incomplete_earlier_stage', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     run.status = 'passed';
     run.currentStage = Stage.Integrate;
     for (const stageRun of run.stageRuns) {
@@ -419,7 +420,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
   });
 
   it('projects Done with service-call wrapped archive and merge delivery evidence', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_service_call_done', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_service_call_done', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     run.status = 'passed';
     run.currentStage = Stage.Integrate;
     for (const stageRun of run.stageRuns) {
@@ -458,7 +459,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
   });
 
   it('rejects targetBranch-only Integrate delivery when projecting Done', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_target_branch_only_done', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_target_branch_only_done', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     run.status = 'passed';
     run.currentStage = Stage.Integrate;
     for (const stageRun of run.stageRuns) {

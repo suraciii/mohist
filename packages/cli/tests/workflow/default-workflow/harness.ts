@@ -21,6 +21,8 @@ import { WorkflowEngine } from '../../../src/workflow/workflow-engine';
 import {
   createDefaultWorkflowDefinitionSnapshot,
   DEFAULT_STAGE_DEFINITIONS,
+} from '../../../src/workflow/definitions/default-workflow';
+import {
   type CompiledStageDefinition,
 } from '../../../src/workflow/domain';
 import {

@@ -12,6 +12,7 @@ import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { WorkflowApplicationRuntime } from '../../src/workflow/stage-context';
 import { WorkflowRun, type WorkflowWork } from '../../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definitions/default-workflow';
 
 class RegistryCapturingRunner implements StageRunner {
   capturedRegistries: StageContext['agentSessionRegistry'][] = [];
@@ -88,7 +89,7 @@ function makeEngine(runners: StageRunner[], workflowRunService?: any, workflowAp
 }
 
 function makeSequencedWorkflowService(issue: Issue, work: WorkflowWork[]): WorkflowApplicationRuntime {
-  const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number });
+  const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions: DEFAULT_STAGE_DEFINITIONS });
   let index = 0;
   const next = () => work[index++] ?? { kind: 'complete' as const };
   return {
@@ -275,7 +276,7 @@ describe('T-006: WorkflowEngine shared-session registry lifecycle', () => {
 
   it('uses a fresh registry after retrying the same stage within one workflow run', async () => {
     const issue = makeIssue(Stage.Plan);
-    const { run } = WorkflowRun.startWorkflow({ id: 'run-shared-retry', issueId: issue.id, issueNumber: issue.number });
+    const { run } = WorkflowRun.startWorkflow({ id: 'run-shared-retry', issueId: issue.id, issueNumber: issue.number, definitions: DEFAULT_STAGE_DEFINITIONS });
     let visit = 0;
     const sessionIds: string[] = [];
     const factoryCalls: string[] = [];

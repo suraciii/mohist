@@ -7,7 +7,8 @@ import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
-import { DEFAULT_STAGE_DEFINITIONS, WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
+import { WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 import { Stage } from '../src/types';
 
 describe('WorkflowRunRepo aggregate persistence', () => {
@@ -133,7 +134,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
   });
 
   it('loads an aggregate snapshot with ordered stages, tasks, checks, approval, and delivery metadata', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_snapshot', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_snapshot', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
@@ -156,14 +157,14 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(plan.checks.map(check => check.name)).toEqual(['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']);
     expect(plan.approval).toMatchObject({ status: 'approved', output: { approved: true } });
     expect(build.tasks).toHaveLength(1);
-    expect(build.buildWorkSourceState).toMatchObject({
+    expect(build.workSourceState).toMatchObject({
       evaluated: true,
       tasks: [{ id: 'T-001', title: 'Build task', order: 0 }],
     });
   });
 
   it('restores task events so retry can reapply event invalidation after reload', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_events', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_events', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
@@ -213,7 +214,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
   });
 
   it('saves run, stage, task, check, approval, failure, and freeze changes in one aggregate transaction', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_freeze', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_freeze', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
@@ -361,13 +362,12 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     )!;
 
     expect(check.workSourceState).toMatchObject({ evaluated: true, missing: true });
-    expect(check.buildWorkSourceState).toBeUndefined();
     expect(row.work_source_state).toContain('"missing":true');
     expect(row.build_work_source_state).toBeNull();
   });
 
   it('keeps rerun-cleared Build task identities out until workflow materializes them', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_build_rerun', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_build_rerun', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
@@ -400,7 +400,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
   });
 
   it('persists removal of generated repair tasks when rerunning a stage', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_rerun', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_rerun', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
@@ -433,7 +433,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
   });
 
   it('persists workflow-policy task reset provenance without treating it as repair cause', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_reset_provenance', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_reset_provenance', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
@@ -487,7 +487,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
   });
 
   it('keeps workflow-policy reset provenance after starting the fresh attempt', () => {
-    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_reset_start_attempt', issueId, issueNumber });
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_reset_start_attempt', issueId, issueNumber, definitions: DEFAULT_STAGE_DEFINITIONS });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
     }
