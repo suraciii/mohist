@@ -57,12 +57,11 @@ describe('StageStateService', () => {
       expect(state!.tasks.length).toBe(0);
     });
 
-    it('should seed static tasks for integrate stage', () => {
+    it('should not seed static tasks for integrate stage', () => {
       service.ensureStage(issueId, Stage.Integrate);
 
       const state = service.getStageState(issueId, Stage.Integrate);
-      expect(state!.tasks.length).toBe(3);
-      expect(state!.tasks.map(t => t.taskId)).toEqual(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge']);
+      expect(state!.tasks.length).toBe(0);
     });
 
     it('should not seed tasks for build stage (dynamic tasks)', () => {
@@ -359,8 +358,8 @@ describe('StageStateService', () => {
     });
   });
 
-  describe('placeholder filtering', () => {
-    it('filters out obsolete Plan placeholder tasks when real task evidence also exists', () => {
+  describe('row-based task projection', () => {
+    it('returns all recorded tasks instead of filtering by built-in task ids', () => {
       service.ensureStage(issueId, Stage.Plan);
 
       const now = new Date().toISOString();
@@ -406,12 +405,12 @@ describe('StageStateService', () => {
       const state = service.getStageState(issueId, Stage.Plan);
       const taskIds = state!.tasks.map(t => t.taskId);
 
-      expect(taskIds).not.toContain('read-context');
-      expect(taskIds).not.toContain('design-solution');
+      expect(taskIds).toContain('read-context');
+      expect(taskIds).toContain('design-solution');
       expect(taskIds).toContain('proposal');
       expect(taskIds).toContain('specs');
       expect(taskIds).toContain('self-review');
-      expect(taskIds).toHaveLength(3);
+      expect(taskIds).toHaveLength(5);
     });
 
     it('adds reason and causedBy metadata to a runtime-added repair task', () => {
@@ -505,7 +504,7 @@ describe('StageStateService', () => {
   });
 
   describe('check repair projection', () => {
-    it('projects checkRepair when review-passed failed with no repair tasks', () => {
+    it('does not infer checkRepair from row state without workflow definition', () => {
       service.ensureStage(issueId, Stage.Check);
       service.upsertCheck(issueId, Stage.Check, {
         checkName: 'review-passed',
@@ -516,19 +515,10 @@ describe('StageStateService', () => {
       const states = service.getIssueStageState(issueId);
       const checkState = states.find(s => s.stage === Stage.Check);
 
-      expect(checkState?.checkRepair).toBeDefined();
-      expect(checkState!.checkRepair!.status).toBe('available');
-      expect(checkState!.checkRepair!.attemptsUsed).toBe(0);
-      expect(checkState!.checkRepair!.attemptsMax).toBe(2);
-      expect(checkState!.checkRepair!.attemptsRemaining).toBe(2);
-      expect(checkState!.checkRepair!.repairAvailable).toBe(true);
-      expect(checkState!.checkRepair!.lastRepairTask).toBeNull();
-      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
-      expect(checkState!.checkRepair!.stopReason).toBeNull();
-      expect(checkState!.checkRepair!.unresolvedSummary).toBe('Review found issues');
+      expect(checkState?.checkRepair).toBeUndefined();
     });
 
-    it('projects checkRepair with completed repair and failed follow-up review', () => {
+    it('keeps repair task and failed check visible without fabricating repair projection', () => {
       service.ensureStage(issueId, Stage.Check);
       service.upsertTask(issueId, Stage.Check, {
         taskId: 'fix-review-findings',
@@ -547,21 +537,12 @@ describe('StageStateService', () => {
       const states = service.getIssueStageState(issueId);
       const checkState = states.find(s => s.stage === Stage.Check);
 
-      expect(checkState?.checkRepair).toBeDefined();
-      expect(checkState!.checkRepair!.status).toBe('available');
-      expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
-      expect(checkState!.checkRepair!.attemptsMax).toBe(2);
-      expect(checkState!.checkRepair!.attemptsRemaining).toBe(1);
-      expect(checkState!.checkRepair!.repairAvailable).toBe(true);
-      expect(checkState!.checkRepair!.lastRepairTask).not.toBeNull();
-      expect(checkState!.checkRepair!.lastRepairTask!.taskId).toBe('fix-review-findings');
-      expect(checkState!.checkRepair!.lastRepairStatus).toBe('completed');
-      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('failed');
-      expect(checkState!.checkRepair!.stopReason).toBeNull();
-      expect(checkState!.checkRepair!.unresolvedSummary).toBe('2 issues remain');
+      expect(checkState?.checkRepair).toBeUndefined();
+      expect(checkState?.tasks.map(task => task.taskId)).toContain('fix-review-findings');
+      expect(checkState?.checks.find(check => check.checkName === 'review-passed')?.status).toBe('failed');
     });
 
-    it('projects checkRepair with repair still pending after repair task started', () => {
+    it('does not infer running repair state without workflow definition', () => {
       service.ensureStage(issueId, Stage.Check);
       service.upsertTask(issueId, Stage.Check, {
         taskId: 'fix-review-findings',
@@ -578,13 +559,8 @@ describe('StageStateService', () => {
       const states = service.getIssueStageState(issueId);
       const checkState = states.find(s => s.stage === Stage.Check);
 
-      expect(checkState?.checkRepair).toBeDefined();
-      expect(checkState!.checkRepair!.status).toBe('running');
-      expect(checkState!.checkRepair!.attemptsUsed).toBe(1);
-      expect(checkState!.checkRepair!.attemptsRemaining).toBe(1);
-      expect(checkState!.checkRepair!.repairAvailable).toBe(false);
-      expect(checkState!.checkRepair!.lastRepairStatus).toBe('running');
-      expect(checkState!.checkRepair!.stopReason).toBe('repair-running');
+      expect(checkState?.checkRepair).toBeUndefined();
+      expect(checkState?.tasks.find(task => task.taskId === 'fix-review-findings')?.status).toBe('running');
     });
 
     it('does not project checkRepair when no repair evidence exists and review-passed is pending', () => {
@@ -600,7 +576,7 @@ describe('StageStateService', () => {
       expect(checkState?.checkRepair).toBeUndefined();
     });
 
-    it('shows not-needed when review-passed passed with no repair tasks needed', () => {
+    it('does not infer not-needed repair state without workflow definition', () => {
       service.ensureStage(issueId, Stage.Check);
       service.upsertCheck(issueId, Stage.Check, {
         checkName: 'review-passed',
@@ -611,13 +587,10 @@ describe('StageStateService', () => {
       const states = service.getIssueStageState(issueId);
       const checkState = states.find(s => s.stage === Stage.Check);
 
-      expect(checkState?.checkRepair).toBeDefined();
-      expect(checkState!.checkRepair!.status).toBe('not-needed');
-      expect(checkState!.checkRepair!.stopReason).toBe('review-passed');
-      expect(checkState!.checkRepair!.followUpReviewStatus).toBe('passed');
+      expect(checkState?.checkRepair).toBeUndefined();
     });
 
-    it('extracts unresolved summary from review-passed output', () => {
+    it('keeps failed check output available without checkRepair projection', () => {
       service.ensureStage(issueId, Stage.Check);
       service.upsertCheck(issueId, Stage.Check, {
         checkName: 'review-passed',
@@ -628,7 +601,8 @@ describe('StageStateService', () => {
       const states = service.getIssueStageState(issueId);
       const checkState = states.find(s => s.stage === Stage.Check);
 
-      expect(checkState?.checkRepair?.unresolvedSummary).toBe('Primitive tool_call_update.output missing metadata');
+      expect(checkState?.checkRepair).toBeUndefined();
+      expect(checkState?.checks[0].output).toEqual({ verdict: 'FAIL', summary: 'Primitive tool_call_update.output missing metadata' });
     });
 
     it('projects checkRepair from custom retry policy outside Check', () => {

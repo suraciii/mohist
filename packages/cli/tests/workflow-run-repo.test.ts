@@ -299,7 +299,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(integrateCheckCount).toBe(1);
   });
 
-  it('repairs Build task identities from tasks.json without inventing completion evidence', () => {
+  it('does not read tasks.json into Build when loading aggregates', () => {
     const run = repo.createOrLoadActiveAggregate({ issueId, issueNumber });
     const tasksPath = path.join(tempDir, 'tasks.json');
     fs.writeFileSync(tasksPath, JSON.stringify({
@@ -310,8 +310,8 @@ describe('WorkflowRunRepo aggregate persistence', () => {
       ],
     }), 'utf-8');
 
-    repo.loadAggregateById(run.id, { tasksPath });
-    repo.loadAggregateById(run.id, { tasksPath });
+    repo.loadAggregateById(run.id);
+    repo.loadAggregateById(run.id);
 
     const loaded = repo.loadAggregateById(run.id)!;
     const build = loaded.snapshot().stageRuns.find(stage => stage.stage === Stage.Build)!;
@@ -320,19 +320,9 @@ describe('WorkflowRunRepo aggregate persistence', () => {
       [`${run.id}/build`],
     );
 
-    expect(taskRows.map(row => row.task_id)).toEqual(['T-002', 'T-001']);
-    expect(build.tasks).toHaveLength(2);
-    expect(build.tasks.find(task => task.id === 'T-001')).toMatchObject({
-      status: 'pending',
-      attempts: 0,
-      duration: 0,
-      output: null,
-    });
-    expect(build.tasks.find(task => task.id === 'T-002')).toMatchObject({
-      status: 'pending',
-      attempts: 0,
-      output: null,
-    });
+    expect(taskRows).toEqual([]);
+    expect(build.tasks).toEqual([]);
+    expect(build.workSourceState).toMatchObject({ evaluated: false });
   });
 
   it('persists generic work source state for non-Build stages', () => {
@@ -376,7 +366,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(row.build_work_source_state).toBeNull();
   });
 
-  it('repairs rerun-cleared Build task identities from tasks.json before dispatch', () => {
+  it('keeps rerun-cleared Build task identities out until workflow materializes them', () => {
     const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_build_rerun', issueId, issueNumber });
     for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
       run.completeTask(Stage.Plan, taskId, { status: 'completed' });
@@ -401,14 +391,12 @@ describe('WorkflowRunRepo aggregate persistence', () => {
       ],
     }), 'utf-8');
 
-    const loaded = repo.loadAggregateById(run.id, { tasksPath })!;
+    const loaded = repo.loadAggregateById(run.id)!;
     const build = loaded.snapshot().stageRuns.find(stage => stage.stage === Stage.Build)!;
 
-    expect(build.tasks.map(task => [task.id, task.status, task.attempts, task.output])).toEqual([
-      ['T-001', 'pending', 0, null],
-      ['T-002', 'pending', 0, null],
-    ]);
-    expect(loaded.nextWork()).toMatchObject({ kind: 'task', stage: Stage.Build, taskId: 'T-001' });
+    expect(build.tasks).toEqual([]);
+    expect(build.workSourceState).toMatchObject({ evaluated: false });
+    expect(loaded.nextWork()).toMatchObject({ kind: 'blocked', stage: Stage.Build, reason: { reason: 'dynamic-source-not-evaluated' } });
   });
 
   it('persists removal of generated repair tasks when rerunning a stage', () => {

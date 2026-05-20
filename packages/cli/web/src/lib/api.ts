@@ -359,7 +359,7 @@ export const api = {
     request<import('./types').WorkflowRun>(`/issues/${number}/workflow-run`),
 
   retryCheckpoint: (number: number, stage: string) =>
-    request<{ message: string; repairBudgetExhausted?: boolean }>(`/issues/${number}/stages/${stage}/retry-checkpoint`, { method: 'POST' }),
+    request<{ message: string }>(`/issues/${number}/stages/${stage}/retry-checkpoint`, { method: 'POST' }),
 
   rerunStage: (number: number, stage: string) =>
     request<{ issue: import('./types').Issue; taskId: string; status: string; queuePosition: number; message: string }>(`/issues/${number}/stages/${stage}/rerun`, { method: 'POST' }),

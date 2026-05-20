@@ -14,12 +14,23 @@ import { ProjectService } from '../src/services/project-service';
 import { IssueService } from '../src/services/issue-service';
 import { ConfigService } from '../src/services/config-service';
 import { EventBus, AgentRunnerService } from '../src/services';
+import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { StateManager } from '../src/server/state-manager';
 import { CommentRepo } from '../src/db/comment-repo';
 import { LabelRepo } from '../src/db/label-repo';
 import { createIssueRoutes } from '../src/api/issues';
 import { Stage, IssueStatus } from '../src/types';
 import { StageExecutionRepo } from '../src/db/stage-execution-repo';
+
+function completePlanToApproval(workflowApplicationService: WorkflowApplicationService, issueId: string): void {
+  for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+    workflowApplicationService.completeTask({ issueId, stage: Stage.Plan, taskId, result: { status: 'completed' } });
+  }
+  for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+    workflowApplicationService.recordCheckResult({ issueId, stage: Stage.Plan, result: { name: checkName, status: 'pass' } });
+  }
+}
 
 function createTestServer(app: Hono): http.Server {
   return http.createServer(async (req, res) => {
@@ -331,11 +342,11 @@ describe('Recovery Verb Regression Suite', () => {
 
     function createRetryServer(agentRunner: AgentRunnerService) {
       const app = new Hono();
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, undefined, new WorkflowRunService(db)));
       return createTestServer(app);
     }
 
-    it('rejects retry when no checkpoint exists — does NOT reset to backlog', async () => {
+    it('rejects retry when no WorkflowRun exists — does NOT reset to backlog', async () => {
       const issue = issueService.create({ projectId, title: 'No Checkpoint Issue' });
       issueRepo.updateStage(issue.id, Stage.Build);
       issueRepo.blockIssue(issue.id, 'Build interrupted');
@@ -348,9 +359,7 @@ describe('Recovery Verb Regression Suite', () => {
       const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
       expect(response.status).toBe(409);
-      expect(response.body.error).toContain('checkpoint');
-      expect(response.body.error).toContain('rerun');
-      expect(response.body.error).toContain('rewind');
+      expect(response.body.error).toContain('No workflow run found');
 
       const updated = issueRepo.findById(issue.id);
       expect(updated?.stage).toBe(Stage.Build);
@@ -358,7 +367,7 @@ describe('Recovery Verb Regression Suite', () => {
       expect(updated?.status).toBe(IssueStatus.Blocked);
     });
 
-    it('rejects retry when no tasks.json exists — does NOT reset to backlog', async () => {
+    it('rejects retry when no WorkflowRun exists even without tasks.json — does NOT reset to backlog', async () => {
       const issue = issueService.create({ projectId, title: 'No Tasks Issue' });
       issueRepo.updateStage(issue.id, Stage.Build);
       issueRepo.blockIssue(issue.id, 'Build failed');
@@ -371,7 +380,7 @@ describe('Recovery Verb Regression Suite', () => {
       const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
       expect(response.status).toBe(409);
-      expect(response.body.error).toContain('checkpoint');
+      expect(response.body.error).toContain('No workflow run found');
       expect(response.body.error).not.toContain('reset to');
 
       const updated = issueRepo.findById(issue.id);
@@ -379,11 +388,18 @@ describe('Recovery Verb Regression Suite', () => {
       expect(updated?.stage).not.toBe(Stage.Backlog);
     });
 
-it('allows retry when checkpoint exists', async () => {
+    it('allows retry when WorkflowRun has failed work', async () => {
         const issue = issueService.create({ projectId, title: 'Checkpoint Issue' });
         issueRepo.updateStage(issue.id, Stage.Build);
         issueRepo.blockIssue(issue.id, 'Build failed');
         issueRepo.updateRetryCount(issue.id, 2);
+        const workflowApplicationService = new WorkflowApplicationService(db);
+        workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+        completePlanToApproval(workflowApplicationService, issue.id);
+        workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+        workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+        workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-failed' } });
+        workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'failed', error: 'Build failed' } });
 
         const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test-change`);
         fs.mkdirSync(changeDir, { recursive: true });
@@ -398,14 +414,14 @@ it('allows retry when checkpoint exists', async () => {
         } as any;
 
         const retryApp = new Hono();
-        retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+        retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, undefined, new WorkflowRunService(db)));
         const retryServer = createTestServer(retryApp);
 
         const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
 
         expect(response.status).toBe(202, `Expected 202 but got ${response.status}: ${JSON.stringify(response.body)}`);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.message).toContain('checkpoint');
+        expect(response.body.data.message).toContain('failed work');
 
         const updated = issueRepo.findById(issue.id);
         expect(updated?.status).toBe(IssueStatus.Active);

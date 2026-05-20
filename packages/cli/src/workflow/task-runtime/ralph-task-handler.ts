@@ -194,7 +194,6 @@ export function materializeRalphTasks(ctx: StageContext): void {
         order: t.order,
         dependsOn: t.dependsOn ?? [],
       })),
-      tasksPath: change.tasksPath,
     });
   }
 }

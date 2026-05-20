@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -12,26 +12,6 @@ import { IssueService } from '../src/services/issue-service';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { Stage, IssueStatus, MergeState } from '../src/types';
-
-function makeTasksJson(tasks: Array<{ id: string; passes: boolean }>) {
-  return JSON.stringify({ version: 1, tasks });
-}
-
-function createChangeDirWithTasks(
-  worktreeDir: string,
-  issueNumber: number,
-  tasksContent: string,
-): string {
-  const changeDir = path.join(
-    worktreeDir,
-    'openspec',
-    'changes',
-    `${issueNumber}-test-change`,
-  );
-  fs.mkdirSync(changeDir, { recursive: true });
-  fs.writeFileSync(path.join(changeDir, 'tasks.json'), tasksContent, 'utf-8');
-  return changeDir;
-}
 
 function createWorktreeMock(worktreePath: string | null) {
   return {
@@ -62,19 +42,12 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('build-stage all-pass: resumes pipeline for verification', () => {
+  it('active issue without WorkflowRun becomes interrupted instead of reading tasks.json', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'All Pass' });
+    const issue = issueService.create({ projectId: project.id, title: 'Build Orphan' });
 
     issueRepo.updateStatus(issue.id, IssueStatus.Active);
     issueRepo.updateStage(issue.id, Stage.Build);
-
-    const tasksJson = makeTasksJson([
-      { id: 'T-001', passes: true },
-      { id: 'T-002', passes: true },
-      { id: 'T-003', passes: true },
-    ]);
-    createChangeDirWithTasks(tmpDir, issue.number, tasksJson);
 
     const service = new AgentRunnerService(
       eventBus,
@@ -87,14 +60,13 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
     expect(recovered?.stage).toBe(Stage.Build);
+    expect(recovered?.blockedReason).toBeUndefined();
     expect(recovered?.approvalState).toBeUndefined();
-    expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
   });
 
   it('build-stage with check approval: reconciles to check without blocking', () => {
@@ -132,156 +104,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.blockedReason).toBeUndefined();
   });
 
-  it('build-stage partial: auto-retry triggered', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'Partial' });
-
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    const tasksJson = makeTasksJson([
-      { id: 'T-001', passes: true },
-      { id: 'T-002', passes: true },
-      { id: 'T-003', passes: false },
-    ]);
-    createChangeDirWithTasks(tmpDir, issue.number, tasksJson);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Build);
-    expect(recovered?.retryCount).toBe(1);
-    expect(recovered?.blockedReason).toContain('2/3');
-  });
-
-  it('build-stage no tasks.json: blocked', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'No Tasks' });
-
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    const changeDir = path.join(
-      tmpDir,
-      'openspec',
-      'changes',
-      `${issue.number}-test-change`,
-    );
-    fs.mkdirSync(changeDir, { recursive: true });
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.stage).toBe(Stage.Build);
-    expect(recovered?.blockedReason).toContain('tasks.json');
-  });
-
-  it('build-stage no change directory: blocked', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'No ChangeDir' });
-
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('变更目录');
-  });
-
-  it('build-stage invalid JSON: blocked', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'Bad JSON' });
-
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    createChangeDirWithTasks(tmpDir, issue.number, '{ not valid json }');
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.stage).toBe(Stage.Build);
-    expect(recovered?.blockedReason).toContain('格式损坏');
-  });
-
-  it('build-stage tasks.json missing tasks array: blocked', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'No Array' });
-
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    createChangeDirWithTasks(tmpDir, issue.number, JSON.stringify({ version: 1 }));
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('tasks 数组');
-  });
-
-  it('plan-stage orphan: restored to awaiting approval (non-build stage)', () => {
+  it('plan-stage orphan becomes interrupted instead of fabricating approval', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Plan Orphan' });
 
@@ -302,9 +125,9 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
     expect(recovered?.stage).toBe(Stage.Plan);
-    expect(recovered?.approvalState?.status).toBe('awaiting');
+    expect(recovered?.approvalState).toBeUndefined();
   });
 
   it('awaiting approval: gate restored, status active', () => {
@@ -360,7 +183,7 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     expect(recovered?.stage).toBe(Stage.Build);
   });
 
-    it('no worktree found: build-stage blocked', () => {
+    it('no worktree found: build-stage still interrupts without WorkflowRun', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'No Worktree' });
 
@@ -381,11 +204,11 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('Worktree');
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
+    expect(recovered?.blockedReason).toBeUndefined();
   });
 
-  it('mixed orphans: awaiting preserved, build all-pass advanced, plan interrupted', () => {
+  it('mixed orphans: explicit awaiting approval is preserved, other no-run issues interrupt', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
 
     const awaitingIssue = issueService.create({ projectId: project.id, title: 'Awaiting' });
@@ -400,12 +223,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
     const buildIssue = issueService.create({ projectId: project.id, title: 'Build All Pass' });
     issueRepo.updateStatus(buildIssue.id, IssueStatus.Active);
     issueRepo.updateStage(buildIssue.id, Stage.Build);
-    const tasksJson = makeTasksJson([
-      { id: 'T-001', passes: true },
-      { id: 'T-002', passes: true },
-    ]);
-    createChangeDirWithTasks(tmpDir, buildIssue.number, tasksJson);
-
     const planIssue = issueService.create({ projectId: project.id, title: 'Plan Orphan' });
     issueRepo.updateStatus(planIssue.id, IssueStatus.Active);
     issueRepo.updateStage(planIssue.id, Stage.Plan);
@@ -421,8 +238,6 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
     service.recoverIssues();
 
     const rAwaiting = issueRepo.findById(awaitingIssue.id);
@@ -431,43 +246,13 @@ describe('recoverIssues — orphan-recovery scenarios', () => {
 
     const rBuild = issueRepo.findById(buildIssue.id);
     expect(rBuild?.stage).toBe(Stage.Build);
+    expect(rBuild?.status).toBe(IssueStatus.Interrupted);
     expect(rBuild?.approvalState).toBeUndefined();
-    expect(enqueueSpy).toHaveBeenCalledWith(buildIssue.id, 'resume-pipeline');
 
     const rPlan = issueRepo.findById(planIssue.id);
-    expect(rPlan?.status).toBe(IssueStatus.Active);
+    expect(rPlan?.status).toBe(IssueStatus.Interrupted);
     expect(rPlan?.stage).toBe(Stage.Plan);
-    expect(rPlan?.approvalState?.status).toBe('awaiting');
-  });
-
-  it('build-stage empty tasks array: resumes pipeline for verification', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'Empty Tasks' });
-
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    createChangeDirWithTasks(tmpDir, issue.number, makeTasksJson([]));
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.stage).toBe(Stage.Build);
-    expect(recovered?.approvalState).toBeUndefined();
-    expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
+    expect(rPlan?.approvalState).toBeUndefined();
   });
 });
 
@@ -582,7 +367,7 @@ describe('recoverIssues — migration v16 + blockedReason + retryCount', () => {
   });
 });
 
-describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
+describe('recoverIssues — no WorkflowRun recovery boundary', () => {
   let db: DatabaseManager;
   let projectRepo: ProjectRepo;
   let issueRepo: IssueRepo;
@@ -605,130 +390,20 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function setupPartialTasksIssue(
-    retryCount: number = 0,
-    passed: number = 2,
-    total: number = 8,
-  ) {
+  function setupActiveBuildIssue(retryCount: number = 0) {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'AutoRetry' });
+    const issue = issueService.create({ projectId: project.id, title: 'No WorkflowRun' });
     issueRepo.updateStatus(issue.id, IssueStatus.Active);
     issueRepo.updateStage(issue.id, Stage.Build);
     if (retryCount > 0) {
       issueRepo.updateRetryCount(issue.id, retryCount);
     }
 
-    const tasks = [];
-    for (let i = 0; i < passed; i++) tasks.push({ id: `T-${String(i + 1).padStart(3, '0')}`, passes: true });
-    for (let i = passed; i < total; i++) tasks.push({ id: `T-${String(i + 1).padStart(3, '0')}`, passes: false });
-    createChangeDirWithTasks(tmpDir, issue.number, makeTasksJson(tasks));
-
     return { project, issue };
   }
 
-  it('first auto-retry (retryCount 0→1): status stays active, retryCount=1, blockedReason set', () => {
-    const { project, issue } = setupPartialTasksIssue(0, 2, 8);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.stage).toBe(Stage.Build);
-    expect(recovered?.retryCount).toBe(1);
-    expect(recovered?.blockedReason).toContain('2/8');
-    expect(recovered?.blockedReason).toContain('第 1/3 次');
-  });
-
-  it('second auto-retry (retryCount 1→2): increments correctly', () => {
-    const { project, issue } = setupPartialTasksIssue(1, 3, 8);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.retryCount).toBe(2);
-    expect(recovered?.blockedReason).toContain('3/8');
-    expect(recovered?.blockedReason).toContain('第 2/3 次');
-  });
-
-  it('third auto-retry (retryCount 2→3): still active, final attempt', () => {
-    const { project, issue } = setupPartialTasksIssue(2, 1, 5);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Active);
-    expect(recovered?.retryCount).toBe(3);
-    expect(recovered?.blockedReason).toContain('1/5');
-    expect(recovered?.blockedReason).toContain('第 3/3 次');
-  });
-
-  it('retryCount=3 (max reached): marks blocked with human-readable reason', () => {
-    const { project, issue } = setupPartialTasksIssue(3, 2, 8);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    const blockedEvents: any[] = [];
-    eventBus.on('agent_blocked', (e) => blockedEvents.push(e));
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.stage).toBe(Stage.Build);
-    expect(recovered?.retryCount).toBe(4);
-    expect(recovered?.blockedReason).toContain('2/8');
-    expect(recovered?.blockedReason).toContain('已自动重试 3 次仍失败');
-    expect(recovered?.blockedReason).toContain('人工介入');
-  });
-
-  it('retryCount>3: also marks blocked', () => {
-    const { project, issue } = setupPartialTasksIssue(5, 1, 4);
+  it('does not auto-retry from tasks.json progress without an active WorkflowRun', () => {
+    const { issue } = setupActiveBuildIssue();
 
     const service = new AgentRunnerService(
       eventBus,
@@ -744,197 +419,37 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
     service.recoverIssues();
 
     const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.retryCount).toBe(6);
-  });
-
-  it('auto-retry pipeline start failure: marks blocked immediately', () => {
-    const { project, issue } = setupPartialTasksIssue(0, 2, 8);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-    vi.spyOn(service, 'enqueue').mockImplementation(() => {
-      throw new Error('Concurrent agent limit reached (8)');
-    });
-
-    const blockedEvents: any[] = [];
-    eventBus.on('agent_blocked', (e) => blockedEvents.push(e));
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('自动重试启动失败');
-    expect(recovered?.blockedReason).toContain('2/8');
-    expect(blockedEvents).toHaveLength(1);
-    expect(blockedEvents[0].issueNumber).toBe(issue.number);
-    expect(blockedEvents[0].blockedReason).toContain('自动重试启动失败');
-  });
-
-  it('non-retryable failure (project deleted after issue created): blocked with reason', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'Orphan' });
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    const mockProjectRepo = {
-      findById: vi.fn().mockReturnValue(null),
-    } as any;
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      mockProjectRepo,
-      createWorktreeMock(null),
-    );
-
-    const blockedEvents: any[] = [];
-    eventBus.on('agent_blocked', (e) => blockedEvents.push(e));
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('Project 已不存在');
-    expect(recovered?.retryCount).toBe(0);
-    expect(blockedEvents).toHaveLength(1);
-    expect(blockedEvents[0].retryCount).toBe(0);
-  });
-
-  it('non-retryable failure (no worktree): blocked with reason', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'NoWT' });
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(null),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('Worktree 已不存在');
-  });
-
-  it('non-retryable failure (no tasks.json): blocked with reason', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'NoTasksFile' });
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test-change`);
-    fs.mkdirSync(changeDir, { recursive: true });
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('tasks.json 不存在');
-  });
-
-  it('non-retryable failure (invalid JSON): blocked with reason', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'BadJson' });
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-
-    createChangeDirWithTasks(tmpDir, issue.number, 'not json at all');
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Blocked);
-    expect(recovered?.blockedReason).toContain('tasks.json 格式损坏');
-  });
-
-  it('all-pass clears retryCount and blockedReason', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'AllPassReset' });
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-    issueRepo.updateRetryCount(issue.id, 2);
-    issueRepo.updateBlockedReason(issue.id, 'Old reason');
-
-    createChangeDirWithTasks(tmpDir, issue.number, makeTasksJson([
-      { id: 'T-001', passes: true },
-      { id: 'T-002', passes: true },
-    ]));
-
-    const service = new AgentRunnerService(
-      eventBus,
-      undefined,
-      issueRepo,
-      8,
-      undefined,
-      undefined,
-      projectRepo,
-      createWorktreeMock(tmpDir),
-    );
-    const enqueueSpy = vi.spyOn(service, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-
-    service.recoverIssues();
-
-    const recovered = issueRepo.findById(issue.id);
-    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
     expect(recovered?.stage).toBe(Stage.Build);
     expect(recovered?.retryCount).toBe(0);
     expect(recovered?.blockedReason).toBeUndefined();
     expect(recovered?.approvalState).toBeUndefined();
-    expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
   });
 
-  it('agent_blocked event emitted with correct payload on non-retryable failure', () => {
-    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
-    const issue = issueService.create({ projectId: project.id, title: 'EventPayload' });
-    issueRepo.updateStatus(issue.id, IssueStatus.Active);
-    issueRepo.updateStage(issue.id, Stage.Build);
-    issueRepo.updateRetryCount(issue.id, 1);
+  it('preserves retry count while interrupting a no-run orphan', () => {
+    const { issue } = setupActiveBuildIssue(2);
 
-    const changeDir = path.join(tmpDir, 'openspec', 'changes', `${issue.number}-test-change`);
-    fs.mkdirSync(changeDir, { recursive: true });
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+      undefined,
+      undefined,
+      projectRepo,
+      createWorktreeMock(tmpDir),
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
+    expect(recovered?.retryCount).toBe(2);
+    expect(recovered?.blockedReason).toBeUndefined();
+  });
+
+  it('does not emit agent_blocked for a generic no-run interruption', () => {
+    const { issue } = setupActiveBuildIssue(3);
 
     const service = new AgentRunnerService(
       eventBus,
@@ -952,17 +467,13 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
 
     service.recoverIssues();
 
-    expect(blockedEvents).toHaveLength(1);
-    const evt = blockedEvents[0];
-    expect(evt.issueId).toBe(issue.id);
-    expect(evt.projectId).toBe(issue.projectId);
-    expect(evt.issueNumber).toBe(issue.number);
-    expect(evt.blockedReason).toContain('tasks.json 不存在');
-    expect(evt.retryCount).toBe(1);
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
+    expect(blockedEvents).toHaveLength(0);
   });
 
-  it('agent_blocked event emitted with retryCount on max retries reached', () => {
-    const { project, issue } = setupPartialTasksIssue(3, 2, 8);
+  it('project/worktree presence does not change no-run recovery semantics', () => {
+    const { issue } = setupActiveBuildIssue();
 
     const service = new AgentRunnerService(
       eventBus,
@@ -975,14 +486,32 @@ describe('recoverIssues — auto-retry and blockedReason scenarios', () => {
       createWorktreeMock(tmpDir),
     );
 
-    const blockedEvents: any[] = [];
-    eventBus.on('agent_blocked', (e) => blockedEvents.push(e));
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
+    expect(recovered?.stage).toBe(Stage.Build);
+  });
+
+  it('missing worktree does not create a stage-specific block without WorkflowRun', () => {
+    const { issue } = setupActiveBuildIssue();
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+      undefined,
+      undefined,
+      projectRepo,
+      createWorktreeMock(null),
+    );
 
     service.recoverIssues();
 
-    expect(blockedEvents).toHaveLength(1);
-    expect(blockedEvents[0].retryCount).toBe(4);
-    expect(blockedEvents[0].issueNumber).toBe(issue.number);
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
+    expect(recovered?.blockedReason).toBeUndefined();
   });
 
   it('getBlockedIssues returns all blocked issues with reasons', () => {
@@ -1155,7 +684,7 @@ describe('recoverIssues — false-done detection', () => {
     expect(blockedEvents.some(e => e.issueNumber === falseDoneIssue.number)).toBe(true);
   });
 
-  it('integrate-stage active issue: preserved and can be resumed', () => {
+  it('integrate-stage active issue without WorkflowRun becomes interrupted', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Integrate Active' });
     issueRepo.updateStatus(issue.id, IssueStatus.Active);
@@ -1176,11 +705,11 @@ describe('recoverIssues — false-done detection', () => {
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.stage).toBe(Stage.Integrate);
-    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
     expect(recovered?.blockedReason).toBeUndefined();
   });
 
-  it('check-stage with mergeState=merged: preserves definition-driven stage during recovery', () => {
+  it('check-stage with mergeState=merged still needs WorkflowRun to preserve active state', () => {
     const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
     const issue = issueService.create({ projectId: project.id, title: 'Check Merged' });
     issueRepo.updateStatus(issue.id, IssueStatus.Active);
@@ -1202,7 +731,7 @@ describe('recoverIssues — false-done detection', () => {
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.stage).toBe(Stage.Check);
-    expect(recovered?.status).toBe(IssueStatus.Active);
+    expect(recovered?.status).toBe(IssueStatus.Interrupted);
   });
 
   it('check-stage with WorkflowRun and mergeState=merged: preserves definition-driven stage during recovery', () => {

@@ -186,11 +186,6 @@ export class WorkflowEngine {
     };
   }
 
-  private getTasksPath(issue: Issue): string | undefined {
-    const changeDir = this.artifactManager.getChangeDir(issue.number);
-    return changeDir ? `${changeDir}/tasks.json` : undefined;
-  }
-
   private refreshIssue(issue: Issue): Issue {
     return this.issueRepo.findById(issue.id) ?? issue;
   }
@@ -290,15 +285,14 @@ export class WorkflowEngine {
   private async resumeAfterMaterializingWork(
     issue: Issue,
     acpOptions: AgentSessionOptions,
-    tasksPath?: string,
   ): Promise<ReturnType<WorkflowApplicationRuntime['resumeDecision']>> {
     const service = this.workflowApplicationService;
     if (!service) throw new Error('WorkflowApplicationService is required for aggregate workflow execution');
 
-    let decision = service.resumeDecision(issue.id, { tasksPath });
+    let decision = service.resumeDecision(issue.id);
 
     if (this.shouldMaterializeBeforeWork(decision.nextWork) && await this.materializeCurrentStageWork(issue, acpOptions, decision.run)) {
-      decision = service.resumeDecision(issue.id, { tasksPath });
+      decision = service.resumeDecision(issue.id);
     }
 
     return decision;
@@ -309,23 +303,22 @@ export class WorkflowEngine {
     if (!service) throw new Error('WorkflowApplicationService is required for aggregate workflow execution');
 
     let currentIssue = issue;
-    const tasksPath = this.getTasksPath(issue);
     let initial: ReturnType<WorkflowApplicationRuntime['startWorkflow']> | ReturnType<WorkflowApplicationRuntime['resumeDecision']>;
     if (issue.stage === Stage.Backlog) {
-      initial = service.startWorkflow({ issueId: issue.id, issueNumber: issue.number, tasksPath });
+      initial = service.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
     } else {
       const retryableFailedStage = this.workflowRunService?.canRetryStage?.(issue.id, issue.stage) ?? false;
       if (retryableFailedStage) {
         this.pendingRejectionFeedback.set(`${issue.id}:${issue.stage}`, this.getRejectedApprovalOutput(issue.id, issue.stage));
       }
       initial = retryableFailedStage
-        ? service.retryStage({ issueId: issue.id, stage: issue.stage, tasksPath, startedBy: 'retry' })
-        : service.resumeDecision(issue.id, { tasksPath });
+        ? service.retryStage({ issueId: issue.id, stage: issue.stage, startedBy: 'retry' })
+        : service.resumeDecision(issue.id);
     }
     let run = initial.run;
     let work = 'decision' in initial ? initial.decision.nextWork : initial.nextWork;
     if (this.shouldMaterializeBeforeWork(work) && await this.materializeCurrentStageWork(issue, acpOptions, run)) {
-      const materializedDecision = service.resumeDecision(issue.id, { tasksPath });
+      const materializedDecision = service.resumeDecision(issue.id);
       run = materializedDecision.run;
       work = materializedDecision.nextWork;
     }
@@ -390,7 +383,7 @@ export class WorkflowEngine {
         };
       }
 
-      const decision = await this.resumeAfterMaterializingWork(issue, acpOptions, tasksPath);
+      const decision = await this.resumeAfterMaterializingWork(issue, acpOptions);
       run = decision.run;
       work = decision.nextWork;
       const nextStage = 'stage' in work ? work.stage : work.kind === 'failed' ? work.reason.stage : Stage.Done;

@@ -1278,7 +1278,7 @@ describe('API Routes', () => {
       return issue;
     }
 
-    function createRetryServer(agentRunner: AgentRunnerService) {
+    function createRetryServer(agentRunner: AgentRunnerService, workflowRunService?: WorkflowRunService) {
       const app = new Hono();
       const prerequisiteService = new IssuePrerequisiteService(issueRepo, stateManager.getIssueStartPrerequisiteRepo());
       app.route('/api/issues', createIssueRoutes(
@@ -1297,7 +1297,7 @@ describe('API Routes', () => {
         undefined,
         undefined,
         undefined,
-        undefined,
+        workflowRunService,
         prerequisiteService,
       ));
       return createTestServer(app);
@@ -1345,17 +1345,18 @@ describe('API Routes', () => {
         expect(updated?.status).toBe(IssueStatus.Blocked);
       });
 
-      it('should reject retry when no checkpoint found', async () => {
+      it('rejects retry when no WorkflowRun exists', async () => {
         const issue = createBlockedIssue('Retry Test');
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
-        server = createRetryServer(agentRunner);
+        const workflowRunService = new WorkflowRunService(db);
+        server = createRetryServer(agentRunner, workflowRunService);
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
         expect(response.status).toBe(409);
         expect(response.body.success).toBe(false);
-        expect(response.body.error).toContain('checkpoint');
+        expect(response.body.error).toContain('No workflow run found');
 
         const issueRepo = stateManager.getIssueRepo();
         const updated = issueRepo.findById(issue.id);
@@ -1363,7 +1364,7 @@ describe('API Routes', () => {
         expect(updated?.stage).not.toBe(Stage.Backlog);
       });
 
-      it('should retry from checkpoint when worktree has tasks.json', async () => {
+      it('retries failed WorkflowRun work and ignores tasks.json as retry authority', async () => {
         const tmpRetryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-retry-test-'));
 
         try {
@@ -1375,6 +1376,14 @@ describe('API Routes', () => {
           issueRepo.updateStage(issue.id, Stage.Build);
           issueRepo.blockIssue(issue.id, 'Build interrupted');
           issueRepo.updateRetryCount(issue.id, 2);
+          const workflowRunService = new WorkflowRunService(db);
+          const workflowApplicationService = new WorkflowApplicationService(db);
+          workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
+          completePlanToApproval(workflowApplicationService, issue.id);
+          workflowApplicationService.approveStage({ issueId: issue.id, stage: Stage.Plan, approval: { output: { approved: true } } });
+          workflowApplicationService.materializeTasks({ issueId: issue.id, stage: Stage.Build, tasks: [{ id: 'T-001', title: 'Build task', order: 1 }] });
+          workflowApplicationService.startTaskAttempt({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', evidence: { executionId: 'build-failed' } });
+          workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Build, taskId: 'T-001', result: { status: 'failed', error: 'failed before retry' } });
 
           const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
           fs.mkdirSync(changeDir, { recursive: true });
@@ -1390,14 +1399,14 @@ describe('API Routes', () => {
           } as any;
 
           const retryApp = new Hono();
-          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo()));
+          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, undefined, workflowRunService));
           const retryServer = createTestServer(retryApp);
 
           const response = await request(retryServer).post(`/api/issues/${issue.number}/retry`);
 
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
-          expect(response.body.data.message).toContain('retrying from checkpoint');
+          expect(response.body.data.message).toContain('retrying from failed work');
 
           const updated = issueRepo.findById(issue.id);
           expect(updated?.status).toBe(IssueStatus.Active);
@@ -1494,25 +1503,27 @@ describe('API Routes', () => {
         issueRepo.updateStage(issue.id, Stage.Plan);
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus);
-        server = createRetryServer(agentRunner);
+        const workflowRunService = new WorkflowRunService(db);
+        server = createRetryServer(agentRunner, workflowRunService);
 
         const response = await request(server).post('/api/issues/1/retry');
 
         expect(response.status).toBe(409);
-        expect(response.body.error).toContain('not blocked');
+        expect(response.body.error).toContain('No workflow run found');
       });
 
-      it('should reject retry when issue has a running slot and no checkpoint', async () => {
+      it('rejects retry with running queue slot when no WorkflowRun exists', async () => {
         const issue = createBlockedIssue('Running Agent');
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
         (agentRunner as any).runningSlots.set(issue.id, { id: 'fake-task', issueId: issue.id });
-        server = createRetryServer(agentRunner);
+        const workflowRunService = new WorkflowRunService(db);
+        server = createRetryServer(agentRunner, workflowRunService);
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
         expect(response.status).toBe(409);
-        expect(response.body.error).toContain('checkpoint');
+        expect(response.body.error).toContain('No workflow run found');
       });
 
       it('should return 404 when issue not found', async () => {
@@ -1525,16 +1536,17 @@ describe('API Routes', () => {
         expect(response.status).toBe(404);
       });
 
-      it('should reject retry and keep stage when no checkpoint found', async () => {
+      it('rejects retry and keeps stage when no WorkflowRun exists', async () => {
         const issue = createBlockedIssue('No Checkpoint');
         const eventBus = new EventBus();
         const agentRunner = new AgentRunnerService(eventBus, undefined, stateManager.getIssueRepo(), 8);
-        server = createRetryServer(agentRunner);
+        const workflowRunService = new WorkflowRunService(db);
+        server = createRetryServer(agentRunner, workflowRunService);
 
         const response = await request(server).post(`/api/issues/${issue.number}/retry`);
 
         expect(response.status).toBe(409);
-        expect(response.body.error).toContain('checkpoint');
+        expect(response.body.error).toContain('No workflow run found');
 
         const issueRepo = stateManager.getIssueRepo();
         const updated = issueRepo.findById(issue.id);
@@ -1544,7 +1556,7 @@ describe('API Routes', () => {
     });
 
     describe('POST /api/issues/:number/stages/:stage/retry-checkpoint', () => {
-      it('retries the Check checkpoint and resumes the pipeline when repair budget is exhausted', async () => {
+      it('retries the Check checkpoint and resumes through the generic workflow engine', async () => {
         const tmpRetryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-check-retry-test-'));
 
         try {
@@ -1556,7 +1568,7 @@ describe('API Routes', () => {
           issueRepo.blockIssue(issue.id, 'Review still failing');
           issueRepo.updateRetryCount(issue.id, 2);
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 
@@ -1576,6 +1588,7 @@ describe('API Routes', () => {
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'fix-review-findings:1', result: { status: 'completed', events: ['code.changed'] } });
           workflowApplicationService.completeTask({ issueId: issue.id, stage: Stage.Check, taskId: 'ai-review', result: { status: 'completed' } });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'health:check', status: 'pass' } });
+          workflowApplicationService.startCheckAttempt({ issueId: issue.id, stage: Stage.Check, checkName: 'review-passed' });
           workflowApplicationService.recordCheckResult({ issueId: issue.id, stage: Stage.Check, result: { name: 'review-passed', status: 'fail', message: 'Still failing after second repair', output: { verdict: 'FAIL', summary: 'Still failing after second repair' } } });
 
           const changeDir = path.join(tmpRetryDir, 'openspec', 'changes', `${issue.number}-test-change`);
@@ -1616,8 +1629,7 @@ describe('API Routes', () => {
 
           expect(response.status).toBe(202);
           expect(response.body.success).toBe(true);
-          expect(response.body.data.message).toContain('repair budget is exhausted');
-          expect(response.body.data.repairBudgetExhausted).toBe(true);
+          expect(response.body.data.message).toContain('checkpoint retry initiated');
           expect(enqueueSpy).toHaveBeenCalledWith(issue.id, 'resume-pipeline');
 
           const updated = issueRepo.findById(issue.id);
@@ -1654,7 +1666,7 @@ describe('API Routes', () => {
             title: 'Review still running',
           });
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 
@@ -1737,7 +1749,7 @@ describe('API Routes', () => {
           const issue = issueService.create({ projectId: rerunProject.id, title: 'Rerun Stale Approval Review' });
           issueRepo.updateStage(issue.id, Stage.Check);
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 
@@ -1826,7 +1838,7 @@ describe('API Routes', () => {
           title: 'Build still running',
         });
 
-        const workflowRunService = new WorkflowRunService(db, issueRepo);
+        const workflowRunService = new WorkflowRunService(db);
         const workflowApplicationService = new WorkflowApplicationService(db);
         workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
         completePlanToApproval(workflowApplicationService, issue.id);
@@ -1884,7 +1896,7 @@ describe('API Routes', () => {
           processPid: process.pid,
         });
 
-        const workflowRunService = new WorkflowRunService(db, issueRepo);
+        const workflowRunService = new WorkflowRunService(db);
         const workflowApplicationService = new WorkflowApplicationService(db);
         workflowApplicationService.startWorkflow({ issueId: issue.id, issueNumber: issue.number });
         completePlanToApproval(workflowApplicationService, issue.id);
@@ -1953,7 +1965,7 @@ describe('API Routes', () => {
           issueRepo.blockIssue(issue.id, 'Review failed');
           issueRepo.updateRetryCount(issue.id, 2);
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 
@@ -2036,7 +2048,7 @@ describe('API Routes', () => {
           issueRepo.updateStage(issue.id, Stage.Check);
           issueRepo.blockIssue(issue.id, 'Review failed');
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 
@@ -2102,7 +2114,7 @@ describe('API Routes', () => {
           const issue = issueService.create({ projectId: repairProject.id, title: 'Repair Check Unavailable' });
           issueRepo.updateStage(issue.id, Stage.Check);
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 
@@ -2165,7 +2177,7 @@ describe('API Routes', () => {
           issueRepo.updateStage(issue.id, Stage.Check);
           issueRepo.blockIssue(issue.id, 'Review still failing');
 
-          const workflowRunService = new WorkflowRunService(db, issueRepo);
+          const workflowRunService = new WorkflowRunService(db);
           const workflowApplicationService = new WorkflowApplicationService(db);
           const stageStateService = new StageStateService(db);
 

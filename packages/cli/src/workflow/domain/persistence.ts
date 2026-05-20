@@ -165,16 +165,6 @@ export function hydrateWorkflowRun(
 
 export function repairWorkflowRunSnapshot(
   snapshot: WorkflowRunSnapshot,
-  buildTasks: Array<{
-    id: string;
-    title: string;
-    order?: number;
-    dependsOn?: string[];
-    passes?: boolean;
-    attempts?: number;
-    durations?: number[];
-    error?: string | null;
-  }> = [],
 ): WorkflowRunSnapshot {
   const workflowDefinitionSnapshot = snapshot.workflowDefinitionSnapshot ?? createDefaultWorkflowDefinitionSnapshot();
   const definitions: CompiledStageDefinition[] = workflowDefinitionSnapshot.compiledStageDefinitions.length > 0
@@ -201,42 +191,7 @@ export function repairWorkflowRunSnapshot(
     }
 
     const shouldRepairStaticStage = workflowRunning && (definition.stage === Stage.Plan || definition.stage === Stage.Integrate);
-    const shouldMaterializeBuild = workflowRunning && definition.stage === Stage.Build && buildTasks.length > 0;
-
-    if (shouldMaterializeBuild) {
-      stageRun.workSourceState = {
-        evaluated: true,
-        tasks: buildTasks.map(t => ({
-          id: t.id,
-          title: t.title,
-          order: t.order ?? stageRun.tasks.length,
-          dependsOn: t.dependsOn ?? [],
-        })),
-      };
-      for (const task of buildTasks) {
-        const existing = stageRun.tasks.find(candidate => candidate.id === task.id);
-        if (existing) {
-          existing.dependsOn = [...(task.dependsOn ?? existing.dependsOn ?? [])];
-          continue;
-        }
-        stageRun.tasks.push({
-          id: task.id,
-          title: task.title,
-          status: 'pending',
-          order: task.order ?? stageRun.tasks.length,
-          dependsOn: [...(task.dependsOn ?? [])],
-          attempts: 0,
-          duration: 0,
-          artifacts: [],
-          events: [],
-          output: null,
-          reason: null,
-          causedBy: null,
-          resetBy: null,
-          latestAttempt: null,
-        });
-      }
-    } else if (shouldRepairStaticStage) {
+    if (shouldRepairStaticStage) {
       for (const [taskIndex, task] of definition.tasks.entries()) {
         if (stageRun.tasks.some(existing => existing.id === task.id)) continue;
         stageRun.tasks.push({
