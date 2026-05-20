@@ -38,31 +38,7 @@ describe('workflow inspector', () => {
           onMissing: { action: 'continue-session', maxAttempts: 1 },
         },
       ]);
-      expect(parsed.workflow.stages[2].tasks.find((task: any) => task.id === 'ai-review').selfRepairPolicy).toEqual({
-        enabled: true,
-        allowedScopes: [
-          'formatting',
-          'typos',
-          'missing-obvious-guards',
-          'small-test-expectation-updates',
-          'import-cleanup',
-          'dead-code-removal',
-        ],
-        maxAttempts: 3,
-        requiresVerification: true,
-        disallowedReasons: [
-          'product-behavior-change',
-          'public-contract-modification',
-          'data-safety-risk',
-          'security-posture-change',
-          'merge-strategy-change',
-          'architectural-judgment-required',
-          'cross-file-refactoring',
-          'ambiguous-solution',
-          'user-decision-required',
-          'out-of-current-scope',
-        ],
-      });
+      expect(parsed.workflow.stages[2].tasks.find((task: any) => task.id === 'ai-review')).not.toHaveProperty('selfRepairPolicy');
       expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'review-passed')).toMatchObject({
         uses: 'mohist/marker',
         with: {
@@ -114,7 +90,6 @@ describe('workflow inspector', () => {
       stage: Stage.Check,
       uses: 'mohist/agent',
       source: 'builtin',
-      selfRepair: true,
       useDescription: expect.stringContaining('ACP session'),
     });
     expect(explainWorkflowItem('merge-ready')).toMatchObject({
@@ -604,7 +579,6 @@ function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
         emits: nonEmpty(task.emits),
         dependsOn: nonEmpty(task.dependsOn),
         resultContract: task.resultContract,
-        selfRepairPolicy: task.selfRepairPolicy,
       })),
       checks: stage.checks.map(check => compact({
         name: check.name,
@@ -631,7 +605,6 @@ function toSemanticOnFailure(onFailure: CheckFailurePolicy | undefined): unknown
         emits: nonEmpty(onFailure.retry.task.emits),
         dependsOn: nonEmpty(onFailure.retry.task.dependsOn),
         resultContract: onFailure.retry.task.resultContract,
-        selfRepairPolicy: onFailure.retry.task.selfRepairPolicy,
       }),
     }),
   };

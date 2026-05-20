@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  extractRepairResultFromArtifact,
-  isRepairAllowed,
-} from '../../src/workflow/task-runtime/self-repair';
-import type { SelfRepairPolicy, WorkflowItem } from '../../src/types/workflow-results';
+import { extractRepairResultFromArtifact } from '../../src/workflow/task-runtime/self-repair';
 import type { ResultContract } from '../../src/types/workflow-results';
-import { REVIEW_SELF_REPAIR_POLICY } from '../../src/workflow/domain';
 
 function makeContract(path = 'review.md'): ResultContract {
   return {
@@ -15,18 +10,6 @@ function makeContract(path = 'review.md'): ResultContract {
     allowedMarkers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
   };
 }
-
-const testPolicy: SelfRepairPolicy = {
-  enabled: true,
-  allowedScopes: ['formatting', 'typos', 'missing-obvious-guards'],
-  maxAttempts: 3,
-  requiresVerification: true,
-  disallowedReasons: [
-    'product-behavior-change',
-    'architectural-judgment-required',
-    'data-safety-risk',
-  ],
-};
 
 describe('self-repair: extractRepairResultFromArtifact', () => {
   describe('safe repair recording', () => {
@@ -49,7 +32,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: resolved',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.hadRepairs).toBe(true);
       expect(result.repairedItemIds).toEqual(['fix-1', 'fix-2']);
@@ -82,7 +65,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: unresolved',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.repairedItemIds).toEqual(['safe-fix']);
       expect(result.unresolvedItems).toHaveLength(1);
@@ -97,7 +80,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         'All checks passed. No repairs needed.',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.hadRepairs).toBe(false);
       expect(result.repairedItemIds).toEqual([]);
@@ -106,7 +89,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
     });
 
     it('returns empty result for null artifact', () => {
-      const result = extractRepairResultFromArtifact(makeContract(), null, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), null);
 
       expect(result.hadRepairs).toBe(false);
       expect(result.repairedItemIds).toEqual([]);
@@ -132,7 +115,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: open',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.hadRepairs).toBe(false);
       expect(result.unresolvedItems).toHaveLength(2);
@@ -163,7 +146,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: pre-existing',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.repairedItemIds).toEqual(['fix-1']);
       expect(result.unresolvedItems).toHaveLength(0);
@@ -181,7 +164,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: resolved',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.repairedItemIds).toEqual([]);
       expect(result.hadRepairs).toBe(false);
@@ -214,7 +197,7 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: open',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.repairedItemIds).toEqual(['fmt-1']);
       expect(result.unresolvedItems).toHaveLength(2);
@@ -240,118 +223,12 @@ describe('self-repair: extractRepairResultFromArtifact', () => {
         '  Status: follow-up',
       ].join('\n');
 
-      const result = extractRepairResultFromArtifact(makeContract(), content, testPolicy);
+      const result = extractRepairResultFromArtifact(makeContract(), content);
 
       expect(result.repairedItemIds).toEqual(['fix-1']);
       expect(result.unresolvedItems).toHaveLength(0);
       expect(result.postRepairVerdict).toBe('PASS');
     });
-  });
-});
-
-describe('self-repair: isRepairAllowed', () => {
-  it('allows items with allowed scopes', () => {
-    const item: WorkflowItem = {
-      id: 'item-1',
-      severity: 'info',
-      scope: 'formatting',
-      evidence: 'Trailing whitespace',
-    };
-
-    const result = isRepairAllowed(testPolicy, item);
-    expect(result.allowed).toBe(true);
-  });
-
-  it('allows items with no scope when allowed scopes exist', () => {
-    const item: WorkflowItem = {
-      id: 'item-1',
-      severity: 'info',
-      evidence: 'Something simple',
-    };
-
-    const result = isRepairAllowed(testPolicy, item);
-    expect(result.allowed).toBe(true);
-  });
-
-  it('rejects items with disallowed reason in evidence', () => {
-    const item: WorkflowItem = {
-      id: 'item-1',
-      severity: 'blocking',
-      evidence: 'Changes product behavior [disallowed:product-behavior-change]',
-    };
-
-    const result = isRepairAllowed(testPolicy, item);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('product-behavior-change');
-  });
-
-  it('rejects items with disallowed reason in suggestedAction', () => {
-    const item: WorkflowItem = {
-      id: 'item-1',
-      severity: 'blocking',
-      evidence: 'Module needs redesign',
-      suggestedAction: 'Refactor module [disallowed:architectural-judgment-required]',
-    };
-
-    const result = isRepairAllowed(testPolicy, item);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('architectural-judgment-required');
-  });
-
-  it('rejects when policy is disabled', () => {
-    const disabledPolicy: SelfRepairPolicy = {
-      enabled: false,
-      allowedScopes: [],
-      requiresVerification: true,
-      disallowedReasons: [],
-    };
-
-    const item: WorkflowItem = {
-      id: 'item-1',
-      severity: 'info',
-      evidence: 'Simple fix',
-    };
-
-    const result = isRepairAllowed(disabledPolicy, item);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('disabled');
-  });
-
-  it('rejects items with scope not in allowed scopes', () => {
-    const item: WorkflowItem = {
-      id: 'item-1',
-      severity: 'blocking',
-      scope: 'cross-file-refactoring',
-      evidence: 'Needs changes across 5 files',
-    };
-
-    const result = isRepairAllowed(testPolicy, item);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('not in allowed scopes');
-  });
-});
-
-describe('self-repair: REVIEW_SELF_REPAIR_POLICY in domain', () => {
-  it('has conservative allowed scopes', () => {
-    expect(REVIEW_SELF_REPAIR_POLICY.enabled).toBe(true);
-    expect(REVIEW_SELF_REPAIR_POLICY.allowedScopes).toContain('formatting');
-    expect(REVIEW_SELF_REPAIR_POLICY.allowedScopes).toContain('typos');
-    expect(REVIEW_SELF_REPAIR_POLICY.allowedScopes).toContain('missing-obvious-guards');
-    expect(REVIEW_SELF_REPAIR_POLICY.allowedScopes).not.toContain('product-behavior-change');
-  });
-
-  it('has comprehensive disallowed reasons', () => {
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('product-behavior-change');
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('data-safety-risk');
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('security-posture-change');
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('architectural-judgment-required');
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('ambiguous-solution');
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('user-decision-required');
-    expect(REVIEW_SELF_REPAIR_POLICY.disallowedReasons).toContain('out-of-current-scope');
-  });
-
-  it('requires verification', () => {
-    expect(REVIEW_SELF_REPAIR_POLICY.requiresVerification).toBe(true);
   });
 });
 

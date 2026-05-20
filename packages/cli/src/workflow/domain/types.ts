@@ -1,5 +1,5 @@
 import { Stage } from '../../types';
-import type { ResultContract, SelfRepairPolicy, WorkflowItem, WorkflowSnapshot } from '../../types/workflow-results';
+import type { ResultContract, WorkflowItem, WorkflowSnapshot } from '../../types/workflow-results';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
@@ -69,7 +69,6 @@ export interface TaskDefinition {
   emits?: string[];
   dependsOn?: string[];
   resultContract?: ResultContract;
-  selfRepairPolicy?: SelfRepairPolicy;
 }
 
 export interface CheckDefinition {

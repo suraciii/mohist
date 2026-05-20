@@ -10,7 +10,6 @@ import {
   type ParseError,
 } from '../result-contracts';
 import { extractRepairResultFromArtifact } from '../task-runtime/self-repair';
-import { REVIEW_SELF_REPAIR_POLICY } from '../domain';
 
 const log = Log.create({ service: 'artifact-marker-check' });
 
@@ -34,11 +33,7 @@ export class ArtifactMarkerCheck implements Check {
     }
     const matched = parsed.marker.toUpperCase() === this.expectMarker.toUpperCase();
     const structured = buildStructuredResult(parsed);
-    const repairResult = extractRepairResultFromArtifact(
-      promiseMarkerContractForPath(this.filePath),
-      content,
-      REVIEW_SELF_REPAIR_POLICY,
-    );
+    const repairResult = extractRepairResultFromArtifact(promiseMarkerContractForPath(this.filePath), content);
     const finalStructured = {
       ...structured,
       ...(repairResult.repairedItemIds.length > 0 ? { repairedItemIds: repairResult.repairedItemIds } : {}),
