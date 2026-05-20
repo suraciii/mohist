@@ -1,14 +1,4 @@
-import type { WorkflowItem, WorkflowSnapshot } from '../../types/workflow-results';
-
-export interface FailedCheckContext {
-  checkName: string;
-  verdict: 'PASS' | 'FAIL';
-  blockingItems: WorkflowItem[];
-  nonBlockingItems: WorkflowItem[];
-  sourceArtifactRefs?: string[];
-  snapshot?: WorkflowSnapshot;
-  priorTaskOutputs?: Record<string, unknown>[];
-}
+import type { FailedCheckContext, WorkflowItem, WorkflowSnapshot } from '../types/workflow-results';
 
 export function buildFailedCheckContext(
   failedCheck: { name: string; status: string; message?: string; output?: unknown },
@@ -16,7 +6,7 @@ export function buildFailedCheckContext(
 ): FailedCheckContext {
   const output = (failedCheck.output ?? {}) as Record<string, unknown>;
   const structuredResult = output.structuredResult as { verdict?: string; items?: WorkflowItem[]; snapshot?: WorkflowSnapshot } | undefined;
-  const verdict = (structuredResult?.verdict ?? output.verdict ?? 'FAIL') as 'PASS' | 'FAIL';
+  const verdict = (structuredResult?.verdict ?? output.verdict ?? 'FAIL') as FailedCheckContext['verdict'];
   const allItems = structuredResult?.items ?? [];
   const blockingItems = allItems.filter(item =>
     item.severity === 'blocking' && item.status !== 'resolved' && item.status !== 'pre-existing' && item.status !== 'out-of-scope',

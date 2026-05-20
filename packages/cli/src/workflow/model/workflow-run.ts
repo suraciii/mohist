@@ -130,8 +130,7 @@ export type WorkflowEvent =
   | { type: 'stage-failed'; stage: Stage; reason: FailureDetails }
   | { type: 'workflow-completed' }
   | { type: 'workflow-failed'; reason: FailureDetails }
-  | { type: 'delivery-frozen'; stage: Stage; freezePoint: FreezePoint }
-  | { type: 'integrate-frozen'; stage: Stage; freezePoint: FreezePoint };
+  | { type: 'delivery-frozen'; stage: Stage; freezePoint: FreezePoint };
 
 export type WorkflowWork =
   | { kind: 'task'; stage: Stage; taskId: string }

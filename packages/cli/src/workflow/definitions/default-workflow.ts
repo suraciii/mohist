@@ -3,13 +3,15 @@ import { REVIEW_RESULT_CONTRACT, SELF_REVIEW_RESULT_CONTRACT } from '../checks/r
 import {
   compileWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
-  parseWorkflowDefinitionSource,
-  workflowDefinitionSourceToYaml,
   type CompiledStageDefinition,
   type WorkflowDefinition,
   type WorkflowDefinitionSnapshot,
-  type WorkflowSourceDefinition,
 } from '../model';
+import {
+  parseWorkflowDefinitionSource,
+  workflowDefinitionSourceToYaml,
+  type WorkflowSourceDefinition,
+} from '../workflow-definition-source';
 
 const DEFAULT_PLAN_HEALTH_COMMAND = 'npm ci && npm run typecheck';
 const DEFAULT_BUILD_HEALTH_COMMAND = 'npm ci && npm run build';

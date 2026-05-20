@@ -9,16 +9,18 @@ import {
 import {
   cloneWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
-  parseWorkflowDefinitionSource,
   type CheckDefinition,
   type CheckFailurePolicy,
   type CompiledStageDefinition,
   type StageDefinition,
   type TaskDefinition,
   type WorkflowDefinition,
-  type WorkflowSourceDefinition,
   type WorkflowDefinitionSnapshot,
 } from './model';
+import {
+  parseWorkflowDefinitionSource,
+  type WorkflowSourceDefinition,
+} from './workflow-definition-source';
 import {
   getWorkflowUseDefinition,
   inferWorkflowCheckUse,

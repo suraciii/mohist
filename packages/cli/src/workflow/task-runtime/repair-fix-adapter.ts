@@ -1,6 +1,6 @@
 import type { CheckResult, StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
-import type { FailedCheckContext } from '../model';
+import type { FailedCheckContext } from '../../types/workflow-results';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
 
 export type RepairFixTaskId =

@@ -1,5 +1,5 @@
-import type { StageContext } from '../stage-context';
-import type { WorkflowDefinitionSnapshot } from './workflow-definition';
+import type { StageContext } from './stage-context';
+import type { WorkflowDefinitionSnapshot } from './model';
 
 export interface WorkflowTemplateContext {
   issue: {

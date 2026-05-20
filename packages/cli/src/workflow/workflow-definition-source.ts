@@ -3,9 +3,38 @@ import type {
   StageDefinition,
   TaskDefinition,
   WorkflowDefinition,
-  WorkflowSourceDefinition,
-  WorkflowStageSourceDefinition,
-} from './workflow-definition';
+  WorkflowTasksFromSource,
+  StageEventPolicy,
+} from './model';
+import type { Stage } from '../types';
+
+export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
+  source?: TaskDefinition['source'];
+};
+
+export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'source' | 'name'> & {
+  id?: string;
+  name?: string;
+  source?: CheckDefinition['source'];
+};
+
+export interface WorkflowStageSourceDefinition {
+  id?: Stage;
+  stage?: Stage;
+  tasks?: WorkflowTaskSourceDefinition[];
+  tasksFrom?: WorkflowTasksFromSource;
+  checks?: WorkflowCheckSourceDefinition[];
+  on?: Record<string, StageEventPolicy>;
+  approval?: boolean;
+}
+
+export interface WorkflowSourceDefinition {
+  id: string;
+  name?: string;
+  artifacts?: Record<string, string>;
+  defaults?: Record<string, unknown>;
+  stages: WorkflowStageSourceDefinition[];
+}
 
 export interface ParseWorkflowDefinitionOptions {
   taskSource?: TaskDefinition['source'];

@@ -100,7 +100,9 @@ export {
   compileWorkflowDefinition,
   type WorkflowDefinition,
   type StageDefinition,
-  type FailedCheckContext,
   type ReactionInputSelector,
-  buildFailedCheckContext,
 } from './model';
+
+export {
+  buildFailedCheckContext,
+} from './reaction-context';
