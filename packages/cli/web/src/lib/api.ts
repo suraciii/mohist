@@ -229,9 +229,9 @@ export const api = {
   getWorkflowLogs: (number: number) =>
     request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
 
-  rebaseIssue: async (number: number, reEvalPlan?: boolean) => {
+  rebaseIssue: async (number: number) => {
     try {
-      return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(`/issues/${number}/rebase`, { method: 'POST', body: reEvalPlan ? JSON.stringify({ reEvalPlan: true }) : undefined })
+      return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(`/issues/${number}/rebase`, { method: 'POST' })
     } catch (err) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
         return err.data as { rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }

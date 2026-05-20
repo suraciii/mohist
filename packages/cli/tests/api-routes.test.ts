@@ -606,7 +606,7 @@ describe('API Routes', () => {
         expect(integrateHealth.origin).toEqual({ source: 'builtin', uses: 'mohist/health-gate' });
       });
 
-      it('stage-state projects from WorkflowRun and ignores legacy evidence when a run exists', async () => {
+      it('stage-state projects from WorkflowRun and ignores non-WorkflowRun evidence', async () => {
         const issue = issueService.create({ projectId, title: 'Stage State WorkflowRun Issue' });
         const stageStateService = new StageStateService(db);
         const workflowRunService = new WorkflowRunService(db);
@@ -641,13 +641,13 @@ describe('API Routes', () => {
         expect(JSON.stringify(build)).not.toContain('T-LOG');
       });
 
-      it('stage-state keeps legacy fallback available when no WorkflowRun exists', async () => {
-        const issue = issueService.create({ projectId, title: 'Legacy Fallback Issue' });
+      it('stage-state reads persisted projection rows when no WorkflowRun is supplied to the API route', async () => {
+        const issue = issueService.create({ projectId, title: 'Persisted Stage State Issue' });
         const stageStateService = new StageStateService(db);
         stageStateService.ensureStage(issue.id, Stage.Build);
         stageStateService.upsertTask(issue.id, Stage.Build, {
           taskId: 'T-001',
-          title: 'Legacy task',
+          title: 'Persisted task',
           status: 'completed',
         });
 
@@ -656,7 +656,7 @@ describe('API Routes', () => {
 
         expect(response.status).toBe(200);
         const build = response.body.data.stages.find((s: any) => s.stage === 'build');
-        expect(build.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 'T-001', title: 'Legacy task' })]));
+        expect(build.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: 'T-001', title: 'Persisted task' })]));
       });
     });
 

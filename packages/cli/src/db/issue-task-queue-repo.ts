@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseManager, type SqlValue } from './database';
 
-export type TaskType = 'start-pipeline' | 'resume-pipeline' | 'rebase';
+export type TaskType = 'start-pipeline' | 'resume-pipeline';
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface IssueTaskQueueRow {

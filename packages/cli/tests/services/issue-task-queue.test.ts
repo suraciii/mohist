@@ -8,16 +8,8 @@ import { AgentRunnerService } from '../../src/services/agent-runner-service';
 import { EventBus } from '../../src/services/event-bus';
 import { IssueService } from '../../src/services/issue-service';
 import { Stage, IssueStatus, MergeState } from '../../src/types';
-import * as fs from 'fs';
-import * as path from 'path';
 
 let projectCounter = 0;
-
-function touchFetchCache(projectPath: string) {
-  const gitDir = path.join(projectPath, '.git');
-  fs.mkdirSync(gitDir, { recursive: true });
-  fs.writeFileSync(path.join(gitDir, 'mohist-last-fetch'), Date.now().toString(), 'utf-8');
-}
 
 function createHangingWorktreeManager() {
   return {
@@ -101,7 +93,7 @@ describe('IssueTaskQueue', () => {
 
       const service = createService();
       const first = service.enqueue(issue.id, 'start-pipeline');
-      const second = service.enqueue(issue.id, 'rebase');
+      const second = service.enqueue(issue.id, 'resume-pipeline');
 
       expect(first.status).toBe('running');
       expect(second.status).toBe('pending');
@@ -156,7 +148,7 @@ describe('IssueTaskQueue', () => {
       const issue = setupIssue(project.id);
 
       const taskA = service.enqueue(issue.id, 'start-pipeline', {}, { priority: 0 });
-      const taskB = service.enqueue(issue.id, 'rebase', {}, { priority: 0 });
+      const taskB = service.enqueue(issue.id, 'resume-pipeline', {}, { priority: 0 });
 
       const status = service.getQueueStatus(issue.id) as any;
       const pendingIds = status.pending.map((t: any) => t.id);
@@ -200,7 +192,7 @@ describe('IssueTaskQueue', () => {
       const first = service.enqueue(issue.id, 'start-pipeline');
       expect(first.status).toBe('running');
 
-      const second = service.enqueue(issue.id, 'rebase');
+      const second = service.enqueue(issue.id, 'resume-pipeline');
       expect(second.status).toBe('pending');
 
       const status = service.getQueueStatus(issue.id) as any;
@@ -272,7 +264,7 @@ describe('IssueTaskQueue', () => {
 
       const service = createService();
       const running = service.enqueue(issue.id, 'start-pipeline');
-      const pending1 = service.enqueue(issue.id, 'rebase');
+      const pending1 = service.enqueue(issue.id, 'resume-pipeline');
       const pending2 = service.enqueue(issue.id, 'resume-pipeline');
 
       expect(running.status).toBe('running');
@@ -318,7 +310,7 @@ describe('IssueTaskQueue', () => {
       const project = setupProject();
       const issue = setupIssue(project.id);
       service.enqueue(issue.id, 'start-pipeline');
-      service.enqueue(issue.id, 'rebase');
+      service.enqueue(issue.id, 'resume-pipeline');
 
       const status = service.getQueueStatus(issue.id) as any;
       expect(status.running).not.toBeNull();
@@ -523,34 +515,6 @@ describe('IssueTaskQueue', () => {
       expect(dbRecord!.result).toBe('skipped');
     });
 
-    it('should execute rebase for integrate-stage issues', async () => {
-      const project = setupProject();
-      touchFetchCache(project.path);
-      const issue = setupIssue(project.id);
-      issueRepo.updateStage(issue.id, Stage.Integrate);
-      issueRepo.updateStatus(issue.id, IssueStatus.Active);
-
-      const wtManager = createHangingWorktreeManager();
-      wtManager.exists.mockReturnValue(true);
-      wtManager.canFastForward.mockResolvedValue(false);
-      wtManager.rebaseOntoMaster.mockResolvedValue({ success: true, conflicts: [] });
-
-      const service = createService(1, wtManager);
-      const result = service.enqueue(issue.id, 'rebase');
-
-      await new Promise((r) => setTimeout(r, 50));
-
-      const dbRecord = taskQueueRepo.findById(result.taskId);
-      expect(dbRecord!.status).toBe('completed');
-      expect(dbRecord!.result).toBe('success');
-      expect(wtManager.rebaseOntoMaster).toHaveBeenCalledWith(
-        project.path,
-        project.name,
-        issue.number,
-        project.baseBranch,
-        { abortOnConflict: false },
-      );
-    });
   });
 
   describe('slot freed on task completion triggers schedule', () => {

@@ -3466,22 +3466,10 @@ export function createIssueRoutes(
         } satisfies ApiResponse, 202);
       }
 
-      if (!agentRunner) {
-        return c.json({ success: false, error: 'AgentRunnerService not configured' } satisfies ApiResponse, 500);
-      }
-
-      const result = agentRunner.enqueue(issue.id, 'rebase', body);
-
-      const response: ApiResponse = {
-        success: true,
-        data: {
-          taskId: result.taskId,
-          status: result.status,
-          queuePosition: result.queuePosition,
-          message: `Issue #${number} enqueued for rebase`,
-        }
-      };
-      return c.json(response, 202);
+      return c.json({
+        success: false,
+        error: `Cannot rebase: issue #${number} has no active WorkflowRun. Start or resume the workflow so rebase can be scheduled as workflow work.`,
+      } satisfies ApiResponse, 409);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
