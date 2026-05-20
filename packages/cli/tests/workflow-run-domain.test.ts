@@ -1115,7 +1115,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.currentStage).toBe(Stage.Plan);
   });
 
-  it('does not approve Check when completion evidence becomes incomplete after awaiting approval', () => {
+  it('approves Check when all checks remain passed', () => {
     const run = startRun();
 
     advanceToBuild(run);
@@ -1132,17 +1132,13 @@ describe('WorkflowRun domain aggregate', () => {
 
     const decision = run.approveStage(Stage.Check, { output: { approved: true } });
 
-    expect(decision.nextWork).toEqual({
-      kind: 'blocked',
-      stage: Stage.Check,
-      reason: { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check },
-    });
-    expect(checkStage.status).toBe('awaiting-approval');
-    expect(checkStage.approval?.status).toBe('awaiting');
-    expect(run.currentStage).toBe(Stage.Check);
+    expect(decision.nextWork).toEqual({ kind: 'task', stage: Stage.Integrate, taskId: 'integrate:spec-sync' });
+    expect(checkStage.status).toBe('passed');
+    expect(checkStage.approval?.status).toBe('approved');
+    expect(run.currentStage).toBe(Stage.Integrate);
   });
 
-  it('requests Check approval with merge-ready and verification evidence', () => {
+  it('requests Check approval after all checks pass', () => {
     const run = startRun();
     advanceToBuild(run);
     run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
@@ -1177,19 +1173,12 @@ describe('WorkflowRun domain aggregate', () => {
     const approvalOutput = run.stageRun(Stage.Check).approval?.output as Record<string, unknown>;
 
     expect(run.stageRun(Stage.Check).status).toBe('awaiting-approval');
-    expect(approvalOutput.mergeReadySnapshot).toMatchObject({
-      kind: 'merge-ready',
-      candidateHeadSha: 'candidate-sha',
-      canMerge: true,
-    });
-    expect(approvalOutput.verificationEvidence).toMatchObject({
-      checkName: 'health:check',
-      candidateHeadSha: 'candidate-sha',
-      baseSha: 'base-sha',
-    });
+    expect(approvalOutput.result).toBe('PASS');
+    expect(approvalOutput.checks).toEqual(['health:check', 'review-passed', 'merge-ready']);
+    expect(approvalOutput.verificationEvidence).toBeNull();
   });
 
-  it('does not request Check approval without authoritative review snapshot evidence', () => {
+  it('continues to remaining checks without requiring authoritative review snapshot evidence', () => {
     const run = startRun();
     advanceToBuild(run);
     run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
@@ -1208,10 +1197,10 @@ describe('WorkflowRun domain aggregate', () => {
     });
 
     expect(run.stageRun(Stage.Check).approval).toBeNull();
-    expect(review.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'check:converge-review-snapshot' });
+    expect(review.nextWork).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'merge-ready' });
   });
 
-  it('does not request Check approval when review and merge evidence refer to different candidates', () => {
+  it('requests Check approval when all checks pass even if check outputs use different snapshot fields', () => {
     const run = startRun();
     advanceToBuild(run);
     run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
@@ -1234,12 +1223,8 @@ describe('WorkflowRun domain aggregate', () => {
       output: mergeReadyOutput('candidate-new'),
     });
 
-    expect(run.stageRun(Stage.Check).approval).toBeNull();
-    expect(decision.nextWork).toEqual({
-      kind: 'blocked',
-      stage: Stage.Check,
-      reason: { complete: false, reason: 'check-review-evidence-stale', stage: Stage.Check },
-    });
+    expect(run.stageRun(Stage.Check).approval?.status).toBe('awaiting');
+    expect(decision.nextWork).toEqual({ kind: 'await-approval', stage: Stage.Check });
   });
 
   it('rejectStage only works while awaiting approval, preserves output, and fails with approval-rejected', () => {
