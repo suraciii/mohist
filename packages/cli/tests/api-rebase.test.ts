@@ -198,32 +198,29 @@ describe('POST /api/issues/:number/rebase', () => {
     });
   });
 
-  describe('enqueue fallback when no active WorkflowRun', () => {
-    it('should enqueue rebase task and return 202 when no WorkflowRun exists', async () => {
+  describe('without active WorkflowRun', () => {
+    it('rejects rebase instead of using the legacy queue task fallback', async () => {
       const issue = issueService.create({ projectId, title: 'Build Issue' });
       issueService.transitionToStage(issue.id, Stage.Build);
       issueService.setStatus(issue.id, IssueStatus.Active);
 
       const { server, agentRunner } = makeServer();
-      const res = await request(server)
-        .post('/api/issues/1/rebase')
-        .send({ reEvalPlan: true });
-      expect(res.status).toBe(202);
-      expect(res.body.data.taskId).toBe('task-123');
-      expect(res.body.data.status).toBe('pending');
-      expect(res.body.data.queuePosition).toBe(0);
-      expect(agentRunner.enqueue).toHaveBeenCalledWith(issue.id, 'rebase', { reEvalPlan: true });
+      const res = await request(server).post('/api/issues/1/rebase');
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('no active WorkflowRun');
+      expect(agentRunner.enqueue).not.toHaveBeenCalled();
     });
 
-    it('should enqueue rebase with empty payload when no body and no WorkflowRun', async () => {
+    it('rejects rebase without body when no WorkflowRun exists', async () => {
       const issue = issueService.create({ projectId, title: 'Plan Issue' });
       issueService.transitionToStage(issue.id, Stage.Plan);
       issueService.setStatus(issue.id, IssueStatus.Active);
 
       const { server, agentRunner } = makeServer();
       const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(202);
-      expect(agentRunner.enqueue).toHaveBeenCalledWith(issue.id, 'rebase', {});
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain('no active WorkflowRun');
+      expect(agentRunner.enqueue).not.toHaveBeenCalled();
     });
   });
 });

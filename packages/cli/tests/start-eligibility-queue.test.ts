@@ -202,7 +202,7 @@ describe('Start Eligibility Queue Execution', () => {
       expect(dbRecord!.result).toContain('Only backlog issues can be started');
     });
 
-    it('should not affect non-start-pipeline tasks', async () => {
+    it('should not affect resume-pipeline tasks', async () => {
       const project = setupProject();
       const issue200 = setupIssue(project.id, 'Issue #200');
       const issue201 = setupIssue(project.id, 'Issue #201');
@@ -212,7 +212,7 @@ describe('Start Eligibility Queue Execution', () => {
       issueRepo.updateStage(issue201.id, Stage.Integrate);
 
       const service = createService();
-      const result = service.enqueue(issue201.id, 'rebase');
+      const result = service.enqueue(issue201.id, 'resume-pipeline');
 
       const dbRecord = await waitForTask(result.taskId);
       expect(dbRecord!.result).not.toContain('waiting for prerequisite');

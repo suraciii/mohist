@@ -26,10 +26,7 @@ import type { WorkflowRunService } from './workflow-run-service';
 import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { findChangeDir } from '../openspec/detector';
-import { WorktreeManager, smartFetch } from '../git/worktree-manager';
-import { resolveConflictsViaAgent, type ConflictResolutionDeps } from './conflict-resolution';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { WorktreeManager } from '../git/worktree-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
@@ -52,9 +49,6 @@ import { HealthGateCheck } from '../workflow/checks/health-gate-check';
 import { ArtifactExistsCheck, ArtifactMarkerCheck, ShellCommandCheck } from '../workflow/checks';
 import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/workflow-inspector';
 
-const execFileAsync = promisify(execFile);
-
-const REBASE_ALLOWED_STAGES: Stage[] = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done];
 export type TaskType = QueueTaskType;
 
 export interface EnqueueOptions {
@@ -216,7 +210,7 @@ export class AgentRunnerService {
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
     private readonly taskQueueRepo?: IssueTaskQueueRepo,
-    private readonly conflictResolutionDeps?: ConflictResolutionDeps,
+    _conflictResolutionDeps?: unknown,
     private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
     private readonly stageExecutionRepo?: StageExecutionRepo,
     private readonly stageStateService?: StageStateService,
@@ -1144,9 +1138,6 @@ export class AgentRunnerService {
           case 'resume-pipeline':
             await this.executeResumePipelineTask(task, issue);
             break;
-          case 'rebase':
-            await this.executeRebaseTask(task, issue);
-            break;
           default:
             this.completeTask(task.id, 'completed', 'skipped');
         }
@@ -1527,282 +1518,6 @@ export class AgentRunnerService {
     } catch (err) {
       log.error('Failed to ensure worktree', { issueNumber, error: err instanceof Error ? err.message : String(err) });
       return null;
-    }
-  }
-
-  private async executeRebaseTask(task: IssueTaskQueueRecord, issue: Issue): Promise<void> {
-    if (!this.issueRepo || !this.projectRepo || !this.worktreeManager) {
-      this.completeTask(task.id, 'failed', 'Missing dependencies for rebase execution');
-      return;
-    }
-
-    if (!REBASE_ALLOWED_STAGES.includes(issue.stage)) {
-      log.info('Skipping rebase: stage not allowed', { issueNumber: issue.number, stage: issue.stage });
-      this.completeTask(task.id, 'completed', 'skipped');
-      return;
-    }
-
-    const project = this.projectRepo.findById(issue.projectId);
-    if (!project) {
-      this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
-      return;
-    }
-
-    if (!this.worktreeManager.exists(project.name, issue.number)) {
-      this.completeTask(task.id, 'failed', `Worktree not found for issue #${issue.number}`);
-      return;
-    }
-
-    const payload = this.parsePayload(task.payload);
-    const reEvalPlan = Boolean(payload.reEvalPlan);
-    const issueNumber = issue.number;
-    const issueId = issue.id;
-    const projectId = issue.projectId;
-
-    this.eventBus.emit('rebase_started', { issueId, projectId, issueNumber });
-
-    this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'fetching' });
-    await smartFetch(project.path);
-
-    this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'checking' });
-    const canFF = await this.worktreeManager.canFastForward(project.path, project.name, issueNumber, project.baseBranch);
-
-    if (canFF) {
-      this.eventBus.emit('rebase_completed', { issueId, projectId, issueNumber, rebased: false });
-      this.completeTask(task.id, 'completed', 'up_to_date');
-      return;
-    }
-
-    this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'rebasing' });
-    const rebaseResult = await this.worktreeManager.rebaseOntoMaster(
-      project.path,
-      project.name,
-      issueNumber,
-      project.baseBranch,
-      { abortOnConflict: false },
-    );
-
-    if (!rebaseResult.success) {
-      if (!this.conflictResolutionDeps) {
-        await this.worktreeManager.abortRebase(project.name, issueNumber);
-        this.eventBus.emit('rebase_conflict', {
-          issueId,
-          projectId,
-          issueNumber,
-          conflicts: rebaseResult.conflicts,
-        });
-        this.completeTask(task.id, 'failed', 'Rebase conflicts, no auto-resolution available');
-        return;
-      }
-
-      const worktreePath = this.worktreeManager.getPath(project.name, issueNumber);
-      if (!worktreePath) {
-        await this.worktreeManager.abortRebase(project.name, issueNumber);
-        this.completeTask(task.id, 'failed', 'Worktree path not found');
-        return;
-      }
-
-      this.eventBus.emit('rebase_conflict', {
-        issueId,
-        projectId,
-        issueNumber,
-        conflicts: rebaseResult.conflicts,
-        status: 'resolving',
-      });
-      this.eventBus.emit('agent_conflict_resolution_started', {
-        issueId,
-        projectId,
-        issueNumber,
-        conflictFiles: rebaseResult.conflicts,
-      });
-
-      try {
-        const resolutionResult = await resolveConflictsViaAgent(
-          this.conflictResolutionDeps,
-          issueId,
-          projectId,
-          worktreePath,
-          rebaseResult.conflicts,
-        );
-
-        if (!resolutionResult.success) {
-          await this.worktreeManager.abortRebase(project.name, issueNumber);
-          this.eventBus.emit('agent_conflict_resolution_failed', {
-            issueId,
-            projectId,
-            issueNumber,
-            error: resolutionResult.error || 'Conflict resolution failed',
-          });
-          this.eventBus.emit('rebase_conflict', {
-            issueId,
-            projectId,
-            issueNumber,
-            conflicts: rebaseResult.conflicts,
-            status: 'failed',
-            error: resolutionResult.error || 'Conflict resolution failed',
-          });
-          this.completeTask(task.id, 'failed', resolutionResult.error || 'Conflict resolution failed');
-          return;
-        }
-
-        this.eventBus.emit('agent_conflict_resolution_completed', {
-          issueId,
-          projectId,
-          issueNumber,
-        });
-
-        const refreshedIssue = this.issueRepo!.findById(issueId);
-
-        if (refreshedIssue?.stage === Stage.Check) {
-          await this.handleReviewRebase(refreshedIssue, project, projectId, issueNumber, true);
-        }
-
-        this.eventBus.emit('rebase_progress', { issueId, projectId, issueNumber, step: 'completing' });
-        this.eventBus.emit('rebase_completed', { issueId, projectId, issueNumber, rebased: true });
-
-        if (refreshedIssue?.stage === Stage.Plan) {
-          this.handlePlanRebase(refreshedIssue, project, projectId, issueNumber);
-        }
-
-        if (refreshedIssue?.stage === Stage.Build) {
-          this.handleBuildRebase(refreshedIssue, project, projectId, issueNumber, reEvalPlan);
-        }
-
-        this.completeTask(task.id, 'completed', 'success');
-      } catch (err) {
-        log.error('Unexpected error in conflict resolution', { issueNumber, error: err instanceof Error ? err.message : String(err) });
-        try {
-          await this.worktreeManager.abortRebase(project.name, issueNumber);
-        } catch {}
-        this.eventBus.emit('rebase_conflict', {
-          issueId,
-          projectId,
-          issueNumber,
-          conflicts: rebaseResult.conflicts,
-          status: 'failed',
-          error: err instanceof Error ? err.message : 'Unexpected error during conflict resolution',
-        });
-        this.completeTask(task.id, 'failed', err instanceof Error ? err.message : 'Unexpected error during conflict resolution');
-      }
-      return;
-    }
-
-    if (issue.stage === Stage.Check) {
-      await this.handleReviewRebase(issue, project, projectId, issueNumber);
-    }
-
-    this.eventBus.emit('rebase_completed', { issueId, projectId, issueNumber, rebased: true });
-
-    if (issue.stage === Stage.Plan) {
-      this.handlePlanRebase(issue, project, projectId, issueNumber);
-    }
-
-    if (issue.stage === Stage.Build) {
-      this.handleBuildRebase(issue, project, projectId, issueNumber, reEvalPlan);
-    }
-
-    this.completeTask(task.id, 'completed', 'success');
-  }
-
-  private async handleReviewRebase(
-    issue: Issue,
-    project: { name: string; baseBranch: string },
-    projectId: string,
-    number: number,
-    skipBuildVerify?: boolean,
-  ): Promise<boolean | undefined> {
-    if (!this.worktreeManager) return undefined;
-    if (skipBuildVerify) {
-      log.info('Skipping build verification after conflict resolution', { issueNumber: number });
-      return undefined;
-    }
-    this.eventBus.emit('rebase_progress', { issueId: issue.id, projectId, issueNumber: number, step: 'verifying' });
-    try {
-      const worktreePath = this.worktreeManager.getPath(project.name, issue.number);
-      if (worktreePath) {
-        await execFileAsync('npm', ['run', 'build'], {
-          cwd: worktreePath,
-          timeout: 5 * 60 * 1000,
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        return true;
-      }
-    } catch {}
-    return false;
-  }
-
-  private handlePlanRebase(issue: Issue, _project: { name: string }, _projectId: string, number: number): void {
-    if (!this.worktreeManager || !this.issueRepo) return;
-    if (!this.isIssueAwaitingApproval(issue.id)) {
-      log.info('Skipping re-self-review injection: issue not at approval checkpoint', { issueNumber: number });
-      return;
-    }
-    const rebaseMessage = 'master has new changes after rebase. Please re-evaluate design artifacts: check if design/tasks can leverage the new code, and verify all file paths referenced in tasks.json still exist in the updated codebase.';
-    const commentRepo = (this as any).commentRepo;
-    if (commentRepo) {
-      commentRepo.create({ issueId: issue.id, body: rebaseMessage });
-    }
-    try {
-      this.enqueue(issue.id, 'resume-pipeline');
-      log.info('Enqueued resume-pipeline after plan rebase', { issueNumber: number });
-    } catch (err) {
-      log.error('Failed to enqueue resume-pipeline after plan rebase', {
-        issueNumber: number,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private handleBuildRebase(issue: Issue, project: { name: string }, _projectId: string, number: number, reEvalPlan = false): void {
-    if (!this.worktreeManager || !this.issueRepo) return;
-
-    if (reEvalPlan) {
-      this.issueRepo.updateStage(issue.id, Stage.Plan);
-      this.issueRepo.clearApprovalState(issue.id);
-      const rebaseMessage = 'master has new changes after rebase. Code commits are preserved. Please re-evaluate design artifacts and tasks: check if the existing task breakdown is still appropriate for the updated codebase, merge/split/add/remove tasks as needed, and verify all file paths referenced in tasks.json still exist.';
-      const commentRepo = (this as any).commentRepo;
-      if (commentRepo) {
-        commentRepo.create({ issueId: issue.id, body: rebaseMessage });
-      }
-      try {
-        this.enqueue(issue.id, 'start-pipeline');
-        log.info('Enqueued start-pipeline after build rebase (reEvalPlan)', { issueNumber: number });
-      } catch (err) {
-        log.error('Failed to enqueue start-pipeline after build rebase', {
-          issueNumber: number,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-      return;
-    }
-
-    if (!this.checkpointRepo) return;
-    const changeDir = findChangeDir(
-      this.worktreeManager.getPath(project.name, issue.number) || process.cwd(),
-      issue.number,
-    );
-    if (!changeDir) return;
-    try {
-      const tasksPath = path.join(changeDir, 'tasks.json');
-      const tasksContent = fs.readFileSync(tasksPath, 'utf-8');
-      const tasksFile = JSON.parse(tasksContent);
-      for (const task of tasksFile.tasks) {
-        task.passes = false;
-        task.error = null;
-        task.attempts = 0;
-      }
-      fs.writeFileSync(tasksPath, JSON.stringify(tasksFile, null, 2), 'utf-8');
-      this.checkpointRepo.delete(issue.number, 'build');
-    } catch (err) {
-      log.warn('Failed to clear build checkpoint after rebase', { issueNumber: number, error: err instanceof Error ? err.message : String(err) });
-    }
-  }
-
-  private parsePayload(payloadStr: string): Record<string, unknown> {
-    try {
-      return JSON.parse(payloadStr);
-    } catch {
-      return {};
     }
   }
 
