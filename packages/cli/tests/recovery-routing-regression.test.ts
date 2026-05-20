@@ -336,7 +336,7 @@ describe('Recovery routing regression tests', () => {
       const app = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
       const detailServer = createTestServer(app);
 
       const response = await request(detailServer).get(`/api/issues/${issue.number}`);
@@ -378,7 +378,7 @@ describe('Recovery routing regression tests', () => {
       const app = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new StageStateService(db), new WorkflowRunService(db)));
+      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new StageStateService(db), new WorkflowRunService(db)));
       const stageStateServer = createTestServer(app);
 
       const response = await request(stageStateServer).get(`/api/issues/${issue.number}/stage-state`);
@@ -411,7 +411,7 @@ describe('Recovery routing regression tests', () => {
       const queueApp = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, undefined, undefined, stateManager.getIssueTaskQueueRepo());
-      queueApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
+      queueApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new WorkflowRunService(db)));
       const queueServer = createTestServer(queueApp);
 
       const response = await request(queueServer).get(`/api/issues/${issue.number}/queue`);

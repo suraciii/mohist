@@ -36,15 +36,18 @@ function extractUnresolvedSummary(output: unknown, message: string | null): stri
   return message ?? null
 }
 
-function checkRepairPolicy(definition?: WorkflowStageDefinition | null): WorkflowCheckFailurePolicy | null {
-  return definition?.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')
-    ?? definition?.checkFailurePolicies?.find(policy => policy.fixTaskId === 'fix-review-findings')
-    ?? definition?.checkFailurePolicies?.[0]
-    ?? null
+function checkRepairPolicy(definition?: WorkflowStageDefinition | null, failedCheckName?: string | null): WorkflowCheckFailurePolicy | null {
+  if (!definition?.checkFailurePolicies?.length) return null
+  if (failedCheckName) {
+    const exact = definition.checkFailurePolicies.find(policy => policy.checkName === failedCheckName)
+    if (exact) return exact
+  }
+  return definition.checkFailurePolicies[0] ?? null
 }
 
 function computeCheckRepair(tasks: StageTaskState[], checks: StageCheckState[], definition?: WorkflowStageDefinition | null): CheckRepairState | undefined {
-  const policy = checkRepairPolicy(definition)
+  const failedCheckName = checks.find(check => check.status === 'failed')?.checkName ?? null
+  const policy = checkRepairPolicy(definition, failedCheckName)
   if (!policy) return undefined
 
   const repairTasks = tasks.filter(task => isTaskAttemptForBase(task.taskId, policy.fixTaskId))

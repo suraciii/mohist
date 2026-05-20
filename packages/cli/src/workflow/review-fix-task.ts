@@ -4,7 +4,7 @@ import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-s
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import { formatAgentPrompt } from '../agents/agent-prompt-schema';
 import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
-import { loadAgentConfig } from './workflow-loader';
+import { loadAgentConfig } from '../agents/agent-config';
 import { buildFailedCheckContext, type FailedCheckContext } from './domain';
 import { Log } from '../util/log';
 

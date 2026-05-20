@@ -5,7 +5,7 @@ import { buildExplorePrompt } from '../agents/artifact-prompt';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueService } from './issue-service';
 import type { Issue } from '../types';
-import { loadAgentConfig } from '../workflow/workflow-loader';
+import { loadAgentConfig } from '../agents/agent-config';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'explore-acp' });

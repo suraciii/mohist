@@ -1,7 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { Check, CheckContext, CheckResult } from './index';
-import type { HealthGatePolicy } from '../workflow-loader';
 import { Log } from '../../util/log';
 
 const execFileAsync = promisify(execFile);
@@ -81,6 +80,15 @@ export interface HealthGateCheckOptions {
   worktreePath: string;
   policy: HealthGatePolicy;
   stage: string;
+  name?: string;
+}
+
+export interface HealthGatePolicy {
+  enabled: boolean;
+  command: string;
+  timeout: number;
+  autoFix?: boolean;
+  maxFixAttempts?: number;
 }
 
 export class HealthGateCheck implements Check {
@@ -93,7 +101,7 @@ export class HealthGateCheck implements Check {
     this.worktreePath = options.worktreePath;
     this.policy = options.policy;
     this.stage = options.stage;
-    this.name = `health:${this.stage}`;
+    this.name = options.name ?? `health:${this.stage}`;
   }
 
   async run(_ctx: CheckContext): Promise<CheckResult> {

@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { OpenSpecSyncDryRunCheck } from '../../src/workflow/checks/openspec-sync-dry-run-check';
 import { MergeReadinessCheck } from '../../src/workflow/checks/merge-readiness-check';
-import { IntegrationHealthGatePreviewCheck } from '../../src/workflow/checks/integration-health-gate-preview-check';
 import { Stage } from '../../src/types';
 
 function makeCheckContext(overrides?: Partial<{
@@ -261,63 +260,6 @@ describe('MergeReadinessCheck', () => {
       expect(result.status).toBe('error');
       expect(result.message).toContain('git error');
     });
-  });
-});
-
-describe('IntegrationHealthGatePreviewCheck', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'health-gate-preview-test-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('returns pass with postMerge policy metadata', async () => {
-    const workflowYaml = path.join(tmpDir, 'workflow.yaml');
-    fs.writeFileSync(workflowYaml, `
-stages:
-  - stage: plan
-  - stage: build
-  - stage: check
-healthGates:
-  postMerge:
-    enabled: true
-    command: npm run build && npm test
-    timeout: 300000
-    autoFix: false
-    maxFixAttempts: 0
-    fallbackReaction:
-      type: ask-user
-`, 'utf-8');
-
-    const check = new IntegrationHealthGatePreviewCheck();
-    const ctx = makeCheckContext({ changeDir: tmpDir, acpOptions: { cwd: tmpDir } });
-    const result = await check.run(ctx);
-
-    expect(result.status).toBe('pass');
-    expect(result.name).toBe('integration-health-gate-preview');
-    expect(result.output).toMatchObject({
-      kind: 'integration-health-gate-preview',
-      policyName: 'postMerge',
-      command: 'npm run build && npm test',
-      timeout: 300000,
-      enabled: true,
-      autoFix: false,
-      maxFixAttempts: 0,
-    });
-  });
-
-  it('returns error when workflow loading fails', async () => {
-    const check = new IntegrationHealthGatePreviewCheck();
-    const nonexistentDir = '/non-existent-directory-that-cannot-exist';
-    const ctx = makeCheckContext({ changeDir: nonexistentDir, acpOptions: { cwd: nonexistentDir } });
-    const result = await check.run(ctx);
-    expect(result.status).toBe('pass');
-    const output = result.output as any;
-    expect(output.policyName).toBe('postMerge');
   });
 });
 

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Issue } from '../types';
-import type { AgentConfig } from '../workflow/workflow-loader';
+import type { AgentConfig } from './agent-config';
 import { formatAgentPrompt } from './agent-prompt-schema';
 import { formatIssueInfo, listOpenSpecContextFiles } from './workflow-context';
 

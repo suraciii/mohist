@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { loadAgentConfig } from '../src/workflow/workflow-loader';
+import { loadAgentConfig } from '../src/agents/agent-config';
 
 describe('loadAgentConfig', () => {
   let tempDir: string;

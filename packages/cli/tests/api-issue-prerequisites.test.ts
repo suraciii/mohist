@@ -89,11 +89,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -121,11 +133,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -153,11 +177,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -180,11 +216,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -206,11 +254,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -236,11 +296,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -267,11 +339,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -297,11 +381,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -334,11 +430,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -364,11 +472,23 @@ describe('Issue Prerequisites API', () => {
       );
       const enqueueSpy = vi.spyOn(agentRunner, 'enqueue');
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -391,11 +511,23 @@ describe('Issue Prerequisites API', () => {
       );
       const enqueueSpy = vi.spyOn(agentRunner, 'enqueue');
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -427,11 +559,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 
@@ -465,11 +609,23 @@ describe('Issue Prerequisites API', () => {
         undefined, undefined, projectRepo, undefined, issueTaskQueueRepo
       );
       app.route('/api/issues', createIssueRoutes(
-        issueService, projectService, stateManager, undefined, undefined,
-        agentRunner, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined,
-        prerequisiteService
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
       ));
       const server = createTestServer(app);
 

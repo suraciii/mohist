@@ -105,24 +105,22 @@ describe('GET /api/issues/:number/stage-state', () => {
   function createApp(): http.Server {
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
-      issueService,
-      projectService,
-      stateManager,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stageStateService,
-    ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+      ));
     return createTestServer(app);
   }
 

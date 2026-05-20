@@ -34,11 +34,6 @@ export {
 } from './checks';
 
 export {
-  BuildTestCheck,
-  type BuildTestCheckOptions,
-} from './checks/build-test-check';
-
-export {
   AiReviewCheck,
   type AiReviewCheckOptions,
 } from './checks/ai-review-check';
@@ -72,11 +67,6 @@ export {
 } from './checks/all-tasks-complete-check';
 
 export {
-  CodeCompilesCheck,
-  type CodeCompilesCheckOptions,
-} from './checks/code-compiles-check';
-
-export {
   CheckpointManager,
   createCheckpointManager,
 } from './checkpoint-manager';
@@ -94,16 +84,6 @@ export {
 } from './utils';
 
 export { type PlanResult, type ReviewResult } from '../types/workflow-results';
-
-export {
-  loadWorkflow,
-  loadWorkflowWithDetection,
-  detectOpenSpecForIssue,
-  type WorkflowStage,
-  type WorkflowConfig,
-  type OpenSpecDetection,
-  type WorkflowConfigWithDetection,
-} from './workflow-loader';
 
 export {
   GenericStageRunner,

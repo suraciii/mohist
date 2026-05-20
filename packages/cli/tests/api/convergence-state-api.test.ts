@@ -98,26 +98,24 @@ describe('Convergence State API', () => {
 function createApp(): http.Server {
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
-      issueService,
-      projectService,
-      stateManager,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stageStateService,
-      undefined,
-      undefined,
-    ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        undefined,
+        undefined,
+      ));
     return createTestServer(app);
   }
 

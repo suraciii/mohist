@@ -190,7 +190,7 @@ describe('Check repair display semantics', () => {
   })
 
   describe('repair task completed plus follow-up review failed', () => {
-    it('shows both repair task completed and follow-up review failed together', () => {
+    it('shows both repair task completed and follow-up check failed together', () => {
       const checkRepair = makeCheckRepairState({
         status: 'exhausted',
         attemptsUsed: 1,
@@ -220,7 +220,7 @@ describe('Check repair display semantics', () => {
       setupDefaultMocks(makeStageStateWithCheckRepair(checkRepair))
       renderPage()
 
-      expect(screen.getByText(/follow-up review failed/i)).toBeTruthy()
+      expect(screen.getByText(/follow-up check failed/i)).toBeTruthy()
     })
 
     it('does not present repair completion as review gate success', () => {
@@ -255,7 +255,7 @@ describe('Check repair display semantics', () => {
 
       expect(screen.queryByText(/Review passed/i)).toBeNull()
       const pageText = document.body.textContent ?? ''
-      const hasFollowUpReviewFailed = /follow-up review failed/i.test(pageText)
+      const hasFollowUpReviewFailed = /follow-up check failed/i.test(pageText)
       const hasRepairCompleted = /completed/i.test(pageText)
       expect(hasRepairCompleted && hasFollowUpReviewFailed).toBe(true)
     })

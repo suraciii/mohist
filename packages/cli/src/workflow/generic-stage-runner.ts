@@ -8,23 +8,12 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckDefinition, CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowEvent, WorkflowRun, WorkSourceKind } from './domain';
+import type { CheckRunStatus, CompiledStageDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkSourceKind } from './domain';
 import { Log } from '../util/log';
-import {
-  extractReactionOutput,
-  buildVerificationContextFromReaction,
-  saveVerificationContext,
-  clearVerificationContext,
-} from './convergence';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { readTasks } from '../openspec/ralph-executor';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import * as path from 'path';
-import * as fs from 'fs';
 
 const log = Log.create({ service: 'generic-stage-runner' });
-const execFileAsync = promisify(execFile);
 export const GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE = 'Generic stage runner requires WorkflowRun requestedWork';
 
 type PersistedCheckResult = {
@@ -184,32 +173,9 @@ export class GenericStageRunner implements StageRunner {
       };
     }
 
-    if (result.status === 'completed') {
-      try {
-        await this.finalizeSuccessfulTask(ctx, taskId);
-      } catch (err) {
-        const failedResult: StageTaskResult = {
-          ...result,
-          status: 'failed',
-          reason: err instanceof Error ? err.message : String(err),
-        };
-        this.appendTaskResult(ctx, failedResult);
-        this.updateStageExecutionStatus(ctx, 'failed');
-        return {
-          success: false,
-          output: failedResult.output ?? null,
-          checkResults: [],
-          message: failedResult.reason,
-        };
-      }
-    }
-
     const accepted = result.alreadyReported
       ? { decision: null as WorkflowDecision | null, result }
       : this.appendTaskResult(ctx, result);
-    if (accepted.result.status === 'completed' && accepted.decision) {
-      this.applyAcceptedTaskSideEffects(ctx, accepted.decision.events);
-    }
     if (accepted.result.status === 'failed' || accepted.result.status === 'skipped') this.updateStageExecutionStatus(ctx, 'failed');
 
     return {
@@ -237,141 +203,6 @@ export class GenericStageRunner implements StageRunner {
       reason: task.reason ?? result.reason,
       causedBy: task.causedBy ?? result.causedBy,
     };
-  }
-
-  private async finalizeSuccessfulTask(ctx: StageContext, taskId: string): Promise<void> {
-    if (ctx.issue.stage !== Stage.Plan || taskId !== 'self-review') return;
-
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-    if (!changeDir) return;
-
-    const commitOk = await commitPlanArtifacts(changeDir, ctx.issue);
-    if (!commitOk) {
-      throw new Error(`Failed to commit plan artifacts for issue #${ctx.issue.number}`);
-    }
-
-    ctx.checkpointManager.delete(ctx.issue.number, 'plan');
-  }
-
-  private applyAcceptedTaskSideEffects(ctx: StageContext, events: WorkflowEvent[]): void {
-    const stageDefinition = this.getStageDefinition(ctx.issue.stage);
-    if (!stageDefinition) return;
-    const reviewTask = this.reviewProducerTask(stageDefinition);
-    const verdictCheck = this.repairableVerdictCheck(stageDefinition);
-    if (!reviewTask || !verdictCheck) return;
-
-    const verdictInvalidated = events.some(
-      event => event.type === 'check-invalidated' && event.checkName === verdictCheck.name,
-    );
-    if (verdictInvalidated) {
-      this.persistReactionConvergenceFromWorkflow(ctx, stageDefinition, verdictCheck);
-    }
-
-    const aiReviewCompleted = events.some(
-      event => event.type === 'task-completed' && this.baseRuntimeTaskId(event.taskId) === reviewTask.id,
-    );
-    if (aiReviewCompleted) {
-      const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-      if (changeDir) {
-        clearVerificationContext(changeDir);
-      }
-    }
-
-    if (!events.some(event => event.type === 'task-invalidated' && this.baseRuntimeTaskId(event.taskId) === reviewTask.id)) return;
-    this.invalidateReviewArtifactForRereview(ctx, reviewTask.id);
-  }
-
-  private persistReactionConvergenceFromWorkflow(ctx: StageContext, stageDefinition: CompiledStageDefinition, verdictCheckDefinition: CheckDefinition): void {
-    const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
-    if (!stageRun) return;
-
-    const repairTaskIds = new Set(
-      (stageDefinition.repairPolicies ?? [])
-        .filter(policy => policy.checkName === verdictCheckDefinition.name)
-        .map(policy => policy.fixTaskId),
-    );
-    const fixTask = [...stageRun.tasks].reverse().find(
-      t => repairTaskIds.has(this.baseRuntimeTaskId(t.id)) && t.status === 'completed',
-    );
-    if (!fixTask?.output) return;
-
-    const reactionOutput = extractReactionOutput({
-      taskId: fixTask.id,
-      title: fixTask.title,
-      status: 'completed',
-      artifacts: [],
-      attempts: fixTask.attempts,
-      duration: fixTask.duration,
-      output: fixTask.output,
-    });
-    if (!reactionOutput) return;
-
-    const reviewCheck = stageRun.checks.find(c => c.checkName === verdictCheckDefinition.name);
-    const failedCheck: import('./stage-context').CheckResult = {
-      name: verdictCheckDefinition.name,
-      status: 'fail',
-      output: reviewCheck?.output ?? { verdict: 'FAIL' },
-    };
-
-    const verificationCtx = buildVerificationContextFromReaction(
-      failedCheck,
-      reactionOutput,
-      fixTask.attempts,
-    );
-
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-    if (changeDir) {
-      saveVerificationContext(changeDir, verificationCtx);
-    }
-  }
-
-  private invalidateReviewArtifactForRereview(ctx: StageContext, reviewTaskId: string): void {
-    const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
-    if (!changeDir) return;
-
-    const reviewPath = path.join(changeDir, 'review.md');
-    try {
-      if (fs.existsSync(reviewPath)) {
-        const staleReviewPath = path.join(changeDir, `review.stale-${Date.now()}.md`);
-        fs.renameSync(reviewPath, staleReviewPath);
-        log.info('Renamed stale review.md before generic stage re-review', { issueNumber: ctx.issue.number, staleReviewPath });
-      }
-      ctx.checkpointManager?.deleteStep?.(ctx.issue.number, ctx.issue.stage, reviewTaskId);
-      log.info('Invalidated review checkpoint for generic stage re-review', { issueNumber: ctx.issue.number, stage: ctx.issue.stage, taskId: reviewTaskId });
-    } catch (err) {
-      log.warn('Failed to invalidate review artifact before generic stage re-review', {
-        issueNumber: ctx.issue.number,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private repairableVerdictCheck(stageDefinition: CompiledStageDefinition): CheckDefinition | null {
-    const policies = [
-      ...(stageDefinition.repairPolicies ?? []),
-      ...(stageDefinition.checkFailurePolicies ?? []),
-    ];
-    const policy = policies.find(candidate => candidate.checkName === 'review-passed')
-      ?? policies.find(candidate => this.baseRuntimeTaskId(candidate.fixTaskId) === 'fix-review-findings')
-      ?? policies[0];
-    if (!policy) return null;
-    return stageDefinition.checks.find(check => check.name === policy.checkName) ?? null;
-  }
-
-  private reviewProducerTask(stageDefinition: CompiledStageDefinition): TaskDefinition | null {
-    const verdictRepairTaskIds = new Set(
-      (stageDefinition.repairPolicies ?? [])
-        .filter(policy => this.repairableVerdictCheck(stageDefinition)?.name === policy.checkName)
-        .map(policy => policy.fixTaskId),
-    );
-    const eventInvalidatedTaskIds = new Set(
-      (stageDefinition.invalidationPolicy?.entries ?? [])
-        .filter(entry => entry.invalidates.tasks?.length)
-        .flatMap(entry => entry.invalidates.tasks ?? []),
-    );
-    return stageDefinition.tasks.find(task => eventInvalidatedTaskIds.has(task.id) && !verdictRepairTaskIds.has(task.id))
-      ?? stageDefinition.tasks.find(task => task.uses === 'mohist/agent')
-      ?? null;
   }
 
   private async runRequestedCheck(ctx: StageContext): Promise<StageRunResult> {
@@ -865,34 +696,4 @@ export class GenericStageRunner implements StageRunner {
     return 'runtime';
   }
 
-}
-
-async function commitPlanArtifacts(changeDir: string, issue: { number: number; title: string }): Promise<boolean> {
-  try {
-    const worktreePath = path.dirname(path.dirname(path.dirname(changeDir)));
-    const relPath = path.relative(worktreePath, changeDir);
-
-    const { stdout: statusOut } = await execFileAsync(
-      'git',
-      ['status', '--porcelain', '--', relPath],
-      { cwd: worktreePath },
-    );
-
-    if (!statusOut.trim()) {
-      log.info('No uncommitted plan artifacts', { issueNumber: issue.number });
-      return true;
-    }
-
-    await execFileAsync('git', ['add', '--', relPath], { cwd: worktreePath });
-    await execFileAsync('git', ['commit', '-m', `plan(issue-${issue.number}): ${issue.title}`], { cwd: worktreePath });
-
-    log.info('Plan artifacts committed', { issueNumber: issue.number, changeDir });
-    return true;
-  } catch (err) {
-    log.warn('Failed to commit plan artifacts', {
-      issueNumber: issue.number,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return false;
-  }
 }

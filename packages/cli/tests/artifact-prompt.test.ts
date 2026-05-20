@@ -11,7 +11,7 @@ import {
   type ArtifactType,
 } from '../src/agents/artifact-prompt';
 import type { Issue } from '../src/types';
-import type { AgentConfig } from '../src/workflow/workflow-loader';
+import type { AgentConfig } from '../src/agents/agent-config';
 import * as fs from 'fs';
 import * as path from 'path';
 

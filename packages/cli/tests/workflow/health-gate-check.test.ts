@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'child_process';
-import type { HealthGatePolicy } from '../../src/workflow/workflow-loader';
-import { HealthGateCheck } from '../../src/workflow/checks/health-gate-check';
+import { HealthGateCheck, type HealthGatePolicy } from '../../src/workflow/checks/health-gate-check';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -18,7 +17,6 @@ function createMockPolicy(overrides?: Partial<HealthGatePolicy>): HealthGatePoli
     timeout: 300000,
     autoFix: false,
     maxFixAttempts: 0,
-    fallbackReaction: { type: 'ask-user' },
     ...overrides,
   };
 }

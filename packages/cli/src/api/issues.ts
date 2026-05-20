@@ -8,7 +8,6 @@ import { ProjectService } from '../services';
 import { AgentRunnerService } from '../services';
 import type { ConflictResolutionDeps } from '../services/conflict-resolution';
 import { WorktreeManager } from '../git/worktree-manager';
-import { MergeQueue } from '../git/merge-queue';
 import type { LlmConfig } from '../agent-runtime';
 import { WorkflowLogRepo } from '../db/workflow-log-repo';
 import { SessionStreamLogRepo, type SessionStreamLogEntry } from '../db/session-stream-log-repo';
@@ -24,7 +23,6 @@ import { execFileSync } from 'child_process';
 import { Log } from '../util/log';
 import type { IssueQueueStatus } from '../services/agent-runner-service';
 import { assembleSessionTranscript } from '../services/session-transcript-service';
-import { PostMergeFinalizer } from '../services/post-merge-finalizer';
 import { StageStateService } from '../services/stage-state-service';
 import type { IssuePrerequisiteService, IssuePrerequisiteSummary, IssueStartEligibility } from '../services/issue-prerequisite-service';
 import type { EpicService } from '../services/epic-service';
@@ -692,12 +690,10 @@ export function createIssueRoutes(
   sessionStreamLogRepo?: SessionStreamLogRepo,
   coderSessionRepo?: CoderSessionRepo,
   _opencodeBinPath?: string,
-  mergeQueue?: MergeQueue,
   checkpointRepo?: PipelineCheckpointRepo,
   _resolveConflictsDeps?: ConflictResolutionDeps,
   checkSuiteRepo?: CheckSuiteRepo,
   stageExecutionRepo?: StageExecutionRepo,
-  _postMergeFinalizer?: PostMergeFinalizer,
   stageStateService?: StageStateService,
   workflowRunService?: WorkflowRunService,
   issuePrerequisiteService?: IssuePrerequisiteService,
@@ -1176,15 +1172,12 @@ export function createIssueRoutes(
       const blockedIssues = issueRepo.findByMergeStates([MergeState.Blocked])
         .filter(issue => issue.projectId === projectId);
 
-      const blockedEntries = blockedIssues.map(issue => {
-        const queueEntry = mergeQueue?.getStatus().find(e => e.issueNumber === issue.number);
-        return {
-          issueNumber: issue.number,
-          title: issue.title,
-          conflictingFiles: queueEntry?.conflictingFiles ?? [],
-          blockedAt: issue.updatedAt,
-        };
-      });
+      const blockedEntries = blockedIssues.map(issue => ({
+        issueNumber: issue.number,
+        title: issue.title,
+        conflictingFiles: [],
+        blockedAt: issue.updatedAt,
+      }));
 
       return c.json({ success: true, data: blockedEntries } satisfies ApiResponse);
     } catch (error) {
@@ -1342,24 +1335,6 @@ export function createIssueRoutes(
           recovery,
         },
       } satisfies ApiResponse);
-    } catch (error) {
-      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
-    }
-  });
-
-  app.get('/merge-queue/status', async (c) => {
-    try {
-      const projectId = getCurrentProjectId();
-      if (!projectId) {
-        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
-      }
-
-      if (!mergeQueue) {
-        return c.json({ success: true, data: { items: [] } } satisfies ApiResponse);
-      }
-
-      const entries = mergeQueue.getStatus().filter(e => e.projectId === projectId);
-      return c.json({ success: true, data: { items: entries } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }
@@ -3638,14 +3613,10 @@ export function createIssueRoutes(
       }
 
       if (issue.stage === Stage.Done) {
-        if (!mergeQueue) {
-          return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
-        }
-        const retried = mergeQueue.retry(number);
-        if (!retried) {
-          return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state` } satisfies ApiResponse, 409);
-        }
-        return c.json({ success: true, data: { rebased: true, message: 'Rebase delegated to merge queue retry' } } satisfies ApiResponse);
+        return c.json({
+          success: false,
+          error: `Issue #${number} is done; rebase must be expressed as workflow work before completion.`,
+        } satisfies ApiResponse, 409);
       }
 
       const workflowApplicationService = createWorkflowApplicationService();
@@ -3935,42 +3906,6 @@ export function createIssueRoutes(
           message: `Issue #${number} rerun from ${currentIssue.stage} stage`,
         },
       } satisfies ApiResponse, 202);
-    } catch (error) {
-      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
-    }
-  });
-
-  app.post('/:number/retry-merge', async (c) => {
-    try {
-      const number = parseInt(c.req.param('number'));
-      const projectId = getCurrentProjectId();
-
-      if (!projectId) {
-        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
-      }
-
-      const issue = issueService.getByNumber(projectId, number);
-      if (!issue) {
-        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
-      }
-
-      if (!mergeQueue) {
-        return c.json({ success: false, error: 'MergeQueue not configured' } satisfies ApiResponse, 500);
-      }
-
-      const project = projectService.getById(projectId);
-      if (project && worktreeManager && !worktreeManager.exists(project.name, issue.number)) {
-        return c.json({ success: false, error: `No worktree found for issue #${number}` } satisfies ApiResponse, 404);
-      }
-
-      const retried = mergeQueue.retry(number);
-      if (!retried) {
-        const queueEntry = mergeQueue.getStatus().find(e => e.issueNumber === number);
-        const currentState = queueEntry?.mergeState ?? 'unknown';
-        return c.json({ success: false, error: `Issue #${number} is not in a retryable merge state (current state: ${currentState}; retryable: build-failed, conflict, blocked)` } satisfies ApiResponse, 409);
-      }
-
-      return c.json({ success: true, data: { message: `Issue #${number} re-enqueued for merge` } } satisfies ApiResponse);
     } catch (error) {
       return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
     }

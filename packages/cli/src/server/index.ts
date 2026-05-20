@@ -19,21 +19,15 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, resolveConflictsViaAgent, PostMergeFinalizer, StageStateService, WorkflowRunService, WorkflowApplicationService, IssuePrerequisiteService, BaseDriftService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, StageStateService, WorkflowRunService, IssuePrerequisiteService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
-import { MergeQueue } from '../git/merge-queue';
-import { Stage } from '../types';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
-import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
-import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { MergeEntry } from '../git/merge-queue';
 import { Log } from '../util/log';
 import { getVersionInfo } from '../version';
 
 
 import { load as loadConfig, getServerConfig, getLogConfig, resolveOpencodeBinPath } from '../config/config-loader';
-import { resolveStageModel } from '../config/model-resolution';
 import { RateLimiter } from '../utils/rate-limiter';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -128,18 +122,10 @@ async function main(): Promise<void> {
     opencodeBinPath,
   };
 
-  const issueRepo = stateManager.getIssueRepo();
   const coderSessionRepo = stateManager.getCoderSessionRepo();
-
-  const postMergeFinalizer = new PostMergeFinalizer(
-    stateManager.getProjectRepo(),
-    stateManager.getStageExecutionRepo(),
-  );
 
   const stageStateService = new StageStateService(db);
   const workflowRunService = new WorkflowRunService(db);
-  const baseDriftService = new BaseDriftService();
-  const workflowApplicationService = new WorkflowApplicationService(db);
 
   const issuePrerequisiteService = new IssuePrerequisiteService(
     stateManager.getIssueRepo(),
@@ -157,124 +143,6 @@ async function main(): Promise<void> {
   if (expiredCount > 0) {
     log.info(`Expired ${expiredCount} orphaned pending question(s) from previous session`);
   }
-
-  const mergeQueue = new MergeQueue({
-    worktreeManager,
-    eventBus,
-    issueRepo,
-    getProjectPath: (projectId: string) => {
-      const project = projectService.getById(projectId);
-      if (!project) return null;
-      return { path: project.path, name: project.name, baseBranch: project.baseBranch };
-    },
-    resolveConflicts: async (entry, worktreePath, conflictFiles) => {
-      log.info('resolveConflicts callback invoked', { issueNumber: entry.issueNumber, conflictFiles });
-      return resolveConflictsViaAgent(conflictResolutionDeps, entry.issueId, entry.projectId, worktreePath, conflictFiles);
-    },
-    fixBuildErrors: async (entry: MergeEntry, worktreePath: string, buildOutput: string) => {
-      log.info('fixBuildErrors callback invoked', { issueNumber: entry.issueNumber });
-
-      const refreshedIssue = issueRepo.findById(entry.issueId);
-      if (!refreshedIssue) {
-        return { success: false, error: 'Issue not found for build fix' };
-      }
-
-      const config = loadConfig();
-
-      const fixObservers = createWorkflowSessionObservers({
-        eventBus,
-        workflowLogRepo,
-        sessionStreamLogRepo,
-        coderSessionRepo,
-        stage: 'build',
-        title: 'Build error fix',
-      });
-
-      const acpOptions: AgentSessionOptions = {
-        cwd: worktreePath,
-        issueId: refreshedIssue.id,
-        projectId: entry.projectId,
-        issueNumber: refreshedIssue.number,
-        opencodeBinPath,
-        model: resolveStageModel(Stage.Build, config, refreshedIssue),
-        observers: fixObservers,
-      };
-
-      const truncatedOutput = buildOutput.length > 8000 ? buildOutput.slice(-8000) : buildOutput;
-
-      const prompt = [
-        `## Build Fix Required`,
-        '',
-        `Issue #${refreshedIssue.number}: ${refreshedIssue.title}`,
-        '',
-        `The build failed after rebase. Fix all build errors and ensure the build passes.`,
-        '',
-        `## Build Error Output`,
-        '',
-        '```',
-        truncatedOutput,
-        '```',
-        '',
-        `## Instructions`,
-        '',
-        `1. Read the build error output above carefully`,
-        `2. Fix each error in the relevant source files`,
-        `3. Do NOT modify unrelated code — make minimal targeted fixes`,
-        `4. Run \`npm run build\` in \`packages/cli\` to verify your fixes`,
-        `5. If tests exist and are affected, run \`npm test\` to verify`,
-        `6. Commit your fixes with a descriptive message`,
-      ].join('\n');
-
-      try {
-        const session = await AgentSession.create(acpOptions);
-        try {
-          const result = await session.execute(prompt, { kind: 'recovery' });
-          if (!result.success) {
-            return { success: false, error: result.error || 'Agent build fix session failed' };
-          }
-          return { success: true };
-        } finally {
-          await session.close().catch(() => {});
-        }
-      } catch (err) {
-        return { success: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-    postMergeFinalizer,
-    getMergeMetadata: async (projectId: string, issueNumber: number) => {
-      const issue = issueRepo.findByNumber(projectId, issueNumber);
-      if (!issue) return undefined;
-      return {
-        issueNumber,
-        issueTitle: issue.title,
-      };
-    },
-    async onBaseAdvanced(event) {
-      log.info('Base branch advanced, triggering drift scan', { projectId: event.projectId, issueNumber: event.issueNumber, baseBranch: event.baseBranch, newBaseSha: event.newBaseSha });
-      const project = projectService.getById(event.projectId);
-      if (!project) {
-        log.warn('Project not found for drift scan', { projectId: event.projectId });
-        return;
-      }
-      try {
-        await baseDriftService.scanActiveCandidatesForDrift({
-          projectId: event.projectId,
-          baseBranch: event.baseBranch,
-          newBaseSha: event.newBaseSha,
-          issueRepo,
-          workflowRunService,
-          worktreeManager,
-          project: { path: project.path, name: project.name },
-          eventBus,
-          workflowApplicationService,
-        });
-      } catch (err) {
-        log.error('Failed to scan for base drift', { error: err instanceof Error ? err.message : String(err) });
-      }
-    },
-  });
-
-  mergeQueue.recoverFromDB();
 
   const skillRunner: SkillRunner = {
     async runSkill(skillName: string): Promise<void> {
@@ -298,7 +166,7 @@ async function main(): Promise<void> {
 
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/epics', createEpicRoutes(epicService, projectService));
-  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, mergeQueue, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), postMergeFinalizer, stageStateService, workflowRunService, issuePrerequisiteService, epicService));
+  server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), stageStateService, workflowRunService, issuePrerequisiteService, epicService));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));
