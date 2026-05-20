@@ -436,7 +436,6 @@ function disabledHealthGates() {
     plan: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
     build: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
     check: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
-    postMerge: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
   };
 }
 

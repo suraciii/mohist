@@ -317,7 +317,7 @@ describe('default workflow external-system harness', () => {
     expect(integrateRun.tasks.find(task => task.taskId === 'integrate:merge')).toMatchObject({ status: 'pending' });
   });
 
-  it('fails post-merge Integrate health without rerunning delivery side-effect tasks', async () => {
+  it('fails post-delivery Integrate health without rerunning delivery side-effect tasks', async () => {
     const harness = createHarness({ healthFailuresBeforePass: { 'health:integrate': 1 } });
 
     expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);

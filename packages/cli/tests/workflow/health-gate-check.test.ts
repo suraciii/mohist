@@ -321,7 +321,7 @@ describe('HealthGateCheck', () => {
 
   describe('check name format', () => {
     it('uses health:stage as check name', () => {
-      const stages = ['plan', 'build', 'check', 'postMerge'];
+      const stages = ['plan', 'build', 'check', 'integrate'];
       for (const stage of stages) {
         const check = new HealthGateCheck({
           worktreePath: '/tmp/worktree',

@@ -245,7 +245,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
       checks: [
         {
           id: 'health:integrate',
-          title: 'Post-merge health check',
+          title: 'Post-delivery health check',
           uses: 'mohist/health-gate',
           with: { command: DEFAULT_CHECK_HEALTH_COMMAND, timeout: DEFAULT_HEALTH_TIMEOUT_MS },
           onFailure: {
@@ -258,7 +258,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 with: {
                   prompt: {
                     inline: [
-                      'Fix the post-merge health failure.',
+                      'Fix the post-delivery health failure.',
                       '',
                       'Apply the minimal changes required after integration side effects. Preserve already completed delivery work unless correcting the health failure requires it.',
                     ].join('\n'),
