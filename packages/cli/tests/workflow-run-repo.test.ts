@@ -497,4 +497,43 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(loaded.workflowRecoverySummary()).toBe('running');
     expect(loaded.nextWork()).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
   });
+
+  it('keeps workflow-policy reset provenance after starting the fresh attempt', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_reset_start_attempt', issueId, issueNumber });
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.approveStage(Stage.Plan);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', output: { previous: true }, artifacts: ['review.md'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', output: { verdict: 'FAIL' } });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
+    run.startTaskAttempt(Stage.Check, 'ai-review', '2026-05-20T00:00:00.000Z', { executionId: 'check-188-ai-review-1' });
+
+    repo.saveAggregate(run, 'tester');
+
+    const loaded = repo.loadAggregateById(run.id)!;
+    const aiReview = loaded.stageRun(Stage.Check).findTask('ai-review');
+
+    expect(aiReview).toMatchObject({
+      status: 'running',
+      resetBy: {
+        type: 'workflow-policy',
+        taskId: 'fix-review-findings',
+        eventName: 'code.changed',
+        message: 'code.changed reset',
+      },
+      latestAttempt: {
+        state: 'running',
+        executionId: 'check-188-ai-review-1',
+      },
+    });
+    expect(loaded.workflowRecoverySummary()).toBe('running');
+  });
 });
