@@ -5,9 +5,7 @@ import type {
   AgentPromptSource,
   CheckDefinition,
   CheckFailurePolicy,
-  ApprovalEvidenceMetadata,
   ApprovalPolicy,
-  ApprovalEvidencePolicy,
   CheckPolicy,
   CompiledStageDefinition,
   InvalidationPolicy,
@@ -62,7 +60,6 @@ function cloneOnFailure(check: CheckDefinition): CheckDefinition {
   const cloned = {
     ...check,
     with: check.with ? { ...check.with } : undefined,
-    approvalEvidence: check.approvalEvidence ? { ...check.approvalEvidence } : undefined,
   };
   if (!check.onFailure?.retry) return cloned;
   return {
@@ -129,7 +126,6 @@ function cloneCompiledStageDefinition(stage: CompiledStageDefinition): CompiledS
     taskExecutionPolicies: stage.taskExecutionPolicies?.map(policy => ({ ...policy })),
     checkPolicies: stage.checkPolicies.map(policy => ({ ...policy })),
     approvalPolicy: stage.approvalPolicy ? { ...stage.approvalPolicy } : undefined,
-    approvalEvidencePolicy: stage.approvalEvidencePolicy ? { ...stage.approvalEvidencePolicy } : undefined,
     repairPolicies: stage.repairPolicies?.map(cloneRepairPolicy),
     invalidationPolicy: stage.invalidationPolicy ? cloneInvalidationPolicy(stage.invalidationPolicy) : undefined,
   };
@@ -163,36 +159,6 @@ function compileApprovalPolicy(stage: StageDefinition, existingPolicy?: Approval
   if (existingPolicy) return { ...existingPolicy };
   if (stage.requiresApproval) return { checkName: stage.approvalCheckName ?? 'user-approval' };
   return undefined;
-}
-
-function approvalEvidenceMetadata(check: CheckDefinition): ApprovalEvidenceMetadata | null {
-  const evidence = check.approvalEvidence ?? check.with?.approvalEvidence;
-  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-  const role = (evidence as Record<string, unknown>).role;
-  if (role !== 'verdict' && role !== 'verification' && role !== 'candidate') return null;
-  const snapshotField = (evidence as Record<string, unknown>).snapshotField;
-  return {
-    role,
-    ...(typeof snapshotField === 'string' && snapshotField.length > 0 ? { snapshotField } : {}),
-  };
-}
-
-function approvalEvidenceRole(check: CheckDefinition): string | null {
-  return approvalEvidenceMetadata(check)?.role ?? null;
-}
-
-function compileApprovalEvidencePolicy(stage: StageDefinition): ApprovalEvidencePolicy | undefined {
-  const verdictCheckName = stage.checks.find(check => approvalEvidenceRole(check) === 'verdict')?.name;
-  const verificationCheckName = stage.checks.find(check => approvalEvidenceRole(check) === 'verification')?.name;
-  const candidateCheckName = stage.checks.find(check => approvalEvidenceRole(check) === 'candidate')?.name;
-  if (!verdictCheckName || !verificationCheckName || !candidateCheckName) return undefined;
-  return {
-    verdictCheckName,
-    verificationCheckName,
-    candidateCheckName,
-    convergenceTaskId: 'check:converge-review-snapshot',
-    convergenceTaskTitle: 'Converge review snapshot',
-  };
 }
 
 function compileRepairPoliciesFromChecks(stage: StageDefinition): RepairPolicy[] {
@@ -306,16 +272,10 @@ function compileTaskExecutionPolicies(stage: StageDefinition, compiled: Partial<
   return policies.size > 0 ? [...policies.values()] : undefined;
 }
 
-function compileRuntimeTaskExecutionPolicies(stage: StageDefinition): TaskExecutionPolicy[] {
-  const policies: TaskExecutionPolicy[] = [
+function compileRuntimeTaskExecutionPolicies(_stage: StageDefinition): TaskExecutionPolicy[] {
+  return [
     { taskId: 'rebase-branch', kind: 'rebase-task', workSourceKind: 'runtime' },
   ];
-
-  if (compileApprovalEvidencePolicy(stage)?.convergenceTaskId) {
-    policies.push({ taskId: 'check:converge-review-snapshot', kind: 'service-call', workSourceKind: 'runtime' });
-  }
-
-  return policies;
 }
 
 function allCheckNames(stage: StageDefinition, checkPolicies?: CheckPolicy[]): string[] {
@@ -432,10 +392,6 @@ export function compileWorkflowDefinition(definition: WorkflowDefinition): Compi
       checkPolicies: compileCheckPolicies(source),
       approvalPolicy: compileApprovalPolicy(source),
     };
-    const approvalEvidencePolicy = compileApprovalEvidencePolicy(source);
-    if (approvalEvidencePolicy) {
-      compiled.approvalEvidencePolicy = approvalEvidencePolicy;
-    }
     const repairPoliciesFromChecks = compileRepairPoliciesFromChecks(source);
     if (repairPoliciesFromChecks.length > 0) {
       compiled.repairPolicies = repairPoliciesFromChecks;

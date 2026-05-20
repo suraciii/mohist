@@ -6,7 +6,6 @@ import {
   type CausedByMetadata,
   type BuildWorkSourceState,
   type StageRunSnapshot,
-  type VerificationEvidence,
   type WorkItemAttempt,
   type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
@@ -52,7 +51,6 @@ export interface WorkflowStageRun {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  staleEvidenceDetected?: boolean;
 }
 
 export interface WorkflowTask {
@@ -333,13 +331,9 @@ function checkRowToSnapshot(row: WorkflowCheckRow): StageRunSnapshot['checks'][n
 function approvalFromStageRow(row: WorkflowStageRunRow): StageRunSnapshot['approval'] {
   if (!row.approval_status || !row.approval_requested_at) return null;
   const output = safeParseJson(row.approval_output);
-  const verificationEvidence = (output && typeof output === 'object')
-    ? (output as { verificationEvidence?: VerificationEvidence }).verificationEvidence ?? null
-    : null;
   return {
     status: row.approval_status as 'awaiting' | 'approved' | 'rejected',
     output,
-    verificationEvidence,
     requestedAt: row.approval_requested_at,
     respondedAt: row.approval_responded_at,
   };

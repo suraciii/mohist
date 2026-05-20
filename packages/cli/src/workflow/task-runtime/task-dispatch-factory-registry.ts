@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Stage, MergeState } from '../../types';
-import type { StageContext, StageTaskResult, CheckResult } from '../stage-context';
+import type { StageContext, CheckResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
-import type { AgentPromptSource, CompiledStageDefinition, RequiredMarkerDefinition, TaskDefinition, TaskExecutionKind, WorkflowDefinitionSnapshot } from '../domain';
-import { DEFAULT_STAGE_DEFINITIONS, createWorkflowTemplateContext, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../domain';
+import type { AgentPromptSource, RequiredMarkerDefinition, TaskDefinition, TaskExecutionKind } from '../domain';
+import { createWorkflowTemplateContext, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../domain';
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
@@ -141,23 +141,6 @@ function createRepairDispatchTask(input: TaskDispatchFactoryInput): Dispatchable
 }
 
 function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrator: OpenSpecIntegrator): DispatchableTask | null {
-  if (input.task.taskId === 'check:converge-review-snapshot') {
-    return {
-      taskId: input.task.taskId,
-      title: input.task.title,
-      kind: 'service-call',
-      stage: input.ctx.issue.stage,
-      attempt: input.attempt,
-      serviceFn: async () => {
-        const result = await executeConvergeReviewSnapshotTask(input.ctx);
-        if (result.status !== 'completed') {
-          throw new Error(result.reason ?? 'Converge review snapshot failed');
-        }
-        return result.output;
-      },
-    };
-  }
-
   const uses = input.sourceTask?.uses ?? inferWorkflowTaskUse(input.task.taskId, input.executionKind);
   const serviceFn = buildWorkflowServiceFn(uses, input, integrator);
   if (!serviceFn) return null;
@@ -484,88 +467,6 @@ function unwrapWorkflowOutput(output: unknown): Record<string, unknown> | null {
     return data.result as Record<string, unknown>;
   }
   return data;
-}
-
-async function executeConvergeReviewSnapshotTask(ctx: StageContext): Promise<StageTaskResult> {
-  const taskId = 'check:converge-review-snapshot';
-  const title = 'Converge review snapshot';
-  const startedAt = Date.now();
-  emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId, ctx.issue.stage, taskId, title, 'started', 1, []);
-
-  try {
-    const project = ctx.projectRepo?.findById(ctx.issue.projectId);
-    const worktreePath = project ? ctx.worktreeManager.getPath(project.name, ctx.issue.number) : null;
-    if (!worktreePath) throw new Error('Worktree not found');
-    const convergence = await ctx.worktreeManager.createCheckConvergenceCommit(worktreePath, ctx.issue.number);
-    if (!convergence.success) throw new Error(convergence.error ?? 'Convergence commit failed');
-
-    const output = { converged: true, snapshotSha: convergence.headSha };
-    const verdictCheckName = getApprovalEvidenceCheckName(ctx, 'verdict');
-    const verdictSnapshotField = getApprovalEvidenceSnapshotField(ctx, 'verdict') ?? 'snapshotSha';
-    const latestVerdict = verdictCheckName ? getLatestCheckResultFromStage(ctx, verdictCheckName) : undefined;
-    if (latestVerdict && ctx.checkSuiteRepo) {
-      const { buildAuthoritativeAiReviewResult } = await import('../stage-context');
-      const authoritative = buildAuthoritativeAiReviewResult(
-        {
-          ...latestVerdict,
-          output: {
-            ...((latestVerdict.output as Record<string, unknown>) ?? {}),
-            [verdictSnapshotField]: convergence.headSha,
-            snapshotSha: convergence.headSha,
-          },
-        },
-        { snapshotSha: convergence.headSha },
-      );
-      const suite = authoritative ? ctx.checkSuiteRepo.findActiveByIssueId(ctx.issue.id) : null;
-      if (suite && authoritative) {
-        ctx.checkSuiteRepo.updateChecks(suite.id, latestVerdict.name, { status: 'passed', output: authoritative, ranAt: authoritative.convergedAt });
-        ctx.checkSuiteRepo.updateSnapshotSha(suite.id, convergence.headSha);
-      }
-    }
-
-    emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId, ctx.issue.stage, taskId, title, 'completed', 1, []);
-    return { taskId, title, status: 'completed', artifacts: [], attempts: 1, duration: Date.now() - startedAt, output };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    emitStageTaskUpdate(ctx.eventBus, ctx.issue.id, ctx.issue.projectId, ctx.issue.stage, taskId, title, 'failed', 1, []);
-    return { taskId, title, status: 'failed', artifacts: [], attempts: 1, duration: Date.now() - startedAt, reason: message, output: { error: message } };
-  }
-}
-
-function getLatestCheckResultFromStage(ctx: StageContext, checkName: string): { name: string; status: 'pass' | 'fail' | 'error' | 'pending'; output?: unknown } | undefined {
-  const checkStage = ctx.workflowRun?.stageRuns.find(stageRun => stageRun.stage === ctx.issue.stage);
-  const check = checkStage?.checks.find(candidate => candidate.checkName === checkName);
-  if (!check) return undefined;
-  return {
-    name: check.checkName,
-    status: check.status === 'passed' ? 'pass' : check.status === 'pending' || check.status === 'running' ? 'pending' : check.status === 'error' ? 'error' : 'fail',
-    output: check.output ?? undefined,
-  };
-}
-
-type ApprovalEvidenceRole = 'verdict' | 'verification' | 'candidate';
-
-function getApprovalEvidenceCheckName(ctx: StageContext, role: ApprovalEvidenceRole): string | null {
-  const policy = getStageDefinition(ctx)?.approvalEvidencePolicy;
-  if (!policy) return null;
-  if (role === 'verdict') return policy.verdictCheckName;
-  if (role === 'verification') return policy.verificationCheckName;
-  return policy.candidateCheckName;
-}
-
-function getApprovalEvidenceSnapshotField(ctx: StageContext, role: ApprovalEvidenceRole): string | null {
-  const stageDefinition = getStageDefinition(ctx);
-  const checkName = getApprovalEvidenceCheckName(ctx, role);
-  const check = checkName ? stageDefinition?.checks.find(candidate => candidate.name === checkName) : undefined;
-  const evidence = check?.approvalEvidence ?? check?.with?.approvalEvidence;
-  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
-  const field = (evidence as Record<string, unknown>).snapshotField;
-  return typeof field === 'string' && field.length > 0 ? field : null;
-}
-
-function getStageDefinition(ctx: StageContext): CompiledStageDefinition | undefined {
-  const snapshot = workflowDefinitionSnapshotFromUnknown(ctx.workflowRun?.workflowDefinition) as WorkflowDefinitionSnapshot | null;
-  return (snapshot?.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS).find(definition => definition.stage === ctx.issue.stage);
 }
 
 function normalizeRepairTaskId(taskId: string): RepairFixTaskId {

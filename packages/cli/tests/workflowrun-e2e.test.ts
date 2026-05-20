@@ -320,7 +320,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(check.deliveryMetadata?.frozen).toBe(true);
   });
 
-  it('projects check suite checks from approval evidence policy without a fixed Check stage', () => {
+  it('projects check suite checks from stage checks without a fixed Check stage', () => {
     const snapshot = createWorkflowDefinitionSnapshot({
       definition: {
         id: 'project/plan-review-suite',
@@ -333,19 +333,16 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
                 name: 'verify-plan',
                 title: 'Verify plan',
                 uses: 'mohist/health-gate',
-                with: { approvalEvidence: { role: 'verification', snapshotField: 'headSha' } },
               },
               {
                 name: 'plan-verdict',
                 title: 'Plan verdict',
                 uses: 'mohist/verdict',
-                with: { approvalEvidence: { role: 'verdict', snapshotField: 'reviewedSha' } },
               },
               {
                 name: 'plan-candidate',
                 title: 'Plan candidate',
                 uses: 'mohist/merge-ready',
-                with: { approvalEvidence: { role: 'candidate', snapshotField: 'headSha' } },
               },
             ],
             requiresApproval: true,

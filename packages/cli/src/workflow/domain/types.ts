@@ -77,7 +77,6 @@ export interface CheckDefinition {
   source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
-  approvalEvidence?: ApprovalEvidenceMetadata;
   onFailure?: CheckFailureAction;
 }
 
@@ -133,21 +132,6 @@ export interface CheckPolicy {
 
 export interface ApprovalPolicy {
   checkName: string;
-}
-
-export type ApprovalEvidenceRole = 'verdict' | 'verification' | 'candidate';
-
-export interface ApprovalEvidenceMetadata {
-  role: ApprovalEvidenceRole;
-  snapshotField?: string;
-}
-
-export interface ApprovalEvidencePolicy {
-  verdictCheckName: string;
-  verificationCheckName: string;
-  candidateCheckName: string;
-  convergenceTaskId?: string;
-  convergenceTaskTitle?: string;
 }
 
 export type ReactionInputSelector =
@@ -215,7 +199,6 @@ export type CompiledStageDefinition = StageDefinition & {
   taskExecutionPolicies?: TaskExecutionPolicy[];
   checkPolicies: CheckPolicy[];
   approvalPolicy?: ApprovalPolicy;
-  approvalEvidencePolicy?: ApprovalEvidencePolicy;
   repairPolicies?: RepairPolicy[];
   invalidationPolicy?: InvalidationPolicy;
 };
@@ -308,7 +291,6 @@ export type WorkflowEvent =
   | { type: 'approval-requested'; stage: Stage }
   | { type: 'approval-approved'; stage: Stage }
   | { type: 'approval-rejected'; stage: Stage; reason: FailureDetails }
-  | { type: 'evidence-stale-marked'; stage: Stage; reason: string }
   | { type: 'stage-completed'; stage: Stage }
   | { type: 'stage-failed'; stage: Stage; reason: FailureDetails }
   | { type: 'workflow-completed' }
@@ -372,25 +354,11 @@ export interface CheckStateSnapshot {
   latestAttempt: WorkItemAttempt | null;
 }
 
-export interface VerificationEvidence {
-  checkName: string;
-  status: 'pass' | 'fail' | 'error' | 'pending';
-  command: string;
-  duration: number;
-  summary: string;
-  logExcerpt: string;
-  checkedAt: string;
-  candidateHeadSha?: string;
-  baseSha?: string;
-}
-
 export interface ApprovalSnapshot {
   status: 'awaiting' | 'approved' | 'rejected';
   output: unknown | null;
-  verificationEvidence?: VerificationEvidence | null;
   requestedAt: string;
   respondedAt: string | null;
-  staleEvidenceDetected?: boolean;
 }
 
 export interface StageRunSnapshot {
