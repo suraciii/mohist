@@ -44,7 +44,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         { id: 'proposal-complete', title: 'Proposal complete', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/proposal.md' } },
         { id: 'specs-complete', title: 'Specs complete', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/specs' } },
         { id: 'design-complete', title: 'Design complete', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/design.md' } },
-        { id: 'tasks-valid', title: 'Tasks valid' },
+        { id: 'tasks-valid', title: 'Tasks valid', uses: 'mohist/artifact-exists', with: { path: '{{ artifacts.openspecChange }}/tasks.json' } },
         {
           id: 'self-review-passed',
           title: 'Self review passed',
@@ -60,7 +60,20 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-plan-review',
                 title: 'Fix plan review findings',
                 uses: 'mohist/agent',
-                with: { prompt: { ref: 'mohist/plan/fix-review' } },
+                with: {
+                  prompt: {
+                    inline: [
+                      'Fix the plan review findings in:',
+                      '',
+                      '{{ artifacts.openspecChange }}/self-review.md',
+                      '',
+                      'Apply the minimal artifact changes required under:',
+                      '{{ artifacts.openspecChange }}',
+                      '',
+                      'Do not edit self-review.md.',
+                    ].join('\n'),
+                  },
+                },
               },
             },
           },
@@ -90,7 +103,15 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-build-health',
                 title: 'Fix build health',
                 uses: 'mohist/agent',
-                with: { prompt: { ref: 'mohist/build/fix-health' } },
+                with: {
+                  prompt: {
+                    inline: [
+                      'Fix the build health failure.',
+                      '',
+                      'Run or inspect the configured build command, apply the minimal code or artifact changes required, and avoid unrelated refactors.',
+                    ].join('\n'),
+                  },
+                },
               },
             },
           },
@@ -132,8 +153,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           with: {
             command: DEFAULT_CHECK_HEALTH_COMMAND,
             timeout: DEFAULT_HEALTH_TIMEOUT_MS,
-            approvalEvidence: { role: 'verification' },
           },
+          approvalEvidence: { role: 'verification' },
           onFailure: {
             retry: {
               limit: 1,
@@ -142,7 +163,15 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 title: 'Fix check health',
                 uses: 'mohist/agent',
                 emits: ['code.changed'],
-                with: { prompt: { ref: 'mohist/check/fix-health' } },
+                with: {
+                  prompt: {
+                    inline: [
+                      'Fix the check health failure.',
+                      '',
+                      'Run or inspect the configured check command, apply the minimal code changes required, and avoid unrelated refactors.',
+                    ].join('\n'),
+                  },
+                },
               },
             },
           },
@@ -154,10 +183,10 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           with: {
             path: '{{ artifacts.openspecChange }}/review.md',
             expect: '<promise>PASS</promise>',
-            approvalEvidence: {
-              role: 'verdict',
-              snapshotField: 'snapshotSha',
-            },
+          },
+          approvalEvidence: {
+            role: 'verdict',
+            snapshotField: 'snapshotSha',
           },
           onFailure: {
             retry: {
@@ -187,11 +216,9 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           id: 'merge-ready',
           title: 'Merge ready',
           uses: 'mohist/merge-ready',
-          with: {
-            approvalEvidence: {
-              role: 'candidate',
-              snapshotField: 'candidateHeadSha',
-            },
+          approvalEvidence: {
+            role: 'candidate',
+            snapshotField: 'candidateHeadSha',
           },
           onFailure: {
             retry: {
@@ -228,7 +255,15 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-integrate-health',
                 title: 'Fix integrate health',
                 uses: 'mohist/agent',
-                with: { prompt: { ref: 'mohist/integrate/fix-health' } },
+                with: {
+                  prompt: {
+                    inline: [
+                      'Fix the post-merge health failure.',
+                      '',
+                      'Apply the minimal changes required after integration side effects. Preserve already completed delivery work unless correcting the health failure requires it.',
+                    ].join('\n'),
+                  },
+                },
               },
             },
           },

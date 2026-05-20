@@ -130,6 +130,7 @@ describe('WorkflowRun domain aggregate', () => {
       'design',
       'tasks',
       'self-review',
+      'fix-plan-review',
     ]);
     expect(plan.taskExecutionPolicies?.find(policy => policy.taskId === 'proposal')).toMatchObject({
       kind: 'agent-session',
@@ -141,7 +142,7 @@ describe('WorkflowRun domain aggregate', () => {
       maxAttempts: 1,
     });
     expect(plan.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-plan-review')).toMatchObject({
-      kind: 'repair-task',
+      kind: 'agent-session',
       workSourceKind: 'runtime',
     });
     expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({

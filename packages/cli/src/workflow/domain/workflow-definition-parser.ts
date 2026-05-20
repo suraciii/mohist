@@ -87,6 +87,7 @@ function parseStageSource(
       id: undefined,
       source: check.source ?? options.checkSource,
       with: check.with ? { ...check.with } : undefined,
+      approvalEvidence: check.approvalEvidence ? { ...check.approvalEvidence } : undefined,
     };
   });
 

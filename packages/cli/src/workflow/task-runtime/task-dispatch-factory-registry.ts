@@ -557,7 +557,7 @@ function getApprovalEvidenceSnapshotField(ctx: StageContext, role: ApprovalEvide
   const stageDefinition = getStageDefinition(ctx);
   const checkName = getApprovalEvidenceCheckName(ctx, role);
   const check = checkName ? stageDefinition?.checks.find(candidate => candidate.name === checkName) : undefined;
-  const evidence = check?.with?.approvalEvidence;
+  const evidence = check?.approvalEvidence ?? check?.with?.approvalEvidence;
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return null;
   const field = (evidence as Record<string, unknown>).snapshotField;
   return typeof field === 'string' && field.length > 0 ? field : null;
