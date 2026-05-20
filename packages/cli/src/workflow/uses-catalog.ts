@@ -18,6 +18,7 @@ export interface WorkflowUseDefinition {
   deliveryRole: WorkflowDeliveryRole;
   locksCode?: boolean;
   sourceKind?: WorkflowTaskSourceKind;
+  raises?: string[];
   evidence?: WorkflowUseEvidenceRequirement;
   description: string;
   inputs: string[];
@@ -32,6 +33,7 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     sideEffect: 'worktree',
     idempotency: 'checkpointed',
     deliveryRole: 'none',
+    raises: ['code.changed'],
     description: 'Runs an agent task through Mohist ACP session execution, creating or reusing the task session as needed.',
     inputs: ['prompt', 'context', 'outputContract', 'session'],
     outputContract: 'ACP-backed agent task result, session evidence, and declared artifacts.',
@@ -157,6 +159,7 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     sideEffect: 'branch',
     idempotency: 'checkpointed',
     deliveryRole: 'none',
+    raises: ['code.changed'],
     description: 'Rebases the issue branch onto the latest base branch.',
     inputs: ['targetBranch'],
     outputContract: 'Rebase result and changed snapshot metadata.',
@@ -212,6 +215,12 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
 
 export function getWorkflowUseDefinition(name: string): WorkflowUseDefinition | undefined {
   return BUILTIN_WORKFLOW_USES.find(use => use.name === name);
+}
+
+export function workflowUsesThatRaise(eventName: string): string[] {
+  return BUILTIN_WORKFLOW_USES
+    .filter(use => use.allowedPlacement !== 'check' && use.raises?.includes(eventName))
+    .map(use => use.name);
 }
 
 export function isWorkflowUseAllowed(name: string, placement: 'task' | 'check'): boolean {

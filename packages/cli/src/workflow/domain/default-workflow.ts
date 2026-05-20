@@ -69,7 +69,7 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-plan-review',
                 title: 'Fix plan review findings',
                 uses: 'mohist/agent',
-                emits: ['plan.artifacts.changed'],
+                onSuccess: { emit: ['plan.artifacts.changed'] },
                 with: {
                   prompt: {
                     inline: [
@@ -173,7 +173,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-check-health',
                 title: 'Fix check health',
                 uses: 'mohist/agent',
-                emits: ['code.changed'],
                 with: {
                   prompt: {
                     inline: [
@@ -202,7 +201,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-review-findings',
                 title: 'Fix review findings',
                 uses: 'mohist/agent',
-                emits: ['code.changed'],
                 with: {
                   prompt: {
                     inline: [
@@ -230,7 +228,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
                 id: 'fix-merge-readiness',
                 title: 'Fix merge readiness',
                 uses: 'mohist/rebase',
-                emits: ['code.changed'],
               },
             },
           },

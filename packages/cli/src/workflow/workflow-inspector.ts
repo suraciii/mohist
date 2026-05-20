@@ -216,13 +216,17 @@ function compileCustomTasks(
       diagnostics.push({ severity: 'error', path: `${taskPath}.uses`, message: `Use '${rawTask.uses}' is not supported for full custom task execution yet` });
       continue;
     }
+    if ('emits' in rawTask) {
+      diagnostics.push({ severity: 'error', path: `${taskPath}.emits`, message: 'task.emits is not supported; use onSuccess.emit for unconditional success events or let the task runtime raise events' });
+      continue;
+    }
     const task: TaskDefinition = {
       id: rawTask.id,
       title: typeof rawTask.title === 'string' ? rawTask.title : rawTask.id,
       source: 'project',
       uses: rawTask.uses,
       with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
-      emits: arrayValue(rawTask.emits).filter((value): value is string => typeof value === 'string'),
+      onSuccess: compileTaskSuccessAction(rawTask.onSuccess),
       dependsOn: arrayValue(rawTask.dependsOn ?? rawTask.needs).filter((value): value is string => typeof value === 'string'),
       resultContract: isRecord(rawTask.resultContract) ? rawTask.resultContract as unknown as TaskDefinition['resultContract'] : undefined,
     };
@@ -328,13 +332,17 @@ function compileCheckOnFailure(
     diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.task`, message: 'retry.task requires id' });
     return undefined;
   }
+  if ('emits' in rawTask) {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.task.emits`, message: 'task.emits is not supported; use onSuccess.emit for unconditional success events or let the task runtime raise events' });
+    return undefined;
+  }
   const task: TaskDefinition = {
     id: rawTask.id,
     title: typeof rawTask.title === 'string' ? rawTask.title : rawTask.id,
     source: 'project',
     uses: typeof rawTask.uses === 'string' ? rawTask.uses : 'mohist/agent',
     with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
-    emits: arrayValue(rawTask.emits).filter((value): value is string => typeof value === 'string'),
+    onSuccess: compileTaskSuccessAction(rawTask.onSuccess),
   };
   return {
     retry: {
@@ -343,6 +351,12 @@ function compileCheckOnFailure(
       inputFrom: compileReactionInputs(retry.inputFrom),
     },
   };
+}
+
+function compileTaskSuccessAction(rawOnSuccess: unknown): TaskDefinition['onSuccess'] | undefined {
+  if (!isRecord(rawOnSuccess)) return undefined;
+  const emit = arrayValue(rawOnSuccess.emit).filter((value): value is string => typeof value === 'string');
+  return emit.length > 0 ? { emit } : undefined;
 }
 
 function compileStageEventPolicies(

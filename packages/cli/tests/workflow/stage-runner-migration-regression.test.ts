@@ -232,7 +232,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
           onFailure: {
             retry: {
               limit: 1,
-              task: { id: 'fix-check-health', title: 'Fix check health', uses: 'mohist/agent', emits: ['code.changed'] },
+              task: { id: 'fix-check-health', title: 'Fix check health', uses: 'mohist/agent' },
             },
           },
         },
@@ -246,7 +246,6 @@ function createStageDefinition(stage: Stage): StageDefinition {
                 id: 'fix-review-findings',
                 title: 'Fix review findings',
                 uses: 'mohist/agent',
-                emits: ['code.changed'],
                 with: { prompt: { inline: 'Fix findings in {{ openspec.changeDir }}/review.md' } },
               },
             },
@@ -258,7 +257,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
           onFailure: {
             retry: {
               limit: 1,
-              task: { id: 'fix-merge-readiness', title: 'Fix merge readiness', uses: 'mohist/rebase', emits: ['code.changed'] },
+              task: { id: 'fix-merge-readiness', title: 'Fix merge readiness', uses: 'mohist/rebase' },
             },
           },
         },
@@ -288,16 +287,9 @@ function createStageDefinition(stage: Stage): StageDefinition {
         entries: [
           {
             trigger: 'task-completion',
-            triggerTaskId: 'fix-review-findings',
+            eventName: 'code.changed',
             reason: 'code.changed reset',
             invalidates: { tasks: ['ai-review'], checks: ['health:check', 'review-passed', 'merge-ready'], approval: true },
-          },
-          {
-            trigger: 'task-completion',
-            triggerTaskId: 'rebase-branch',
-            when: { shaChanged: true },
-            reason: 'Rebase changed the candidate snapshot; re-run review checks',
-            invalidates: { tasks: ['ai-review'], checks: ['review-passed', 'merge-ready'], approval: true },
           },
         ],
       },
@@ -1690,7 +1682,6 @@ describe('StageRunner migration regression coverage', () => {
                 id: 'auto-fix-review',
                 title: 'Auto-fix review',
                 uses: 'mohist/agent',
-                emits: ['code.changed'],
                 with: { prompt: { inline: 'Fix {{ openspec.changeDir }}/review.md' } },
               },
             },
@@ -2192,6 +2183,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const decision = run.completeTask(Stage.Check, 'rebase-branch', {
         status: 'completed',
+        events: ['code.changed'],
         output: {
           rebased: true,
           shaChanged: true,
@@ -2247,6 +2239,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const decision = run.completeTask(Stage.Check, 'rebase-branch', {
         status: 'completed',
+        events: ['code.changed'],
         output: {
           rebased: true,
           shaChanged: true,
@@ -2352,6 +2345,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const decision = run.completeTask(Stage.Check, 'fix-review-findings', {
         status: 'completed',
+        events: ['code.changed'],
         causedBy: { type: 'check-failure', checkName: 'review-passed', message: 'review findings' },
       });
 
@@ -2655,12 +2649,21 @@ describe('StageRunner migration regression coverage', () => {
       expect(def.checks.map(check => check.name)).toEqual(['health:check', 'review-passed', 'merge-ready']);
     });
 
-    it('Check stage definition includes invalidation policy for rebase', () => {
+    it('Check stage definition includes code.changed invalidation policy', () => {
       const def = createStageDefinition(Stage.Check);
       expect(def.invalidationPolicy).toBeDefined();
-      const rebaseEntry = def.invalidationPolicy?.entries.find((e: any) => e.triggerTaskId === 'rebase-branch');
-      expect(rebaseEntry).toBeDefined();
-      expect(rebaseEntry.when?.shaChanged).toBe(true);
+      const entry = def.invalidationPolicy?.entries.find((e: any) => e.eventName === 'code.changed');
+      expect(entry).toBeDefined();
+      expect(entry).toMatchObject({
+        trigger: 'task-completion',
+        reason: 'code.changed reset',
+        invalidates: {
+          tasks: ['ai-review'],
+          checks: ['health:check', 'review-passed', 'merge-ready'],
+          approval: true,
+        },
+      });
+      expect(entry?.triggerTaskId).toBeUndefined();
     });
 
     it('Build stage definition includes Ralph work source', () => {

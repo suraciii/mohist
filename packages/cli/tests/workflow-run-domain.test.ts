@@ -842,21 +842,59 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'check', stage: Stage.Check, checkName: 'review-passed' });
   });
 
-  it('rejects task result events that were not declared by the task definition', () => {
+  it('accepts task result events raised by task runtime without YAML task capability declarations', () => {
     const definitions = compileWorkflowDefinition({
       id: 'custom',
       stages: [
         {
           stage: Stage.Build,
-          tasks: [{ id: 'custom-task', title: 'Custom task', emits: ['code.changed'] }],
-          checks: [],
+          on: {
+            'docs.updated': { reset: { checks: 'all' } },
+          },
+          tasks: [{ id: 'custom-task', title: 'Custom task' }],
+          checks: [{ name: 'docs-check', title: 'Docs check' }],
         },
       ],
     });
     const run = startRun(definitions);
 
-    expect(() => run.completeTask(Stage.Build, 'custom-task', { status: 'completed', events: ['docs.updated'] }))
-      .toThrow(/raised undeclared event docs.updated/);
+    const decision = run.completeTask(Stage.Build, 'custom-task', { status: 'completed', events: ['docs.updated'] });
+
+    expect(decision.events).toContainEqual({ type: 'task-completed', stage: Stage.Build, taskId: 'custom-task' });
+    expect(decision.events).toContainEqual({
+      type: 'check-invalidated',
+      stage: Stage.Build,
+      checkName: 'docs-check',
+      reason: 'docs.updated reset',
+    });
+    expect(run.stageRun(Stage.Build).findTask('custom-task').events).toEqual(['docs.updated']);
+  });
+
+  it('adds configured onSuccess events to completed task results', () => {
+    const definitions = compileWorkflowDefinition({
+      id: 'custom',
+      stages: [
+        {
+          stage: Stage.Build,
+          on: {
+            'docs.updated': { reset: { checks: 'all' } },
+          },
+          tasks: [{ id: 'custom-task', title: 'Custom task', onSuccess: { emit: ['docs.updated'] } }],
+          checks: [{ name: 'docs-check', title: 'Docs check' }],
+        },
+      ],
+    });
+    const run = startRun(definitions);
+
+    const decision = run.completeTask(Stage.Build, 'custom-task', { status: 'completed' });
+
+    expect(run.stageRun(Stage.Build).findTask('custom-task').events).toEqual(['docs.updated']);
+    expect(decision.events).toContainEqual({
+      type: 'check-invalidated',
+      stage: Stage.Build,
+      checkName: 'docs-check',
+      reason: 'docs.updated reset',
+    });
   });
 
   it('retries a failed task and resets same-stage downstream work while preserving earlier completed tasks', () => {
@@ -1803,7 +1841,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'pass', output: { verdict: 'PASS', snapshotSha: 'sha-old' } });
     run.recordCheckResult(Stage.Check, { name: 'merge-ready', status: 'pass', output: mergeReadyOutput('sha-old') });
     run.scheduleRebaseTask('target branch moved');
-    run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', output: { shaChanged: true, beforeBaseSha: 'a', afterBaseSha: 'b', beforeHeadSha: 'c', afterHeadSha: 'd' } });
+    run.completeTask(Stage.Check, 'rebase-branch', { status: 'completed', events: ['code.changed'], output: { shaChanged: true, beforeBaseSha: 'a', afterBaseSha: 'b', beforeHeadSha: 'c', afterHeadSha: 'd' } });
 
     expect(run.stageRun(Stage.Check).findTask('ai-review').status).toBe('pending');
     expect(run.stageRun(Stage.Check).findCheck('review-passed').status).toBe('pending');
@@ -1823,6 +1861,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.scheduleRebaseTask('target branch moved');
     run.completeTask(Stage.Check, 'rebase-branch', {
       status: 'completed',
+      events: ['code.changed'],
       output: {
         kind: 'service-call-task',
         success: true,

@@ -28,7 +28,6 @@ export type DispatchableTask = ExecutableTask | {
   cwd?: string;
   stage?: string;
   attempt?: number;
-  emits?: string[];
   agentSessionRef?: string;
   artifactVerification?: (artifacts: string[]) => string[];
   requiredMarkers?: RequiredMarkerDefinition[];
@@ -106,7 +105,6 @@ function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Dispatchable
     kind: 'service-call',
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
-    emits: input.sourceTask?.emits,
     serviceFn: async () => {
       const result = await executeRebaseBranchTask(input.ctx, input.attempt, {
         taskId: input.task.taskId,
@@ -127,7 +125,6 @@ function createRepairDispatchTask(input: TaskDispatchFactoryInput): Dispatchable
     kind: 'service-call',
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
-    emits: input.sourceTask?.emits,
     serviceFn: async () => {
       const adapter = createRepairFixAdapter();
       const result = await adapter.dispatch(normalizeRepairTaskId(input.task.taskId), input.ctx, {
@@ -154,7 +151,6 @@ function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrat
     kind: 'service-call',
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
-    emits: input.sourceTask?.emits,
     serviceFn,
   };
 }
@@ -171,7 +167,6 @@ function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Dispat
   if (input.ctx.issue.stage === Stage.Check && input.task.taskId === 'ai-review') return createCheckAiReviewDispatchTask(input);
   return {
     ...input.task,
-    emits: input.sourceTask?.emits,
     agentSessionRef: input.agentSessionRef,
   };
 }
@@ -242,7 +237,6 @@ function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, 
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
-    emits: input.sourceTask?.emits,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
@@ -297,7 +291,6 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
       kind: 'service-call',
       stage: input.ctx.issue.stage,
       attempt: input.attempt,
-      emits: input.sourceTask?.emits,
       serviceFn: async () => ({ restoredFromCheckpoint: true }),
     };
   }
@@ -310,7 +303,6 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
       kind: 'service-call',
       stage: input.ctx.issue.stage,
       attempt: input.attempt,
-      emits: input.sourceTask?.emits,
       serviceFn: async () => ({ artifacts: [taskConfig.label], restoredFromDisk: true }),
     };
   }
@@ -323,7 +315,6 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: 'plan',
     attempt: input.attempt,
-    emits: input.sourceTask?.emits,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => taskConfig.verifyArtifact() ? [taskConfig.label] : [],
@@ -345,7 +336,6 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
       kind: 'service-call',
       stage: input.ctx.issue.stage,
       attempt: input.attempt,
-      emits: input.sourceTask?.emits,
       serviceFn: async () => ({ restoredFromCheckpoint: true }),
     };
   }
@@ -358,7 +348,6 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: 'check',
     attempt: input.attempt,
-    emits: input.sourceTask?.emits,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => fs.existsSync(path.join(changeDir, reviewOutputPath)) ? [reviewOutputPath] : [],

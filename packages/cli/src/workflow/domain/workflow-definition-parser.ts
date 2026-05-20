@@ -71,7 +71,9 @@ function parseStageSource(
     ...task,
     source: task.source ?? options.taskSource,
     with: task.with ? { ...task.with } : undefined,
-    emits: task.emits ? [...task.emits] : undefined,
+    onSuccess: task.onSuccess ? {
+      emit: task.onSuccess.emit ? [...task.onSuccess.emit] : undefined,
+    } : undefined,
     dependsOn: task.dependsOn ? [...task.dependsOn] : undefined,
     resultContract: task.resultContract ? { ...task.resultContract } : undefined,
   }));
