@@ -225,8 +225,8 @@ export function IssueDetailPage() {
     },
   })
 
-  const repairReviewFindingsMutation = useMutation({
-    mutationFn: () => api.repairReviewFindings(issueNumber),
+  const approvalVerdictRepairMutation = useMutation({
+    mutationFn: () => api.runApprovalVerdictRepair(issueNumber, issue?.stage ?? Stage.Check),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -835,11 +835,11 @@ export function IssueDetailPage() {
                           <>
                             {canRetry && checkRepair!.repairAvailable && (
                               <button
-                                onClick={() => repairReviewFindingsMutation.mutate()}
-                                disabled={repairReviewFindingsMutation.isPending}
+                                onClick={() => approvalVerdictRepairMutation.mutate()}
+                                disabled={approvalVerdictRepairMutation.isPending}
                                 className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
                               >
-                                {repairReviewFindingsMutation.isPending ? 'Fixing...' : 'Fix review findings'}
+                                {approvalVerdictRepairMutation.isPending ? 'Repairing...' : 'Run repair'}
                               </button>
                             )}
                             {canRetry && (

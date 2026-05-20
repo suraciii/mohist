@@ -367,8 +367,11 @@ export const api = {
   rerunReview: (number: number) =>
     request<{ issue: import('./types').Issue; taskId: string; status: string; queuePosition: number; message: string }>(`/issues/${number}/check/rerun-review`, { method: 'POST' }),
 
+  runApprovalVerdictRepair: (number: number, stage: string) =>
+    request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/stages/${stage}/approval-verdict-repair`, { method: 'POST' }),
+
   repairReviewFindings: (number: number) =>
-    request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/check/repair-review-findings`, { method: 'POST' }),
+    request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/stages/check/approval-verdict-repair`, { method: 'POST' }),
 
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
