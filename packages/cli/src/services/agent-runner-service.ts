@@ -38,7 +38,7 @@ import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-s
 import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
 import { createCheckRegistry } from '../workflow/checks/check-registry';
-import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS, type WorkflowDefinitionSnapshot } from '../workflow/domain';
 import { AiReviewCheck } from '../workflow/checks/ai-review-check';
 import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
 import { MergeReadyCheck } from '../workflow/checks/merge-ready-check';
@@ -322,10 +322,23 @@ export class AgentRunnerService {
     return activeIssues
       .filter(issue => issue.stage !== Stage.Backlog)
       .map(issue => {
-        const deliveryStatus = classifyMergeDelivery(issue);
+        const deliveryStatus = this.classifyIssueDelivery(issue);
         const falseDone = deliveryStatus === 'done-not-merged';
         return { issueNumber: issue.number, stage: issue.stage, falseDone };
       });
+  }
+
+  private classifyIssueDelivery(issue: Issue): ReturnType<typeof classifyMergeDelivery> {
+    return classifyMergeDelivery(issue, { requireLocalMerge: this.requiresLocalMergeDelivery(issue) });
+  }
+
+  private requiresLocalMergeDelivery(issue: Issue): boolean {
+    const run = this.workflowRunService?.getLatestRunForIssue(issue.id);
+    const snapshot = run?.workflowDefinition as WorkflowDefinitionSnapshot | null | undefined;
+    if (!snapshot) return true;
+    return snapshot.resolvedDefinition.stages.some(stage =>
+      stage.tasks.some(task => task.uses === 'mohist/merge'),
+    );
   }
 
   recoverFromQueue(): void {
@@ -498,7 +511,7 @@ export class AgentRunnerService {
         return;
       }
 
-      const deliveryStatus = classifyMergeDelivery(issue);
+      const deliveryStatus = this.classifyIssueDelivery(issue);
       const isFalseDone = deliveryStatus === 'done-not-merged';
 
       if (isFalseDone) {

@@ -31,10 +31,17 @@ export type MergeDeliveryStatus =
   | 'done-not-merged'
   | 'integrating';
 
-export function classifyMergeDelivery(issue: Issue): MergeDeliveryStatus {
+export function classifyMergeDelivery(
+  issue: Issue,
+  options?: { requireLocalMerge?: boolean },
+): MergeDeliveryStatus {
   const { stage, status, mergeState } = issue;
+  const requireLocalMerge = options?.requireLocalMerge ?? true;
 
   if (stage === Stage.Done || status === IssueStatus.Completed) {
+    if (!requireLocalMerge) {
+      return 'merged';
+    }
     if (mergeState === MergeState.Merged) {
       return 'merged';
     }

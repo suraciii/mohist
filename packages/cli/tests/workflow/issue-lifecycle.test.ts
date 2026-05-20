@@ -170,6 +170,11 @@ describe('classifyMergeDelivery', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.Conflict });
       expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
     });
+
+    it('does not require merge evidence when the workflow definition has no local merge delivery', () => {
+      const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
+      expect(classifyMergeDelivery(issue, { requireLocalMerge: false })).toBe('merged');
+    });
   });
 
   describe('done/completed + merged is not anomaly', () => {

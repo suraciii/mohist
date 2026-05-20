@@ -71,14 +71,6 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
         label: 'Needs action',
         detail: issue.blockedReason ?? issue.title,
       })
-    } else if (issue.stage === Stage.Done && issue.mergeState !== 'merged') {
-      seen.add(issue.id)
-      items.push({
-        issueNumber: issue.number,
-        issueId: issue.id,
-        label: 'Not merged',
-        detail: issue.title,
-      })
     }
   }
 
