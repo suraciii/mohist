@@ -26,6 +26,7 @@ import {
 import {
   createTaskHandlerRegistry,
   defaultServiceCallTaskHandler,
+  createDefaultStaticTaskLoader,
   createTaskLoaderRegistry,
   type DispatchableTask,
   type ExecutableTask,
@@ -110,9 +111,9 @@ export class DefaultWorkflowExternalWorld {
       case 'fix-integrate-health':
         return this.fixHealth(task, baseTaskId);
       case 'fix-merge-readiness':
-        return this.completed(task);
+        return this.failed(task, 'fix-merge-readiness must run through mohist/rebase service-call');
       default:
-        return this.completed(task);
+        return this.failed(task, `Unexpected agent task routed to fake external agent: ${task.taskId}`);
     }
   }
 
@@ -365,13 +366,7 @@ export class DefaultWorkflowHarness {
 
     const runner = new GenericStageRunner({
       taskLoaderRegistry: createTaskLoaderRegistry([
-        {
-          kind: 'static',
-          load: (ctx: StageContext): ExecutableTask[] => {
-            const definition = stageDefinition(ctx.issue.stage);
-            return (definition?.tasks ?? []).map(task => ({ taskId: task.id, title: task.title, kind: 'agent-session' as const }));
-          },
-        },
+        createDefaultStaticTaskLoader(this.world.worktreePath),
         {
           kind: 'ralph',
           load: (): ExecutableTask[] => {

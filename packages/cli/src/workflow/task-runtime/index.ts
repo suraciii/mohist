@@ -58,6 +58,10 @@ export {
 } from './ralph-task-loader';
 
 export {
+  createDefaultStaticTaskLoader,
+} from './default-static-task-loader';
+
+export {
   createRalphTaskHandler,
   materializeRalphTasks,
 } from './ralph-task-handler';

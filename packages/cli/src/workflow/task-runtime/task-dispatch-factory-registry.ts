@@ -322,9 +322,13 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
 }
 
 function mayRestoreTaskFromPriorOutput(input: TaskDispatchFactoryInput): boolean {
-  const taskState = input.ctx.requestedTask?.status;
-  if (taskState === 'pending' || taskState === 'running') return false;
-  return true;
+  return !wasResetByWorkflowPolicy(input);
+}
+
+function wasResetByWorkflowPolicy(input: TaskDispatchFactoryInput): boolean {
+  const causedBy = input.ctx.requestedTask?.causedBy;
+  return causedBy?.type === 'system-policy'
+    && causedBy.taskId !== undefined;
 }
 
 function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
