@@ -22,10 +22,12 @@ import {
   type CompiledStageDefinition,
 } from '../../src/workflow/domain';
 import {
+  createDefaultTaskDispatchFactoryRegistry,
   createTaskHandlerRegistry,
   createTaskLoaderRegistry,
   type DispatchableTask,
   type ExecutableTask,
+  type TaskDispatchFactoryInput,
   type TaskHandler,
 } from '../../src/workflow/task-runtime';
 import { createCheckRegistry, type CheckFactory } from '../../src/workflow/checks';
@@ -35,7 +37,14 @@ import { IssueStatus, MergeState, Stage, type Issue } from '../../src/types';
 type ExternalWorldOptions = {
   reviewFailuresBeforePass?: number;
   healthFailuresBeforePass?: Partial<Record<string, number>>;
+  markerFailuresBeforePass?: Partial<Record<string, number>>;
+  checkFailuresBeforePass?: Partial<Record<string, number>>;
+  omitArtifacts?: string[];
   failTasks?: Partial<Record<string, string>>;
+  failRalphTasks?: Partial<Record<string, string>>;
+  serviceFailures?: Partial<Record<string, string>>;
+  mergeReadyFailuresBeforePass?: number;
+  mergeReadinessRepairRaisesCodeChanged?: boolean;
 };
 
 class WorkflowExternalWorld {
@@ -47,9 +56,12 @@ class WorkflowExternalWorld {
   readonly serviceCalls: string[] = [];
   codeChangeCounter = 0;
   private aiReviewAttempts = 0;
+  private selfReviewAttempts = 0;
   private readonly checkAttempts = new Map<string, number>();
+  private readonly omittedArtifacts: Set<string>;
 
   constructor(private readonly options: ExternalWorldOptions = {}) {
+    this.omittedArtifacts = new Set(options.omitArtifacts ?? []);
     this.worktreePath = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-default-workflow-harness-'));
     this.changeDir = path.join(this.worktreePath, 'openspec', 'changes', '188-default-workflow');
     fs.mkdirSync(this.changeDir, { recursive: true });
@@ -82,15 +94,19 @@ class WorkflowExternalWorld {
     }
     switch (baseTaskId) {
       case 'proposal':
+        if (this.omittedArtifacts.has('proposal.md')) return this.completed(task, []);
         this.write('proposal.md', '# Proposal\n');
         return this.completed(task, ['proposal.md']);
       case 'specs':
+        if (this.omittedArtifacts.has('specs')) return this.completed(task, []);
         this.write('specs/feature.md', '# Spec\n');
         return this.completed(task, ['specs']);
       case 'design':
+        if (this.omittedArtifacts.has('design.md')) return this.completed(task, []);
         this.write('design.md', '# Design\n');
         return this.completed(task, ['design.md']);
       case 'tasks':
+        if (this.omittedArtifacts.has('tasks.json')) return this.completed(task, []);
         this.write('tasks.json', JSON.stringify({
           tasks: [
             { id: 'T-001', order: 1, title: 'Implement feature', description: 'Implement feature', passes: false, attempts: 0 },
@@ -99,7 +115,11 @@ class WorkflowExternalWorld {
         }, null, 2));
         return this.completed(task, ['tasks.json']);
       case 'self-review':
-        this.write('self-review.md', '# Self review\n<promise>PASS</promise>\n');
+        if (this.omittedArtifacts.has('self-review.md')) return this.completed(task, []);
+        this.selfReviewAttempts += 1;
+        this.write('self-review.md', this.selfReviewAttempts <= (this.options.markerFailuresBeforePass?.['self-review-passed'] ?? 0)
+          ? '# Self review\nPlan findings\n<promise>FAIL</promise>\n'
+          : '# Self review\n<promise>PASS</promise>\n');
         return this.completed(task, ['self-review.md']);
       case 'ai-review':
         this.aiReviewAttempts += 1;
@@ -120,6 +140,27 @@ class WorkflowExternalWorld {
             unresolvedItemIds: [],
           },
         });
+      case 'fix-plan-review':
+        this.write('proposal.md', '# Proposal fixed\n');
+        this.write('specs/feature.md', '# Spec fixed\n');
+        this.write('design.md', '# Design fixed\n');
+        this.write('tasks.json', JSON.stringify({
+          tasks: [
+            { id: 'T-001', order: 1, title: 'Implement feature', description: 'Implement feature', passes: false, attempts: 0 },
+            { id: 'T-002', order: 2, title: 'Add regression coverage', description: 'Add tests', dependsOn: ['T-001'], passes: false, attempts: 0 },
+          ],
+        }, null, 2));
+        return this.completed(task);
+      case 'fix-build-health':
+      case 'fix-check-health':
+      case 'fix-integrate-health':
+        this.codeChangeCounter += 1;
+        fs.writeFileSync(path.join(this.worktreePath, `${baseTaskId}.ts`), `export const value = ${this.codeChangeCounter};\n`);
+        return this.completed(task, [], { events: ['code.changed'] });
+      case 'fix-merge-readiness':
+        return this.completed(task, [], {
+          events: this.options.mergeReadinessRepairRaisesCodeChanged ? ['code.changed'] : undefined,
+        });
       default:
         return this.completed(task);
     }
@@ -127,6 +168,17 @@ class WorkflowExternalWorld {
 
   ralphTask(task: DispatchableTask): StageTaskResult {
     this.taskCalls.push(task.taskId);
+    const configuredFailure = this.options.failRalphTasks?.[task.taskId];
+    if (configuredFailure) {
+      return {
+        taskId: task.taskId,
+        title: task.title,
+        status: 'failed',
+        attempts: 1,
+        duration: 1,
+        reason: configuredFailure,
+      };
+    }
     const tasksPath = path.join(this.changeDir, 'tasks.json');
     const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf-8'));
     parsed.tasks = parsed.tasks.map((item: any) => item.id === task.taskId ? { ...item, passes: true, attempts: (item.attempts ?? 0) + 1 } : item);
@@ -137,6 +189,18 @@ class WorkflowExternalWorld {
   async serviceCall(task: DispatchableTask, ctx: StageContext): Promise<StageTaskResult> {
     this.taskCalls.push(task.taskId);
     this.serviceCalls.push(task.taskId);
+    const configuredFailure = this.options.serviceFailures?.[task.taskId];
+    if (configuredFailure) {
+      return {
+        taskId: task.taskId,
+        title: task.title,
+        status: 'failed',
+        attempts: 1,
+        duration: 1,
+        reason: configuredFailure,
+        output: { error: configuredFailure },
+      };
+    }
     const input = task as DispatchableTask & { serviceFn?: (ctx: StageContext) => Promise<unknown>; attempt?: number; stage?: string };
     const result = input.serviceFn ? await input.serviceFn(ctx) : { ok: true };
     return this.completed(task, [], {
@@ -169,6 +233,18 @@ class WorkflowExternalWorld {
           case 'review-passed':
             return this.marker(checkName, 'review.md', { snapshotSha: 'candidate-head' });
           case 'merge-ready':
+            if (this.shouldFailCheck(checkName, this.options.mergeReadyFailuresBeforePass ?? 0)) {
+              return {
+                name: checkName,
+                status: 'fail',
+                message: 'Merge not ready',
+                output: {
+                  kind: 'merge-ready',
+                  canMerge: false,
+                  conflictFiles: ['src/conflict.ts'],
+                },
+              };
+            }
             return {
               name: checkName,
               status: 'pass',
@@ -188,7 +264,10 @@ class WorkflowExternalWorld {
           default:
             if (checkName.startsWith('health:')) {
               const attempt = this.nextCheckAttempt(checkName);
-              if (attempt <= (this.options.healthFailuresBeforePass?.[checkName] ?? 0)) {
+              const failuresBeforePass = this.options.healthFailuresBeforePass?.[checkName]
+                ?? this.options.checkFailuresBeforePass?.[checkName]
+                ?? 0;
+              if (attempt <= failuresBeforePass) {
                 return {
                   name: checkName,
                   status: 'fail',
@@ -311,6 +390,14 @@ class WorkflowExternalWorld {
     };
   }
 
+  private shouldFailMarker(checkName: string): boolean {
+    return this.shouldFailCheck(checkName, this.options.markerFailuresBeforePass?.[checkName] ?? 0);
+  }
+
+  private shouldFailCheck(checkName: string, failuresBeforePass: number): boolean {
+    return this.nextCheckAttempt(checkName) <= failuresBeforePass;
+  }
+
   private nextCheckAttempt(checkName: string): number {
     const next = (this.checkAttempts.get(checkName) ?? 0) + 1;
     this.checkAttempts.set(checkName, next);
@@ -380,6 +467,32 @@ class DefaultWorkflowHarness {
       'service-call': async (task, ctx) => this.world.serviceCall(task as DispatchableTask, ctx),
     };
 
+    const defaultDispatchFactory = createDefaultTaskDispatchFactoryRegistry();
+    const taskDispatchFactoryRegistry = {
+      build: (input: TaskDispatchFactoryInput) => {
+        if (input.executionKind === 'rebase-task') {
+          return {
+            taskId: input.task.taskId,
+            title: input.task.title,
+            kind: 'agent-session' as const,
+            stage: input.ctx.issue.stage,
+            attempt: input.attempt,
+          };
+        }
+        if (input.executionKind === 'agent-session' && input.task.taskId === 'self-review') {
+          return {
+            taskId: input.task.taskId,
+            title: input.task.title,
+            kind: 'agent-session' as const,
+            stage: input.ctx.issue.stage,
+            attempt: input.attempt,
+            agentSessionRef: input.agentSessionRef,
+          };
+        }
+        return defaultDispatchFactory.build(input);
+      },
+    };
+
     const checkRegistry = createCheckRegistry(Object.fromEntries(
       ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan', 'health:build', 'health:check', 'review-passed', 'merge-ready', 'health:integrate']
         .map(name => [name, this.world.checkFactory(name)]),
@@ -389,6 +502,7 @@ class DefaultWorkflowHarness {
       taskLoaderRegistry,
       taskHandlerRegistry: createTaskHandlerRegistry(taskHandlers),
       checkRegistry,
+      taskDispatchFactoryRegistry,
       getStageDefinition: stageDefinition,
       worktreePath: this.world.worktreePath,
     });
@@ -633,6 +747,202 @@ describe('default workflow external-system harness', () => {
     expect(harness.issueRepo.findById(harness.issue.id)).toMatchObject({
       stage: Stage.Build,
       status: IssueStatus.Blocked,
+    });
+  });
+
+  it('repairs failed Plan self-review, emits plan.changed, and reruns self-review before Plan approval', async () => {
+    const harness = createHarness({ markerFailuresBeforePass: { 'self-review-passed': 1 } });
+
+    const planBoundary = await harness.runUntilBoundary();
+    expect(planBoundary).toMatchObject({ completed: false, stage: Stage.Plan, message: 'Awaiting plan approval' });
+
+    const planRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Plan)!;
+    expect(planRun.status).toBe('awaiting-approval');
+    expect(harness.world.agentCalls.filter(taskId => taskId === 'self-review')).toHaveLength(2);
+    expect(planRun.tasks.find(task => task.taskId === 'self-review')).toMatchObject({
+      status: 'completed',
+      attempts: 1,
+    });
+    expect(planRun.tasks.find(task => task.taskId === 'fix-plan-review')).toMatchObject({
+      status: 'completed',
+      events: ['plan.changed'],
+    });
+    expect(planRun.checks.find(check => check.checkName === 'self-review-passed')).toMatchObject({
+      status: 'passed',
+    });
+    expect(planRun.approvalStatus).toBe('awaiting');
+  });
+
+  it('blocks Plan approval when a required Plan artifact is missing', async () => {
+    const harness = createHarness({ omitArtifacts: ['proposal.md'] });
+
+    const failed = await harness.runUntilBoundary();
+    expect(failed.completed).toBe(false);
+    expect(failed.stage).toBe(Stage.Plan);
+    expect(failed.message).toContain('proposal.md missing');
+
+    const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;
+    const planRun = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Plan)!;
+    expect(latest.status).toBe('failed');
+    expect(planRun.status).toBe('failed');
+    expect(planRun.checks.find(check => check.checkName === 'proposal-complete')).toMatchObject({
+      status: 'failed',
+    });
+    expect(planRun.approvalStatus).toBeNull();
+  });
+
+  it('stops Build when a Ralph task fails and does not run downstream task or Build health check', async () => {
+    const harness = createHarness({ failRalphTasks: { 'T-001': 'Implementation failed' } });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const failed = await harness.runUntilBoundary();
+    expect(failed).toMatchObject({ completed: false, stage: Stage.Build, message: 'Implementation failed' });
+
+    const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;
+    const buildRun = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Build)!;
+    expect(latest.status).toBe('failed');
+    expect(buildRun.status).toBe('failed');
+    expect(buildRun.tasks.find(task => task.taskId === 'T-001')).toMatchObject({
+      status: 'failed',
+      reason: 'Implementation failed',
+    });
+    expect(buildRun.tasks.find(task => task.taskId === 'T-002')).toMatchObject({
+      status: 'pending',
+    });
+    expect(harness.world.checkCalls).not.toContain('health:build');
+  });
+
+  it('respects Build task dependencies from tasks.json before running Build health', async () => {
+    const harness = createHarness();
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const checkBoundary = await harness.runUntilBoundary();
+    expect(checkBoundary.stage).toBe(Stage.Check);
+
+    const t1Index = harness.world.taskCalls.indexOf('T-001');
+    const t2Index = harness.world.taskCalls.indexOf('T-002');
+    const healthIndex = harness.world.checkCalls.indexOf('health:build');
+    expect(t1Index).toBeGreaterThanOrEqual(0);
+    expect(t2Index).toBeGreaterThan(t1Index);
+    expect(healthIndex).toBeGreaterThanOrEqual(0);
+    expect(harness.world.taskCalls.indexOf('ai-review')).toBeGreaterThan(t2Index);
+  });
+
+  it('repairs Check health failure, raises code.changed, reruns AI review, and clears stale checks', async () => {
+    const harness = createHarness({ healthFailuresBeforePass: { 'health:check': 1 } });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const checkBoundary = await harness.runUntilBoundary();
+    expect(checkBoundary).toMatchObject({ completed: false, stage: Stage.Check, message: 'Awaiting check approval' });
+
+    const checkRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Check)!;
+    expect(harness.world.agentCalls.filter(taskId => taskId === 'ai-review')).toHaveLength(2);
+    expect(checkRun.tasks.find(task => task.taskId === 'fix-check-health')).toMatchObject({
+      status: 'completed',
+      events: ['code.changed'],
+    });
+    expect(checkRun.checks.find(check => check.checkName === 'health:check')).toMatchObject({
+      status: 'passed',
+    });
+    expect(checkRun.checks.find(check => check.checkName === 'review-passed')).toMatchObject({
+      status: 'passed',
+    });
+  });
+
+  it('repairs merge readiness and reruns merge-ready before Check approval', async () => {
+    const harness = createHarness({ mergeReadyFailuresBeforePass: 1 });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const checkBoundary = await harness.runUntilBoundary();
+    expect(checkBoundary).toMatchObject({ completed: false, stage: Stage.Check, message: 'Awaiting check approval' });
+
+    const checkRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Check)!;
+    expect(checkRun.tasks.find(task => task.taskId === 'fix-merge-readiness')).toMatchObject({
+      status: 'completed',
+    });
+    expect(harness.world.checkCalls.filter(checkName => checkName === 'merge-ready')).toHaveLength(2);
+    expect(checkRun.checks.find(check => check.checkName === 'merge-ready')).toMatchObject({
+      status: 'passed',
+    });
+  });
+
+  it('invalidates Check approval when merge-readiness repair raises code.changed after approval', async () => {
+    const harness = createHarness({
+      mergeReadyFailuresBeforePass: 1,
+      mergeReadinessRepairRaisesCodeChanged: true,
+    });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+
+    const checkBoundary = await harness.runUntilBoundary();
+    expect(checkBoundary).toMatchObject({ completed: false, stage: Stage.Check, message: 'Awaiting check approval' });
+
+    const checkRun = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!.stageRuns.find(stageRun => stageRun.stage === Stage.Check)!;
+    expect(harness.world.agentCalls.filter(taskId => taskId === 'ai-review')).toHaveLength(2);
+    expect(checkRun.tasks.find(task => task.taskId === 'fix-merge-readiness')).toMatchObject({
+      status: 'completed',
+      events: ['code.changed'],
+    });
+    expect(checkRun.approvalStatus).toBe('awaiting');
+  });
+
+  it('stops Integrate when spec sync fails and does not run archive or merge', async () => {
+    const harness = createHarness({ serviceFailures: { 'integrate:spec-sync': 'Spec sync failed' } });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Check);
+    harness.approve(Stage.Check);
+
+    const failed = await harness.runUntilBoundary();
+    expect(failed).toMatchObject({ completed: false, stage: Stage.Integrate, message: 'Spec sync failed' });
+
+    const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;
+    const integrateRun = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Integrate)!;
+    expect(latest.status).toBe('failed');
+    expect(integrateRun.status).toBe('failed');
+    expect(harness.world.serviceCalls).toEqual(['integrate:spec-sync']);
+    expect(integrateRun.tasks.find(task => task.taskId === 'integrate:archive-change')).toMatchObject({
+      status: 'pending',
+    });
+    expect(integrateRun.tasks.find(task => task.taskId === 'integrate:merge')).toMatchObject({
+      status: 'pending',
+    });
+  });
+
+  it('fails post-merge Integrate health without rerunning delivery side-effect tasks', async () => {
+    const harness = createHarness({ healthFailuresBeforePass: { 'health:integrate': 1 } });
+
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
+    harness.approve(Stage.Plan);
+    expect((await harness.runUntilBoundary()).stage).toBe(Stage.Check);
+    harness.approve(Stage.Check);
+
+    const failed = await harness.runUntilBoundary();
+    expect(failed).toMatchObject({ completed: false, stage: Stage.Integrate, message: 'health:integrate failed' });
+
+    const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;
+    const integrateRun = latest.stageRuns.find(stageRun => stageRun.stage === Stage.Integrate)!;
+    expect(latest.status).toBe('failed');
+    expect(integrateRun.status).toBe('failed');
+    expect(harness.world.serviceCalls).toEqual([
+      'integrate:spec-sync',
+      'integrate:archive-change',
+      'integrate:merge',
+    ]);
+    expect(integrateRun.tasks.some(task => task.taskId === 'fix-integrate-health')).toBe(false);
+    expect(harness.world.checkCalls.filter(checkName => checkName === 'health:integrate')).toHaveLength(1);
+    expect(integrateRun.checks.find(check => check.checkName === 'health:integrate')).toMatchObject({
+      status: 'failed',
     });
   });
 });
