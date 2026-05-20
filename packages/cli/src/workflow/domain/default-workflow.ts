@@ -1,5 +1,5 @@
 import { Stage } from '../../types';
-import { REVIEW_RESULT_CONTRACT, REVIEW_SELF_REPAIR_POLICY, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
+import { REVIEW_RESULT_CONTRACT, SELF_REVIEW_RESULT_CONTRACT } from './contracts';
 import type { CompiledStageDefinition, WorkflowDefinition, WorkflowDefinitionSnapshot } from './types';
 import { parseWorkflowDefinitionSource, workflowDefinitionSourceToYaml, type WorkflowSourceDefinition } from './workflow-definition-parser';
 import { compileWorkflowDefinition, createWorkflowDefinitionSnapshot } from './workflow-definition';
@@ -122,7 +122,6 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
               },
             ],
           },
-          selfRepairPolicy: REVIEW_SELF_REPAIR_POLICY,
         },
       ],
       checks: [

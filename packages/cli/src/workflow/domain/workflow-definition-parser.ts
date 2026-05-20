@@ -74,7 +74,6 @@ function parseStageSource(
     emits: task.emits ? [...task.emits] : undefined,
     dependsOn: task.dependsOn ? [...task.dependsOn] : undefined,
     resultContract: task.resultContract ? { ...task.resultContract } : undefined,
-    selfRepairPolicy: task.selfRepairPolicy ? { ...task.selfRepairPolicy } : undefined,
   }));
 
   const checks = (source.checks ?? []).map(check => {

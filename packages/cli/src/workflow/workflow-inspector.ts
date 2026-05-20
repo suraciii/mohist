@@ -225,7 +225,6 @@ function compileCustomTasks(
       emits: arrayValue(rawTask.emits).filter((value): value is string => typeof value === 'string'),
       dependsOn: arrayValue(rawTask.dependsOn ?? rawTask.needs).filter((value): value is string => typeof value === 'string'),
       resultContract: isRecord(rawTask.resultContract) ? rawTask.resultContract as unknown as TaskDefinition['resultContract'] : undefined,
-      selfRepairPolicy: isRecord(rawTask.selfRepairPolicy) ? rawTask.selfRepairPolicy as unknown as TaskDefinition['selfRepairPolicy'] : undefined,
     };
     if (task.uses === 'mohist/agent' && !hasAgentPromptSource(task.with)) {
       diagnostics.push({
@@ -760,7 +759,6 @@ function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): Expl
     uses,
     dependsOn: task.dependsOn ?? [],
     requiredMarkers: Array.isArray(task.with?.requiredMarkers) ? task.with.requiredMarkers.length : undefined,
-    selfRepair: task.selfRepairPolicy?.enabled,
     useDescription: useDefinition?.description,
   };
 }

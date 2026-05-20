@@ -64,6 +64,5 @@ export {
 
 export {
   extractRepairResultFromArtifact,
-  isRepairAllowed,
   type SelfRepairResult,
 } from './self-repair';

@@ -1,9 +1,4 @@
-import type {
-  SelfRepairPolicy,
-  WorkflowItem,
-  WorkflowItemSeverity,
-  WorkflowVerification,
-} from '../../types/workflow-results';
+import type { WorkflowItem, WorkflowItemSeverity, WorkflowVerification } from '../../types/workflow-results';
 import { parseStructuredResult, isParseSuccess } from '../result-contracts';
 import type { ResultContract } from '../../types/workflow-results';
 
@@ -22,7 +17,6 @@ export interface SelfRepairResult {
 export function extractRepairResultFromArtifact(
   contract: ResultContract,
   artifactContent: string | null,
-  _policy: SelfRepairPolicy,
 ): SelfRepairResult {
   const empty: SelfRepairResult = {
     repairedItemIds: [],
@@ -86,30 +80,4 @@ function extractVerificationFromItems(items: WorkflowItem[]): WorkflowVerificati
     }
   }
   return verifications;
-}
-
-export function isRepairAllowed(
-  policy: SelfRepairPolicy,
-  item: WorkflowItem,
-): { allowed: boolean; reason?: string } {
-  if (!policy.enabled) {
-    return { allowed: false, reason: 'Self-repair is disabled' };
-  }
-
-  for (const disallowed of policy.disallowedReasons) {
-    const tag = `[disallowed:${disallowed}]`;
-    if (item.evidence?.includes(tag) || item.suggestedAction?.includes(tag)) {
-      return { allowed: false, reason: `Item marked as disallowed: ${disallowed}` };
-    }
-  }
-
-  if (policy.allowedScopes.length > 0) {
-    const itemScopes = (item.scope ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    const hasAllowedScope = itemScopes.some(s => policy.allowedScopes.includes(s));
-    if (itemScopes.length > 0 && !hasAllowedScope) {
-      return { allowed: false, reason: `Item scope not in allowed scopes: ${item.scope}` };
-    }
-  }
-
-  return { allowed: true };
 }

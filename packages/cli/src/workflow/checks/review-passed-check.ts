@@ -3,7 +3,6 @@ import { parseStructuredResult, buildStructuredResult, isParseError } from '../r
 import { REVIEW_RESULT_CONTRACT } from '../domain';
 import { extractFixSuggestions, readReportFile } from '../utils';
 import { extractRepairResultFromArtifact } from '../task-runtime/self-repair';
-import { REVIEW_SELF_REPAIR_POLICY } from '../domain';
 import { Log } from '../../util/log';
 import type { ResultContract } from '../../types/workflow-results';
 
@@ -53,11 +52,7 @@ export class ReviewPassedCheck implements Check {
     const snapshotSha = await this.getCandidateHeadSha(ctx);
     const structured = buildStructuredResult(parsed);
 
-    const repairResult = extractRepairResultFromArtifact(
-      this.contract,
-      sourceContent,
-      REVIEW_SELF_REPAIR_POLICY,
-    );
+    const repairResult = extractRepairResultFromArtifact(this.contract, sourceContent);
 
     const repairedItemIds = repairResult.repairedItemIds.length > 0
       ? repairResult.repairedItemIds

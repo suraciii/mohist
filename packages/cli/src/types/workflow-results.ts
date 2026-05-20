@@ -68,14 +68,6 @@ export type ResultOutputSource =
   | { type: 'artifact'; path: string }
   | { type: 'task-output'; key: string };
 
-export interface SelfRepairPolicy {
-  enabled: boolean;
-  allowedScopes: string[];
-  maxAttempts?: number;
-  requiresVerification: boolean;
-  disallowedReasons: string[];
-}
-
 export interface WorkflowConvergenceState {
   failedCheck?: string;
   blockingItemCount: number;

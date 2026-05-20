@@ -341,7 +341,6 @@ export type {
   ReactionTaskOutput,
   ResultContract,
   ResultOutputSource,
-  SelfRepairPolicy,
   WorkflowConvergenceState,
   FailedCheckContext,
 } from './workflow-results';
