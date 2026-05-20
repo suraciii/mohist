@@ -341,6 +341,11 @@ export class AgentRunnerService {
     );
   }
 
+  private shouldUseLegacyMergedCheckRouting(issue: Issue): boolean {
+    if (issue.stage !== Stage.Check || issue.mergeState !== MergeState.Merged) return false;
+    return !this.workflowRunService?.getLatestRunForIssue(issue.id);
+  }
+
   recoverFromQueue(): void {
     if (!this.taskQueueRepo || !this.issueRepo) {
       log.info('Queue recovery skipped — missing taskQueueRepo or issueRepo');
@@ -528,11 +533,19 @@ export class AgentRunnerService {
       }
 
       if (deliveryStatus === 'merged' || deliveryStatus === 'integrating') {
-        if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+        if (this.shouldUseLegacyMergedCheckRouting(issue)) {
           this.issueRepo.updateStage(issue.id, Stage.Integrate);
           log.info('Truly merged issue from Check stage — transitioning to Integrate', {
             issueNumber: issue.number,
             action: 'stage updated to integrate',
+          });
+          return;
+        }
+
+        if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+          log.info('Merged Check-stage issue has WorkflowRun history; preserving definition-driven stage state', {
+            issueNumber: issue.number,
+            action: 'stage preserved',
           });
           return;
         }
@@ -1265,7 +1278,8 @@ export class AgentRunnerService {
       return;
     }
 
-    if (issue.stage === Stage.Integrate || (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged)) {
+    const useLegacyMergedCheckRouting = this.shouldUseLegacyMergedCheckRouting(issue);
+    if (issue.stage === Stage.Integrate || useLegacyMergedCheckRouting) {
       const project = this.projectRepo.findById(issue.projectId);
       if (!project) {
         this.completeTask(task.id, 'failed', `Project not found: ${issue.projectId}`);
@@ -1278,7 +1292,7 @@ export class AgentRunnerService {
         return;
       }
 
-      if (issue.stage === Stage.Check && issue.mergeState === MergeState.Merged) {
+      if (useLegacyMergedCheckRouting) {
         this.issueRepo.updateStage(issue.id, Stage.Integrate);
       }
 

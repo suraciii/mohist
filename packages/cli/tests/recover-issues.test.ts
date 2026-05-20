@@ -9,6 +9,8 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
+import { WorkflowApplicationService } from '../src/services/workflow-application-service';
+import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { Stage, IssueStatus, MergeState } from '../src/types';
 
 function makeTasksJson(tasks: Array<{ id: string; passes: boolean }>) {
@@ -1200,6 +1202,38 @@ describe('recoverIssues — false-done detection', () => {
 
     const recovered = issueRepo.findById(issue.id);
     expect(recovered?.stage).toBe(Stage.Integrate);
+    expect(recovered?.status).toBe(IssueStatus.Active);
+  });
+
+  it('check-stage with WorkflowRun and mergeState=merged: preserves definition-driven stage during recovery', () => {
+    const project = projectRepo.create({ name: 'TestProject', path: tmpDir });
+    const issue = issueService.create({ projectId: project.id, title: 'Check Merged With WorkflowRun' });
+    issueRepo.updateStatus(issue.id, IssueStatus.Active);
+    issueRepo.updateStage(issue.id, Stage.Check);
+    issueRepo.setMergeState(issue.id, MergeState.Merged);
+    new WorkflowApplicationService(db).startWorkflow({ issueId: issue.id, issueNumber: issue.number, startedBy: 'test' });
+
+    const service = new AgentRunnerService(
+      eventBus,
+      undefined,
+      issueRepo,
+      8,
+      undefined,
+      undefined,
+      projectRepo,
+      createWorktreeMock(tmpDir),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new WorkflowRunService(db),
+    );
+
+    service.recoverIssues();
+
+    const recovered = issueRepo.findById(issue.id);
+    expect(recovered?.stage).toBe(Stage.Plan);
     expect(recovered?.status).toBe(IssueStatus.Active);
   });
 });
