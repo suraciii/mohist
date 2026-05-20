@@ -1,6 +1,6 @@
 import { DatabaseManager } from '../db/database';
 import { Stage } from '../types';
-import { workflowDefinitionSnapshotFromUnknown } from '../workflow/model';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow/workflow-run-snapshot';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/convergence';

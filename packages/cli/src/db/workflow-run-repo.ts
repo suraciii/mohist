@@ -10,13 +10,13 @@ import {
   type WorkflowRunSnapshot,
   WorkflowRun as DomainWorkflowRun,
 } from '../workflow/model';
-import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definitions/default-workflow';
 import {
   freezePointFromStageSnapshot,
   hydrateWorkflowRun,
   repairWorkflowRunSnapshot,
   workflowDefinitionSnapshotFromUnknown,
-} from '../workflow/model';
+} from '../workflow/workflow-run-snapshot';
+import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definitions/default-workflow';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';

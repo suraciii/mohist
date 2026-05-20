@@ -6,7 +6,7 @@ import { emitStageTaskUpdate } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
 import type { AgentPromptSource, TaskDefinition, TaskExecutionKind } from '../model';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
-import { workflowDefinitionSnapshotFromUnknown } from '../model';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';

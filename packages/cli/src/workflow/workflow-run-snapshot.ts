@@ -1,7 +1,7 @@
-import { Stage } from '../../types';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
-import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from './workflow-definition';
-import { WorkflowRun } from './workflow-run';
+import { Stage } from '../types';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from './uses-catalog';
+import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from './model';
+import { WorkflowRun } from './model';
 import type {
   CausedByMetadata,
   CheckRunStatus,
@@ -12,7 +12,7 @@ import type {
   TaskRunStatus,
   WorkflowRunSnapshot,
   WorkSourceState,
-} from './workflow-run';
+} from './model';
 
 function isCausedByMetadata(value: unknown): value is CausedByMetadata {
   return Boolean(value && typeof value === 'object' && 'type' in value && typeof (value as { type?: unknown }).type === 'string');
@@ -193,8 +193,8 @@ export function repairWorkflowRunSnapshot(
       stageSnapshots.set(definition.stage, stageRun);
     }
 
-    const shouldRepairStaticStage = workflowRunning && (definition.stage === Stage.Plan || definition.stage === Stage.Integrate);
-    if (shouldRepairStaticStage) {
+    const shouldRepairStageDefinition = workflowRunning;
+    if (shouldRepairStageDefinition) {
       for (const [taskIndex, task] of definition.tasks.entries()) {
         if (stageRun.tasks.some(existing => existing.id === task.id)) continue;
         stageRun.tasks.push({
@@ -216,7 +216,7 @@ export function repairWorkflowRunSnapshot(
       }
     }
 
-    if (shouldRepairStaticStage) {
+    if (shouldRepairStageDefinition) {
       for (const check of definition.checks) {
         if (stageRun.checks.some(existing => existing.name === check.name)) continue;
         stageRun.checks.push({
