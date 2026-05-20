@@ -1,13 +1,13 @@
-import type { CheckResult, StageContext, StageTaskResult } from './stage-context';
-import { emitStageTaskUpdate } from './stage-context';
-import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
-import { createWorkflowSessionObservers } from '../agent-runtime';
-import { formatAgentPrompt } from '../agents/agent-prompt-schema';
-import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
-import { loadAgentConfig } from '../agents/agent-config';
+import type { CheckResult, StageContext, StageTaskResult } from '../stage-context';
+import { emitStageTaskUpdate } from '../stage-context';
+import { AgentSession, type AgentSessionOptions } from '../../agent-runtime/agent-session';
+import { createWorkflowSessionObservers } from '../../agent-runtime';
+import { formatAgentPrompt } from '../../agents/agent-prompt-schema';
+import { formatIssueInfo, listOpenSpecContextFiles } from '../../agents/workflow-context';
+import { loadAgentConfig } from '../../agents/agent-config';
 import { buildFailedCheckContext } from './reaction-context';
-import type { FailedCheckContext } from '../types/workflow-results';
-import { Log } from '../util/log';
+import type { FailedCheckContext } from '../../types/workflow-results';
+import { Log } from '../../util/log';
 
 const log = Log.create({ service: 'review-fix-task' });
 

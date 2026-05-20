@@ -15,8 +15,8 @@ import {
   hydrateWorkflowRun,
   repairWorkflowRunSnapshot,
   workflowDefinitionSnapshotFromUnknown,
-} from '../workflow/workflow-run-snapshot';
-import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definitions/default-workflow';
+} from '../workflow/projection/workflow-run-snapshot';
+import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definition/default-workflow';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type WorkflowTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';

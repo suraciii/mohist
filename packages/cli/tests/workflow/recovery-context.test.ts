@@ -83,7 +83,7 @@ describe('recovery task prompts', () => {
   });
 
   it('provides issue and OpenSpec @file context to review fixes', async () => {
-    const { runReviewFixTask } = await import('../../src/workflow/review-fix-task');
+    const { runReviewFixTask } = await import('../../src/workflow/repair/review-fix-task');
     await runReviewFixTask(makeContext(Stage.Check, changeDir), {
       worktreePath: '/tmp/worktree',
       failedCheck: {
@@ -109,7 +109,7 @@ describe('recovery task prompts', () => {
   });
 
   it('provides issue and OpenSpec @file context to plan repair', async () => {
-    const { runPlanRepairTask } = await import('../../src/workflow/plan-repair-task');
+    const { runPlanRepairTask } = await import('../../src/workflow/repair/plan-repair-task');
     await runPlanRepairTask(makeContext(Stage.Plan, changeDir), {
       worktreePath: '/tmp/worktree',
       failedCheck: {
@@ -129,4 +129,3 @@ describe('recovery task prompts', () => {
     expect(prompt).toContain(`@${path.join(changeDir, 'tasks.json')}`);
   });
 });
-

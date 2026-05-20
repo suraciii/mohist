@@ -12,7 +12,7 @@ import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { WorkflowApplicationRuntime } from '../../src/workflow/stage-context';
 import { WorkflowRun, type WorkflowWork } from '../../src/workflow/model';
-import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definitions/default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definition/default-workflow';
 
 class RegistryCapturingRunner implements StageRunner {
   capturedRegistries: StageContext['agentSessionRegistry'][] = [];

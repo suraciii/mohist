@@ -33,7 +33,7 @@ import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
 import { createCheckRegistry } from '../workflow/checks/check-registry';
 import { createWorkflowTemplateContextFromValues, renderWorkflowTemplate } from '../workflow/template';
-import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definitions/default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definition/default-workflow';
 import { AiReviewCheck } from '../workflow/checks/ai-review-check';
 import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
 import { MergeReadyCheck } from '../workflow/checks/merge-ready-check';
@@ -45,7 +45,7 @@ import { SelfReviewPassedCheck } from '../workflow/checks/self-review-passed-che
 import { UserApprovalCheck } from '../workflow/checks/user-approval-check';
 import { HealthGateCheck } from '../workflow/checks/health-gate-check';
 import { ArtifactExistsCheck, ArtifactMarkerCheck, ShellCommandCheck } from '../workflow/checks';
-import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/workflow-inspector';
+import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/definition/workflow-inspector';
 
 export type TaskType = QueueTaskType;
 

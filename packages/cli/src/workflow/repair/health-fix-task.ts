@@ -1,11 +1,11 @@
-import type { CheckResult, StageContext, StageTaskResult } from './stage-context';
-import { emitStageTaskUpdate } from './stage-context';
-import { AgentSession, type AgentSessionOptions } from '../agent-runtime/agent-session';
-import { createWorkflowSessionObservers } from '../agent-runtime';
-import { formatAgentPrompt } from '../agents/agent-prompt-schema';
-import { formatIssueInfo, listOpenSpecContextFiles } from '../agents/workflow-context';
-import { loadAgentConfig } from '../agents/agent-config';
-import { Log } from '../util/log';
+import type { CheckResult, StageContext, StageTaskResult } from '../stage-context';
+import { emitStageTaskUpdate } from '../stage-context';
+import { AgentSession, type AgentSessionOptions } from '../../agent-runtime/agent-session';
+import { createWorkflowSessionObservers } from '../../agent-runtime';
+import { formatAgentPrompt } from '../../agents/agent-prompt-schema';
+import { formatIssueInfo, listOpenSpecContextFiles } from '../../agents/workflow-context';
+import { loadAgentConfig } from '../../agents/agent-config';
+import { Log } from '../../util/log';
 
 const log = Log.create({ service: 'health-fix-task' });
 

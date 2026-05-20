@@ -6,13 +6,13 @@ import { emitStageTaskUpdate } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
 import type { AgentPromptSource, TaskDefinition, TaskExecutionKind } from '../model';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
-import { workflowDefinitionSnapshotFromUnknown } from '../workflow-run-snapshot';
+import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
-import { loadVerificationContext, buildVerificationPromptSuffix } from '../convergence';
+import { loadVerificationContext, buildVerificationPromptSuffix } from '../repair/convergence';
 import { inferWorkflowTaskUse } from '../uses-catalog';
 
 interface PlanTaskConfig {

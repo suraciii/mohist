@@ -1,9 +1,9 @@
 import { DatabaseManager } from '../db/database';
 import { Stage } from '../types';
-import { workflowDefinitionSnapshotFromUnknown } from '../workflow/workflow-run-snapshot';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
-import { extractReactionOutput } from '../workflow/convergence';
+import { extractReactionOutput } from '../workflow/repair/convergence';
 import type { CompiledStageDefinition } from '../workflow/model';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 

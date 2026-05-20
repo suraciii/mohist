@@ -11,7 +11,7 @@ import {
   parseWorkflowDefinitionSource,
   workflowDefinitionSourceToYaml,
   type WorkflowSourceDefinition,
-} from '../workflow-definition-source';
+} from './workflow-definition-source';
 
 const DEFAULT_PLAN_HEALTH_COMMAND = 'npm ci && npm run typecheck';
 const DEFAULT_BUILD_HEALTH_COMMAND = 'npm ci && npm run build';

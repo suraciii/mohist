@@ -94,7 +94,7 @@ export {
 export {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   DEFAULT_STAGE_DEFINITIONS,
-} from './definitions/default-workflow';
+} from './definition/default-workflow';
 
 export {
   compileWorkflowDefinition,
@@ -105,4 +105,4 @@ export {
 
 export {
   buildFailedCheckContext,
-} from './reaction-context';
+} from './repair/reaction-context';

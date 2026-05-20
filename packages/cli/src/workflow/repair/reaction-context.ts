@@ -1,4 +1,4 @@
-import type { FailedCheckContext, WorkflowItem, WorkflowSnapshot } from '../types/workflow-results';
+import type { FailedCheckContext, WorkflowItem, WorkflowSnapshot } from '../../types/workflow-results';
 
 export function buildFailedCheckContext(
   failedCheck: { name: string; status: string; message?: string; output?: unknown },

@@ -5,8 +5,8 @@ import type {
   WorkflowDefinition,
   WorkflowTasksFromSource,
   StageEventPolicy,
-} from './model';
-import type { Stage } from '../types';
+} from '../model';
+import type { Stage } from '../../types';
 
 export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
   source?: TaskDefinition['source'];
