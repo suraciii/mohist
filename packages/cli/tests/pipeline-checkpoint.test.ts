@@ -74,7 +74,8 @@ vi.mock('child_process', () => ({
 }));
 
 import * as fs from 'fs';
-import { PlanStageRunner, type StageContext, createCheckpointManager, type ChangeArtifactsManager } from '../src/workflow';
+import { type StageContext, createCheckpointManager, type ChangeArtifactsManager } from '../src/workflow';
+import { PlanStageRunner } from '../src/workflow/plan-stage-runner';
 import { AgentSession } from '../src/agent-runtime/agent-session';
 import { buildArtifactPrompt, buildSelfReviewPrompt } from '../src/agents/artifact-prompt';
 

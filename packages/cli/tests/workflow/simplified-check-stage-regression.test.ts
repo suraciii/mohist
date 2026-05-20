@@ -23,6 +23,7 @@ import { BaseStageRunner } from '../../src/workflow/base-stage-runner';
 import {
   getLatestCheckResult,
 } from '../../src/workflow/stage-context';
+import { MOHIST_DEFAULT_WORKFLOW_DEFINITION } from '../../src/workflow/domain';
 import type { StageStateService } from '../../src/services/stage-state-service';
 
 const PASS_REVIEW_REPORT = '# Review\n<promise>PASS</promise>\n\n### Code Quality: PASS';
@@ -207,17 +208,11 @@ describe('Simplified check-stage regression tests', () => {
       expect(result.checkResults?.map(r => r.name)).toEqual(['review-passed', 'merge-ready', 'user-approval']);
     });
 
-    it('CheckSuiteChecks type has only review-passed, merge-ready, user-approval keys', async () => {
-      const checks: import('../../src/types').CheckSuiteChecks = {
-        'review-passed': { status: 'pending' },
-        'merge-ready': { status: 'pending' },
-        'user-approval': { status: 'pending' },
-      };
+    it('default Check check names come from the workflow definition', async () => {
+      const checkStage = MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(stage => stage.stage === Stage.Check);
 
-      expect(Object.keys(checks)).toEqual(['review-passed', 'merge-ready', 'user-approval']);
-      expect(checks['review-passed']).toBeDefined();
-      expect(checks['merge-ready']).toBeDefined();
-      expect(checks['user-approval']).toBeDefined();
+      expect(checkStage?.checks.map(check => check.name)).toEqual(['health:check', 'review-passed', 'merge-ready']);
+      expect(checkStage?.requiresApproval).toBe(true);
     });
   });
 
@@ -803,29 +798,20 @@ describe('Simplified check-stage regression tests', () => {
     });
   });
 
-  describe('CheckSuite makeInitialChecks produces review-passed, merge-ready, user-approval', () => {
-    it('makeInitialChecks returns only review-passed, merge-ready, user-approval', async () => {
-      const { CheckSuiteChecks } = await import('../../src/types');
+  describe('Default Check definition', () => {
+    it('keeps default review repair policy in workflow definition rather than fixed check-suite types', async () => {
+      const checkStage = MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(stage => stage.stage === Stage.Check);
+      const reviewCheck = checkStage?.checks.find(check => check.name === 'review-passed');
 
-      const checks: CheckSuiteChecks = {
-        'review-passed': { status: 'pending' },
-        'merge-ready': { status: 'pending' },
-        'user-approval': { status: 'pending' },
-      };
-
-      expect(Object.keys(checks).sort()).toEqual(['merge-ready', 'review-passed', 'user-approval'].sort());
-    });
-
-    it('CheckSuiteChecks web type matches the expected keys', async () => {
-      const { CheckSuiteChecks: WebCheckSuiteChecks } = await import('../../web/src/lib/types');
-
-      const checks: WebCheckSuiteChecks = {
-        'review-passed': { status: 'pending' },
-        'merge-ready': { status: 'pending' },
-        'user-approval': { status: 'pending' },
-      };
-
-      expect(Object.keys(checks).sort()).toEqual(['merge-ready', 'review-passed', 'user-approval'].sort());
+      expect(reviewCheck?.onFailure).toMatchObject({
+        retry: {
+          limit: 2,
+          task: {
+            id: 'fix-review-findings',
+            title: 'Fix review findings',
+          },
+        },
+      });
     });
   });
 
@@ -847,17 +833,4 @@ describe('Simplified check-stage regression tests', () => {
     });
   });
 
-  describe('useCheckSuiteProgress uses simplified check names', () => {
-    it('DEFAULT_CHECKS has only review-passed, merge-ready, user-approval', async () => {
-      const hook = await import('../../web/src/hooks/useCheckSuiteProgress');
-
-      const defaultChecks = {
-        'review-passed': { status: 'pending' },
-        'merge-ready': { status: 'pending' },
-        'user-approval': { status: 'pending' },
-      };
-
-      expect(Object.keys(defaultChecks)).toEqual(['review-passed', 'merge-ready', 'user-approval']);
-    });
-  });
 });

@@ -76,7 +76,8 @@ vi.mock('../src/agents/artifact-prompt', () => ({
 }));
 
 import type { PipelineCheckpointRepo } from '../src/db/pipeline-checkpoint-repo';
-import { BuildStageRunner, createCheckpointManager } from '../src/workflow';
+import { createCheckpointManager } from '../src/workflow';
+import { BuildStageRunner } from '../src/workflow/build-stage-runner';
 import type { StageContext } from '../src/workflow';
 
 function createMockIssue(stage: Stage, overrides?: Partial<Issue>): Issue {
