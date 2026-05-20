@@ -1994,87 +1994,6 @@ export function createIssueRoutes(
     }
   });
 
-  app.post('/:number/skip-to-review', async (c) => {
-    try {
-      const number = parseInt(c.req.param('number'));
-      const projectId = getCurrentProjectId();
-
-      if (!projectId) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'No active project. Use: mo project use <name>'
-        };
-        return c.json(response, 400);
-      }
-
-      const issue = issueService.getByNumber(projectId, number);
-      if (!issue) {
-        const response: ApiResponse = {
-          success: false,
-          error: `Issue #${number} not found`
-        };
-        return c.json(response, 404);
-      }
-
-      const project = projectService.getById(projectId);
-      if (!project) {
-        const response: ApiResponse = {
-          success: false,
-          error: 'Project not found'
-        };
-        return c.json(response, 404);
-      }
-
-      const worktreePath = worktreeManager?.getPath(project.name, issue.number) || project.path;
-      const change = detectOpenSpecChange(worktreePath, issue);
-
-      if (!change) {
-        const response: ApiResponse = {
-          success: false,
-          error: `No OpenSpec Change found for issue #${number}. Use "mo propose ${number}" first.`
-        };
-        return c.json(response, 400);
-      }
-
-      issueService.transitionToStage(issue.id, Stage.Check);
-      issueService.setStatus(issue.id, IssueStatus.Active);
-
-      if (agentRunner) {
-        const result = agentRunner.enqueue(issue.id, 'resume-pipeline');
-
-        const updatedIssue = issueService.getByNumber(projectId, number);
-        const response: ApiResponse = {
-          success: true,
-          data: {
-            issue: updatedIssue,
-            taskId: result.taskId,
-            status: result.status,
-            queuePosition: result.queuePosition,
-            message: `Issue #${number} skipping to review stage. Change: ${change.changePath}`
-          }
-        };
-        return c.json(response, 202);
-      }
-
-      const updatedIssue2 = issueService.getByNumber(projectId, number);
-
-      const response2: ApiResponse = {
-        success: true,
-        data: {
-          issue: updatedIssue2,
-          message: `Issue #${number} stage set to check (no agent runner). Change: ${change.changePath}`
-        }
-      };
-      return c.json(response2);
-    } catch (error) {
-      const response: ApiResponse = {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-      return c.json(response, 500);
-    }
-  });
-
   app.post('/:number/approve', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
@@ -2238,38 +2157,6 @@ export function createIssueRoutes(
       if (rejectedStage === Stage.Check) {
         if (checkpointRepo) {
           checkpointRepo.delete(issue.number, Stage.Check);
-        }
-
-        if (worktreeManager) {
-          const project = projectService.getById(projectId);
-          if (project) {
-            const worktreePath = worktreeManager.getPath(project.name, issue.number);
-            if (worktreePath) {
-              const changeDir = findChangeDir(worktreePath, issue.number);
-              if (changeDir) {
-                for (const filename of ['review.md', 'review-self-check.md']) {
-                  const artifactPath = path.join(changeDir, filename);
-                  try {
-                    if (fs.existsSync(artifactPath)) {
-                      fs.unlinkSync(artifactPath);
-                    }
-                  } catch {}
-                }
-              }
-            }
-          }
-        }
-
-        if (checkSuiteRepo) {
-          const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
-          if (activeSuite) {
-            checkSuiteRepo.updateChecks(activeSuite.id, 'user-approval', {
-              status: 'failed',
-              output: { rejected: true, message: message || 'User rejected' },
-              ranAt: new Date().toISOString(),
-            });
-            checkSuiteRepo.updateStatus(activeSuite.id, 'failed');
-          }
         }
       }
 
@@ -3710,28 +3597,6 @@ export function createIssueRoutes(
     }
   });
 
-  app.post('/:number/restart', async (c) => {
-    try {
-      const number = parseInt(c.req.param('number'));
-      const projectId = getCurrentProjectId();
-      if (!projectId) {
-        return c.json({ success: false, error: 'No active project. Use: mo project use <name>' } satisfies ApiResponse, 400);
-      }
-
-      const issue = issueService.getByNumber(projectId, number);
-      if (!issue) {
-        return c.json({ success: false, error: `Issue #${number} not found` } satisfies ApiResponse, 404);
-      }
-
-      return c.json({
-        success: false,
-        error: `restart has been removed; use retry, rerun, or rewind instead`,
-      } satisfies ApiResponse, 410);
-    } catch (error) {
-      return c.json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' } satisfies ApiResponse, 500);
-    }
-  });
-
   app.post('/:number/rerun', async (c) => {
     try {
       const number = parseInt(c.req.param('number'));
@@ -3783,23 +3648,6 @@ export function createIssueRoutes(
         checkpointRepo.delete(currentIssue.number, currentIssue.stage);
         if (currentIssue.stage === Stage.Plan) {
           checkpointRepo.delete(currentIssue.number, 'plan');
-        }
-      }
-
-      if (currentIssue.stage === Stage.Check && worktreeManager) {
-        const worktreePath = worktreeManager.getPath(project.name, currentIssue.number);
-        if (worktreePath) {
-          const changeDir = findChangeDir(worktreePath, currentIssue.number);
-          if (changeDir) {
-            for (const filename of ['review.md', 'review-self-check.md']) {
-              const artifactPath = path.join(changeDir, filename);
-              try {
-                if (fs.existsSync(artifactPath)) {
-                  fs.unlinkSync(artifactPath);
-                }
-              } catch {}
-            }
-          }
         }
       }
 
@@ -3954,22 +3802,6 @@ export function createIssueRoutes(
       }
 
       const project = projectService.getById(projectId);
-      if (worktreeManager && project) {
-        const worktreePath = worktreeManager.getPath(project.name, issue.number);
-        if (worktreePath) {
-          const changeDir = findChangeDir(worktreePath, issue.number);
-          if (stage === Stage.Check && changeDir) {
-            for (const filename of ['review.md', 'review-self-check.md']) {
-              const artifactPath = path.join(changeDir, filename);
-              try {
-                if (fs.existsSync(artifactPath)) {
-                  fs.unlinkSync(artifactPath);
-                }
-              } catch {}
-            }
-          }
-        }
-      }
 
       agentRunner.cancelAll(issue.id);
 
@@ -4027,20 +3859,12 @@ export function createIssueRoutes(
     return handleRetryCheckpoint(c, stage);
   });
 
-  app.post('/:number/check/retry-checkpoint', async (c) => {
-    return handleRetryCheckpoint(c, Stage.Check);
-  });
-
   app.post('/:number/stages/:stage/rerun', async (c) => {
     const stage = parseWorkflowStageParam(c.req.param('stage'));
     if (!stage) {
       return c.json({ success: false, error: `Invalid stage: ${c.req.param('stage')}` } satisfies ApiResponse, 400);
     }
     return handleRerunStage(c, stage);
-  });
-
-  app.post('/:number/check/rerun-review', async (c) => {
-    return handleRerunStage(c, Stage.Check);
   });
 
   const handleApprovalVerdictRepair = async (c: Context, requestedStage?: Stage) => {
@@ -4145,10 +3969,6 @@ export function createIssueRoutes(
       return c.json({ success: false, error: `Invalid stage: ${stageParam}` } satisfies ApiResponse, 400);
     }
     return handleApprovalVerdictRepair(c, stage);
-  });
-
-  app.post('/:number/check/repair-review-findings', async (c) => {
-    return handleApprovalVerdictRepair(c, Stage.Check);
   });
 
   return app;

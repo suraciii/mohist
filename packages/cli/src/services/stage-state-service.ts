@@ -399,7 +399,7 @@ interface StaticTaskDef {
 const REAL_TASK_IDS: Record<Stage, Set<string>> = {
   [Stage.Plan]: new Set(['proposal', 'specs', 'design', 'tasks', 'self-review', 'repair-plan-artifacts', 'fix-plan-health']),
   [Stage.Build]: new Set(['fix-build-health', 'repair-build']),
-  [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-review-findings', 'repair-merge', 'fix-check-health']),
+  [Stage.Check]: new Set(['ai-review', 'fix-review-findings', 'repair-merge', 'fix-check-health']),
   [Stage.Integrate]: new Set(['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge', 'merge-branch', 'verify-merge', 'repair-merge', 'rebase-branch', 'fix-integrate-health']),
   [Stage.Done]: new Set([]),
   [Stage.Backlog]: new Set([]),
@@ -491,10 +491,6 @@ function isTaskAttemptForBase(taskId: string, baseTaskId: string): boolean {
   return taskId === baseTaskId || taskId.startsWith(`${baseTaskId}:`);
 }
 
-function isLegacyFixReviewFindingsTask(taskId: string): boolean {
-  return isTaskAttemptForBase(taskId, 'fix-review-findings') || isTaskAttemptForBase(taskId, 'repair-review-findings');
-}
-
 function stageDefinitionForStage(stage: Stage, stageDefinition?: CompiledStageDefinition): CompiledStageDefinition | undefined {
   return stageDefinition ?? DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === stage);
 }
@@ -522,7 +518,7 @@ function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition):
 
 function isApprovalVerdictFixTask(taskId: string, stageDefinition?: CompiledStageDefinition): boolean {
   const repairPolicy = approvalVerdictRepairPolicy(stageDefinition);
-  return isTaskAttemptForBase(taskId, repairPolicy.fixTaskId) || isLegacyFixReviewFindingsTask(taskId);
+  return isTaskAttemptForBase(taskId, repairPolicy.fixTaskId);
 }
 
 function extractUnresolvedSummary(output: unknown, message: string | null): string | null {
