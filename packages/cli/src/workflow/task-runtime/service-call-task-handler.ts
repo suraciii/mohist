@@ -103,11 +103,14 @@ export const defaultServiceCallTaskHandler = createServiceCallTaskHandler();
 function serviceCallEvents(result: unknown): string[] {
   if (!result || typeof result !== 'object') return [];
   const data = result as Record<string, unknown>;
+  const events = new Set<string>();
   if (Array.isArray(data.events)) {
-    return data.events.filter((event): event is string => typeof event === 'string');
+    for (const event of data.events) {
+      if (typeof event === 'string') events.add(event);
+    }
   }
   if (data.shaChanged === true) {
-    return ['code.changed'];
+    events.add('code.changed');
   }
-  return [];
+  return [...events];
 }
