@@ -9,6 +9,7 @@ import {
   type FreezePoint,
   type CompiledStageDefinition,
   type StageRunSnapshot,
+  type TaskResetMetadata,
   type TaskRunStatus,
   type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
@@ -17,6 +18,10 @@ import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse }
 
 function isCausedByMetadata(value: unknown): value is CausedByMetadata {
   return Boolean(value && typeof value === 'object' && 'type' in value && typeof (value as { type?: unknown }).type === 'string');
+}
+
+function isTaskResetMetadata(value: unknown): value is TaskResetMetadata {
+  return Boolean(value && typeof value === 'object' && (value as { type?: unknown }).type === 'workflow-policy');
 }
 
 function extractDeliveryMetadata(output: unknown): FreezePoint['delivery'] {
@@ -128,6 +133,7 @@ export function hydrateWorkflowRun(
       task.output = taskSnapshot.output;
       task.reason = taskSnapshot.reason;
       task.causedBy = isCausedByMetadata(taskSnapshot.causedBy) ? { ...taskSnapshot.causedBy } : null;
+      task.resetBy = isTaskResetMetadata(taskSnapshot.resetBy) ? { ...taskSnapshot.resetBy } : null;
       task.latestAttempt = taskSnapshot.latestAttempt ? { ...taskSnapshot.latestAttempt } : null;
       if (!task.latestAttempt) {
         task.synthesizeLatestAttempt(new Date().toISOString());
@@ -226,6 +232,7 @@ export function repairWorkflowRunSnapshot(
           output: null,
           reason: null,
           causedBy: null,
+          resetBy: null,
           latestAttempt: null,
         });
       }
@@ -245,6 +252,7 @@ export function repairWorkflowRunSnapshot(
           output: null,
           reason: null,
           causedBy: null,
+          resetBy: null,
           latestAttempt: null,
         });
       }

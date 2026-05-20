@@ -22,6 +22,13 @@ export interface CausedByMetadata {
   message?: string;
 }
 
+export interface TaskResetMetadata {
+  type: 'workflow-policy';
+  taskId?: string;
+  eventName?: string;
+  message?: string;
+}
+
 export interface FailureDetails {
   reason: FailureReason;
   stage: Stage;
@@ -340,6 +347,7 @@ export interface TaskRunSnapshot {
   output: unknown | null;
   reason: string | null;
   causedBy: CausedByMetadata | null;
+  resetBy: TaskResetMetadata | null;
   latestAttempt: WorkItemAttempt | null;
 }
 

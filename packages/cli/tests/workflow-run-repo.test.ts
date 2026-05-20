@@ -443,4 +443,58 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(taskRows.map(row => row.task_id)).toEqual(['ai-review']);
     expect(checkStage.tasks.map(task => task.id)).toEqual(['ai-review']);
   });
+
+  it('persists workflow-policy task reset provenance without treating it as repair cause', () => {
+    const { run } = WorkflowRun.startWorkflow({ id: 'wr_188_reset_provenance', issueId, issueNumber });
+    for (const taskId of ['proposal', 'specs', 'design', 'tasks', 'self-review']) {
+      run.completeTask(Stage.Plan, taskId, { status: 'completed' });
+    }
+    for (const checkName of ['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']) {
+      run.recordCheckResult(Stage.Plan, { name: checkName, status: 'pass' });
+    }
+    run.approveStage(Stage.Plan);
+    run.materializeTasks(Stage.Build, [{ id: 'T-001', title: 'Build task', order: 0 }]);
+    run.completeTask(Stage.Build, 'T-001', { status: 'completed' });
+    run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
+    run.completeTask(Stage.Check, 'ai-review', { status: 'completed', output: { previous: true }, artifacts: ['review.md'] });
+    run.recordCheckResult(Stage.Check, { name: 'health:check', status: 'pass' });
+    run.recordCheckResult(Stage.Check, { name: 'review-passed', status: 'fail', output: { verdict: 'FAIL' } });
+    run.completeTask(Stage.Check, 'fix-review-findings', { status: 'completed', events: ['code.changed'] });
+
+    repo.saveAggregate(run, 'tester');
+
+    const row = db.get<{
+      caused_by_type: string | null;
+      reset_by_type: string | null;
+      reset_by_task_id: string | null;
+      reset_by_event_name: string | null;
+      reset_reason: string | null;
+    }>(
+      `SELECT caused_by_type, reset_by_type, reset_by_task_id, reset_by_event_name, reset_reason
+       FROM workflow_tasks WHERE stage_run_id = ? AND task_id = ?`,
+      [`${run.id}/check`, 'ai-review'],
+    )!;
+    const loaded = repo.loadAggregateById(run.id)!;
+    const aiReview = loaded.stageRun(Stage.Check).findTask('ai-review');
+
+    expect(row).toEqual({
+      caused_by_type: null,
+      reset_by_type: 'workflow-policy',
+      reset_by_task_id: 'fix-review-findings',
+      reset_by_event_name: 'code.changed',
+      reset_reason: 'code.changed reset',
+    });
+    expect(aiReview).toMatchObject({
+      status: 'pending',
+      causedBy: null,
+      resetBy: {
+        type: 'workflow-policy',
+        taskId: 'fix-review-findings',
+        eventName: 'code.changed',
+        message: 'code.changed reset',
+      },
+    });
+    expect(loaded.workflowRecoverySummary()).toBe('running');
+    expect(loaded.nextWork()).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
+  });
 });

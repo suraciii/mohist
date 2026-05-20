@@ -368,6 +368,7 @@ export class BuildStageRunner extends BaseStageRunner {
           output: null,
           reason: null,
           causedBy: null,
+          resetBy: null,
           latestAttempt: null,
         };
         const output = await this.executeTasks(ctx);

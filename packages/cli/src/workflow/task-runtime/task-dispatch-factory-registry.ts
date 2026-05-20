@@ -326,9 +326,7 @@ function mayRestoreTaskFromPriorOutput(input: TaskDispatchFactoryInput): boolean
 }
 
 function wasResetByWorkflowPolicy(input: TaskDispatchFactoryInput): boolean {
-  const causedBy = input.ctx.requestedTask?.causedBy;
-  return causedBy?.type === 'system-policy'
-    && causedBy.taskId !== undefined;
+  return input.ctx.requestedTask?.resetBy?.type === 'workflow-policy';
 }
 
 function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {

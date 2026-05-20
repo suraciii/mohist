@@ -21,6 +21,7 @@ import type {
   StageCompletionGuard,
   StageRunSnapshot,
   StageRunStatus,
+  TaskResetMetadata,
   TaskResultInput,
   TaskRunSnapshot,
   TaskRunStatus,
@@ -55,6 +56,7 @@ export class TaskRun {
   output: unknown | null = null;
   reason: string | null = null;
   causedBy: CausedByMetadata | null = null;
+  resetBy: TaskResetMetadata | null = null;
   latestAttempt: WorkItemAttempt | null = null;
 
   constructor(
@@ -71,7 +73,7 @@ export class TaskRun {
     return this.status === 'completed';
   }
 
-  resetForFreshAttempt(causedBy: CausedByMetadata | null = null): void {
+  resetForFreshAttempt(resetBy: TaskResetMetadata | null = null): void {
     this.status = 'pending';
     this.attempts = 0;
     this.duration = 0;
@@ -79,7 +81,8 @@ export class TaskRun {
     this.events = [];
     this.output = null;
     this.reason = null;
-    this.causedBy = causedBy;
+    this.causedBy = null;
+    this.resetBy = resetBy;
     this.latestAttempt = null;
   }
 
@@ -97,12 +100,14 @@ export class TaskRun {
       output: this.output,
       reason: this.reason,
       causedBy: this.causedBy,
+      resetBy: this.resetBy,
       latestAttempt: this.latestAttempt,
     };
   }
 
   startWorkAttempt(now: string, evidence: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> = {}): WorkItemAttempt {
     this.status = 'running';
+    this.resetBy = null;
     const attemptNumber = this.latestAttempt ? this.latestAttempt.attemptNumber + 1 : 1;
     this.latestAttempt = {
       state: 'running',
@@ -478,9 +483,9 @@ export class StageRun {
     return check;
   }
 
-  resetTask(taskId: string, causedBy: CausedByMetadata | null = null): void {
+  resetTask(taskId: string, resetBy: TaskResetMetadata | null = null): void {
     const task = this.findTask(taskId);
-    task.resetForFreshAttempt(causedBy);
+    task.resetForFreshAttempt(resetBy);
   }
 
   resetCheck(checkName: string): void {
@@ -814,6 +819,7 @@ export class WorkflowRun {
     task.output = effectiveResult.output ?? task.output;
     task.reason = effectiveResult.reason ?? task.reason;
     task.causedBy = effectiveResult.causedBy ?? task.causedBy;
+    task.resetBy = null;
 
     if (task.latestAttempt?.state === 'running') {
       const attemptNow = new Date().toISOString();
@@ -1136,7 +1142,12 @@ export class WorkflowRun {
         const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
         for (const taskId of entry.invalidates.tasks ?? []) {
           try {
-            stageRun.resetTask(taskId, { type: 'system-policy', taskId: task.id, message: reason });
+            stageRun.resetTask(taskId, {
+              type: 'workflow-policy',
+              taskId: task.id,
+              eventName: entry.eventName,
+              message: reason,
+            });
             events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId, reason });
           } catch {
             // Task may not belong to this stage definition.
@@ -1531,7 +1542,12 @@ export class WorkflowRun {
         for (const t of entry.invalidates.tasks) {
           try {
             const reason = entry.reason ?? `Policy invalidation after ${taskId}`;
-            stageRun.resetTask(t, { type: 'system-policy', taskId, message: reason });
+            stageRun.resetTask(t, {
+              type: 'workflow-policy',
+              taskId,
+              eventName: entry.eventName,
+              message: reason,
+            });
             events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: t, reason });
           } catch {
             // task not in stage, skip

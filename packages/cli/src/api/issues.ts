@@ -291,6 +291,16 @@ function taskCause(task: { causedByType: string | null; causedByCheckName: strin
   };
 }
 
+function taskResetCause(task: { resetByType: string | null; resetByTaskId: string | null; resetByEventName: string | null; resetReason: string | null }) {
+  if (!task.resetByType) return null;
+  return {
+    type: task.resetByType,
+    taskId: task.resetByTaskId ?? undefined,
+    eventName: task.resetByEventName ?? undefined,
+    message: task.resetReason ?? undefined,
+  };
+}
+
 function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: CompiledStageDefinition) {
   const deliveryTasks = stageRun.tasks
     .map(task => ({ task, origin: taskOrigin(stageDefinition, task.taskId) }))
@@ -414,6 +424,7 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
         output: task.output,
         reason: task.reason,
         causedBy: taskCause(task),
+        resetBy: taskResetCause(task),
         origin: taskOrigin(stageDefinition, task.taskId),
         startedAt: task.startedAt,
         completedAt: task.completedAt,

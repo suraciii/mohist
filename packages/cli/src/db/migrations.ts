@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 38;
+const SCHEMA_VERSION = 39;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -245,6 +245,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 38) {
     migrateToVersion38(db);
+  }
+  if (currentVersion < 39) {
+    migrateToVersion39(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1178,6 +1181,10 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   caused_by_type TEXT,
   caused_by_check_name TEXT,
   caused_by_task_id TEXT,
+  reset_by_type TEXT,
+  reset_by_task_id TEXT,
+  reset_by_event_name TEXT,
+  reset_reason TEXT,
   started_at    TEXT,
   completed_at  TEXT,
   created_at    TEXT NOT NULL,
@@ -1450,5 +1457,25 @@ function migrateToVersion38(db: DatabaseManager): void {
       db.exec(`ALTER TABLE workflow_tasks ADD COLUMN events TEXT NOT NULL DEFAULT '[]'`);
     }
     setSchemaVersion(db, 38);
+  });
+}
+
+function migrateToVersion39(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>('PRAGMA table_info(workflow_tasks)');
+    const columnNames = new Set(tableInfo.map(column => column.name));
+    if (!columnNames.has('reset_by_type')) {
+      db.exec('ALTER TABLE workflow_tasks ADD COLUMN reset_by_type TEXT');
+    }
+    if (!columnNames.has('reset_by_task_id')) {
+      db.exec('ALTER TABLE workflow_tasks ADD COLUMN reset_by_task_id TEXT');
+    }
+    if (!columnNames.has('reset_by_event_name')) {
+      db.exec('ALTER TABLE workflow_tasks ADD COLUMN reset_by_event_name TEXT');
+    }
+    if (!columnNames.has('reset_reason')) {
+      db.exec('ALTER TABLE workflow_tasks ADD COLUMN reset_reason TEXT');
+    }
+    setSchemaVersion(db, 39);
   });
 }
