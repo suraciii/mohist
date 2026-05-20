@@ -939,7 +939,13 @@ export function IssueDetailPage() {
                 </div>
               </div>
 
-              <MergeStatePanel issueNumber={issue.number} mergeState={issue.mergeState} stage={issue.stage} status={issue.status} />
+              <MergeStatePanel
+                issueNumber={issue.number}
+                mergeState={issue.mergeState}
+                stage={issue.stage}
+                status={issue.status}
+                deliveryRequirement={issue.deliveryRequirement}
+              />
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">

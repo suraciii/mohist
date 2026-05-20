@@ -175,6 +175,21 @@ describe('classifyMergeDelivery', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
       expect(classifyMergeDelivery(issue, { requireLocalMerge: false })).toBe('merged');
     });
+
+    it('uses the issue delivery requirement when classifying a completed issue', () => {
+      const issue = makeIssue({
+        stage: Stage.Done,
+        status: IssueStatus.Completed,
+        mergeState: null,
+        deliveryRequirement: {
+          mode: 'handoff',
+          requiresLocalMerge: false,
+          requiresRemoteMerge: false,
+          falseDoneApplicable: false,
+        },
+      });
+      expect(classifyMergeDelivery(issue)).toBe('merged');
+    });
   });
 
   describe('done/completed + merged is not anomaly', () => {

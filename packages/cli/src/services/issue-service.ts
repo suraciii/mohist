@@ -1,4 +1,4 @@
-import { Issue, Stage, IssueStatus, Comment, Priority } from '../types';
+import { Issue, Stage, IssueStatus, Comment, Priority, type WorkflowDeliveryRequirement } from '../types';
 import { IssueRepo, CommentRepo, ProjectRepo, PipelineCheckpointRepo } from '../db';
 import type { IssueQueueStatus } from './agent-runner-service';
 import { WorktreeManager } from '../git/worktree-manager';
@@ -43,7 +43,16 @@ export class IssueService {
     private worktreeManager?: WorktreeManager,
     private agentRunner?: { getQueueStatus(issueId: string): IssueQueueStatus },
     private checkpointRepo?: PipelineCheckpointRepo,
+    private deliveryRequirementResolver?: (issue: Issue) => WorkflowDeliveryRequirement,
   ) {}
+
+  setDeliveryRequirementResolver(resolver: (issue: Issue) => WorkflowDeliveryRequirement): void {
+    this.deliveryRequirementResolver = resolver;
+  }
+
+  private getDeliveryRequirement(issue: Issue): WorkflowDeliveryRequirement | undefined {
+    return this.deliveryRequirementResolver?.(issue) ?? issue.deliveryRequirement;
+  }
 
   create(input: CreateIssueInput): Issue {
     const number = this.issueRepo.getNextNumber(input.projectId);
@@ -208,7 +217,7 @@ export class IssueService {
       throw new Error('Cannot archive: issue has a running agent. Force-stop it first.');
     }
 
-    const deliveryStatus = classifyMergeDelivery(issue);
+    const deliveryStatus = classifyMergeDelivery(issue, { deliveryRequirement: this.getDeliveryRequirement(issue) });
     const isFalseDone = deliveryStatus === 'done-not-merged';
 
     let warning: string | undefined;
@@ -276,7 +285,7 @@ export class IssueService {
     let count = 0;
     const skippedNumbers: number[] = [];
     for (const issue of completed) {
-      const deliveryStatus = classifyMergeDelivery(issue);
+      const deliveryStatus = classifyMergeDelivery(issue, { deliveryRequirement: this.getDeliveryRequirement(issue) });
       if (deliveryStatus === 'done-not-merged') {
         skippedNumbers.push(issue.number);
         log.info('Skipped false-done issue in batch archive', { issueNumber: issue.number, mergeState: issue.mergeState ?? 'null' });

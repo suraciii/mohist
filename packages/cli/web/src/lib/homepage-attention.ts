@@ -1,5 +1,6 @@
 import type { Issue, AgentStatus } from './types'
 import { IssueStatus, Stage } from './types'
+import { isFalseDoneIssue } from './delivery-requirement'
 
 export interface AttentionItem {
   issueNumber: number
@@ -45,6 +46,14 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Integration failed',
+        detail: issue.title,
+      })
+    } else if (isFalseDoneIssue(issue)) {
+      seen.add(issue.id)
+      items.push({
+        issueNumber: issue.number,
+        issueId: issue.id,
+        label: 'Not merged',
         detail: issue.title,
       })
     } else if (issue.status === IssueStatus.Interrupted) {
