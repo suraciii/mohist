@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isFalseDoneIssue, issueFalseDoneApplicable, issueRequiresLocalMerge } from './delivery-requirement'
+import { isCompletedWithoutLocalMergeRequirement, isFalseDoneIssue, issueFalseDoneApplicable, issueRequiresLocalMerge } from './delivery-requirement'
 import { IssueStatus, Stage, type Issue } from './types'
 
 function makeIssue(overrides: Partial<Issue>): Issue {
@@ -38,6 +38,7 @@ describe('delivery requirement helpers', () => {
     })
 
     expect(isFalseDoneIssue(issue)).toBe(false)
+    expect(isCompletedWithoutLocalMergeRequirement(issue)).toBe(true)
   })
 
   it('flags done workflows when the definition requires local merge evidence', () => {

@@ -34,14 +34,14 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
     }
     return 'running'
   }
+  if (isFalseDoneIssue(issue)) {
+    return 'false-done'
+  }
   if (issue.status === IssueStatus.Blocked) {
     return 'closed'
   }
   if (issue.status === IssueStatus.Closed) {
     return 'closed'
-  }
-  if (isFalseDoneIssue(issue)) {
-    return 'false-done'
   }
   if (issue.approvalState?.status === 'awaiting') {
     return 'approval'
@@ -131,7 +131,8 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     (a) => a.issueNumber === issue.number,
   ) ?? false
   const badge = getBadgeType(issue, isAgentRunning)
-  const isBlocked = issue.status === IssueStatus.Blocked
+  const isFalseDone = isFalseDoneIssue(issue)
+  const isBlocked = issue.status === IssueStatus.Blocked && !isFalseDone
   const isClosed = issue.status === IssueStatus.Closed
   const isInterrupted = issue.status === IssueStatus.Interrupted
 
