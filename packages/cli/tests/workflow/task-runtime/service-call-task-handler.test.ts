@@ -101,6 +101,7 @@ describe('ServiceCallTaskHandler', () => {
       title: 'Merge to main',
       status: 'failed',
       attempts: 1,
+      reason: 'Merge conflict',
       output: expect.objectContaining({
         kind: 'service-call-task',
         stage: 'integrate',

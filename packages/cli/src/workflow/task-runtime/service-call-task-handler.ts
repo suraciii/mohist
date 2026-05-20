@@ -85,6 +85,7 @@ export function createServiceCallTaskHandler(): (
         artifacts: [],
         attempts: attempt,
         duration,
+        reason: error,
         output: {
           kind: 'service-call-task',
           stage,
