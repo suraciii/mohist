@@ -949,7 +949,6 @@ export function IssueDetailPage() {
                 mergeState={issue.mergeState}
                 stage={issue.stage}
                 status={issue.status}
-                deliveryRequirement={issue.deliveryRequirement}
               />
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (

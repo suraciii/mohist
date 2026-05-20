@@ -582,19 +582,13 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(within(summary as HTMLElement).getByText(/#209/i)).toBeInTheDocument()
     })
 
-    it('does not render attention summary item for completed workflow that does not require local merge state', () => {
+    it('does not render attention summary item for completed workflow without local merge state', () => {
       const doneUnmergedIssue = makeIssue({
         number: 42,
         title: 'Completed but not merged',
         stage: Stage.Done,
         status: IssueStatus.Completed,
         mergeState: 'conflict',
-        deliveryRequirement: {
-          mode: 'handoff',
-          requiresLocalMerge: false,
-          requiresRemoteMerge: false,
-          falseDoneApplicable: false,
-        },
       })
       const queryClient = new QueryClient()
 
@@ -610,7 +604,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(summary).toBeNull()
     })
 
-    it('renders Not merged label for done issue with null mergeState when local merge is required', () => {
+    it('does not render attention summary item for done issue with null mergeState', () => {
       const doneUnmergedIssue = makeIssue({
         number: 43,
         title: 'Completed but missing merge result',
@@ -629,25 +623,17 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       )
 
       const summary = document.querySelector('.bg-amber-50')
-      expect(summary).toBeTruthy()
-      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
-      expect(within(summary as HTMLElement).getByText(/Not merged/i)).toBeInTheDocument()
+      expect(summary).toBeNull()
     })
 
-    it('renders Not merged instead of generic blocked overlay for false-done blocked issue', () => {
+    it('renders generic blocked overlay for blocked done issue', () => {
       const doneUnmergedIssue = makeIssue({
         number: 44,
-        title: 'Blocked false done',
+        title: 'Blocked completed issue',
         stage: Stage.Done,
         status: IssueStatus.Blocked,
         mergeState: 'conflict',
-        blockedReason: 'False-done anomaly detected',
-        deliveryRequirement: {
-          mode: 'local-merge',
-          requiresLocalMerge: true,
-          requiresRemoteMerge: false,
-          falseDoneApplicable: true,
-        },
+        blockedReason: 'Manual intervention required',
       })
       const queryClient = new QueryClient()
 
@@ -659,8 +645,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         </QueryClientProvider>,
       )
 
-      expect(screen.getByText(/Not merged/i)).toBeInTheDocument()
-      expect(screen.queryByText(/Needs Action/i)).not.toBeInTheDocument()
+      expect(screen.getAllByText(/Needs Action/i).length).toBeGreaterThan(0)
+      expect(screen.queryByText(/Not merged/i)).not.toBeInTheDocument()
     })
 
     it('renders attention summary item with Needs action label for blocked issue', () => {

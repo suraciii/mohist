@@ -6,7 +6,6 @@ import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
-import { isFalseDoneIssue } from '../lib/delivery-requirement'
 
 export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check])
 
@@ -14,7 +13,6 @@ const MERGE_STATE_LABELS: Record<string, string> = {
   '': 'Not merged',
   'build-failed': 'Failed',
   conflict: 'Conflict',
-  'done-not-merged': 'Not merged',
   pending: 'Pending',
   merging: 'Merging',
 }
@@ -25,7 +23,7 @@ interface Props {
   showArchiveButton?: boolean
 }
 
-type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'false-done' | 'waiting' | 'drift' | null
+type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'waiting' | 'drift' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (issue.stage === Stage.Integrate) {
@@ -33,9 +31,6 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
       return 'closed'
     }
     return 'running'
-  }
-  if (isFalseDoneIssue(issue)) {
-    return 'false-done'
   }
   if (issue.status === IssueStatus.Blocked) {
     return 'closed'
@@ -82,14 +77,6 @@ function Badge({
       </span>
     )
   }
-  if (type === 'false-done') {
-    const label = MERGE_STATE_LABELS[mergeState ?? ''] ?? 'Not merged'
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-white bg-red-500 px-1.5 py-0.5 rounded">
-        {label}
-      </span>
-    )
-  }
   if (type === 'running') {
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
@@ -131,8 +118,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     (a) => a.issueNumber === issue.number,
   ) ?? false
   const badge = getBadgeType(issue, isAgentRunning)
-  const isFalseDone = isFalseDoneIssue(issue)
-  const isBlocked = issue.status === IssueStatus.Blocked && !isFalseDone
+  const isBlocked = issue.status === IssueStatus.Blocked
   const isClosed = issue.status === IssueStatus.Closed
   const isInterrupted = issue.status === IssueStatus.Interrupted
 

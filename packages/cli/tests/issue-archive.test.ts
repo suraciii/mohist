@@ -540,45 +540,26 @@ describe('IssueService archive', () => {
       const result = await svc.archiveAllCompleted(projectId);
 
       expect(result.count).toBe(1);
+      expect(result.skipped).toBe(1);
+      expect(result.skippedNumbers).toEqual([issue2.number]);
     });
 
-    it('should skip false-done issues (done/completed + mergeState null) and report skipped', async () => {
-      const issue1 = issueRepo.create({ number: 1, projectId, title: 'False Done' });
+    it('should archive done/completed issues without merge evidence', async () => {
+      const issue1 = issueRepo.create({ number: 1, projectId, title: 'Done without merge' });
       issueRepo.updateStage(issue1.id, Stage.Done);
       issueRepo.updateStatus(issue1.id, IssueStatus.Completed);
-      // mergeState is null by default (not merged)
       const issue2 = issueRepo.create({ number: 2, projectId, title: 'Really Done' });
       issueRepo.updateStage(issue2.id, Stage.Done);
       issueRepo.setMergeState(issue2.id, MergeState.Merged);
 
       const result = await service.archiveAllCompleted(projectId);
 
-      expect(result.count).toBe(1);
-      expect(result.skipped).toBe(1);
-      expect(result.skippedNumbers).toContain(1);
-      expect(result.message).toContain('Skipped 1 false-done issue');
-    });
-
-    it('should archive completed issues without local merge when the workflow does not require it', async () => {
-      const issue = issueRepo.create({ number: 1, projectId, title: 'PR Handoff Done' });
-      issueRepo.updateStage(issue.id, Stage.Done);
-      issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-      service.setDeliveryRequirementResolver(() => ({
-        mode: 'handoff',
-        requiresLocalMerge: false,
-        requiresRemoteMerge: false,
-        falseDoneApplicable: false,
-      }));
-
-      const result = await service.archiveAllCompleted(projectId);
-
-      expect(result.count).toBe(1);
+      expect(result.count).toBe(2);
       expect(result.skipped).toBe(0);
-      expect(result.skippedNumbers).toEqual([]);
     });
 
-    it('should skip false-done issues (done/completed + non-merged mergeState) and report skipped', async () => {
-      const issue1 = issueRepo.create({ number: 1, projectId, title: 'False Done Conflict' });
+    it('should archive done/completed issues with non-merged merge state', async () => {
+      const issue1 = issueRepo.create({ number: 1, projectId, title: 'Done with conflict state' });
       issueRepo.updateStage(issue1.id, Stage.Done);
       issueRepo.updateStatus(issue1.id, IssueStatus.Completed);
       issueRepo.setMergeState(issue1.id, MergeState.Conflict);
@@ -588,15 +569,13 @@ describe('IssueService archive', () => {
 
       const result = await service.archiveAllCompleted(projectId);
 
-      expect(result.count).toBe(1);
-      expect(result.skipped).toBe(1);
-      expect(result.skippedNumbers).toContain(1);
-      expect(result.message).toContain('Skipped 1 false-done issue');
+      expect(result.count).toBe(2);
+      expect(result.skipped).toBe(0);
     });
   });
 });
 
-describe('IssueService archive — false-done guard', () => {
+describe('IssueService archive — completed workflow semantics', () => {
   let db: DatabaseManager;
   let issueRepo: IssueRepo;
   let commentRepo: CommentRepo;
@@ -621,22 +600,19 @@ describe('IssueService archive — false-done guard', () => {
     db.close();
   });
 
-  it('should return falseDoneWarning when archiving done/completed + mergeState null issue', async () => {
-    const issue = issueRepo.create({ number: 1, projectId, title: 'False Done' });
+  it('archives done/completed + mergeState null without merge warning', async () => {
+    const issue = issueRepo.create({ number: 1, projectId, title: 'Done without merge' });
     issueRepo.updateStage(issue.id, Stage.Done);
     issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-    // mergeState is null by default
 
     const result = await service.archive(projectId, 1);
 
     expect(result.issue.archivedAt).toBeDefined();
-    expect(result.falseDoneWarning).toBe(true);
-    expect(result.warning).toContain('not been merged');
-    expect(result.warning).toContain('mergeState: null');
+    expect(result.warning).toBeUndefined();
   });
 
-  it('should return falseDoneWarning when archiving done/completed + mergeState conflict issue', async () => {
-    const issue = issueRepo.create({ number: 1, projectId, title: 'False Done Conflict' });
+  it('archives done/completed + mergeState conflict without merge warning', async () => {
+    const issue = issueRepo.create({ number: 1, projectId, title: 'Done with conflict state' });
     issueRepo.updateStage(issue.id, Stage.Done);
     issueRepo.updateStatus(issue.id, IssueStatus.Completed);
     issueRepo.setMergeState(issue.id, MergeState.Conflict);
@@ -644,12 +620,10 @@ describe('IssueService archive — false-done guard', () => {
     const result = await service.archive(projectId, 1);
 
     expect(result.issue.archivedAt).toBeDefined();
-    expect(result.falseDoneWarning).toBe(true);
-    expect(result.warning).toContain('not been merged');
-    expect(result.warning).toContain('mergeState: conflict');
+    expect(result.warning).toBeUndefined();
   });
 
-  it('should NOT return falseDoneWarning when archiving truly merged issue', async () => {
+  it('archives truly merged issue without warning', async () => {
     const issue = issueRepo.create({ number: 1, projectId, title: 'Truly Merged' });
     issueRepo.updateStage(issue.id, Stage.Done);
     issueRepo.updateStatus(issue.id, IssueStatus.Completed);
@@ -658,38 +632,7 @@ describe('IssueService archive — false-done guard', () => {
     const result = await service.archive(projectId, 1);
 
     expect(result.issue.archivedAt).toBeDefined();
-    expect(result.falseDoneWarning).toBe(false);
     expect(result.warning).toBeUndefined();
-  });
-
-  it('should NOT return falseDoneWarning when workflow delivery does not require local merge', async () => {
-    const issue = issueRepo.create({ number: 1, projectId, title: 'PR Handoff Done' });
-    issueRepo.updateStage(issue.id, Stage.Done);
-    issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-    service.setDeliveryRequirementResolver(() => ({
-      mode: 'handoff',
-      requiresLocalMerge: false,
-      requiresRemoteMerge: false,
-      falseDoneApplicable: false,
-    }));
-
-    const result = await service.archive(projectId, 1);
-
-    expect(result.issue.archivedAt).toBeDefined();
-    expect(result.falseDoneWarning).toBe(false);
-    expect(result.warning).toBeUndefined();
-  });
-
-  it('should still archive false-done issue but with warning (not blocking)', async () => {
-    const issue = issueRepo.create({ number: 1, projectId, title: 'False Done' });
-    issueRepo.updateStage(issue.id, Stage.Done);
-    issueRepo.updateStatus(issue.id, IssueStatus.Completed);
-
-    // Should not throw, should archive with warning
-    const result = await service.archive(projectId, 1);
-
-    expect(result.issue.archivedAt).toBeDefined();
-    expect(result.falseDoneWarning).toBe(true);
   });
 });
 

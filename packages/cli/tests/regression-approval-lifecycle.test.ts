@@ -222,13 +222,13 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
     });
   });
 
-  describe('AC-3: done/completed + mergeState null is classified as done-not-merged', () => {
+  describe('AC-3: done/completed + mergeState null is classified as not-merged', () => {
     function expectAnomaly(issue: Issue) {
       const status = classifyMergeDelivery(issue);
-      expect(status).toBe('done-not-merged');
+      expect(status).toBe('not-merged');
     }
 
-    it('stage=done + status=completed + mergeState=null is done-not-merged', () => {
+    it('stage=done + status=completed + mergeState=null is not-merged', () => {
       expectAnomaly(makeIssue({
         stage: Stage.Done,
         status: IssueStatus.Completed,
@@ -236,7 +236,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       }));
     });
 
-    it('stage=done + status=completed + mergeState=Conflict is done-not-merged', () => {
+    it('stage=done + status=completed + mergeState=Conflict is not-merged', () => {
       expectAnomaly(makeIssue({
         stage: Stage.Done,
         status: IssueStatus.Completed,
@@ -244,7 +244,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       }));
     });
 
-    it('stage=done + status=completed + mergeState=Blocked is done-not-merged', () => {
+    it('stage=done + status=completed + mergeState=Blocked is not-merged', () => {
       expectAnomaly(makeIssue({
         stage: Stage.Done,
         status: IssueStatus.Completed,
@@ -252,7 +252,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       }));
     });
 
-    it('stage=done + status=completed + mergeState=Pending (not yet merged) is done-not-merged', () => {
+    it('stage=done + status=completed + mergeState=Pending (not yet merged) is not-merged', () => {
       expectAnomaly(makeIssue({
         stage: Stage.Done,
         status: IssueStatus.Completed,
@@ -260,7 +260,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       }));
     });
 
-    it('stage=check + status=completed + mergeState=null is done-not-merged', () => {
+    it('stage=check + status=completed + mergeState=null is not-merged', () => {
       expectAnomaly(makeIssue({
         stage: Stage.Check,
         status: IssueStatus.Completed,
@@ -268,7 +268,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       }));
     });
 
-    it('stage=done + status=completed + mergeState=Merged is NOT done-not-merged', () => {
+    it('stage=done + status=completed + mergeState=Merged is NOT not-merged', () => {
       const issue = makeIssue({
         stage: Stage.Done,
         status: IssueStatus.Completed,
@@ -277,7 +277,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       expect(classifyMergeDelivery(issue)).toBe('merged');
     });
 
-    it('stage=check + mergeState=merged (async) is merged (not done-not-merged)', () => {
+    it('stage=check + mergeState=merged (async) is merged (not not-merged)', () => {
       const issue = makeIssue({
         stage: Stage.Check,
         status: IssueStatus.Active,
@@ -287,8 +287,8 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
     });
   });
 
-  describe('AC-4: archive-all-completed skips false-done issues', () => {
-    it('archiveAllCompleted skips stage=done + mergeState=null', async () => {
+  describe('AC-4: archive-all-completed archives completed workflow issues', () => {
+    it('archiveAllCompleted archives stage=done + mergeState=null', async () => {
       const { DatabaseManager } = await import('../src/db/database');
       const { initializeDatabase } = await import('../src/db/migrations');
       const { IssueRepo } = await import('../src/db/issue-repo');
@@ -305,9 +305,9 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
         const commentRepo = new CommentRepo(db);
         const service = new IssueService(issueRepo, commentRepo, projectRepo);
 
-        const falseDone = issueRepo.create({ number: 1, projectId: project.id, title: 'False Done' });
-        issueRepo.updateStage(falseDone.id, Stage.Done);
-        issueRepo.updateStatus(falseDone.id, IssueStatus.Completed);
+        const notMerged = issueRepo.create({ number: 1, projectId: project.id, title: 'Not Merged' });
+        issueRepo.updateStage(notMerged.id, Stage.Done);
+        issueRepo.updateStatus(notMerged.id, IssueStatus.Completed);
 
         const trulyDone = issueRepo.create({ number: 2, projectId: project.id, title: 'Truly Done' });
         issueRepo.updateStage(trulyDone.id, Stage.Done);
@@ -315,16 +315,14 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
         const result = await service.archiveAllCompleted(project.id);
 
-        expect(result.count).toBe(1);
-        expect(result.skipped).toBe(1);
-        expect(result.skippedNumbers).toContain(1);
-        expect(result.message).toContain('false-done');
+        expect(result.count).toBe(2);
+        expect(result.skipped).toBe(0);
       } finally {
         db.close();
       }
     });
 
-    it('archiveAllCompleted skips stage=done + mergeState=Conflict', async () => {
+    it('archiveAllCompleted archives stage=done + mergeState=Conflict', async () => {
       const { DatabaseManager } = await import('../src/db/database');
       const { initializeDatabase } = await import('../src/db/migrations');
       const { IssueRepo } = await import('../src/db/issue-repo');
@@ -341,10 +339,10 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
         const commentRepo = new CommentRepo(db);
         const service = new IssueService(issueRepo, commentRepo, projectRepo);
 
-        const falseDone = issueRepo.create({ number: 1, projectId: project.id, title: 'False Done Conflict' });
-        issueRepo.updateStage(falseDone.id, Stage.Done);
-        issueRepo.updateStatus(falseDone.id, IssueStatus.Completed);
-        issueRepo.setMergeState(falseDone.id, MergeState.Conflict);
+        const notMerged = issueRepo.create({ number: 1, projectId: project.id, title: 'Not Merged Conflict' });
+        issueRepo.updateStage(notMerged.id, Stage.Done);
+        issueRepo.updateStatus(notMerged.id, IssueStatus.Completed);
+        issueRepo.setMergeState(notMerged.id, MergeState.Conflict);
 
         const trulyDone = issueRepo.create({ number: 2, projectId: project.id, title: 'Truly Done' });
         issueRepo.updateStage(trulyDone.id, Stage.Done);
@@ -352,9 +350,8 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
         const result = await service.archiveAllCompleted(project.id);
 
-        expect(result.count).toBe(1);
-        expect(result.skipped).toBe(1);
-        expect(result.skippedNumbers).toContain(1);
+        expect(result.count).toBe(2);
+        expect(result.skipped).toBe(0);
       } finally {
         db.close();
       }
@@ -379,14 +376,14 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
       expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
 
-    it('done/completed + null mergeState returns done-not-merged', () => {
+    it('done/completed + null mergeState returns not-merged', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('completed status (no stage=done) + null mergeState returns done-not-merged', () => {
+    it('completed status (no stage=done) + null mergeState returns not-merged', () => {
       const issue = makeIssue({ stage: Stage.Check, status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
     it('active merge states are correctly classified', () => {

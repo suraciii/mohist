@@ -155,40 +155,20 @@ describe('classifyMergeDelivery', () => {
 
   });
 
-  describe('done/completed + null as anomaly', () => {
-    it('returns done-not-merged for stage=done + null', () => {
+  describe('done/completed + merge state', () => {
+    it('returns not-merged for stage=done + null', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('returns done-not-merged for status=completed + null', () => {
+    it('returns not-merged for status=completed + null', () => {
       const issue = makeIssue({ status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('returns done-not-merged for stage=done + non-merged mergeState', () => {
+    it('returns not-merged for stage=done + non-merged mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.Conflict });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
-    });
-
-    it('does not require merge evidence when the workflow definition has no local merge delivery', () => {
-      const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue, { requireLocalMerge: false })).toBe('merged');
-    });
-
-    it('uses the issue delivery requirement when classifying a completed issue', () => {
-      const issue = makeIssue({
-        stage: Stage.Done,
-        status: IssueStatus.Completed,
-        mergeState: null,
-        deliveryRequirement: {
-          mode: 'handoff',
-          requiresLocalMerge: false,
-          requiresRemoteMerge: false,
-          falseDoneApplicable: false,
-        },
-      });
-      expect(classifyMergeDelivery(issue)).toBe('merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
   });
 
@@ -200,9 +180,9 @@ describe('classifyMergeDelivery', () => {
   });
 
   describe('unknown state', () => {
-    it('returns done-not-merged for done + null mergeState', () => {
+    it('returns not-merged for done + null mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Active, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
     it('returns not-ready for backlog stage + null', () => {

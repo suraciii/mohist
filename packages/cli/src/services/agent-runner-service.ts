@@ -26,13 +26,13 @@ import type { WorkflowRunService } from './workflow-run-service';
 import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
-import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
+import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoader, createDefaultStaticTaskLoader } from '../workflow/task-runtime';
 import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-session-task-handler';
 import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
 import { createCheckRegistry } from '../workflow/checks/check-registry';
-import { createWorkflowTemplateContextFromValues, projectWorkflowDeliveryRequirement, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../workflow/model';
+import { createWorkflowTemplateContextFromValues, renderWorkflowTemplate } from '../workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definitions/default-workflow';
 import { AiReviewCheck } from '../workflow/checks/ai-review-check';
 import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
@@ -75,7 +75,6 @@ export interface GlobalQueueStatus {
 export interface RecoverableIssue {
   issueNumber: number;
   stage: string;
-  falseDone?: boolean;
 }
 
 export interface BlockedIssueInfo {
@@ -316,20 +315,7 @@ export class AgentRunnerService {
     const activeIssues = this.issueRepo.findAll({ status: IssueStatus.Active });
     return activeIssues
       .filter(issue => issue.stage !== Stage.Backlog)
-      .map(issue => {
-        const deliveryStatus = this.classifyIssueDelivery(issue);
-        const falseDone = deliveryStatus === 'done-not-merged';
-        return { issueNumber: issue.number, stage: issue.stage, falseDone };
-      });
-  }
-
-  private classifyIssueDelivery(issue: Issue): ReturnType<typeof classifyMergeDelivery> {
-    return classifyMergeDelivery(issue, { deliveryRequirement: this.getWorkflowDeliveryRequirement(issue) });
-  }
-
-  private getWorkflowDeliveryRequirement(issue: Issue) {
-    const run = this.workflowRunService?.getLatestRunForIssue(issue.id);
-    return projectWorkflowDeliveryRequirement(workflowDefinitionSnapshotFromUnknown(run?.workflowDefinition));
+      .map(issue => ({ issueNumber: issue.number, stage: issue.stage }));
   }
 
   recoverFromQueue(): void {
@@ -502,24 +488,8 @@ export class AgentRunnerService {
         return;
       }
 
-      const deliveryStatus = this.classifyIssueDelivery(issue);
-      const isFalseDone = deliveryStatus === 'done-not-merged';
-
-      if (isFalseDone) {
-        const falseDoneReason = `False-done anomaly detected: issue is marked done/completed but mergeState is ${issue.mergeState ?? 'null'}. Merge has not been confirmed.`;
-        this.issueRepo.blockIssue(issue.id, falseDoneReason);
-        this.cleanupOrphanedCoderSessions(issue.id, issue.number);
-        log.warn('False-done issue detected during recovery', {
-          issueNumber: issue.number,
-          mergeState: issue.mergeState ?? 'null',
-          action: 'status=blocked, false-done anomaly',
-        });
-        this.emitBlocked(issue, falseDoneReason, issue.retryCount ?? 0);
-        return;
-      }
-
-      if ((issue.stage === Stage.Done || issue.status === IssueStatus.Completed) && deliveryStatus === 'merged') {
-        log.info('Completed issue with delivery evidence needs no recovery action', {
+      if (issue.stage === Stage.Done || issue.status === IssueStatus.Completed) {
+        log.info('Completed issue needs no recovery action', {
           issueNumber: issue.number,
           action: 'terminal issue preserved',
         });
@@ -554,23 +524,6 @@ export class AgentRunnerService {
       log.error('Failed to recover orphaned issue', {
         issueNumber: issue.number,
         error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  private emitBlocked(issue: Issue, reason: string, retryCount: number): void {
-    try {
-      this.eventBus.emit('agent_blocked', {
-        issueId: issue.id,
-        projectId: issue.projectId,
-        issueNumber: issue.number,
-        blockedReason: reason,
-        retryCount,
-      });
-    } catch (emitErr) {
-      log.error('Failed to emit agent_blocked event', {
-        issueNumber: issue.number,
-        error: emitErr instanceof Error ? emitErr.message : String(emitErr),
       });
     }
   }

@@ -73,15 +73,6 @@ export interface ApprovalState {
   respondedAt?: string;
 }
 
-export type WorkflowDeliveryMode = 'local-merge' | 'remote-merge' | 'handoff' | 'none';
-
-export interface WorkflowDeliveryRequirement {
-  mode: WorkflowDeliveryMode;
-  requiresLocalMerge: boolean;
-  requiresRemoteMerge: boolean;
-  falseDoneApplicable: boolean;
-}
-
 export interface Issue {
   id: string;
   number: number;
@@ -102,7 +93,6 @@ export interface Issue {
   model?: string;
   stageModels?: Record<string, string>;
   archivedAt?: string;
-  deliveryRequirement?: WorkflowDeliveryRequirement;
 }
 
 export interface Project {

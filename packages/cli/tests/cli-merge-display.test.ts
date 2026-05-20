@@ -62,7 +62,7 @@ describe('CLI merge display formatting', () => {
 
     it('returns not-merged when stage=done but mergeState not merged', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.Conflict });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
     it('returns not-ready for backlog + null mergeState', () => {
@@ -85,9 +85,9 @@ describe('CLI merge display formatting', () => {
       expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
 
-    it('returns done-not-merged for done + null mergeState', () => {
+    it('returns not-merged for done + null mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
     it('returns integrating for integrate + null mergeState', () => {
@@ -95,9 +95,9 @@ describe('CLI merge display formatting', () => {
       expect(classifyMergeDelivery(issue)).toBe('integrating');
     });
 
-    it('returns done-not-merged for completed status + null mergeState', () => {
+    it('returns not-merged for completed status + null mergeState', () => {
       const issue = makeIssue({ status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
     it('returns merged even if stage not done yet', () => {
@@ -106,38 +106,38 @@ describe('CLI merge display formatting', () => {
     });
   });
 
-  describe('false-done detection', () => {
-    it('detects false-done: stage=done + null mergeState', () => {
+  describe('not-merged detection', () => {
+    it('detects not-merged: stage=done + null mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('detects false-done: stage=done + conflict mergeState', () => {
+    it('detects not-merged: stage=done + conflict mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.Conflict });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('detects false-done: stage=done + blocked mergeState', () => {
+    it('detects not-merged: stage=done + blocked mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.Blocked });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('detects false-done: stage=done + build-failed mergeState', () => {
+    it('detects not-merged: stage=done + build-failed mergeState', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.BuildFailed });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('detects false-done: status=completed + null mergeState even without stage=done', () => {
+    it('detects not-merged: status=completed + null mergeState even without stage=done', () => {
       const issue = makeIssue({ status: IssueStatus.Completed, mergeState: null });
-      expect(classifyMergeDelivery(issue)).toBe('done-not-merged');
+      expect(classifyMergeDelivery(issue)).toBe('not-merged');
     });
 
-    it('does not flag false-done when mergeState=merged', () => {
+    it('does not flag not-merged when mergeState=merged', () => {
       const issue = makeIssue({ stage: Stage.Done, status: IssueStatus.Completed, mergeState: MergeState.Merged });
       expect(classifyMergeDelivery(issue)).toBe('merged');
     });
 
-    it('does not flag false-done when stage not done', () => {
+    it('does not flag not-merged when stage not done', () => {
       const issue = makeIssue({ stage: Stage.Check, status: IssueStatus.Active, mergeState: null });
       expect(classifyMergeDelivery(issue)).toBe('not-ready');
     });
