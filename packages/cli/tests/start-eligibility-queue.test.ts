@@ -182,10 +182,9 @@ describe('Start Eligibility Queue Execution', () => {
       const service = createService(1, wtManager);
       const result = service.enqueue(issue201.id, 'start-pipeline');
 
-      await new Promise((r) => setTimeout(r, 50));
-
-      const dbRecord = taskQueueRepo.findById(result.taskId);
-      expect(dbRecord!.status).toBe('running');
+      const dbRecord = await waitForTask(result.taskId);
+      expect(dbRecord!.result ?? '').not.toContain('waiting for prerequisite');
+      expect(dbRecord!.result ?? '').not.toContain('skipped');
     });
 
     it('should skip with lifecycle reason when issue has no prerequisites but is not startable', async () => {

@@ -1,6 +1,6 @@
 import { Stage, type Issue } from '../types';
 import type { StageRunner } from './stage-runner';
-import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime, StageRunResult, AgentSessionRegistry } from './stage-context';
+import type { StageContext, IssueRepo, ChangeArtifactsManager, WorktreeManager, ProjectRepo, WorkflowApplicationRuntime, AgentSessionRegistry } from './stage-context';
 import { InMemoryAgentSessionRegistry } from './stage-context';
 import type { CheckpointManager } from './checkpoint-manager';
 import type { EventBus } from '../services/event-bus';
@@ -15,7 +15,6 @@ import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
 import type { StageCompletionGuard, TaskRunSnapshot, WorkflowWork } from './domain';
-import { GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE } from './generic-stage-runner';
 
 export interface PipelineResult {
   completed: boolean;
@@ -442,57 +441,14 @@ export class WorkflowEngine {
       return { completed: false, stage: issue.stage, message: 'Agent stopped by user' };
     }
 
-    if (this.workflowApplicationService) {
-      return this.runAggregateWorkflow(issue, acpOptions);
+    if (!this.workflowApplicationService) {
+      return {
+        completed: false,
+        stage: issue.stage,
+        message: 'WorkflowApplicationService is required for workflow execution',
+      };
     }
 
-    let currentIssue = issue;
-    const stageVisitCounts = new Map<Stage, number>();
-    const MAX_STAGE_VISITS = 5;
-
-    while (currentIssue.stage !== Stage.Done) {
-      if (this.signal?.aborted) {
-        return { completed: false, stage: currentIssue.stage, message: 'Agent stopped by user' };
-      }
-
-      const visitCount = (stageVisitCounts.get(currentIssue.stage) ?? 0) + 1;
-      stageVisitCounts.set(currentIssue.stage, visitCount);
-
-      if (visitCount > MAX_STAGE_VISITS) {
-        return {
-          completed: false,
-          stage: currentIssue.stage,
-          message: `Stage ${currentIssue.stage} reached max visit limit (${MAX_STAGE_VISITS}) — possible escalation loop`,
-        };
-      }
-
-      const ctx = this.buildContext(currentIssue, acpOptions);
-      const runners = this.runners.filter(r => r.canHandle(currentIssue.stage));
-      if (runners.length === 0) {
-        return { completed: false, stage: currentIssue.stage, message: `Pipeline cannot handle stage: ${currentIssue.stage}` };
-      }
-
-      let result: StageRunResult | null = null;
-      for (const runner of runners) {
-        const stageResult = await runner.run(ctx);
-        if (stageResult.message === GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE) {
-          continue;
-        }
-        result = stageResult;
-        break;
-      }
-      if (!result) {
-        return { completed: false, stage: currentIssue.stage, message: `Pipeline cannot handle stage without aggregate workflow service: ${currentIssue.stage}` };
-      }
-
-      if (result.success) {
-        return { completed: false, stage: currentIssue.stage, message: 'Stage completed but aggregate workflow service is unavailable' };
-      } else {
-        return { completed: false, stage: currentIssue.stage, message: result.message };
-      }
-    }
-    this.checkpointManager.deleteAll(currentIssue.number);
-
-    return { completed: true, stage: Stage.Done, message: 'Pipeline completed' };
+    return this.runAggregateWorkflow(issue, acpOptions);
   }
 }

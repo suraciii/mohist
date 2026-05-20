@@ -2626,7 +2626,7 @@ describe('StageRunner migration regression coverage', () => {
       expect(genericRunner.canHandle(Stage.Integrate)).toBe(false);
     });
 
-    it('WorkflowEngine non-aggregate path falls back from generic runner to legacy rollback runner', async () => {
+    it('WorkflowEngine refuses to execute workflow without aggregate workflow service', async () => {
       const genericRunner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
         taskHandlerRegistry: createBasicTaskHandlerRegistry(),
@@ -2659,8 +2659,12 @@ describe('StageRunner migration regression coverage', () => {
 
       const result = await engine.run(issue, { cwd: tmpDir } as any);
 
-      expect(legacyRunner.run).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({ completed: false, stage: Stage.Plan, message: 'Stage completed but aggregate workflow service is unavailable' });
+      expect(legacyRunner.run).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        completed: false,
+        stage: Stage.Plan,
+        message: 'WorkflowApplicationService is required for workflow execution',
+      });
     });
 
     it('default check registry names match declared health checks', async () => {
