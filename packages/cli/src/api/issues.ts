@@ -32,7 +32,7 @@ import { WorkflowApplicationService } from '../services/workflow-application-ser
 import type { WorkflowRunService } from '../services/workflow-run-service';
 import { evaluateBaseDrift, type BaseDriftState, type CandidateEvidence, type WorkflowFacts, type RebaseTaskOutput, type BaseDriftInput } from '../services/base-drift-service';
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import { WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/domain';
+import { DEFAULT_STAGE_DEFINITIONS, WorkflowDomainError, workflowDefinitionSnapshotFromUnknown, type StageCompletionGuard, type CompiledStageDefinition, type WorkflowRunSnapshot } from '../workflow/domain';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
 import { getLatestCheckResult, type CheckResult } from '../workflow/stage-context';
@@ -196,29 +196,36 @@ const log = Log.create({ service: 'issue' });
 
 const execFileAsync = promisify(execFile);
 
-function getLatestCheckStageReviewPassed(issueId: string, stageExecutionRepo?: StageExecutionRepo): CheckResult | undefined {
+function getLatestStageExecutionCheckResult(
+  issueId: string,
+  stage: Stage,
+  checkName: string,
+  stageExecutionRepo?: StageExecutionRepo,
+): CheckResult | undefined {
   if (!stageExecutionRepo) return undefined;
 
-  const latestCheckExecution = stageExecutionRepo
+  const latestStageExecution = stageExecutionRepo
     .findByIssueId(issueId)
-    .filter(execution => execution.stage === Stage.Check)
+    .filter(execution => execution.stage === stage)
     .at(-1);
 
-  if (!latestCheckExecution) return undefined;
-  return getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'review-passed') ??
-    getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'ai-review');
+  if (!latestStageExecution) return undefined;
+  return getLatestCheckResult(latestStageExecution.checkResults as CheckResult[], checkName);
 }
 
-function getWorkflowRunCheckReviewPassed(issueId: string, workflowRunService?: WorkflowRunService): CheckResult | undefined {
-  const checkStage = workflowRunService
+function getWorkflowRunStageCheckResult(
+  issueId: string,
+  stage: Stage,
+  checkName: string,
+  workflowRunService?: WorkflowRunService,
+): CheckResult | undefined {
+  const stageRun = workflowRunService
     ?.getActiveRunForIssue(issueId)
     ?.stageRuns
-    .find(stageRun => stageRun.stage === Stage.Check);
-  if (!checkStage) return undefined;
+    .find(candidate => candidate.stage === stage);
+  if (!stageRun) return undefined;
 
-  const reviewPassed = checkStage.checks.find(check => check.checkName === 'review-passed');
-  const aiReview = checkStage.checks.find(check => check.checkName === 'ai-review');
-  const check = reviewPassed ?? aiReview;
+  const check = stageRun.checks.find(candidate => candidate.checkName === checkName);
   if (!check) return undefined;
 
   return {
@@ -235,58 +242,43 @@ function getWorkflowRunCheckReviewPassed(issueId: string, workflowRunService?: W
   };
 }
 
-function getWorkflowRunCheckHealthCheck(issueId: string, workflowRunService?: WorkflowRunService): CheckResult | undefined {
-  const checkStage = workflowRunService
-    ?.getActiveRunForIssue(issueId)
-    ?.stageRuns
-    .find(stageRun => stageRun.stage === Stage.Check);
-  if (!checkStage) return undefined;
+function getAuthoritativeStageCheckResult(
+  issueId: string,
+  stage: Stage,
+  checkName: string,
+  workflowRunService?: WorkflowRunService,
+  stageExecutionRepo?: StageExecutionRepo,
+): CheckResult | undefined {
+  return getWorkflowRunStageCheckResult(issueId, stage, checkName, workflowRunService) ??
+    getLatestStageExecutionCheckResult(issueId, stage, checkName, stageExecutionRepo);
+}
 
-  const healthCheck = checkStage.checks.find(check => check.checkName === 'health:check');
-  if (!healthCheck) return undefined;
+type ApprovalEvidenceContext = {
+  stage: Stage;
+  verdictCheckName: string;
+  verificationCheckName: string;
+  candidateCheckName: string;
+  candidateUses: string;
+};
 
+function getApprovalEvidenceContext(issue: Issue, workflowRunService?: WorkflowRunService): ApprovalEvidenceContext | null {
+  const approvalStage = issue.approvalState?.stage;
+  if (!approvalStage) return null;
+  const run = workflowRunService?.getActiveRunForIssue(issue.id) ?? workflowRunService?.getLatestRunForIssue(issue.id);
+  const snapshot = workflowDefinitionSnapshotFromUnknown(run?.workflowDefinition);
+  const stageDefinition = snapshot?.compiledStageDefinitions.find(definition => definition.stage === approvalStage)
+    ?? (approvalStage === Stage.Check ? DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check) : undefined);
+  const evidencePolicy = stageDefinition?.approvalEvidencePolicy;
+  if (!stageDefinition || !evidencePolicy) return null;
+
+  const candidateCheckDefinition = stageDefinition.checks.find(check => check.name === evidencePolicy.candidateCheckName);
   return {
-    name: healthCheck.checkName,
-    status: healthCheck.status === 'passed'
-      ? 'pass'
-      : healthCheck.status === 'pending' || healthCheck.status === 'running'
-        ? 'pending'
-        : healthCheck.status === 'error'
-          ? 'error'
-          : 'fail',
-    message: healthCheck.message ?? undefined,
-    output: healthCheck.output ?? undefined,
+    stage: approvalStage,
+    verdictCheckName: evidencePolicy.verdictCheckName,
+    verificationCheckName: evidencePolicy.verificationCheckName,
+    candidateCheckName: evidencePolicy.candidateCheckName,
+    candidateUses: candidateCheckDefinition?.uses ?? inferWorkflowCheckUse(evidencePolicy.candidateCheckName),
   };
-}
-
-function getLatestCheckStageHealthCheck(issueId: string, stageExecutionRepo?: StageExecutionRepo): CheckResult | undefined {
-  if (!stageExecutionRepo) return undefined;
-
-  const latestCheckExecution = stageExecutionRepo
-    .findByIssueId(issueId)
-    .filter(execution => execution.stage === Stage.Check)
-    .at(-1);
-
-  if (!latestCheckExecution) return undefined;
-  return getLatestCheckResult(latestCheckExecution.checkResults as CheckResult[], 'health:check');
-}
-
-function getAuthoritativeCheckReviewPassed(
-  issueId: string,
-  workflowRunService?: WorkflowRunService,
-  stageExecutionRepo?: StageExecutionRepo,
-): CheckResult | undefined {
-  return getWorkflowRunCheckReviewPassed(issueId, workflowRunService) ??
-    getLatestCheckStageReviewPassed(issueId, stageExecutionRepo);
-}
-
-function getAuthoritativeHealthCheck(
-  issueId: string,
-  workflowRunService?: WorkflowRunService,
-  stageExecutionRepo?: StageExecutionRepo,
-): CheckResult | undefined {
-  return getWorkflowRunCheckHealthCheck(issueId, workflowRunService) ??
-    getLatestCheckStageHealthCheck(issueId, stageExecutionRepo);
 }
 
 type IssueComparisonContext = {
@@ -2245,15 +2237,17 @@ export function createIssueRoutes(
 
       const approvalStage = issue.approvalState?.stage;
 
-      if (approvalStage === Stage.Check) {
-        const approvalOutput = issue.approvalState?.output as Record<string, unknown> | undefined;
-        const latestReviewPassed = getAuthoritativeCheckReviewPassed(issue.id, workflowRunService, stageExecutionRepo);
-        const latestReviewPassedOutput = latestReviewPassed?.output as Record<string, unknown> | undefined;
+      const evidenceContext = getApprovalEvidenceContext(issue, workflowRunService);
 
-        if (!latestReviewPassed || latestReviewPassed.status !== 'pass' || latestReviewPassedOutput?.verdict !== 'PASS') {
+      if (evidenceContext) {
+        const approvalOutput = issue.approvalState?.output as Record<string, unknown> | undefined;
+        const latestVerdictCheck = getAuthoritativeStageCheckResult(issue.id, evidenceContext.stage, evidenceContext.verdictCheckName, workflowRunService, stageExecutionRepo);
+        const latestVerdictOutput = latestVerdictCheck?.output as Record<string, unknown> | undefined;
+
+        if (!latestVerdictCheck || latestVerdictCheck.status !== 'pass' || latestVerdictOutput?.verdict !== 'PASS') {
           return c.json({
             success: false,
-            error: `Cannot approve: latest review verdict is '${latestReviewPassedOutput?.verdict ?? latestReviewPassed?.status ?? 'unknown'}', expected 'PASS'. Re-run checks or wait for completion.`
+            error: `Cannot approve: latest ${evidenceContext.verdictCheckName} verdict is '${latestVerdictOutput?.verdict ?? latestVerdictCheck?.status ?? 'unknown'}', expected 'PASS'. Re-run checks or wait for completion.`
           } satisfies ApiResponse, 409);
         }
 
@@ -2264,169 +2258,173 @@ export function createIssueRoutes(
           } satisfies ApiResponse, 409);
         }
 
-        if (typeof latestReviewPassedOutput?.snapshotSha !== 'string' || latestReviewPassedOutput.snapshotSha.length === 0) {
+        if (typeof latestVerdictOutput?.snapshotSha !== 'string' || latestVerdictOutput.snapshotSha.length === 0) {
           return c.json({
             success: false,
             error: 'Cannot approve: latest review snapshot is missing. Re-run checks to regenerate an authoritative review result.'
           } satisfies ApiResponse, 409);
         }
 
-        if (latestReviewPassedOutput.snapshotSha !== approvalOutput.snapshotSha) {
+        if (latestVerdictOutput.snapshotSha !== approvalOutput.snapshotSha) {
           return c.json({
             success: false,
             error: 'Cannot approve: approval snapshot does not match the latest authoritative review snapshot. The check state may have changed since approval was requested.'
           } satisfies ApiResponse, 409);
         }
 
+        const usesMergeReadyCandidate = evidenceContext.candidateUses === 'mohist/merge-ready';
         const mergeReadySnapshot = approvalOutput?.mergeReadySnapshot as Record<string, unknown> | undefined;
-        if (!mergeReadySnapshot) {
-          return c.json({
-            success: false,
-            error: 'Cannot approve: merge-ready snapshot is missing from approval output. Re-run checks to generate merge-ready evidence.'
-          } satisfies ApiResponse, 409);
-        }
+        const mergeReadyProject = projectService.getById(projectId);
 
-        const requiredFields: Array<{ key: string; type: string }> = [
-          { key: 'kind', type: 'string' },
-          { key: 'targetBranch', type: 'string' },
-          { key: 'strategy', type: 'string' },
-          { key: 'baseSha', type: 'string' },
-          { key: 'candidateHeadSha', type: 'string' },
-          { key: 'mergeBaseSha', type: 'string' },
-          { key: 'canMerge', type: 'boolean' },
-          { key: 'checkedAt', type: 'string' },
-        ];
-        for (const field of requiredFields) {
-          const value = mergeReadySnapshot[field.key];
-          if (value === undefined || value === null || (field.type === 'string' && typeof value !== 'string') || (field.type === 'boolean' && typeof value !== 'boolean')) {
+        if (usesMergeReadyCandidate) {
+          if (!mergeReadySnapshot) {
             return c.json({
               success: false,
-              error: `Cannot approve: merge-ready snapshot is malformed (missing or invalid field: ${field.key}). Re-run checks to regenerate merge-ready evidence.`
+              error: 'Cannot approve: merge-ready snapshot is missing from approval output. Re-run checks to generate merge-ready evidence.'
             } satisfies ApiResponse, 409);
           }
-        }
 
-        const conflictFiles = mergeReadySnapshot.conflictFiles;
-        if (!Array.isArray(conflictFiles) || conflictFiles.some(file => typeof file !== 'string')) {
-          return c.json({
-            success: false,
-            error: 'Cannot approve: merge-ready snapshot is malformed (missing or invalid field: conflictFiles). Re-run checks to regenerate merge-ready evidence.'
-          } satisfies ApiResponse, 409);
-        }
-
-        if (mergeReadySnapshot.canMerge !== true) {
-          return c.json({
-            success: false,
-            error: `Cannot approve: merge-ready snapshot reports canMerge=false. The candidate cannot be cleanly squash-merged. Re-run checks to verify merge readiness.`
-          } satisfies ApiResponse, 409);
-        }
-
-        const mergeReadyProject = projectService.getById(projectId);
-        if (!mergeReadyProject) {
-          return c.json({
-            success: false,
-            error: 'Cannot approve: project not found for merge-ready snapshot validation. Re-run Check after resolving project state.'
-          } satisfies ApiResponse, 409);
-        }
-
-        if (worktreeManager) {
-          const worktreePath = worktreeManager.getPath(mergeReadyProject.name, issue.number);
-          if (worktreePath) {
-            try {
-              const currentHead = await worktreeManager.getHeadSha(worktreePath);
-              const approvalSnapshotSha = approvalOutput.snapshotSha;
-
-              if (typeof approvalSnapshotSha === 'string' && currentHead !== approvalSnapshotSha) {
-                return c.json({
-                  success: false,
-                  error: 'Cannot approve: current HEAD does not match approval snapshot. The code may have changed since approval was requested.'
-                } satisfies ApiResponse, 409);
-              }
-
-              const isClean = await worktreeManager.isWorktreeClean(worktreePath);
-              if (!isClean) {
-                return c.json({
-                  success: false,
-                  error: 'Cannot approve: worktree has uncommitted changes. Commit or stash changes before approving.'
-                } satisfies ApiResponse, 409);
-              }
-
-            } catch (err) {
+          const requiredFields: Array<{ key: string; type: string }> = [
+            { key: 'kind', type: 'string' },
+            { key: 'targetBranch', type: 'string' },
+            { key: 'strategy', type: 'string' },
+            { key: 'baseSha', type: 'string' },
+            { key: 'candidateHeadSha', type: 'string' },
+            { key: 'mergeBaseSha', type: 'string' },
+            { key: 'canMerge', type: 'boolean' },
+            { key: 'checkedAt', type: 'string' },
+          ];
+          for (const field of requiredFields) {
+            const value = mergeReadySnapshot[field.key];
+            if (value === undefined || value === null || (field.type === 'string' && typeof value !== 'string') || (field.type === 'boolean' && typeof value !== 'boolean')) {
               return c.json({
                 success: false,
-                error: `Cannot approve: failed to validate current worktree state. Re-run Check after resolving repository state. ${err instanceof Error ? err.message : String(err)}`
+                error: `Cannot approve: merge-ready snapshot is malformed (missing or invalid field: ${field.key}). Re-run checks to regenerate merge-ready evidence.`
               } satisfies ApiResponse, 409);
             }
           }
-        }
 
-        try {
-          const baseBranch = mergeReadyProject.baseBranch;
-          const candidateBranch = `mo/issue-${issue.number}`;
-          const baseShaResult = await execFileAsync('git', ['rev-parse', baseBranch], { cwd: mergeReadyProject.path });
-          const candidateHeadResult = await execFileAsync('git', ['rev-parse', candidateBranch], { cwd: mergeReadyProject.path });
-          const mergeBaseResult = await execFileAsync('git', ['merge-base', baseBranch, candidateBranch], { cwd: mergeReadyProject.path });
-
-          const currentBaseSha = baseShaResult.stdout.trim();
-          const currentCandidateHeadSha = candidateHeadResult.stdout.trim();
-          const currentMergeBaseSha = mergeBaseResult.stdout.trim();
-
-          const snapshotBaseSha = String(mergeReadySnapshot.baseSha ?? '');
-          const snapshotCandidateHeadSha = String(mergeReadySnapshot.candidateHeadSha ?? '');
-          const snapshotMergeBaseSha = String(mergeReadySnapshot.mergeBaseSha ?? '');
-          const snapshotTargetBranch = String(mergeReadySnapshot.targetBranch ?? '');
-
-          if (snapshotBaseSha && snapshotBaseSha !== currentBaseSha) {
+          const conflictFiles = mergeReadySnapshot.conflictFiles;
+          if (!Array.isArray(conflictFiles) || conflictFiles.some(file => typeof file !== 'string')) {
             return c.json({
               success: false,
-              error: `Cannot approve: merge-ready snapshot base SHA (${snapshotBaseSha}) does not match current base SHA (${currentBaseSha}). The base branch has changed since merge-ready passed. Re-run checks.`
+              error: 'Cannot approve: merge-ready snapshot is malformed (missing or invalid field: conflictFiles). Re-run checks to regenerate merge-ready evidence.'
             } satisfies ApiResponse, 409);
           }
 
-          if (snapshotCandidateHeadSha && snapshotCandidateHeadSha !== currentCandidateHeadSha) {
+          if (mergeReadySnapshot.canMerge !== true) {
             return c.json({
               success: false,
-              error: `Cannot approve: merge-ready snapshot candidate head SHA (${snapshotCandidateHeadSha}) does not match current candidate head SHA (${currentCandidateHeadSha}). The issue branch has changed since merge-ready passed. Re-run checks.`
+              error: `Cannot approve: merge-ready snapshot reports canMerge=false. The candidate cannot be cleanly squash-merged. Re-run checks to verify merge readiness.`
             } satisfies ApiResponse, 409);
           }
 
-          if (snapshotMergeBaseSha && snapshotMergeBaseSha !== currentMergeBaseSha) {
+          if (!mergeReadyProject) {
             return c.json({
               success: false,
-              error: `Cannot approve: merge-ready snapshot merge-base SHA (${snapshotMergeBaseSha}) does not match current merge-base SHA (${currentMergeBaseSha}). The branch relationship has changed since merge-ready passed. Re-run checks.`
+              error: 'Cannot approve: project not found for merge-ready snapshot validation. Re-run Check after resolving project state.'
             } satisfies ApiResponse, 409);
           }
 
-          if (snapshotTargetBranch && snapshotTargetBranch !== baseBranch) {
+          if (worktreeManager) {
+            const worktreePath = worktreeManager.getPath(mergeReadyProject.name, issue.number);
+            if (worktreePath) {
+              try {
+                const currentHead = await worktreeManager.getHeadSha(worktreePath);
+                const approvalSnapshotSha = approvalOutput.snapshotSha;
+
+                if (typeof approvalSnapshotSha === 'string' && currentHead !== approvalSnapshotSha) {
+                  return c.json({
+                    success: false,
+                    error: 'Cannot approve: current HEAD does not match approval snapshot. The code may have changed since approval was requested.'
+                  } satisfies ApiResponse, 409);
+                }
+
+                const isClean = await worktreeManager.isWorktreeClean(worktreePath);
+                if (!isClean) {
+                  return c.json({
+                    success: false,
+                    error: 'Cannot approve: worktree has uncommitted changes. Commit or stash changes before approving.'
+                  } satisfies ApiResponse, 409);
+                }
+
+              } catch (err) {
+                return c.json({
+                  success: false,
+                  error: `Cannot approve: failed to validate current worktree state. Re-run Check after resolving repository state. ${err instanceof Error ? err.message : String(err)}`
+                } satisfies ApiResponse, 409);
+              }
+            }
+          }
+
+          try {
+            const baseBranch = mergeReadyProject.baseBranch;
+            const candidateBranch = `mo/issue-${issue.number}`;
+            const baseShaResult = await execFileAsync('git', ['rev-parse', baseBranch], { cwd: mergeReadyProject.path });
+            const candidateHeadResult = await execFileAsync('git', ['rev-parse', candidateBranch], { cwd: mergeReadyProject.path });
+            const mergeBaseResult = await execFileAsync('git', ['merge-base', baseBranch, candidateBranch], { cwd: mergeReadyProject.path });
+
+            const currentBaseSha = baseShaResult.stdout.trim();
+            const currentCandidateHeadSha = candidateHeadResult.stdout.trim();
+            const currentMergeBaseSha = mergeBaseResult.stdout.trim();
+
+            const snapshotBaseSha = String(mergeReadySnapshot.baseSha ?? '');
+            const snapshotCandidateHeadSha = String(mergeReadySnapshot.candidateHeadSha ?? '');
+            const snapshotMergeBaseSha = String(mergeReadySnapshot.mergeBaseSha ?? '');
+            const snapshotTargetBranch = String(mergeReadySnapshot.targetBranch ?? '');
+
+            if (snapshotBaseSha && snapshotBaseSha !== currentBaseSha) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: merge-ready snapshot base SHA (${snapshotBaseSha}) does not match current base SHA (${currentBaseSha}). The base branch has changed since merge-ready passed. Re-run checks.`
+              } satisfies ApiResponse, 409);
+            }
+
+            if (snapshotCandidateHeadSha && snapshotCandidateHeadSha !== currentCandidateHeadSha) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: merge-ready snapshot candidate head SHA (${snapshotCandidateHeadSha}) does not match current candidate head SHA (${currentCandidateHeadSha}). The issue branch has changed since merge-ready passed. Re-run checks.`
+              } satisfies ApiResponse, 409);
+            }
+
+            if (snapshotMergeBaseSha && snapshotMergeBaseSha !== currentMergeBaseSha) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: merge-ready snapshot merge-base SHA (${snapshotMergeBaseSha}) does not match current merge-base SHA (${currentMergeBaseSha}). The branch relationship has changed since merge-ready passed. Re-run checks.`
+              } satisfies ApiResponse, 409);
+            }
+
+            if (snapshotTargetBranch && snapshotTargetBranch !== baseBranch) {
+              return c.json({
+                success: false,
+                error: `Cannot approve: merge-ready snapshot target branch (${snapshotTargetBranch}) does not match current target branch (${baseBranch}). The base branch configuration has changed. Re-run checks.`
+              } satisfies ApiResponse, 409);
+            }
+          } catch (err) {
             return c.json({
               success: false,
-              error: `Cannot approve: merge-ready snapshot target branch (${snapshotTargetBranch}) does not match current target branch (${baseBranch}). The base branch configuration has changed. Re-run checks.`
+              error: `Cannot approve: failed to validate merge-ready snapshot freshness against Git state. Re-run Check to regenerate merge-ready evidence. ${err instanceof Error ? err.message : String(err)}`
             } satisfies ApiResponse, 409);
           }
-        } catch (err) {
-          return c.json({
-            success: false,
-            error: `Cannot approve: failed to validate merge-ready snapshot freshness against Git state. Re-run Check to regenerate merge-ready evidence. ${err instanceof Error ? err.message : String(err)}`
-          } satisfies ApiResponse, 409);
         }
 
         if (checkSuiteRepo) {
           const activeSuite = checkSuiteRepo.findActiveByIssueId(issue.id);
           if (activeSuite) {
             const checks = activeSuite.checks as unknown as Record<string, { status?: string }>;
-            const reviewPassedCheck = checks['review-passed'] ?? checks['ai-review'];
-            if (reviewPassedCheck?.status !== 'passed') {
+            const verdictSuiteCheck = checks[evidenceContext.verdictCheckName];
+            if (verdictSuiteCheck?.status !== 'passed') {
               return c.json({
                 success: false,
-                error: `Cannot approve: latest review verdict is '${reviewPassedCheck?.status || 'unknown'}', expected 'passed'. Re-run checks or wait for completion.`
+                error: `Cannot approve: ${evidenceContext.verdictCheckName} is '${verdictSuiteCheck?.status || 'unknown'}', expected 'passed'. Re-run checks or wait for completion.`
               } satisfies ApiResponse, 409);
             }
 
-            const mergeReadyCheck = checks['merge-ready'];
-            if (mergeReadyCheck?.status !== 'passed') {
+            const candidateSuiteCheck = checks[evidenceContext.candidateCheckName];
+            if (usesMergeReadyCandidate && candidateSuiteCheck?.status !== 'passed') {
               return c.json({
                 success: false,
-                error: `Cannot approve: merge-ready is '${mergeReadyCheck?.status || 'unknown'}', expected 'passed'. Re-run checks or wait for completion.`
+                error: `Cannot approve: ${evidenceContext.candidateCheckName} is '${candidateSuiteCheck?.status || 'unknown'}', expected 'passed'. Re-run checks or wait for completion.`
               } satisfies ApiResponse, 409);
             }
 
@@ -2440,20 +2438,20 @@ export function createIssueRoutes(
           }
         }
 
-        const latestHealthCheck = getAuthoritativeHealthCheck(issue.id, workflowRunService, stageExecutionRepo);
-        const latestHealthCheckOutput = latestHealthCheck?.output as Record<string, unknown> | undefined;
+        const latestVerificationCheck = getAuthoritativeStageCheckResult(issue.id, evidenceContext.stage, evidenceContext.verificationCheckName, workflowRunService, stageExecutionRepo);
+        const latestVerificationCheckOutput = latestVerificationCheck?.output as Record<string, unknown> | undefined;
 
-        if (!latestHealthCheck || latestHealthCheck.status !== 'pass') {
+        if (!latestVerificationCheck || latestVerificationCheck.status !== 'pass') {
           return c.json({
             success: false,
-            error: latestHealthCheck
-              ? `Cannot approve: health:check is '${latestHealthCheck.status}', expected 'pass'. Re-run Check to generate full verification evidence.`
-              : 'Cannot approve: health:check has not run. Re-run Check to run full verification before approval.'
+            error: latestVerificationCheck
+              ? `Cannot approve: ${evidenceContext.verificationCheckName} is '${latestVerificationCheck.status}', expected 'pass'. Re-run checks to generate full verification evidence.`
+              : `Cannot approve: ${evidenceContext.verificationCheckName} has not run. Re-run checks to run full verification before approval.`
           } satisfies ApiResponse, 409);
         }
 
-        if (latestHealthCheckOutput?.enabled === false) {
-          return c.json({ success: false, error: 'Cannot approve: health:check is disabled by policy. Enable Check verification or re-run with verification enabled.' } satisfies ApiResponse, 409);
+        if (latestVerificationCheckOutput?.enabled === false) {
+          return c.json({ success: false, error: `Cannot approve: ${evidenceContext.verificationCheckName} is disabled by policy. Enable verification or re-run with verification enabled.` } satisfies ApiResponse, 409);
         }
 
         const verificationEvidence = approvalOutput?.verificationEvidence as Record<string, unknown> | undefined;
@@ -2472,7 +2470,7 @@ export function createIssueRoutes(
           } satisfies ApiResponse, 409);
         }
 
-        if (mergeReadySnapshot.candidateHeadSha && String(mergeReadySnapshot.candidateHeadSha) !== evidenceCandidateHeadSha) {
+        if (usesMergeReadyCandidate && mergeReadySnapshot?.candidateHeadSha && String(mergeReadySnapshot.candidateHeadSha) !== evidenceCandidateHeadSha) {
           return c.json({
             success: false,
             error: `Cannot approve: verification evidence candidate head (${evidenceCandidateHeadSha}) does not match merge-ready candidate head (${mergeReadySnapshot.candidateHeadSha}). The verification and merge-ready evidence refer to different candidates. Re-run Check.`
@@ -2480,14 +2478,14 @@ export function createIssueRoutes(
         }
 
         const evidenceCheckName = verificationEvidence.checkName as string | undefined;
-        if (!evidenceCheckName || !['health:check', 'build-test'].includes(evidenceCheckName)) {
+        if (evidenceCheckName !== evidenceContext.verificationCheckName) {
           return c.json({
             success: false,
-            error: `Cannot approve: verification evidence has unexpected check name '${evidenceCheckName ?? 'undefined'}'. Re-run Check to generate standard full verification evidence.`
+            error: `Cannot approve: verification evidence has unexpected check name '${evidenceCheckName ?? 'undefined'}', expected '${evidenceContext.verificationCheckName}'. Re-run checks to generate standard full verification evidence.`
           } satisfies ApiResponse, 409);
         }
 
-        if (worktreeManager && latestHealthCheckOutput) {
+        if (usesMergeReadyCandidate && worktreeManager && latestVerificationCheckOutput) {
           if (mergeReadyProject) {
             const worktreePath = worktreeManager.getPath(mergeReadyProject.name, issue.number);
             if (worktreePath) {
@@ -2503,7 +2501,7 @@ export function createIssueRoutes(
                 }
 
                 const snapshotSha = approvalOutput?.snapshotSha as string | undefined;
-                if (snapshotSha && latestHealthCheckOutput.candidateHeadSha !== snapshotSha && latestHealthCheckOutput.candidateHeadSha !== currentCandidateHeadSha) {
+                if (snapshotSha && latestVerificationCheckOutput.candidateHeadSha !== snapshotSha && latestVerificationCheckOutput.candidateHeadSha !== currentCandidateHeadSha) {
                   return c.json({
                     success: false,
                     error: 'Cannot approve: verification evidence does not match the approval snapshot or current candidate state. The check evidence may be stale. Re-run Check.'

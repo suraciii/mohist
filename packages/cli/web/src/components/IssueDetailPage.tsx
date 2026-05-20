@@ -117,8 +117,9 @@ export function IssueDetailPage() {
   const { data: stageStateData } = useIssueStageState(issueNumber)
   const { data: workflowRun } = useWorkflowRun(issueNumber)
 
-  const workflowRunCheckRepair = workflowRun ? workflowRunToStageStateMap(workflowRun).get(Stage.Check)?.checkRepair : undefined
-  const stageStateCheckRepair = stageStateData?.stages.find(s => s.stage === Stage.Check)?.checkRepair
+  const currentIssueStage = issue?.stage
+  const workflowRunCheckRepair = workflowRun && currentIssueStage ? workflowRunToStageStateMap(workflowRun).get(currentIssueStage)?.checkRepair : undefined
+  const stageStateCheckRepair = currentIssueStage ? stageStateData?.stages.find(s => s.stage === currentIssueStage)?.checkRepair : undefined
   const checkRepair: CheckRepairState | undefined = workflowRunCheckRepair ?? stageStateCheckRepair
   const showCheckRepairActions = issue?.stage === Stage.Check && Boolean(checkRepair)
 
