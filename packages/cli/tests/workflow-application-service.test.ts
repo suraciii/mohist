@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WorkflowApplicationService, type WorkflowRunProjectionPort, type WorkflowRunRepositoryPort } from '../src/services/workflow-application-service';
-import { WorkflowRun, createWorkflowDefinitionSnapshot, parseWorkflowDefinitionSource } from '../src/workflow/domain';
+import { WorkflowRun, createWorkflowDefinitionSnapshot, parseWorkflowDefinitionSource } from '../src/workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 import { Stage } from '../src/types';
 import type { WorkflowAttemptEvidencePort } from '../src/services/attempt-reconciliation-service';

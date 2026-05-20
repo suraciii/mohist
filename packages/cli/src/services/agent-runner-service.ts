@@ -32,7 +32,7 @@ import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-s
 import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
 import { createCheckRegistry } from '../workflow/checks/check-registry';
-import { createWorkflowTemplateContextFromValues, projectWorkflowDeliveryRequirement, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
+import { createWorkflowTemplateContextFromValues, projectWorkflowDeliveryRequirement, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definitions/default-workflow';
 import { AiReviewCheck } from '../workflow/checks/ai-review-check';
 import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
@@ -108,7 +108,7 @@ const log = Log.create({ service: 'agent-runner' });
 
 export function createDefaultCheckRegistry(input: {
   worktreePath: string;
-  workflowDefinitionSnapshot?: import('../workflow/domain').WorkflowDefinitionSnapshot;
+  workflowDefinitionSnapshot?: import('../workflow/model').WorkflowDefinitionSnapshot;
 }) {
   const { worktreePath, workflowDefinitionSnapshot } = input;
   const registry = createCheckRegistry({
@@ -165,7 +165,7 @@ function renderCheckPath(
   ctx: import('../workflow').CheckContext,
   template: string,
   worktreePath: string,
-  workflowDefinitionSnapshot: import('../workflow/domain').WorkflowDefinitionSnapshot | undefined,
+  workflowDefinitionSnapshot: import('../workflow/model').WorkflowDefinitionSnapshot | undefined,
 ): string {
   return renderWorkflowTemplate(template, createWorkflowTemplateContextFromValues({
     issueNumber: ctx.issue.number,
@@ -1110,7 +1110,7 @@ export class AgentRunnerService {
       ]);
 
       const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-      const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
+      const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/model').WorkflowDefinitionSnapshot | undefined;
       const checkRegistry = createDefaultCheckRegistry({ worktreePath, workflowDefinitionSnapshot });
 
       const unifiedRunner = new GenericStageRunner({
@@ -1119,7 +1119,7 @@ export class AgentRunnerService {
         checkRegistry,
         getStageDefinition: (stage) => {
           const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-          const snapshot = activeRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
+          const snapshot = activeRun?.workflowDefinition as import('../workflow/model').WorkflowDefinitionSnapshot | undefined;
           return snapshot?.compiledStageDefinitions.find(d => d.stage === stage)
             ?? DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage);
         },

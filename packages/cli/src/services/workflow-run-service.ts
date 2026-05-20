@@ -1,7 +1,7 @@
 import { DatabaseManager } from '../db/database';
 import { WorkflowRunRepo, WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import { Stage } from '../types';
-import type { WorkflowDefinitionSnapshot } from '../workflow/domain';
+import type { WorkflowDefinitionSnapshot } from '../workflow/model';
 import { WorkflowApplicationService } from './workflow-application-service';
 
 export class WorkflowRunService {

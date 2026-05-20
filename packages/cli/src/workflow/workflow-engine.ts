@@ -14,7 +14,7 @@ import type { ConfigInfo } from '../config/config-schema';
 import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { StageCompletionGuard, TaskRunSnapshot, WorkflowWork } from './domain';
+import type { StageCompletionGuard, TaskRunSnapshot, WorkflowWork } from './model';
 
 export interface PipelineResult {
   completed: boolean;

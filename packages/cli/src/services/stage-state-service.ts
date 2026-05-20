@@ -1,10 +1,10 @@
 import { DatabaseManager } from '../db/database';
 import { Stage } from '../types';
-import { workflowDefinitionSnapshotFromUnknown } from '../workflow/domain';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow/model';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/convergence';
-import type { CompiledStageDefinition } from '../workflow/domain';
+import type { CompiledStageDefinition } from '../workflow/model';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';

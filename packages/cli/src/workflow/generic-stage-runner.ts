@@ -8,7 +8,7 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkSourceKind } from './domain';
+import type { CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkSourceKind } from './model';
 import { inferWorkflowTaskUse } from './uses-catalog';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
@@ -340,7 +340,7 @@ export class GenericStageRunner implements StageRunner {
   private stageExecutionStatusAfterCheck(
     ctx: StageContext,
     result: CheckResult,
-    decision?: import('./domain').WorkflowDecision,
+    decision?: import('./model').WorkflowDecision,
   ): 'running' | 'awaiting-approval' | 'passed' | 'failed' {
     if (decision) {
       if (decision.nextWork.kind === 'task' || decision.nextWork.kind === 'check') return 'running';
@@ -682,12 +682,12 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private sourceTaskDefinition(stageDefinition: CompiledStageDefinition, taskId: string): import('./domain').TaskDefinition | undefined {
+  private sourceTaskDefinition(stageDefinition: CompiledStageDefinition, taskId: string): import('./model').TaskDefinition | undefined {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     return stageDefinition.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
       ?? stageDefinition.checks
         .map(check => check.onFailure?.retry?.task)
-        .find((task): task is import('./domain').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
+        .find((task): task is import('./model').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
   private taskWorkSourceKind(ctx: StageContext, stageDefinition: CompiledStageDefinition, taskId: string): WorkSourceKind | undefined {

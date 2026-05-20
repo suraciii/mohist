@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { WorkflowDefinitionSnapshot } from '../domain';
+import type { WorkflowDefinitionSnapshot } from '../model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../definitions/default-workflow';
 import { Log } from '../../util/log';
 import type { StageContext } from '../stage-context';

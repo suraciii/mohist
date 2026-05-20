@@ -1,7 +1,7 @@
-import { Stage } from '../../../types';
-import type { ResultContract } from '../../../types/workflow-results';
-import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../../uses-catalog';
-import { WorkflowDomainError } from '../errors';
+import { Stage } from '../../types';
+import type { ResultContract } from '../../types/workflow-results';
+import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../uses-catalog';
+import { WorkflowDomainError } from './errors';
 
 export type AgentPromptSource =
   | { ref: string }

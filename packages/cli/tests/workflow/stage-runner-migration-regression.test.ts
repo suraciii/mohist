@@ -7,7 +7,7 @@ import type { StageContext } from '../../src/workflow/stage-context';
 import type { StageRunner } from '../../src/workflow/stage-runner';
 import type { CheckRegistry, CheckContext } from '../../src/workflow/checks';
 import type { TaskLoaderRegistry, TaskHandlerRegistry, ExecutableTask } from '../../src/workflow/task-runtime';
-import type { StageDefinition, WorkflowRun as DomainWorkflowRun } from '../../src/workflow/domain';
+import type { StageDefinition, WorkflowRun as DomainWorkflowRun } from '../../src/workflow/model';
 import { GenericStageRunner, GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE } from '../../src/workflow/generic-stage-runner';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import { createAgentSessionTaskHandler } from '../../src/workflow/task-runtime/agent-session-task-handler';
@@ -15,7 +15,7 @@ import { createRalphTaskHandler } from '../../src/workflow/task-runtime/ralph-ta
 import { createRalphTaskLoader } from '../../src/workflow/task-runtime/ralph-task-loader';
 import { defaultServiceCallTaskHandler } from '../../src/workflow/task-runtime/service-call-task-handler';
 import { EventBus } from '../../src/services/event-bus';
-import { WorkflowRun } from '../../src/workflow/domain';
+import { WorkflowRun } from '../../src/workflow/model';
 import * as RalphExecutor from '../../src/openspec/ralph-executor';
 
 function mergeReadyOutput(candidateHeadSha: string): Record<string, unknown> {
@@ -2637,7 +2637,7 @@ describe('StageRunner migration regression coverage', () => {
 
     it('default check registry names match declared health checks', async () => {
       const { createDefaultCheckRegistry } = await import('../../src/services/agent-runner-service');
-      const { createWorkflowDefinitionSnapshot } = await import('../../src/workflow/domain');
+      const { createWorkflowDefinitionSnapshot } = await import('../../src/workflow/model');
       const { Stage } = await import('../../src/types');
 
       const registry = createDefaultCheckRegistry({

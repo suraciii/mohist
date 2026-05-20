@@ -6,7 +6,7 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
 import { Stage } from '../src/types';
 import { StageStateService, normalizeCheckStatus, normalizeTaskStatus } from '../src/services/stage-state-service';
-import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/domain';
+import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definitions/default-workflow';
 
 describe('StageStateService', () => {

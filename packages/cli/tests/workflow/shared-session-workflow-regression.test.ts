@@ -11,7 +11,7 @@ import type { StageRunner } from '../../src/workflow/stage-runner';
 import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { WorkflowApplicationRuntime } from '../../src/workflow/stage-context';
-import { WorkflowRun, type WorkflowWork } from '../../src/workflow/domain';
+import { WorkflowRun, type WorkflowWork } from '../../src/workflow/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definitions/default-workflow';
 
 class RegistryCapturingRunner implements StageRunner {

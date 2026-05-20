@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Stage } from '../src/types';
-import { freezePointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/domain/snapshot';
-import type { StageDefinition, StageRunSnapshot, WorkflowRunSnapshot } from '../src/workflow/domain';
+import { freezePointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/model';
+import type { StageDefinition, StageRunSnapshot, WorkflowRunSnapshot } from '../src/workflow/model';
 
 describe('workflow run persistence helpers', () => {
   it('reconstructs Integrate freeze point from service-call wrapped merge output', () => {

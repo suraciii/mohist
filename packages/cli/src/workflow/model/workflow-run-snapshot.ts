@@ -1,7 +1,7 @@
-import { Stage } from '../../../types';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../../uses-catalog';
-import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '../definition';
-import { WorkflowRun } from '../run';
+import { Stage } from '../../types';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
+import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from './workflow-definition';
+import { WorkflowRun } from './workflow-run';
 import type {
   CausedByMetadata,
   CheckRunStatus,
@@ -12,7 +12,7 @@ import type {
   TaskRunStatus,
   WorkflowRunSnapshot,
   WorkSourceState,
-} from '../run';
+} from './workflow-run';
 
 function isCausedByMetadata(value: unknown): value is CausedByMetadata {
   return Boolean(value && typeof value === 'object' && 'type' in value && typeof (value as { type?: unknown }).type === 'string');
