@@ -582,7 +582,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(within(summary as HTMLElement).getByText(/#209/i)).toBeInTheDocument()
     })
 
-    it('renders attention summary item with Not merged label for done-but-unmerged issue', () => {
+    it('does not render attention summary item for completed workflow without local merge state', () => {
       const doneUnmergedIssue = makeIssue({
         number: 42,
         title: 'Completed but not merged',
@@ -600,14 +600,11 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         </QueryClientProvider>,
       )
 
-      const summary = document.querySelector('.bg-amber-50')!
-      expect(summary).toBeTruthy()
-      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
-      expect(within(summary as HTMLElement).getByText('Not merged')).toBeInTheDocument()
-      expect(within(summary as HTMLElement).getByText(/#42/i)).toBeInTheDocument()
+      const summary = document.querySelector('.bg-amber-50')
+      expect(summary).toBeNull()
     })
 
-    it('renders Not merged label for done issue with null mergeState', () => {
+    it('does not render Not merged label for done issue with null mergeState', () => {
       const doneUnmergedIssue = makeIssue({
         number: 43,
         title: 'Completed but missing merge result',
@@ -625,11 +622,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         </QueryClientProvider>,
       )
 
-      const summary = document.querySelector('.bg-amber-50')!
-      expect(summary).toBeTruthy()
-      expect(within(summary as HTMLElement).getByText(/Needs attention/i)).toBeInTheDocument()
-      expect(within(summary as HTMLElement).getByText('Not merged')).toBeInTheDocument()
-      expect(within(summary as HTMLElement).getByText(/#43/i)).toBeInTheDocument()
+      const summary = document.querySelector('.bg-amber-50')
+      expect(summary).toBeNull()
     })
 
     it('renders attention summary item with Needs action label for blocked issue', () => {

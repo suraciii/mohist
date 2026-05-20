@@ -23,15 +23,15 @@ export function MergeStatePanel({ issueNumber, mergeState, stage, status }: Merg
     const isDoneOrCompleted = stage === Stage.Done || status === 'completed'
     if (isDoneOrCompleted) {
       return (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+        <div className="rounded-lg border border-green-200 bg-green-50 p-4">
           <div className="flex items-center gap-2">
-            <svg className="h-4 w-4 text-red-600" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+            <svg className="h-4 w-4 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.25 7.25a1 1 0 01-1.42 0L3.296 9.22a1 1 0 111.414-1.414l4.034 4.034 6.543-6.543a1 1 0 011.417-.006z" clipRule="evenodd" />
             </svg>
-            <span className="text-sm font-medium text-red-800">Done but not merged</span>
+            <span className="text-sm font-medium text-green-800">Workflow completed</span>
           </div>
-          <p className="mt-1 text-xs text-red-600">
-            This issue is marked as completed but has not been merged. The merge may have failed or was never attempted.
+          <p className="mt-1 text-xs text-green-700">
+            This workflow is complete. No local merge state was recorded.
           </p>
         </div>
       )
