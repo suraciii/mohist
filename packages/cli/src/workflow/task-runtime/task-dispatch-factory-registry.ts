@@ -98,6 +98,10 @@ function createPlanTaskConfigs(changeDir: string): PlanTaskConfig[] {
   ];
 }
 
+function baseRuntimeTaskId(taskId: string): string {
+  return taskId.replace(/:\d+$/, '');
+}
+
 function createRebaseDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
   return {
     taskId: input.task.taskId,
@@ -164,7 +168,7 @@ function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Dispat
     return createGenericAgentSessionDispatchTask(input, input.task.prompt);
   }
   if (input.ctx.issue.stage === Stage.Plan) return createPlanAgentSessionDispatchTask(input);
-  if (input.ctx.issue.stage === Stage.Check && input.task.taskId === 'ai-review') return createCheckAiReviewDispatchTask(input);
+  if (input.ctx.issue.stage === Stage.Check && baseRuntimeTaskId(input.task.taskId) === 'ai-review') return createCheckAiReviewDispatchTask(input);
   return {
     ...input.task,
     agentSessionRef: input.agentSessionRef,
@@ -279,7 +283,8 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
 
   const tasks = createPlanTaskConfigs(changeDir);
-  const taskConfig = tasks.find(candidate => candidate.type === input.task.taskId);
+  const baseTaskId = baseRuntimeTaskId(input.task.taskId);
+  const taskConfig = tasks.find(candidate => candidate.type === input.task.taskId || candidate.type === baseTaskId);
   if (!taskConfig) throw new Error(`Unknown Plan task: ${input.task.taskId}`);
 
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'plan');

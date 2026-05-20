@@ -272,6 +272,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       const decision = run.completeTask(Stage.Check, 'rebase-branch', {
         status: 'completed',
+        events: ['code.changed'],
         output: {
           rebased: true,
           baseBranch: 'main',
@@ -288,7 +289,7 @@ describe('Rebase workflow regression: T-005', () => {
       expect(checkStage.findCheck('review-passed').status).toBe('pending');
       expect(checkStage.findCheck('merge-ready').status).toBe('pending');
 
-      const shaChangedEvent = decision.events.find((e: any) => e.type === 'task-invalidated' && e.taskId === 'ai-review');
+      const shaChangedEvent = decision.events.find((e: any) => e.type === 'task-invalidated' && e.taskId === 'ai-review:1');
       expect(shaChangedEvent).toBeDefined();
     });
 
@@ -297,6 +298,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       const decision = run.completeTask(Stage.Check, 'rebase-branch', {
         status: 'completed',
+        events: ['code.changed'],
         output: {
           rebased: true,
           shaChanged: true,
@@ -309,7 +311,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       const taskInvalidatedEvents = decision.events.filter((e: any) => e.type === 'task-invalidated');
       expect(taskInvalidatedEvents).toHaveLength(1);
-      expect(taskInvalidatedEvents[0].taskId).toBe('ai-review');
+      expect(taskInvalidatedEvents[0].taskId).toBe('ai-review:1');
 
       const checkInvalidatedEvents = decision.events.filter((e: any) => e.type === 'check-invalidated');
       expect(checkInvalidatedEvents).toHaveLength(3);
@@ -329,6 +331,7 @@ describe('Rebase workflow regression: T-005', () => {
 
       run.completeTask(Stage.Check, 'rebase-branch', {
         status: 'completed',
+        events: ['code.changed'],
         output: {
           rebased: true,
           shaChanged: true,
