@@ -1039,6 +1039,13 @@ export interface WorkflowTaskCause {
   message?: string
 }
 
+export interface WorkflowTaskResetCause {
+  type: 'workflow-policy'
+  taskId?: string
+  eventName?: string
+  message?: string
+}
+
 export interface WorkflowFailureDetails {
   reason: string
   stage: Stage
@@ -1090,6 +1097,7 @@ export interface WorkflowTask {
   output: unknown
   reason: string | null
   causedBy: WorkflowTaskCause | null
+  resetBy: WorkflowTaskResetCause | null
   startedAt: string | null
   completedAt: string | null
 }

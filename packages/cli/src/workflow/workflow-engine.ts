@@ -175,6 +175,14 @@ export class WorkflowEngine {
             message: task.reason ?? undefined,
           }
         : null,
+      resetBy: task.resetByType
+        ? {
+            type: task.resetByType as NonNullable<TaskRunSnapshot['resetBy']>['type'],
+            taskId: task.resetByTaskId ?? undefined,
+            eventName: task.resetByEventName ?? undefined,
+            message: task.resetReason ?? undefined,
+          }
+        : null,
       latestAttempt: null,
     };
   }

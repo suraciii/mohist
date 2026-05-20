@@ -47,7 +47,12 @@ function makeContext(changeDir: string, requestedTask?: StageContext['requestedT
   };
 }
 
-function pendingAiReviewTask(causedBy: StageContext['requestedTask']['causedBy'] = null): StageContext['requestedTask'] {
+function pendingAiReviewTask(
+  input: {
+    causedBy?: StageContext['requestedTask']['causedBy'];
+    resetBy?: StageContext['requestedTask']['resetBy'];
+  } = {},
+): StageContext['requestedTask'] {
   return {
     id: 'ai-review',
     title: 'AI review',
@@ -60,7 +65,8 @@ function pendingAiReviewTask(causedBy: StageContext['requestedTask']['causedBy']
     events: [],
     output: null,
     reason: null,
-    causedBy,
+    causedBy: input.causedBy ?? null,
+    resetBy: input.resetBy ?? null,
     latestAttempt: null,
   };
 }
@@ -101,9 +107,12 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
       const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
       const dispatchable = createDefaultTaskDispatchFactoryRegistry().build({
         ctx: makeContext(changeDir, pendingAiReviewTask({
-          type: 'system-policy',
-          taskId: 'fix-review-findings',
-          message: 'code.changed reset',
+          resetBy: {
+            type: 'workflow-policy',
+            taskId: 'fix-review-findings',
+            eventName: 'code.changed',
+            message: 'code.changed reset',
+          },
         })),
         task,
         executionKind: 'agent-session',

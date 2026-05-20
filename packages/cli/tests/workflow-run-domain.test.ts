@@ -808,6 +808,13 @@ describe('WorkflowRun domain aggregate', () => {
       attempts: 0,
       artifacts: [],
       output: null,
+      causedBy: null,
+      resetBy: {
+        type: 'workflow-policy',
+        taskId: 'fix-review-findings',
+        eventName: 'code.changed',
+        message: 'code.changed reset',
+      },
     });
     expect(run.stageRun(Stage.Check).findCheck('review-passed')).toMatchObject({
       status: 'pending',
@@ -821,6 +828,7 @@ describe('WorkflowRun domain aggregate', () => {
       message: null,
       output: null,
     });
+    expect(run.workflowRecoverySummary()).toBe('running');
     expect(fix.nextWork).toEqual({ kind: 'task', stage: Stage.Check, taskId: 'ai-review' });
   });
 
