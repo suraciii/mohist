@@ -100,6 +100,7 @@ function makeEngine(options: {
 
 function makeSequencedWorkflowService(issue: Issue, work: WorkflowWork[]): WorkflowApplicationRuntime {
   const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions: DEFAULT_STAGE_DEFINITIONS });
+  run.currentStage = issue.stage;
   let index = 0;
   const next = () => work[index++] ?? { kind: 'complete' as const };
   return {
@@ -388,7 +389,7 @@ describe('WorkflowEngine merge-gated completion', () => {
     const result = await engine.run(issue, { cwd: '/tmp' });
 
     expect(result.completed).toBe(true);
-    expect(result.stage).toBe(Stage.Done);
+    expect(result.stage).toBe(Stage.Check);
   });
 
   it('marks done/completed only when mergeState is merged', async () => {

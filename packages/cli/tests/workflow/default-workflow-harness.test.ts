@@ -32,7 +32,7 @@ describe('default workflow external-system harness', () => {
 
     harness.approve(Stage.Check);
     const done = await harness.runUntilBoundary();
-    expect(done).toEqual({ completed: true, stage: Stage.Done, message: 'Pipeline completed' });
+    expect(done).toEqual({ completed: true, stage: Stage.Integrate, message: 'Pipeline completed' });
     expect(harness.world.checkCalls).toContain('health:integrate');
 
     const latest = harness.workflowRunService.getLatestRunForIssue(harness.issue.id)!;

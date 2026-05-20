@@ -1,11 +1,14 @@
-export enum Stage {
-  Backlog = 'backlog',
-  Plan = 'plan',
-  Build = 'build',
-  Check = 'check',
-  Integrate = 'integrate',
-  Done = 'done',
-}
+export const Stage = {
+  Backlog: 'backlog',
+  Plan: 'plan',
+  Build: 'build',
+  Check: 'check',
+  Integrate: 'integrate',
+  Done: 'done',
+} as const;
+
+export type BuiltinStage = typeof Stage[keyof typeof Stage];
+export type Stage = string;
 
 export const STAGE_ORDER: Stage[] = [
   Stage.Backlog,
@@ -16,7 +19,7 @@ export const STAGE_ORDER: Stage[] = [
   Stage.Done
 ];
 
-export const STAGE_TRANSITIONS: Record<Stage, Stage[]> = {
+export const STAGE_TRANSITIONS: Partial<Record<Stage, Stage[]>> = {
   [Stage.Backlog]: [Stage.Plan],
   [Stage.Plan]: [Stage.Build],
   [Stage.Build]: [Stage.Check],
