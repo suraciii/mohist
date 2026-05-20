@@ -4,8 +4,8 @@ import { Stage, MergeState } from '../../types';
 import type { StageContext, StageTaskResult, CheckResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
-import type { AgentPromptSource, CompiledStageDefinition, TaskDefinition, TaskExecutionKind } from '../domain';
-import { DEFAULT_STAGE_DEFINITIONS, workflowDefinitionSnapshotFromUnknown } from '../domain';
+import type { AgentPromptSource, CompiledStageDefinition, RequiredMarkerDefinition, TaskDefinition, TaskExecutionKind, WorkflowDefinitionSnapshot } from '../domain';
+import { DEFAULT_STAGE_DEFINITIONS, createWorkflowTemplateContext, renderWorkflowTemplate, workflowDefinitionSnapshotFromUnknown } from '../domain';
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
@@ -30,6 +30,7 @@ export type DispatchableTask = ExecutableTask | {
   attempt?: number;
   agentSessionRef?: string;
   artifactVerification?: (artifacts: string[]) => string[];
+  requiredMarkers?: RequiredMarkerDefinition[];
   serviceFn?: (ctx: StageContext) => Promise<unknown>;
   input?: unknown;
 };
@@ -215,25 +216,28 @@ function resolveCustomAgentPrompt(input: TaskDispatchFactoryInput, source: Agent
 }
 
 function renderPromptTemplate(input: TaskDispatchFactoryInput, template: string): string {
-  const values = buildPromptTemplateValues(input);
-  return template.replace(/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g, (_match, key: string) => {
-    if (!Object.prototype.hasOwnProperty.call(values, key)) {
-      throw new Error(`Unknown prompt template variable '${key}' for task '${input.task.taskId}'`);
-    }
-    return values[key] ?? '';
+  return renderWorkflowTemplate(template, buildTaskTemplateContext(input));
+}
+
+function buildTaskTemplateContext(input: TaskDispatchFactoryInput) {
+  return createWorkflowTemplateContext({
+    ctx: input.ctx,
+    worktreePath: input.worktreePath,
+    snapshot: workflowDefinitionSnapshotFromUnknown(input.ctx.workflowRun?.workflowDefinition),
   });
 }
 
-function buildPromptTemplateValues(input: TaskDispatchFactoryInput): Record<string, string> {
-  const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
-    || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title)
-    || '';
-  return {
-    'issue.number': String(input.ctx.issue.number),
-    'issue.title': input.ctx.issue.title,
-    'worktree.path': input.worktreePath,
-    'openspec.changeDir': changeDir,
-  };
+function requiredMarkersForTask(input: TaskDispatchFactoryInput): RequiredMarkerDefinition[] | undefined {
+  const markers = input.sourceTask?.with?.requiredMarkers;
+  if (!Array.isArray(markers)) return undefined;
+  const rendered = markers
+    .filter(isRequiredMarkerRecord)
+    .map(marker => ({
+      path: renderPromptTemplate(input, marker.path),
+      markers: marker.markers,
+      onMissing: marker.onMissing,
+    }));
+  return rendered.length > 0 ? rendered : undefined;
 }
 
 function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, prompt: string): DispatchableTask {
@@ -248,6 +252,7 @@ function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, 
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
+    requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
   };
   return {
@@ -259,9 +264,22 @@ function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, 
     stage: agentInput.stage,
     attempt: agentInput.attempt,
     agentSessionRef: input.agentSessionRef,
+    requiredMarkers: agentInput.requiredMarkers,
     artifactVerification: agentInput.artifactVerification,
     input: agentInput,
   };
+}
+
+function isRequiredMarkerRecord(value: unknown): value is RequiredMarkerDefinition {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const data = value as Record<string, unknown>;
+  if (typeof data.path !== 'string') return false;
+  if (!Array.isArray(data.markers) || !data.markers.every(marker => typeof marker === 'string')) return false;
+  if (data.onMissing === undefined) return true;
+  if (!data.onMissing || typeof data.onMissing !== 'object' || Array.isArray(data.onMissing)) return false;
+  const onMissing = data.onMissing as Record<string, unknown>;
+  return onMissing.action === 'continue-session'
+    && (onMissing.maxAttempts === undefined || typeof onMissing.maxAttempts === 'number');
 }
 
 function extractStringArray(value: unknown): string[] | null {
@@ -312,6 +330,7 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Di
     stage: 'plan',
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
+    requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => taskConfig.verifyArtifact() ? [taskConfig.label] : [],
   };
 }
@@ -344,6 +363,7 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput): Dispa
     stage: 'check',
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
+    requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => fs.existsSync(path.join(changeDir, reviewOutputPath)) ? [reviewOutputPath] : [],
     input: { mode: 'ai-review' },
   };
@@ -544,7 +564,7 @@ function getApprovalEvidenceSnapshotField(ctx: StageContext, role: ApprovalEvide
 }
 
 function getStageDefinition(ctx: StageContext): CompiledStageDefinition | undefined {
-  const snapshot = workflowDefinitionSnapshotFromUnknown(ctx.workflowRun?.workflowDefinition);
+  const snapshot = workflowDefinitionSnapshotFromUnknown(ctx.workflowRun?.workflowDefinition) as WorkflowDefinitionSnapshot | null;
   return (snapshot?.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS).find(definition => definition.stage === ctx.issue.stage);
 }
 

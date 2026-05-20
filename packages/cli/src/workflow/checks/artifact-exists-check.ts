@@ -9,8 +9,7 @@ export class ArtifactExistsCheck implements Check {
   ) {}
 
   async run(ctx: CheckContext): Promise<CheckResult> {
-    const roots = [ctx.changeDir, ctx.acpOptions.cwd].filter((value): value is string => Boolean(value));
-    const matched = roots.find(root => fs.existsSync(path.join(root, this.artifactPath)));
+    const matched = this.findExistingPath(ctx);
     if (matched) {
       return {
         name: this.name,
@@ -25,5 +24,13 @@ export class ArtifactExistsCheck implements Check {
       message: `${this.artifactPath} not found`,
       output: { kind: 'artifact-exists', path: this.artifactPath },
     };
+  }
+
+  private findExistingPath(ctx: CheckContext): string | undefined {
+    if (path.isAbsolute(this.artifactPath)) {
+      return fs.existsSync(this.artifactPath) ? this.artifactPath : undefined;
+    }
+    const roots = [ctx.changeDir, ctx.acpOptions.cwd].filter((value): value is string => Boolean(value));
+    return roots.find(root => fs.existsSync(path.join(root, this.artifactPath)));
   }
 }

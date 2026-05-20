@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
 import type { AgentSessionTaskInput } from '../../../src/workflow/task-runtime/types';
@@ -182,6 +185,91 @@ describe('AgentSessionTaskHandler', () => {
     expect(result.status).toBe('completed');
     expect(result.artifacts).toEqual(['proposal.md', 'design.md']);
     expect(verifyArtifacts).toHaveBeenCalled();
+  });
+
+  it('continues the same agent session when a required marker is missing', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-required-marker-'));
+    const markerPath = path.join(tempDir, 'self-review.md');
+    executeMock.mockImplementation(async (_prompt: string) => {
+      if (executeMock.mock.calls.length === 2) {
+        fs.writeFileSync(markerPath, '<promise>PASS</promise>', 'utf-8');
+      }
+      return {
+        success: true,
+        text: 'done',
+        acpSessionId: 'ses-marker',
+      };
+    });
+
+    try {
+      const handler = createAgentSessionTaskHandler();
+      const ctx = makeContext();
+      const input: AgentSessionTaskInput = {
+        taskId: 'self-review',
+        title: 'Self review',
+        prompt: 'Generate self review',
+        cwd: tempDir,
+        stage: 'plan',
+        attempt: 1,
+        requiredMarkers: [
+          {
+            path: markerPath,
+            markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+            onMissing: { action: 'continue-session', maxAttempts: 1 },
+          },
+        ],
+      };
+
+      const result = await handler(input, ctx);
+
+      expect(result.status).toBe('completed');
+      expect(executeMock).toHaveBeenCalledTimes(2);
+      expect(executeMock.mock.calls[1][0]).toContain('Allowed markers: <promise>PASS</promise>, <promise>FAIL</promise>');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails an agent task when a required marker remains missing after configured attempts', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-missing-marker-'));
+    const markerPath = path.join(tempDir, 'self-review.md');
+    executeMock.mockResolvedValue({
+      success: true,
+      text: 'done',
+      acpSessionId: 'ses-marker',
+    });
+
+    try {
+      const handler = createAgentSessionTaskHandler();
+      const ctx = makeContext();
+      const input: AgentSessionTaskInput = {
+        taskId: 'self-review',
+        title: 'Self review',
+        prompt: 'Generate self review',
+        cwd: tempDir,
+        stage: 'plan',
+        attempt: 1,
+        requiredMarkers: [
+          {
+            path: markerPath,
+            markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+            onMissing: { action: 'continue-session', maxAttempts: 1 },
+          },
+        ],
+      };
+
+      const result = await handler(input, ctx);
+
+      expect(result.status).toBe('failed');
+      expect(result.output).toMatchObject({
+        kind: 'agent-session-task',
+        success: true,
+        error: expect.stringContaining('Missing required marker'),
+      });
+      expect(executeMock).toHaveBeenCalledTimes(2);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('emits started then completed/failed stage_task_update events in correct order', async () => {

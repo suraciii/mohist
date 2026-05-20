@@ -70,6 +70,17 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     outputContract: 'Structured verdict evidence.',
   },
   {
+    name: 'mohist/marker',
+    allowedPlacement: 'check',
+    mutates: false,
+    sideEffect: 'none',
+    idempotency: 'idempotent',
+    deliveryRole: 'none',
+    description: 'Reads a file path and verifies that it contains an expected marker.',
+    inputs: ['path', 'expect', 'markers'],
+    outputContract: 'PASS/FAIL marker evidence with the matched marker and path.',
+  },
+  {
     name: 'mohist/health-gate',
     allowedPlacement: 'check',
     mutates: false,
@@ -211,7 +222,7 @@ export function isWorkflowUseAllowed(name: string, placement: 'task' | 'check'):
 
 export function inferWorkflowCheckUse(checkName: string): string {
   if (checkName.startsWith('health:')) return 'mohist/health-gate';
-  if (checkName === 'review-passed' || checkName === 'self-review-passed') return 'mohist/verdict';
+  if (checkName === 'review-passed' || checkName === 'self-review-passed') return 'mohist/marker';
   if (checkName === 'merge-ready') return 'mohist/merge-ready';
   if (checkName.endsWith('-approval')) return 'mohist/approval';
   return 'mohist/artifact-exists';

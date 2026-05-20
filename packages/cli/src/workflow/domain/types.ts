@@ -36,6 +36,15 @@ export type AgentPromptSource =
   | { file: string }
   | { inline: string };
 
+export interface RequiredMarkerDefinition {
+  path: string;
+  markers: string[];
+  onMissing?: {
+    action: 'continue-session';
+    maxAttempts?: number;
+  };
+}
+
 export interface WorkItemAttempt {
   state: WorkItemAttemptState;
   attemptNumber: number;
@@ -209,6 +218,7 @@ export interface WorkflowDefinition {
   name?: string;
   stages: StageDefinition[];
   defaults?: Record<string, unknown>;
+  artifacts?: Record<string, string>;
 }
 
 export type WorkflowDefinitionSource =

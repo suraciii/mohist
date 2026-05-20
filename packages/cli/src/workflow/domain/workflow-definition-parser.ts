@@ -31,6 +31,7 @@ export interface WorkflowStageSourceDefinition {
 export interface WorkflowSourceDefinition {
   id: string;
   name?: string;
+  artifacts?: Record<string, string>;
   defaults?: Record<string, unknown>;
   stages: WorkflowStageSourceDefinition[];
 }
@@ -47,6 +48,7 @@ export function parseWorkflowDefinitionSource(
   return {
     id: source.id,
     name: source.name,
+    artifacts: source.artifacts ? { ...source.artifacts } : undefined,
     defaults: source.defaults ? { ...source.defaults } : undefined,
     stages: source.stages.map(stage => parseStageSource(stage, options)),
   };

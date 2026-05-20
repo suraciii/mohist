@@ -5,6 +5,7 @@ export * from './errors';
 export * from './failed-check-context';
 export * from './persistence';
 export * from './runtime';
+export * from './template';
 export * from './types';
 export * from './workflow-definition';
 export * from './workflow-definition-parser';

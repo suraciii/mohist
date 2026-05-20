@@ -30,12 +30,14 @@ describe('workflow inspector', () => {
     try {
       const parsed = yaml.parse(yamlText);
       expect(parsed.workflow.id).toBe('mohist/default');
-      expect(parsed.workflow.stages[0].tasks.find((task: any) => task.id === 'self-review').resultContract).toEqual({
-        kind: 'promise-marker',
-        required: true,
-        outputSource: { type: 'artifact', path: 'self-review.md' },
-        allowedMarkers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
-      });
+      expect(parsed.workflow.artifacts).toEqual({ openspecChange: '{{ openspec.changeDir }}' });
+      expect(parsed.workflow.stages[0].tasks.find((task: any) => task.id === 'self-review').with.requiredMarkers).toEqual([
+        {
+          path: '{{ artifacts.openspecChange }}/self-review.md',
+          markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+          onMissing: { action: 'continue-session', maxAttempts: 1 },
+        },
+      ]);
       expect(parsed.workflow.stages[2].tasks.find((task: any) => task.id === 'ai-review').selfRepairPolicy).toEqual({
         enabled: true,
         allowedScopes: [
@@ -60,6 +62,13 @@ describe('workflow inspector', () => {
           'user-decision-required',
           'out-of-current-scope',
         ],
+      });
+      expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'review-passed')).toMatchObject({
+        uses: 'mohist/marker',
+        with: {
+          path: '{{ artifacts.openspecChange }}/review.md',
+          expect: '<promise>PASS</promise>',
+        },
       });
 
       const resolved = resolveWorkflowDefinition(tempDir);
@@ -579,6 +588,7 @@ function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
   return {
     id: definition.id,
     name: definition.name,
+    artifacts: definition.artifacts,
     defaults: definition.defaults,
     stages: definition.stages.map(stage => compact({
       stage: stage.stage,

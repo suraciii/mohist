@@ -1,4 +1,5 @@
 import type { StageContext, StageTaskResult } from '../stage-context';
+import type { RequiredMarkerDefinition } from '../domain';
 
 export type TaskKind = 'agent-session' | 'service-call' | 'ralph-task';
 
@@ -37,6 +38,7 @@ export interface AgentSessionTaskInput {
   agentSessionRef?: string;
   artifactVerification?: (artifacts: string[]) => string[];
   retryPromptFactory?: (ctx: StageContext, attempt: number) => string | null;
+  requiredMarkers?: RequiredMarkerDefinition[];
 }
 
 export interface ServiceCallTaskInput {
