@@ -1,6 +1,6 @@
 import type { WorkflowDeliveryRequirement } from '../../types';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, type WorkflowDeliveryRole } from '../uses-catalog';
-import type { CheckDefinition, CompiledStageDefinition, TaskDefinition, TaskExecutionPolicy, WorkflowDefinitionSnapshot } from './types';
+import type { CheckDefinition, CompiledStageDefinition, TaskDefinition, TaskExecutionPolicy, WorkflowDefinitionSnapshot } from './definition';
 
 export const DEFAULT_WORKFLOW_DELIVERY_REQUIREMENT: WorkflowDeliveryRequirement = {
   mode: 'local-merge',

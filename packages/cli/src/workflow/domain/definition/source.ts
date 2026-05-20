@@ -1,40 +1,11 @@
-import { Stage } from '../../types';
 import type {
   CheckDefinition,
   StageDefinition,
-  StageEventPolicy,
   TaskDefinition,
   WorkflowDefinition,
-  WorkflowTasksFromSource,
-} from './types';
-
-export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
-  source?: TaskDefinition['source'];
-};
-
-export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'source' | 'name'> & {
-  id?: string;
-  name?: string;
-  source?: CheckDefinition['source'];
-};
-
-export interface WorkflowStageSourceDefinition {
-  id?: Stage;
-  stage?: Stage;
-  tasks?: WorkflowTaskSourceDefinition[];
-  tasksFrom?: WorkflowTasksFromSource;
-  checks?: WorkflowCheckSourceDefinition[];
-  on?: Record<string, StageEventPolicy>;
-  approval?: boolean;
-}
-
-export interface WorkflowSourceDefinition {
-  id: string;
-  name?: string;
-  artifacts?: Record<string, string>;
-  defaults?: Record<string, unknown>;
-  stages: WorkflowStageSourceDefinition[];
-}
+  WorkflowSourceDefinition,
+  WorkflowStageSourceDefinition,
+} from './workflow-definition';
 
 export interface ParseWorkflowDefinitionOptions {
   taskSource?: TaskDefinition['source'];

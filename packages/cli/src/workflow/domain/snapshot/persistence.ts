@@ -1,19 +1,18 @@
-import { Stage } from '../../types';
-import {
-  WorkflowRun,
-  type CausedByMetadata,
-  type CheckRunStatus,
-  type FailureDetails,
-  type FreezePoint,
-  type CompiledStageDefinition,
-  type StageRunSnapshot,
-  type TaskResetMetadata,
-  type TaskRunStatus,
-  type WorkflowDefinitionSnapshot,
-  type WorkflowRunSnapshot,
-  type WorkSourceState,
-} from './index';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
+import { Stage } from '../../../types';
+import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../../uses-catalog';
+import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '../definition';
+import { WorkflowRun } from '../run';
+import type {
+  CausedByMetadata,
+  CheckRunStatus,
+  FailureDetails,
+  FreezePoint,
+  StageRunSnapshot,
+  TaskResetMetadata,
+  TaskRunStatus,
+  WorkflowRunSnapshot,
+  WorkSourceState,
+} from '../run';
 
 function isCausedByMetadata(value: unknown): value is CausedByMetadata {
   return Boolean(value && typeof value === 'object' && 'type' in value && typeof (value as { type?: unknown }).type === 'string');

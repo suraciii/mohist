@@ -1,4 +1,4 @@
-import type { StageCompletionGuard } from './types';
+import type { StageCompletionGuard } from './run';
 
 export class WorkflowDomainError extends Error {
   constructor(
