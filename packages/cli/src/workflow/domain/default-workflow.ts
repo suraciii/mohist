@@ -20,10 +20,11 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
       id: Stage.Plan,
       on: {
         'plan.artifacts.changed': {
-          reset: 'checks-and-approval',
-          tasks: ['self-review'],
-          checks: ['self-review-passed'],
-          approval: true,
+          reset: {
+            tasks: ['self-review'],
+            checks: ['self-review-passed'],
+            approval: true,
+          },
         },
       },
       tasks: [
@@ -132,10 +133,11 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
       id: Stage.Check,
       on: {
         'code.changed': {
-          reset: 'checks-and-approval',
-          tasks: ['ai-review'],
-          checks: 'all',
-          approval: true,
+          reset: {
+            tasks: ['ai-review'],
+            checks: 'all',
+            approval: true,
+          },
         },
       },
       tasks: [

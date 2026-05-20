@@ -795,13 +795,13 @@ describe('WorkflowRun domain aggregate', () => {
       type: 'task-invalidated',
       stage: Stage.Check,
       taskId: 'ai-review',
-      reason: 'code.changed reset checks-and-approval',
+      reason: 'code.changed reset',
     });
     expect(fix.events).toContainEqual({
       type: 'check-invalidated',
       stage: Stage.Check,
       checkName: 'review-passed',
-      reason: 'code.changed reset checks-and-approval',
+      reason: 'code.changed reset',
     });
     expect(run.stageRun(Stage.Check).findTask('ai-review')).toMatchObject({
       status: 'pending',
@@ -2077,7 +2077,7 @@ describe('WorkflowRun domain aggregate', () => {
       type: 'task-invalidated',
       stage: Stage.Check,
       taskId: 'ai-review',
-      reason: 'code.changed reset checks-and-approval',
+      reason: 'code.changed reset',
     }));
   });
 

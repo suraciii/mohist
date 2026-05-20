@@ -358,10 +358,10 @@ workflow:
     - id: check
       on:
         code.changed:
-          reset: checks-and-approval
-          tasks: [ai-review]
-          checks: all
-          approval: true
+          reset:
+            tasks: [ai-review]
+            checks: all
+            approval: true
       tasks:
         - id: ai-review
           uses: mohist/agent
@@ -413,6 +413,35 @@ workflow:
           approval: true,
         },
       }));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects legacy event reset shortcuts', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-legacy-reset-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/legacy-reset
+  stages:
+    - id: check
+      on:
+        code.changed:
+          reset: checks-and-approval
+      tasks: []
+      checks: []
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          path: expect.stringContaining('workflow.stages[0].on.code.changed.reset'),
+          message: 'reset must be a mapping with at least one target',
+        }),
+      ]);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

@@ -361,23 +361,29 @@ function compileStageEventPolicies(
       diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}`, message: 'event policy must be a mapping' });
       continue;
     }
-    if (rawPolicy.reset !== 'checks-and-approval' && rawPolicy.reset !== 'checks' && rawPolicy.reset !== 'approval') {
-      diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}.reset`, message: 'reset must be checks-and-approval, checks, or approval' });
+    if (!isRecord(rawPolicy.reset)) {
+      diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}.reset`, message: 'reset must be a mapping with at least one target' });
       continue;
     }
-    const tasks = arrayValue(rawPolicy.tasks).filter((value): value is string => typeof value === 'string');
+    const tasks = arrayValue(rawPolicy.reset.tasks).filter((value): value is string => typeof value === 'string');
     let checks: 'all' | string[] | undefined;
-    if (rawPolicy.checks === 'all') {
+    if (rawPolicy.reset.checks === 'all') {
       checks = 'all';
     } else {
-      const checkList = arrayValue(rawPolicy.checks).filter((value): value is string => typeof value === 'string');
+      const checkList = arrayValue(rawPolicy.reset.checks).filter((value): value is string => typeof value === 'string');
       if (checkList.length > 0) checks = checkList;
     }
+    const approval = typeof rawPolicy.reset.approval === 'boolean' ? rawPolicy.reset.approval : undefined;
+    if (tasks.length === 0 && checks === undefined && approval !== true) {
+      diagnostics.push({ severity: 'error', path: `${stagePath}.on.${eventName}.reset`, message: 'reset must target tasks, checks, or approval' });
+      continue;
+    }
     on[eventName] = {
-      reset: rawPolicy.reset,
-      tasks: tasks.length > 0 ? tasks : undefined,
-      checks,
-      approval: typeof rawPolicy.approval === 'boolean' ? rawPolicy.approval : undefined,
+      reset: {
+        tasks: tasks.length > 0 ? tasks : undefined,
+        checks,
+        approval,
+      },
     };
   }
   return Object.keys(on).length > 0 ? on : undefined;

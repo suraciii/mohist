@@ -173,13 +173,14 @@ export interface InvalidationPolicy {
   entries: InvalidationEntry[];
 }
 
-export type StageResetTarget = 'checks-and-approval' | 'checks' | 'approval';
-
-export interface StageEventPolicy {
-  reset: StageResetTarget;
+export interface StageResetAction {
   tasks?: string[];
   checks?: 'all' | string[];
   approval?: boolean;
+}
+
+export interface StageEventPolicy {
+  reset: StageResetAction;
 }
 
 export type WorkflowTasksFromSource = string;
