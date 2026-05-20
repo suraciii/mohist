@@ -4,7 +4,7 @@ import type { OpenSpecChange } from './detector';
 import type { SessionLearning } from '../tools/session-memory';
 import { formatAgentPrompt, type AgentPromptParts } from '../agents/agent-prompt-schema';
 import { listOpenSpecContextFiles } from '../agents/workflow-context';
-import type { AgentConfig } from '../workflow/workflow-loader';
+import type { AgentConfig } from '../agents/agent-config';
 
 const BUILD_INSTRUCTION_PATH = path.join(__dirname, '..', 'agents', 'prompts', 'build.md');
 

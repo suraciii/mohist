@@ -121,6 +121,11 @@ export function IssueDetailPage() {
   const workflowRunCheckRepair = workflowRun && currentIssueStage ? workflowRunToStageStateMap(workflowRun).get(currentIssueStage)?.checkRepair : undefined
   const stageStateCheckRepair = currentIssueStage ? stageStateData?.stages.find(s => s.stage === currentIssueStage)?.checkRepair : undefined
   const checkRepair: CheckRepairState | undefined = workflowRunCheckRepair ?? stageStateCheckRepair
+  const checkRepairActionLabel = checkRepair?.fixTaskId === 'fix-review-findings'
+    ? 'Fix review findings'
+    : checkRepair?.fixTaskId
+      ? `Run ${checkRepair.fixTaskId}`
+      : 'Run repair'
   const showCheckRepairActions = Boolean(checkRepair)
 
   const startMutation = useMutation({
@@ -839,7 +844,7 @@ export function IssueDetailPage() {
                                 disabled={approvalVerdictRepairMutation.isPending}
                                 className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
                               >
-                                {approvalVerdictRepairMutation.isPending ? 'Repairing...' : 'Run repair'}
+                                {approvalVerdictRepairMutation.isPending ? 'Repairing...' : checkRepairActionLabel}
                               </button>
                             )}
                             {canRetry && (
@@ -901,7 +906,7 @@ export function IssueDetailPage() {
                     )
                   })()}
 
-                  {!isBacklog && issue.stage !== Stage.Done && !isAgentRunningOnThis && issue.recovery?.allowedActions.includes('rerun') && (
+                  {!isBacklog && issue.stage !== Stage.Done && !isAgentRunningOnThis && issue.recovery?.allowedActions.includes('rerun') && !showCheckRepairActions && (
                     <button
                       onClick={() => rerunMutation.mutate()}
                       disabled={rerunMutation.isPending}

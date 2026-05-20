@@ -5,7 +5,7 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { SessionStreamLogRepo } from '../db/session-stream-log-repo';
 import type { CoderSessionRepo } from '../db/coder-session-repo';
 import type { EventBus } from './event-bus';
-import { loadAgentConfig } from '../workflow/workflow-loader';
+import { loadAgentConfig } from '../agents/agent-config';
 import { load as loadConfig } from '../config/config-loader';
 import { resolveStageModel } from '../config/model-resolution';
 import { Stage } from '../types';

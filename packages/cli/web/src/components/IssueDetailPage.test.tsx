@@ -442,6 +442,25 @@ describe('IssueDetailPage - merge-base semantic regression', () => {
           issueNumber: 123,
           status: 'failed',
           currentStage: 'check',
+          workflowDefinition: {
+            workflowId: 'test/workflow',
+            source: { type: 'builtin', id: 'test/workflow' },
+            capturedAt: new Date().toISOString(),
+            stageOrder: ['check'],
+            stageDefinitions: [
+              {
+                stage: 'check',
+                checkFailurePolicies: [
+                  {
+                    checkName: 'review-passed',
+                    fixTaskId: 'fix-review-findings',
+                    fixTaskTitle: 'Fix review findings',
+                    maxAttempts: 1,
+                  },
+                ],
+              },
+            ],
+          },
           stageRuns: [
             {
               stage: 'check',

@@ -61,7 +61,7 @@ describe('POST /api/issues/:number/rebase', () => {
     issueService = new IssueService(issueRepo, commentRepo);
   });
 
-  function makeServer(opts: { mergeQueue?: any } = {}) {
+  function makeServer() {
     const app = new Hono();
     const eventBus = new EventBus();
     const agentRunner = new AgentRunnerService(eventBus);
@@ -74,7 +74,6 @@ describe('POST /api/issues/:number/rebase', () => {
       issueService, projectService, stateManager,
       null, undefined, agentRunner,
       undefined, undefined, undefined, undefined,
-      opts.mergeQueue,
     ));
     return { server: createTestServer(app), agentRunner };
   }
@@ -109,42 +108,20 @@ describe('POST /api/issues/:number/rebase', () => {
   });
 
   describe('done stage', () => {
-    it('should delegate to mergeQueue.retry', async () => {
+    it('should reject Done stage rebase after workflow completion', async () => {
       const issue = issueService.create({ projectId, title: 'Done Issue' });
       issueService.transitionToStage(issue.id, Stage.Done);
 
-      const mergeQueue = { retry: vi.fn().mockReturnValue(true) };
-      const { server, agentRunner } = makeServer({ mergeQueue });
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(200);
-      expect(res.body.data.rebased).toBe(true);
-      expect(mergeQueue.retry).toHaveBeenCalledWith(1);
-      expect(agentRunner.enqueue).not.toHaveBeenCalled();
-    });
-
-    it('should return 409 when mergeQueue.retry returns false', async () => {
-      const issue = issueService.create({ projectId, title: 'Done Issue' });
-      issueService.transitionToStage(issue.id, Stage.Done);
-
-      const mergeQueue = { retry: vi.fn().mockReturnValue(false) };
-      const { server } = makeServer({ mergeQueue });
+      const { server, agentRunner } = makeServer();
       const res = await request(server).post('/api/issues/1/rebase');
       expect(res.status).toBe(409);
-    });
-
-    it('should return 500 when mergeQueue is not configured', async () => {
-      const issue = issueService.create({ projectId, title: 'Done Issue' });
-      issueService.transitionToStage(issue.id, Stage.Done);
-
-      const { server } = makeServer();
-      const res = await request(server).post('/api/issues/1/rebase');
-      expect(res.status).toBe(500);
-      expect(res.body.error).toContain('MergeQueue');
+      expect(res.body.error).toContain('done');
+      expect(agentRunner.enqueue).not.toHaveBeenCalled();
     });
   });
 
   describe('non-Done stages with active WorkflowRun', () => {
-    function makeServerWithWorkflow(opts: { mergeQueue?: any } = {}) {
+    function makeServerWithWorkflow() {
       const app = new Hono();
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus);
@@ -158,8 +135,6 @@ describe('POST /api/issues/:number/rebase', () => {
         issueService, projectService, stateManager,
         null, undefined, agentRunner,
         undefined, undefined, undefined, undefined,
-        opts.mergeQueue,
-        undefined,
         undefined,
         undefined,
         undefined,

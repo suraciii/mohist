@@ -444,7 +444,22 @@ describe('API Routes', () => {
       const eventBus = new EventBus();
       const agentRunner = new AgentRunnerService(eventBus, undefined, issueRepo, 8, undefined, undefined, projectRepo, undefined, stateManager.getIssueTaskQueueRepo());
       stageExecutionRepo = stateManager.getStageExecutionRepo();
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo));
+      app.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageExecutionRepo,
+      ));
       server = createTestServer(app);
       
       const project = await projectService.create({ name: 'Test Project', path: '/test/path' });
@@ -528,25 +543,23 @@ describe('API Routes', () => {
       function createWorkflowRunProgressServer(stageStateService: StageStateService, workflowRunService: WorkflowRunService) {
         const app = new Hono();
         app.route('/api/issues', createIssueRoutes(
-          issueService,
-          projectService,
-          stateManager,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          stageStateService,
-          workflowRunService,
-        ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
         return createTestServer(app);
       }
 
@@ -683,7 +696,24 @@ describe('API Routes', () => {
 
         const approveApp = new Hono();
         const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
+        approveApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        approveAgentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageExecutionRepo,
+        stageStateService,
+        workflowRunService,
+      ));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post('/api/issues/1/approve');
@@ -713,7 +743,22 @@ describe('API Routes', () => {
         const approveEventBus = new EventBus();
         const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
         const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo));
+        approveApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        approveAgentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageExecutionRepo,
+      ));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
@@ -736,7 +781,24 @@ describe('API Routes', () => {
           const approveEventBus = new EventBus();
           const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
           const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
+          approveApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        new WorktreeManager(),
+        undefined,
+        approveAgentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageExecutionRepo,
+        stageStateService,
+        workflowRunService,
+      ));
           const approveServer = createTestServer(approveApp);
 
           const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
@@ -767,7 +829,24 @@ describe('API Routes', () => {
           const approveEventBus = new EventBus();
           const approveAgentRunner = new AgentRunnerService(approveEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
           const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-          approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, new WorktreeManager(), undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageStateService, workflowRunService));
+          approveApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        new WorktreeManager(),
+        undefined,
+        approveAgentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const approveServer = createTestServer(approveApp);
 
           const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
@@ -801,7 +880,24 @@ describe('API Routes', () => {
         const approveApp = new Hono();
         const approveAgentRunner = new AgentRunnerService(new EventBus(), undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), undefined, stateManager.getIssueTaskQueueRepo());
         const enqueueSpy = vi.spyOn(approveAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-        approveApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, approveAgentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, stageExecutionRepo, undefined, stageStateService, workflowRunService));
+        approveApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        approveAgentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageExecutionRepo,
+        stageStateService,
+        workflowRunService,
+      ));
         const approveServer = createTestServer(approveApp);
 
         const response = await request(approveServer).post(`/api/issues/${issue.number}/approve`);
@@ -952,7 +1048,24 @@ describe('API Routes', () => {
           const rejectEventBus = new EventBus();
           const rejectAgentRunner = new AgentRunnerService(rejectEventBus, undefined, stateManager.getIssueRepo(), 8, undefined, undefined, stateManager.getProjectRepo(), worktreeManager, stateManager.getIssueTaskQueueRepo());
           const enqueueSpy = vi.spyOn(rejectAgentRunner, 'enqueue').mockReturnValue({ taskId: 'fake', status: 'pending' });
-          rejectApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, undefined, rejectAgentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, stageExecutionRepo, undefined, undefined, workflowRunService));
+          rejectApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        worktreeManager,
+        undefined,
+        rejectAgentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        stageExecutionRepo,
+        undefined,
+        workflowRunService,
+      ));
           const rejectServer = createTestServer(rejectApp);
 
           const response = await request(rejectServer)
@@ -1218,7 +1331,25 @@ describe('API Routes', () => {
     function createRetryServer(agentRunner: AgentRunnerService) {
       const app = new Hono();
       const prerequisiteService = new IssuePrerequisiteService(issueRepo, stateManager.getIssueStartPrerequisiteRepo());
-      app.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, undefined, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, prerequisiteService));
+      app.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        prerequisiteService,
+      ));
       return createTestServer(app);
     }
 
@@ -1365,7 +1496,24 @@ describe('API Routes', () => {
           } as any;
 
           const retryApp = new Hono();
-          retryApp.route('/api/issues', createIssueRoutes(issueService, projectService, stateManager, mockWm, undefined, agentRunner, undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(), undefined, undefined, undefined, undefined, undefined, workflowRunService));
+          retryApp.route('/api/issues', createIssueRoutes(
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        workflowRunService,
+      ));
           const retryServer = createTestServer(retryApp);
           const retrySpy = vi.spyOn(WorkflowApplicationService.prototype, 'retryStageOrReject').mockReturnValue({
             ok: false,
@@ -1495,25 +1643,23 @@ describe('API Routes', () => {
 
           const retryApp = new Hono();
           retryApp.route('/api/issues', createIssueRoutes(
-            issueService,
-            projectService,
-            stateManager,
-            mockWm,
-            undefined,
-            agentRunner,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            stateManager.getPipelineCheckpointRepo(),
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            stageStateService,
-            workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const retryServer = createTestServer(retryApp);
 
           const response = await request(retryServer).post(`/api/issues/${issue.number}/stages/check/retry-checkpoint`);
@@ -1588,10 +1734,23 @@ describe('API Routes', () => {
           const mockWm = { getPath: () => tmpRerunDir, exists: () => true } as any;
           const rerunApp = new Hono();
           rerunApp.route('/api/issues', createIssueRoutes(
-            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
-            undefined, undefined, stateManager.getCoderSessionRepo(), undefined, undefined, stateManager.getPipelineCheckpointRepo(),
-            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        stateManager.getCoderSessionRepo(),
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const rerunServer = createTestServer(rerunApp);
 
           const response = await request(rerunServer).post(`/api/issues/${issue.number}/stages/check/rerun`);
@@ -1665,10 +1824,23 @@ describe('API Routes', () => {
           const mockWm = { getPath: () => tmpRerunDir, exists: () => true } as any;
           const rerunApp = new Hono();
           rerunApp.route('/api/issues', createIssueRoutes(
-            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
-            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
-            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const rerunServer = createTestServer(rerunApp);
 
           const response = await request(rerunServer).post(`/api/issues/${issue.number}/stages/check/rerun`);
@@ -1718,10 +1890,23 @@ describe('API Routes', () => {
 
         const rerunApp = new Hono();
         rerunApp.route('/api/issues', createIssueRoutes(
-          issueService, projectService, stateManager, undefined, undefined, agentRunner,
-          undefined, undefined, stateManager.getCoderSessionRepo(), undefined, undefined, undefined,
-          undefined, undefined, undefined, undefined, undefined, workflowRunService,
-        ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        stateManager.getCoderSessionRepo(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        workflowRunService,
+      ));
         const rerunServer = createTestServer(rerunApp);
 
         const response = await request(rerunServer).post(`/api/issues/${issue.number}/rerun`);
@@ -1768,10 +1953,23 @@ describe('API Routes', () => {
 
         const rerunApp = new Hono();
         rerunApp.route('/api/issues', createIssueRoutes(
-          issueService, projectService, stateManager, undefined, undefined, agentRunner,
-          undefined, undefined, stateManager.getCoderSessionRepo(), undefined, undefined, undefined,
-          undefined, undefined, undefined, undefined, undefined, workflowRunService,
-        ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        stateManager.getCoderSessionRepo(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        workflowRunService,
+      ));
         const rerunServer = createTestServer(rerunApp);
 
         const response = await request(rerunServer).post(`/api/issues/${issue.number}/rerun`);
@@ -1834,25 +2032,23 @@ describe('API Routes', () => {
 
           const repairApp = new Hono();
           repairApp.route('/api/issues', createIssueRoutes(
-            issueService,
-            projectService,
-            stateManager,
-            mockWm,
-            undefined,
-            agentRunner,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            stateManager.getPipelineCheckpointRepo(),
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            stageStateService,
-            workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const repairServer = createTestServer(repairApp);
 
           const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
@@ -1915,10 +2111,23 @@ describe('API Routes', () => {
           const mockWm = { getPath: () => tmpRepairDir, exists: () => true } as any;
           const repairApp = new Hono();
           repairApp.route('/api/issues', createIssueRoutes(
-            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
-            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
-            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const repairServer = createTestServer(repairApp);
 
           const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
@@ -1965,10 +2174,23 @@ describe('API Routes', () => {
           const mockWm = { getPath: () => tmpRepairDir, exists: () => true } as any;
           const repairApp = new Hono();
           repairApp.route('/api/issues', createIssueRoutes(
-            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
-            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
-            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const repairServer = createTestServer(repairApp);
 
           const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);
@@ -2026,10 +2248,23 @@ describe('API Routes', () => {
           const mockWm = { getPath: () => tmpRepairDir, exists: () => true } as any;
           const repairApp = new Hono();
           repairApp.route('/api/issues', createIssueRoutes(
-            issueService, projectService, stateManager, mockWm, undefined, agentRunner,
-            undefined, undefined, undefined, undefined, undefined, stateManager.getPipelineCheckpointRepo(),
-            undefined, undefined, undefined, undefined, stageStateService, workflowRunService,
-          ));
+        issueService,
+        projectService,
+        stateManager,
+        mockWm,
+        undefined,
+        agentRunner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stateManager.getPipelineCheckpointRepo(),
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
           const repairServer = createTestServer(repairApp);
 
           const response = await request(repairServer).post(`/api/issues/${issue.number}/stages/check/approval-verdict-repair`);

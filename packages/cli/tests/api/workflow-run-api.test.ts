@@ -110,25 +110,23 @@ describe('GET /api/issues/:number/workflow-run', () => {
   function createApp(): http.Server {
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
-      issueService,
-      projectService,
-      stateManager,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stageStateService,
-      workflowRunService,
-    ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
     return createTestServer(app);
   }
 
@@ -398,25 +396,23 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
   function createApp(): http.Server {
     const app = new Hono();
     app.route('/api/issues', createIssueRoutes(
-      issueService,
-      projectService,
-      stateManager,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stageStateService,
-      workflowRunService,
-    ));
+        issueService,
+        projectService,
+        stateManager,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        stageStateService,
+        workflowRunService,
+      ));
     return createTestServer(app);
   }
 

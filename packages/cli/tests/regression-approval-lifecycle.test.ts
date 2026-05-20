@@ -181,7 +181,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
       expect(result.completed).toBe(false);
       expect(result.stage).toBe(Stage.Check);
-      expect(result.message).toContain('aggregate workflow service is unavailable');
+      expect(result.message).toContain('WorkflowApplicationService is required');
     });
 
     it('Check runner returning success=false leaves issue in Check pending approval', async () => {
@@ -478,7 +478,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
       expect(result.completed).toBe(false);
       expect(result.stage).toBe(Stage.Plan);
-      expect(result.message).toContain('aggregate workflow service is unavailable');
+      expect(result.message).toContain('WorkflowApplicationService is required');
     });
   });
 });

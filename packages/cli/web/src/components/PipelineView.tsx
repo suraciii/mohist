@@ -1205,7 +1205,7 @@ function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
   )
 }
 
-function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
+export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
   const statusLabels: Record<CheckRepairStatus, string> = {
     'not-needed': 'Repair not needed',
     'available': 'Auto-fix available',

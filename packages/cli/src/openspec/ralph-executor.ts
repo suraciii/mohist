@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { OpenSpecChange } from './detector';
 import type { Task } from './context-assembler';
-import type { AgentConfig } from '../workflow/workflow-loader';
+import type { AgentConfig } from '../agents/agent-config';
 import { withSession } from '../agent-runtime/agent-session';
 import type { AgentSessionOptions, AcpSessionResult } from '../agent-runtime/agent-session';
 import { WorktreeManager } from '../git/worktree-manager';

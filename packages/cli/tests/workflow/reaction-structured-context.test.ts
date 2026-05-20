@@ -397,9 +397,9 @@ describe('Reaction structured context: T-006', () => {
 
       const reviewCheck = checkStage!.checks.find(check => check.name === 'review-passed');
       expect(reviewCheck?.onFailure?.retry?.task.with).toMatchObject({
-        prompt: expect.objectContaining({
-          inline: expect.stringContaining('{{ openspec.changeDir }}/review.md'),
-        }),
+        prompt: {
+          inline: expect.stringContaining('{{ artifacts.openspecChange }}/review.md'),
+        },
       });
     });
   });

@@ -48,12 +48,8 @@ import { DesignCompleteCheck } from '../workflow/checks/design-complete-check';
 import { TasksValidCheck } from '../workflow/checks/tasks-valid-check';
 import { SelfReviewPassedCheck } from '../workflow/checks/self-review-passed-check';
 import { UserApprovalCheck } from '../workflow/checks/user-approval-check';
-import { CodeCompilesCheck } from '../workflow/checks/code-compiles-check';
-import { BuildTestCheck } from '../workflow/checks/build-test-check';
-import { IntegrationHealthGatePreviewCheck } from '../workflow/checks/integration-health-gate-preview-check';
 import { HealthGateCheck } from '../workflow/checks/health-gate-check';
 import { ArtifactExistsCheck, ArtifactMarkerCheck, ShellCommandCheck } from '../workflow/checks';
-import { DEFAULT_HEALTH_GATE_POLICIES, loadHealthGatePolicies, loadWorkflow } from '../workflow/workflow-loader';
 import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/workflow-inspector';
 
 const execFileAsync = promisify(execFile);
@@ -120,16 +116,9 @@ const log = Log.create({ service: 'agent-runner' });
 
 export function createDefaultCheckRegistry(input: {
   worktreePath: string;
-  healthGatePolicies: ReturnType<typeof loadHealthGatePolicies>;
   workflowDefinitionSnapshot?: import('../workflow/domain').WorkflowDefinitionSnapshot;
 }) {
-  const { worktreePath, healthGatePolicies, workflowDefinitionSnapshot } = input;
-  const defaultHealthGatePolicyByStage = {
-    plan: healthGatePolicies.plan,
-    build: healthGatePolicies.build,
-    check: healthGatePolicies.check,
-    integrate: healthGatePolicies.postMerge,
-  } as const;
+  const { worktreePath, workflowDefinitionSnapshot } = input;
   const registry = createCheckRegistry({
     'proposal-complete': () => Promise.resolve(new ProposalCompleteCheck()),
     'specs-complete': () => Promise.resolve(new SpecsCompleteCheck()),
@@ -137,32 +126,24 @@ export function createDefaultCheckRegistry(input: {
     'tasks-valid': () => Promise.resolve(new TasksValidCheck()),
     'self-review-passed': () => Promise.resolve(new SelfReviewPassedCheck()),
     'user-approval': (ctx) => Promise.resolve(new UserApprovalCheck(ctx.issue.stage)),
-    'health:plan': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.plan, stage: 'plan' })),
-    'health:build': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.build, stage: 'build' })),
-    'health:check': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.check, stage: 'check' })),
-    'health:integrate': () => Promise.resolve(new HealthGateCheck({ worktreePath, policy: healthGatePolicies.postMerge, stage: 'integrate' })),
     'ai-review': () => Promise.resolve(new AiReviewCheck()),
     'review-passed': () => Promise.resolve(new ReviewPassedCheck()),
     'merge-ready': () => Promise.resolve(new MergeReadyCheck()),
-    'code-compiles': (_ctx) => Promise.resolve(new CodeCompilesCheck({ worktreePath })),
-    'build-test': (_ctx) => Promise.resolve(new BuildTestCheck({ worktreePath })),
-    'integration-health-gate-preview': () => Promise.resolve(new IntegrationHealthGatePreviewCheck()),
   });
-  for (const stage of workflowDefinitionSnapshot?.compiledStageDefinitions ?? []) {
+  for (const stage of workflowDefinitionSnapshot?.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS) {
     for (const check of stage.checks) {
       if (check.uses === 'mohist/health-gate') {
         const stageName = stage.stage;
-        const fallbackPolicy = defaultHealthGatePolicyByStage[stageName as keyof typeof defaultHealthGatePolicyByStage];
         registry.register(check.name, () => Promise.resolve(new HealthGateCheck({
           worktreePath,
           stage: stageName,
+          name: check.name,
           policy: {
-            enabled: typeof check.with?.enabled === 'boolean' ? check.with.enabled : fallbackPolicy?.enabled ?? true,
-            command: typeof check.with?.command === 'string' ? check.with.command : fallbackPolicy?.command ?? '',
-            timeout: typeof check.with?.timeout === 'number' ? check.with.timeout : fallbackPolicy?.timeout ?? 5 * 60 * 1000,
-            autoFix: typeof check.with?.autoFix === 'boolean' ? check.with.autoFix : fallbackPolicy?.autoFix ?? false,
-            maxFixAttempts: typeof check.with?.maxFixAttempts === 'number' ? check.with.maxFixAttempts : fallbackPolicy?.maxFixAttempts ?? 0,
-            fallbackReaction: fallbackPolicy?.fallbackReaction ?? { type: 'ask-user' },
+            enabled: typeof check.with?.enabled === 'boolean' ? check.with.enabled : true,
+            command: typeof check.with?.command === 'string' ? check.with.command : '',
+            timeout: typeof check.with?.timeout === 'number' ? check.with.timeout : 5 * 60 * 1000,
+            autoFix: typeof check.with?.autoFix === 'boolean' ? check.with.autoFix : false,
+            maxFixAttempts: typeof check.with?.maxFixAttempts === 'number' ? check.with.maxFixAttempts : 0,
           },
         })));
       }
@@ -1425,13 +1406,7 @@ export class AgentRunnerService {
 
       const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
       const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot | undefined;
-      const needsLegacyHealthGatePolicy = !workflowDefinitionSnapshot?.compiledStageDefinitions
-        .some(stage => stage.checks.some(check => check.uses === 'mohist/health-gate'));
-      const workflowConfig = needsLegacyHealthGatePolicy ? loadWorkflow(worktreePath) : 'definition-health-gates';
-      const healthGatePolicies = typeof workflowConfig === 'string'
-        ? DEFAULT_HEALTH_GATE_POLICIES
-        : loadHealthGatePolicies(workflowConfig);
-      const checkRegistry = createDefaultCheckRegistry({ worktreePath, healthGatePolicies, workflowDefinitionSnapshot });
+      const checkRegistry = createDefaultCheckRegistry({ worktreePath, workflowDefinitionSnapshot });
 
       const unifiedRunner = new GenericStageRunner({
         taskLoaderRegistry,
