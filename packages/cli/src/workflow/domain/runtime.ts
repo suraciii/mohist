@@ -71,7 +71,7 @@ export class TaskRun {
     return this.status === 'completed';
   }
 
-  resetForFreshAttempt(): void {
+  resetForFreshAttempt(causedBy: CausedByMetadata | null = null): void {
     this.status = 'pending';
     this.attempts = 0;
     this.duration = 0;
@@ -79,7 +79,7 @@ export class TaskRun {
     this.events = [];
     this.output = null;
     this.reason = null;
-    this.causedBy = null;
+    this.causedBy = causedBy;
     this.latestAttempt = null;
   }
 
@@ -478,9 +478,9 @@ export class StageRun {
     return check;
   }
 
-  resetTask(taskId: string): void {
+  resetTask(taskId: string, causedBy: CausedByMetadata | null = null): void {
     const task = this.findTask(taskId);
-    task.resetForFreshAttempt();
+    task.resetForFreshAttempt(causedBy);
   }
 
   resetCheck(checkName: string): void {
@@ -548,10 +548,11 @@ export class StageRun {
       ...(this.definition.repairPolicies?.map(policy => policy.fixTaskId) ?? []),
       ...(this.definition.checkFailurePolicies?.map(policy => policy.fixTaskId) ?? []),
     ]);
+    const staticTaskIds = new Set(this.definition.tasks.map(task => task.id));
     for (let index = this.tasks.length - 1; index >= 0; index--) {
       const task = this.tasks[index];
       const isRepairTask = [...repairTaskIds].some(fixTaskId => task.id === fixTaskId || task.id.startsWith(`${fixTaskId}:`));
-      const isRuntimeTask = task.causedBy !== null || task.id === 'rebase-branch';
+      const isRuntimeTask = (!staticTaskIds.has(task.id) && task.causedBy !== null) || task.id === 'rebase-branch';
       if (isRepairTask || isRuntimeTask) {
         this.tasks.splice(index, 1);
       }
@@ -1135,7 +1136,7 @@ export class WorkflowRun {
         const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
         for (const taskId of entry.invalidates.tasks ?? []) {
           try {
-            stageRun.resetTask(taskId);
+            stageRun.resetTask(taskId, { type: 'system-policy', taskId: task.id, message: reason });
             events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId, reason });
           } catch {
             // Task may not belong to this stage definition.
@@ -1529,8 +1530,8 @@ export class WorkflowRun {
       if (entry.invalidates.tasks) {
         for (const t of entry.invalidates.tasks) {
           try {
-            stageRun.resetTask(t);
             const reason = entry.reason ?? `Policy invalidation after ${taskId}`;
+            stageRun.resetTask(t, { type: 'system-policy', taskId, message: reason });
             events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: t, reason });
           } catch {
             // task not in stage, skip

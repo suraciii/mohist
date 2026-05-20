@@ -33,7 +33,7 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isCurrentStageApproval, classifyMergeDelivery } from '../workflow/issue-lifecycle';
-import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoader, type TaskKind } from '../workflow/task-runtime';
+import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoader, createDefaultStaticTaskLoader } from '../workflow/task-runtime';
 import { defaultAgentSessionTaskHandler } from '../workflow/task-runtime/agent-session-task-handler';
 import { defaultServiceCallTaskHandler } from '../workflow/task-runtime/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/task-runtime/ralph-task-handler';
@@ -1419,35 +1419,7 @@ export class AgentRunnerService {
         'ralph-task': createRalphTaskHandler(),
       });
       const taskLoaderRegistry = createTaskLoaderRegistry([
-        {
-          kind: 'static',
-          load: (ctx) => {
-            const definition = ctx.workflowRun?.workflowDefinition
-              ? (ctx.workflowRun.workflowDefinition as import('../workflow/domain').WorkflowDefinitionSnapshot).compiledStageDefinitions.find(candidate => candidate.stage === ctx.issue.stage)
-              : DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === ctx.issue.stage);
-            if (!definition) return [];
-            const allowedTaskIds = new Set(
-              definition.workSources
-                ?.filter(source => source.kind === 'static')
-                .flatMap(source => source.taskIds ?? [])
-                ?? definition.tasks.map(task => task.id),
-            );
-            const toTaskKind = (kind: string): TaskKind => {
-              if (kind === 'service-call' || kind === 'ralph-task') return kind;
-              return 'agent-session';
-            };
-
-            return definition.tasks
-              .filter(task => allowedTaskIds.has(task.id))
-              .map(task => ({
-                taskId: task.id,
-                title: task.title,
-                prompt: resolveWorkflowTaskPrompt(task.with, worktreePath),
-                input: task.with,
-                kind: toTaskKind(definition.taskExecutionPolicies?.find(policy => policy.taskId === task.id)?.kind ?? 'agent-session'),
-              }));
-          },
-        },
+        createDefaultStaticTaskLoader(worktreePath),
         createRalphTaskLoader(),
       ]);
 
@@ -1971,26 +1943,5 @@ export class AgentRunnerService {
       recoverableIssues: this.recoverableIssues,
       blockedIssues: this.getBlockedIssues(),
     };
-  }
-}
-
-function resolveWorkflowTaskPrompt(input: Record<string, unknown> | undefined, worktreePath: string): string | undefined {
-  if (!input) return undefined;
-  if (typeof input.prompt === 'string') return input.prompt;
-  if (typeof input.promptFile !== 'string') return undefined;
-
-  const promptPath = path.resolve(worktreePath, input.promptFile);
-  if (!promptPath.startsWith(path.resolve(worktreePath) + path.sep)) {
-    log.warn('Ignoring workflow promptFile outside worktree', { promptFile: input.promptFile });
-    return undefined;
-  }
-  try {
-    return fs.readFileSync(promptPath, 'utf-8');
-  } catch (err) {
-    log.warn('Failed to read workflow promptFile', {
-      promptFile: input.promptFile,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return undefined;
   }
 }
