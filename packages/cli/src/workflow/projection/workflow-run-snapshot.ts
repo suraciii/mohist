@@ -126,7 +126,7 @@ export function hydrateWorkflowRun(
 
     stageRun.tasks.splice(0, stageRun.tasks.length);
     for (const taskSnapshot of [...stageSnapshot.tasks].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))) {
-      const task = stageRun.materializeTaskForPersistence(taskSnapshot.id, taskSnapshot.title, taskSnapshot.order);
+      const task = stageRun.materializeTaskForPersistence(taskSnapshot.id, taskSnapshot.title, taskSnapshot.order, taskSnapshot.uses);
       task.status = taskSnapshot.status;
       task.dependsOn = [...(taskSnapshot.dependsOn ?? [])];
       task.attempts = taskSnapshot.attempts;

@@ -36,6 +36,7 @@ function scheduleRebaseTask(run: DomainWorkflowRun, reason: string) {
   return run.scheduleRuntimeTask({
     taskId: 'rebase-branch',
     title: 'Rebase branch',
+    uses: 'mohist/rebase',
     causedBy: { type: 'branch-changed', message: reason },
   });
 }
@@ -141,6 +142,7 @@ function createBasicTaskLoaderRegistry(): TaskLoaderRegistry {
               taskId: (task as any).id ?? (task as any).taskId,
               title: task.title,
               kind: 'ralph-task' as const,
+              uses: 'mohist/ralph-tasks',
               input: (task as any).id ?? (task as any).taskId,
             }));
           },
@@ -276,10 +278,10 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
       workSources: [{ kind: 'static', taskIds: ['ai-review'] }, { kind: 'runtime' }],
       taskExecutionPolicies: [
         { taskId: 'ai-review', kind: 'agent-session' },
-        { taskId: 'fix-check-health', kind: 'repair-task', workSourceKind: 'runtime' },
+        { taskId: 'fix-check-health', kind: 'agent-session', workSourceKind: 'runtime' },
         { taskId: 'fix-review-findings', kind: 'agent-session', workSourceKind: 'runtime' },
-        { taskId: 'fix-merge-readiness', kind: 'rebase-task', workSourceKind: 'runtime' },
-        { taskId: 'rebase-branch', kind: 'agent-session', workSourceKind: 'runtime' },
+        { taskId: 'fix-merge-readiness', kind: 'service-call', workSourceKind: 'runtime' },
+        { taskId: 'rebase-branch', kind: 'service-call', workSourceKind: 'runtime' },
       ],
       checkPolicies: [
         { checkName: 'health:check', phase: 'post-task' },
@@ -306,9 +308,9 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
     [Stage.Integrate]: {
       stage: Stage.Integrate,
       tasks: [
-        { id: 'integrate:spec-sync', title: 'Spec sync' },
-        { id: 'integrate:archive-change', title: 'Archive change' },
-        { id: 'integrate:merge', title: 'Merge to main' },
+        { id: 'integrate:spec-sync', title: 'Spec sync', uses: 'mohist/openspec-sync' },
+        { id: 'integrate:archive-change', title: 'Archive change', uses: 'mohist/archive-change' },
+        { id: 'integrate:merge', title: 'Merge to main', uses: 'mohist/merge' },
       ],
       checks: [{ name: 'health:integrate', title: 'Integrate health gate' }],
       workSources: [{ kind: 'static', taskIds: ['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge'] }],
@@ -922,7 +924,7 @@ describe('StageRunner migration regression coverage', () => {
           get: vi.fn().mockImplementation((kind: string) => kind === 'ralph'
             ? {
                 kind: 'ralph' as const,
-                load: () => [{ taskId: 'T-001', title: 'Build first task', kind: 'ralph-task' as const, input: 'T-001' }],
+                load: () => [{ taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-001' }],
               }
             : undefined),
           list: vi.fn().mockReturnValue([]),
@@ -954,7 +956,8 @@ describe('StageRunner migration regression coverage', () => {
         expect(materializeTasks).toHaveBeenCalledWith({
           issueId: ctx.issue.id,
           stage: Stage.Build,
-          tasks: [{ id: 'T-001', title: 'Build first task', order: 1, dependsOn: [] }],
+          tasks: [{ id: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', order: 1, dependsOn: [] }],
+          workSourceState: undefined,
         });
         expect(healthCheck).not.toHaveBeenCalled();
       } finally {
@@ -981,8 +984,8 @@ describe('StageRunner migration regression coverage', () => {
             ? {
                 kind: 'ralph' as const,
                 load: () => [
-                  { taskId: 'T-001', title: 'Build first task', kind: 'ralph-task' as const, input: 'T-001' },
-                  { taskId: 'T-002', title: 'Build second task', kind: 'ralph-task' as const, input: 'T-002' },
+                  { taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-001' },
+                  { taskId: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-002' },
                 ],
               }
             : undefined),
@@ -1016,9 +1019,10 @@ describe('StageRunner migration regression coverage', () => {
           issueId: ctx.issue.id,
           stage: Stage.Build,
           tasks: [
-            { id: 'T-001', title: 'Build first task', order: 1, dependsOn: [] },
-            { id: 'T-002', title: 'Build second task', order: 2, dependsOn: ['T-001'] },
+            { id: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', order: 1, dependsOn: [] },
+            { id: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', order: 2, dependsOn: ['T-001'] },
           ],
+          workSourceState: undefined,
         });
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1044,8 +1048,8 @@ describe('StageRunner migration regression coverage', () => {
             ? {
                 kind: 'ralph' as const,
                 load: () => [
-                  { taskId: 'T-001', title: 'Build first task', kind: 'ralph-task' as const, input: 'T-001' },
-                  { taskId: 'T-002', title: 'Build second task', kind: 'ralph-task' as const, input: 'T-002' },
+                  { taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-001' },
+                  { taskId: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-002' },
                 ],
               }
             : undefined),
@@ -1573,6 +1577,7 @@ describe('StageRunner migration regression coverage', () => {
           id: 'fix-check-health',
           taskId: 'fix-check-health',
           title: 'Fix check health',
+          uses: 'mohist/agent',
           status: 'pending',
           attempts: 0,
           order: 1,
@@ -1586,7 +1591,7 @@ describe('StageRunner migration regression coverage', () => {
             stage: Stage.Check,
             tasks: [
               { id: 'ai-review', taskId: 'ai-review', title: 'AI review', status: 'completed' },
-              { id: 'fix-check-health', taskId: 'fix-check-health', title: 'Fix check health', status: 'pending' },
+              { id: 'fix-check-health', taskId: 'fix-check-health', title: 'Fix check health', uses: 'mohist/agent', status: 'pending' },
             ],
             checks: [{ name: 'health:check', status: 'pending', message: 'build failed' }],
           }],
@@ -1607,8 +1612,7 @@ describe('StageRunner migration regression coverage', () => {
       }));
       expect(dispatchable).toEqual(expect.objectContaining({
         taskId: 'fix-check-health',
-        kind: 'service-call',
-        stage: Stage.Check,
+        kind: 'agent-session',
       }));
     });
 
@@ -1827,7 +1831,7 @@ describe('StageRunner migration regression coverage', () => {
 
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': taskHandler }),
+          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1845,7 +1849,7 @@ describe('StageRunner migration regression coverage', () => {
             approveStage: vi.fn(),
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', taskId: 'rebase-branch', title: 'Rebase branch', status: 'pending', causedByType: 'branch-changed' }], checks: [] }],
+            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', taskId: 'rebase-branch', title: 'Rebase branch', uses: 'mohist/rebase', status: 'pending', causedByType: 'branch-changed' }], checks: [] }],
           } as any,
         });
         ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'rebase-branch' };
@@ -1900,7 +1904,7 @@ describe('StageRunner migration regression coverage', () => {
 
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': taskHandler }),
+          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1918,7 +1922,7 @@ describe('StageRunner migration regression coverage', () => {
             approveStage: vi.fn(),
           } as any,
           workflowRun: {
-            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', taskId: 'rebase-branch', title: 'Rebase branch', status: 'pending', causedByType: 'branch-changed' }], checks: [] }],
+            stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'rebase-branch', taskId: 'rebase-branch', title: 'Rebase branch', uses: 'mohist/rebase', status: 'pending', causedByType: 'branch-changed' }], checks: [] }],
           } as any,
         });
         ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'rebase-branch' };

@@ -2,14 +2,13 @@ import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from 
 import type { StageRunner } from './stage-runner';
 import type { CheckContext } from './checks';
 import { resolveCheck } from './checks/check-registry';
-import type { TaskHandlerRegistry, ExecutableTask, TaskKind } from './tasks';
+import type { TaskHandlerRegistry, ExecutableTask } from './tasks';
 import type { TaskLoaderRegistry } from './tasks/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './tasks/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './tasks/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
 import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
-import type { RuntimeStageDefinition, TaskExecutionKind, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';
-import { inferWorkflowTaskUse } from './uses-catalog';
+import type { RuntimeStageDefinition, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { readTasks } from '../openspec/ralph-executor';
@@ -457,7 +456,7 @@ export class GenericStageRunner implements StageRunner {
       if (workSource.kind === 'static' || workSource.kind === 'runtime') return false;
       const change = detectOpenSpecChange(ctx.acpOptions.cwd, ctx.issue);
       if (!change) return false;
-      let tasks: Array<{ id: string; title: string; order: number; dependsOn: string[] }> = [];
+      let tasks: Array<{ id: string; title: string; uses?: string; order: number; dependsOn: string[] }> = [];
       try {
         tasks = this.materializeLoadedTasks(ctx, workSource.kind, change);
       } catch {
@@ -494,7 +493,7 @@ export class GenericStageRunner implements StageRunner {
         continue;
       }
 
-      let tasks: Array<{ id: string; title: string; order: number; dependsOn: string[] }> = [];
+      let tasks: Array<{ id: string; title: string; uses?: string; order: number; dependsOn: string[] }> = [];
       try {
         tasks = this.materializeLoadedTasks(ctx, workSource.kind, change);
       } catch {
@@ -529,7 +528,7 @@ export class GenericStageRunner implements StageRunner {
     ctx: StageContext,
     kind: 'ralph',
     change: NonNullable<ReturnType<typeof detectOpenSpecChange>>,
-  ): Array<{ id: string; title: string; order: number; dependsOn: string[] }> {
+  ): Array<{ id: string; title: string; uses?: string; order: number; dependsOn: string[] }> {
     const loader = this.taskLoaderRegistry.get(kind);
     if (!loader) return [];
 
@@ -544,6 +543,7 @@ export class GenericStageRunner implements StageRunner {
       return {
         id: task.taskId,
         title: task.title,
+        uses: task.uses,
         order: orderedTask?.order ?? index + 1,
         dependsOn: orderedTask?.dependsOn ?? [],
       };
@@ -570,7 +570,8 @@ export class GenericStageRunner implements StageRunner {
           ...taskDef,
           taskId,
           title: taskDef.title,
-          kind: this.toHandlerKind(policy?.kind ?? taskDef.kind),
+          kind: policy?.kind ?? taskDef.kind,
+          uses: taskDef.uses,
         };
       }
 
@@ -580,7 +581,7 @@ export class GenericStageRunner implements StageRunner {
         const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, workSource.kind);
         return {
           ...executableTask,
-          kind: this.toHandlerKind(policy?.kind ?? executableTask.kind),
+          kind: policy?.kind ?? executableTask.kind,
         };
       }
     }
@@ -611,11 +612,11 @@ export class GenericStageRunner implements StageRunner {
     if (!task) return null;
     const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, 'runtime')
       ?? (baseTaskId !== taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, 'runtime') : undefined);
-    const executionKind = policy?.kind ?? this.inferRuntimeTaskExecutionKind(task);
     return {
       taskId,
       title: task.title,
-      kind: this.toHandlerKind(executionKind),
+      kind: policy?.kind ?? 'agent-session',
+      uses: task.uses,
     };
   }
 
@@ -624,35 +625,31 @@ export class GenericStageRunner implements StageRunner {
   }
 
   private runtimeTaskDefinition(ctx: StageContext, taskId: string): TaskDefinition | null {
+    type ProjectedRuntimeTask = {
+      id?: string;
+      taskId?: string;
+      title: string;
+      uses?: string;
+      causedByType?: string | null;
+      causedBy?: unknown;
+    };
     const runtimeTask = ctx.workflowRun
       ?.stageRuns.find(stage => stage.stage === ctx.issue.stage)
       ?.tasks.find(task => {
-        const projectedTask = task as typeof task & { id?: string; taskId?: string; causedByType?: string | null; causedBy?: unknown };
+        const projectedTask = task as ProjectedRuntimeTask;
         const projectedTaskId = projectedTask.taskId ?? projectedTask.id;
         const hasRuntimeCause = projectedTask.causedByType !== undefined
           ? projectedTask.causedByType !== null
           : projectedTask.causedBy !== undefined;
         return projectedTaskId === taskId && hasRuntimeCause;
-      });
+      }) as ProjectedRuntimeTask | undefined;
     if (!runtimeTask) return null;
     return {
       id: taskId,
       title: runtimeTask.title,
-      uses: inferWorkflowTaskUse(taskId),
+      uses: runtimeTask.uses,
       source: 'builtin',
     };
-  }
-
-  private inferRuntimeTaskExecutionKind(task: TaskDefinition): TaskExecutionKind {
-    const uses = task.uses ?? inferWorkflowTaskUse(task.id);
-    if (uses === 'mohist/rebase') return 'rebase-task';
-    if (uses === 'mohist/openspec-sync' || uses === 'mohist/archive-change' || uses === 'mohist/merge' || uses === 'mohist/github-pr') return 'service-call';
-    return 'agent-session';
-  }
-
-  private toHandlerKind(kind: TaskExecutionKind): TaskKind {
-    if (kind === 'repair-task' || kind === 'rebase-task') return 'agent-session';
-    return kind;
   }
 
   private buildDispatchableTask(
@@ -677,7 +674,9 @@ export class GenericStageRunner implements StageRunner {
       failedCheck: options.failedCheck,
       worktreePath: this.worktreePath,
       agentSessionRef: executionKind === 'agent-session' ? policy?.agentSessionRef : undefined,
-      sourceTask: this.sourceTaskDefinition(stageDefinition, task.taskId),
+      sourceTask: this.sourceTaskDefinition(stageDefinition, task.taskId)
+        ?? this.runtimeTaskDefinition(ctx, task.taskId)
+        ?? (baseTaskId !== task.taskId ? this.runtimeTaskDefinition(ctx, baseTaskId) ?? undefined : undefined),
     });
   }
 

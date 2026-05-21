@@ -65,6 +65,7 @@ export interface WorkItemAttempt {
 export interface MaterializedTaskInput {
   id: string;
   title: string;
+  uses?: string;
   order?: number;
   dependsOn?: string[];
 }
@@ -164,6 +165,7 @@ export interface WorkflowDecision {
 export interface TaskRunSnapshot {
   id: string;
   title: string;
+  uses?: string;
   status: TaskRunStatus;
   order: number;
   dependsOn: string[];
@@ -251,6 +253,7 @@ export class TaskRun {
     readonly id: string,
     readonly title: string,
     readonly order: number,
+    readonly uses?: string,
   ) {}
 
   get terminal(): boolean {
@@ -278,6 +281,7 @@ export class TaskRun {
     return {
       id: this.id,
       title: this.title,
+      uses: this.uses,
       status: this.status,
       order: this.order,
       dependsOn: [...this.dependsOn],
@@ -570,7 +574,7 @@ export class StageRun {
     readonly order: number,
   ) {
     this.tasks = definition.tasks.map((task, index) => {
-      const taskRun = new TaskRun(task.id, task.title, index);
+      const taskRun = new TaskRun(task.id, task.title, index, task.uses);
       taskRun.dependsOn = [...(task.dependsOn ?? [])];
       return taskRun;
     });
@@ -595,7 +599,7 @@ export class StageRun {
         existing.dependsOn = [...(task.dependsOn ?? existing.dependsOn)];
         continue;
       }
-      const taskRun = new TaskRun(task.id, task.title, task.order ?? this.tasks.length);
+      const taskRun = new TaskRun(task.id, task.title, task.order ?? this.tasks.length, task.uses);
       taskRun.dependsOn = [...(task.dependsOn ?? [])];
       this.tasks.push(taskRun);
     }
@@ -666,7 +670,7 @@ export class StageRun {
     if (!latest) throw new WorkflowDomainError(`Task ${taskId} does not exist in stage ${this.stage}`);
     const nextIndex = this.nextTaskRunIndex(baseTaskId);
     const id = `${baseTaskId}:${nextIndex}`;
-    const task = new TaskRun(id, latest.title, latest.order + 1);
+    const task = new TaskRun(id, latest.title, latest.order + 1, latest.uses);
     task.dependsOn = [...latest.dependsOn];
     task.resetBy = resetBy;
     this.tasks.push(task);
@@ -755,11 +759,19 @@ export class StageRun {
   appendFixTask(policy: CheckFailurePolicy, causedBy: CausedByMetadata): TaskRun {
     const suffix = this.scheduledFixCount(policy.checkName);
     const id = this.tasks.some(task => task.id === policy.fixTaskId) ? `${policy.fixTaskId}:${suffix}` : policy.fixTaskId;
-    const task = new TaskRun(id, policy.fixTaskTitle, this.tasks.length);
+    const taskDefinition = this.retryTaskDefinition(policy.fixTaskId);
+    const task = new TaskRun(id, policy.fixTaskTitle, this.tasks.length, taskDefinition?.uses);
     task.reason = causedBy.message ?? `Repair ${policy.checkName}`;
     task.causedBy = causedBy;
     this.tasks.push(task);
     return task;
+  }
+
+  private retryTaskDefinition(taskId: string) {
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    return this.definition.checks
+      .map(check => check.onFailure?.retry?.task)
+      .find((task): task is NonNullable<typeof task> => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
   reopenForRepair(): void {
@@ -768,8 +780,8 @@ export class StageRun {
     this.approval = null;
   }
 
-  appendAdHocTask(id: string, title: string, causedBy: CausedByMetadata): TaskRun {
-    const task = new TaskRun(id, title, this.tasks.length);
+  appendAdHocTask(id: string, title: string, causedBy: CausedByMetadata, uses?: string): TaskRun {
+    const task = new TaskRun(id, title, this.tasks.length, uses);
     task.reason = causedBy.message ?? title;
     task.causedBy = causedBy;
     this.tasks.push(task);
@@ -820,10 +832,10 @@ export class StageRun {
     this.workSourceState = { evaluated: false };
   }
 
-  materializeTaskForPersistence(id: string, title: string, order: number): TaskRun {
+  materializeTaskForPersistence(id: string, title: string, order: number, uses?: string): TaskRun {
     const existing = this.tasks.find(task => task.id === id);
     if (existing) return existing;
-    const task = new TaskRun(id, title, order);
+    const task = new TaskRun(id, title, order, uses);
     this.tasks.push(task);
     this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
     return task;
@@ -969,6 +981,7 @@ export class WorkflowRun {
   scheduleRuntimeTask(input: {
     taskId: string;
     title: string;
+    uses?: string;
     causedBy: CausedByMetadata;
   }): WorkflowDecision {
     this.assertRunning();
@@ -986,7 +999,7 @@ export class WorkflowRun {
       stageRun.status = 'running';
     }
 
-    stageRun.appendAdHocTask(input.taskId, input.title, input.causedBy);
+    stageRun.appendAdHocTask(input.taskId, input.title, input.causedBy, input.uses);
     return this.decision([]);
   }
 
@@ -1644,11 +1657,12 @@ export class WorkflowRun {
 
   private taskUse(stageRun: StageRun, taskId: string): string {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
+    const taskRun = stageRun.tasks.find(task => task.id === taskId || task.id === baseTaskId);
     const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId || task.id === baseTaskId)
       ?? stageRun.definition.checks
         .map(check => check.onFailure?.retry?.task)
         .find((task): task is NonNullable<typeof task> => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
-    return taskDefinition?.uses ?? inferWorkflowTaskUse(baseTaskId);
+    return taskRun?.uses ?? taskDefinition?.uses ?? inferWorkflowTaskUse(baseTaskId);
   }
 
   private taskLocksCode(stageRun: StageRun, taskId: string): boolean {

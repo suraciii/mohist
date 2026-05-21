@@ -77,6 +77,7 @@ export interface ExecutableTask {
   taskId: string;
   title: string;
   kind: TaskKind;
+  uses?: string;
   prompt?: string;
   input?: unknown;
   artifactVerification?: (artifacts: string[]) => string[];

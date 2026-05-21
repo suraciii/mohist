@@ -373,7 +373,7 @@ export class DefaultWorkflowHarness {
           kind: 'ralph',
           load: (): ExecutableTask[] => {
             const parsed = JSON.parse(fs.readFileSync(path.join(this.world.changeDir, 'tasks.json'), 'utf-8'));
-            return parsed.tasks.map((task: any) => ({ taskId: task.id, title: task.title, kind: 'ralph-task' as const, input: task.id }));
+            return parsed.tasks.map((task: any) => ({ taskId: task.id, title: task.title, uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: task.id }));
           },
         },
         { kind: 'runtime', load: () => [] },

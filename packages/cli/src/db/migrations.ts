@@ -5,7 +5,7 @@ import { Log } from '../util/log';
 
 const log = Log.create({ service: 'db' });
 
-const SCHEMA_VERSION = 39;
+const SCHEMA_VERSION = 40;
 
 const CREATE_PROJECTS_TABLE = `
 CREATE TABLE IF NOT EXISTS projects (
@@ -248,6 +248,9 @@ export function initializeDatabase(db: DatabaseManager): void {
   }
   if (currentVersion < 39) {
     migrateToVersion39(db);
+  }
+  if (currentVersion < 40) {
+    migrateToVersion40(db);
   }
 
   const finalVersion = getSchemaVersion(db);
@@ -1171,6 +1174,7 @@ CREATE TABLE IF NOT EXISTS workflow_tasks (
   stage_run_id  TEXT NOT NULL REFERENCES workflow_stage_runs(id) ON DELETE CASCADE,
   task_id       TEXT NOT NULL,
   title         TEXT NOT NULL,
+  uses          TEXT,
   status        TEXT NOT NULL DEFAULT 'pending',
   task_order    INTEGER NOT NULL DEFAULT 0,
   attempts      INTEGER NOT NULL DEFAULT 0,
@@ -1477,5 +1481,16 @@ function migrateToVersion39(db: DatabaseManager): void {
       db.exec('ALTER TABLE workflow_tasks ADD COLUMN reset_reason TEXT');
     }
     setSchemaVersion(db, 39);
+  });
+}
+
+function migrateToVersion40(db: DatabaseManager): void {
+  db.transaction(() => {
+    const tableInfo = db.all<{ name: string }>('PRAGMA table_info(workflow_tasks)');
+    const columnNames = new Set(tableInfo.map(column => column.name));
+    if (!columnNames.has('uses')) {
+      db.exec('ALTER TABLE workflow_tasks ADD COLUMN uses TEXT');
+    }
+    setSchemaVersion(db, 40);
   });
 }
