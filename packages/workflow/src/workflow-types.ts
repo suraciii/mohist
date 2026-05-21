@@ -7,7 +7,6 @@ import type {
   WorkflowDefinition,
   WorkflowRun as WorkflowRunModel,
   WorkflowRunStatus as DomainWorkflowRunStatus,
-  ResolvedWorkflowDefinition,
   WorkflowStageId,
 } from './model';
 import type { WorkflowSourceDefinition } from './definition/workflow-definition-source';
@@ -24,13 +23,8 @@ export type WorkflowFailure = FailureDetails;
 
 export type WorkflowDefinitionInput =
   | WorkflowDefinition
-  | ResolvedWorkflowDefinition
   | WorkflowSourceDefinition
-  | {
-      yaml: string;
-      source?: ResolvedWorkflowDefinition['source'];
-      capturedAt?: string;
-    };
+  | { yaml: string };
 
 export interface CreateWorkflowsInput {
   store: WorkflowStore;
@@ -46,7 +40,6 @@ export interface Workflows {
 export interface WorkflowCreateInput {
   id: WorkflowRunId;
   definition: WorkflowDefinitionInput;
-  now?: string;
 }
 
 export interface WorkflowRunner {

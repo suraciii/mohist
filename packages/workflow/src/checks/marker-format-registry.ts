@@ -1,4 +1,4 @@
-import type { CheckContext } from './index';
+import type { WorkflowContext } from '../runtime';
 import type { ResultContract, StructuredWorkflowResult, WorkflowVerification } from '../workflow-results';
 
 export interface MarkerFormatMetadata {
@@ -10,7 +10,7 @@ export interface MarkerFormatHandler {
   enrichStructuredResult?(structured: StructuredWorkflowResult, content: string): StructuredWorkflowResult;
   metadata?(contract: ResultContract, content: string | null): MarkerFormatMetadata;
   enrichOutput?(input: {
-    ctx: CheckContext;
+    ctx: WorkflowContext;
     content: string;
     output: Record<string, unknown>;
   }): Promise<Record<string, unknown>> | Record<string, unknown>;

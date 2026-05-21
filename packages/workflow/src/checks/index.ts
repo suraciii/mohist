@@ -1,11 +1,11 @@
-import type { CheckContext, CheckResult } from '../runtime';
+import type { WorkflowContext, CheckResult } from '../runtime';
 
 export interface Check {
   name: string;
-  run(ctx: CheckContext): Promise<CheckResult>;
+  run(ctx: WorkflowContext): Promise<CheckResult>;
 }
 
-export { type CheckResult, type CheckContext } from '../runtime';
+export { type CheckResult, type WorkflowContext as CheckContext } from '../runtime';
 
 export {
   type CheckProvider,

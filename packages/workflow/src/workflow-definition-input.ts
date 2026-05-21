@@ -1,35 +1,27 @@
 import YAML from 'yaml';
-import {
-  createResolvedWorkflowDefinition,
-  type ResolvedWorkflowDefinition,
-} from './model';
+import { validateWorkflowDefinition, type WorkflowDefinition } from './model';
 import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './definition/workflow-definition-source';
 import type { WorkflowDefinitionInput } from './workflow-types';
 
-export function resolvedWorkflowDefinitionFromInput(input: WorkflowDefinitionInput, capturedAt?: string): ResolvedWorkflowDefinition {
-  if (isResolvedWorkflowDefinition(input)) return input;
+export function workflowDefinitionFromInput(input: WorkflowDefinitionInput): WorkflowDefinition {
+  if (isWorkflowDefinition(input)) {
+    validateWorkflowDefinition(input);
+    return input;
+  }
   if (isYamlWorkflowInput(input)) {
     const parsed = YAML.parse(input.yaml);
-    return createResolvedWorkflowDefinition({
-      definition: parseWorkflowDefinitionSource(normalizeWorkflowSource(parsed)),
-      source: input.source,
-      capturedAt: input.capturedAt ?? capturedAt,
-    });
+    const source = normalizeWorkflowSource(parsed);
+    return parseWorkflowDefinitionSource(source);
   }
-  if (isWorkflowSourceDefinition(input)) {
-    return createResolvedWorkflowDefinition({
-      definition: parseWorkflowDefinitionSource(input),
-      capturedAt,
-    });
-  }
-  return createResolvedWorkflowDefinition({ definition: input, capturedAt });
+  return parseWorkflowDefinitionSource(input);
 }
 
-function isResolvedWorkflowDefinition(value: unknown): value is ResolvedWorkflowDefinition {
-  return isPlainObject(value)
-    && 'workflowId' in value
-    && 'resolvedDefinition' in value
-    && 'compiledStageDefinitions' in value;
+function isWorkflowDefinition(value: unknown): value is WorkflowDefinition {
+  return Boolean(
+    isPlainObject(value)
+      && typeof value.id === 'string'
+      && Array.isArray(value.stages),
+  );
 }
 
 function isYamlWorkflowInput(value: WorkflowDefinitionInput): value is Extract<WorkflowDefinitionInput, { yaml: string }> {

@@ -1,9 +1,9 @@
-import type { CheckResult, StageContext, StageTaskResult } from '../runtime';
+import type { CheckResult, WorkflowContext, StageTaskResult } from '../runtime';
 import type { TaskDefinition } from '../model';
 import type { ExecutableTask } from './types';
 
 export interface TaskDispatchInput {
-  ctx: StageContext;
+  ctx: WorkflowContext;
   task: ExecutableTask;
   attempt: number;
   failedCheck?: CheckResult;

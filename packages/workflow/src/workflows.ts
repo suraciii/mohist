@@ -1,11 +1,8 @@
 import { WorkflowRun } from './model';
 import { WorkflowComponentRegistry } from './component-registry';
-import { resolvedWorkflowDefinitionFromInput } from './workflow-definition-input';
+import { workflowDefinitionFromInput } from './workflow-definition-input';
 import { WorkflowRunner } from './workflow-runner';
-import type {
-  CreateWorkflowsInput,
-  Workflows,
-} from './workflow-types';
+import type { CreateWorkflowsInput, Workflows, WorkflowCreateInput } from './workflow-types';
 
 export * from './workflow-types';
 
@@ -16,12 +13,9 @@ export function createWorkflows(input: CreateWorkflowsInput): Workflows {
   }
 
   return {
-    async create(createInput) {
-      const definition = resolvedWorkflowDefinitionFromInput(createInput.definition, createInput.now);
-      const run = new WorkflowRun(createInput.id, {
-        workflowDefinitionId: definition.resolvedDefinition.id,
-        stages: definition.resolvedDefinition.stages,
-      });
+    async create(createInput: WorkflowCreateInput) {
+      const definition = workflowDefinitionFromInput(createInput.definition);
+      const run = new WorkflowRun(createInput.id, definition.stages);
       return new WorkflowRunner(run, input.store, registry);
     },
 
