@@ -18,7 +18,6 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     private readonly workflowRun: WorkflowRun,
     private readonly store: WorkflowStore,
     private readonly registry: WorkflowComponentRegistry,
-    private readonly maxSteps = 1000,
   ) {}
 
   get id(): WorkflowRunId {
@@ -88,45 +87,42 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   private async runUntilBlocked(): Promise<WorkflowRunResult> {
-    let steps = 0;
-    while (steps++ < this.maxSteps) {
-      if (this.workflowRun.status !== 'running') break;
-      const stageRun = this.currentStageRun();
-      if (!stageRun) break;
-      if (stageRun.status !== 'running') break;
+    while (true) {
+      const work = this.workflowRun.next();
+      if (work.kind === 'complete') {
+        const stageRun = this.currentStageRun();
+        if (!stageRun) break;
+        const completed = this.completeCurrentStage(stageRun);
+        await this.persist();
+        if (!completed) break;
+        continue;
+      }
+      if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
-      if (stageRun.definition.tasksFrom && !stageRun.workSourceState.evaluated) {
+      const stageRun = this.stageRun(work.stage);
+      if (!stageRun) break;
+
+      if (work.kind === 'task-source') {
         const continued = await this.runTaskSource(stageRun);
         await this.persist();
         if (!continued) break;
         continue;
       }
 
-      const taskRun = stageRun.currentTask;
-      const taskDefinition = stageRun.currentTaskDefinition;
-      if (taskRun && taskDefinition) {
+      if (work.kind === 'task') {
+        const taskDefinition = stageRun.definition.tasks.find(candidate => candidate.id === work.taskId);
+        if (!taskDefinition) break;
         const continued = await this.runTask(stageRun, taskDefinition);
         await this.persist();
         if (!continued) break;
         continue;
       }
 
-      const check = stageRun.checks.find(candidate => candidate.status === 'pending');
-      if (check) {
-        const continued = await this.runCheck(stageRun, {
-          name: check.name,
-          title: check.title,
-          uses: stageRun.definition.checks.find(definition => definition.name === check.name)?.uses,
-          with: stageRun.definition.checks.find(definition => definition.name === check.name)?.with,
-        });
-        await this.persist();
-        if (!continued) break;
-        continue;
-      }
-
-      const completed = this.completeCurrentStage(stageRun);
+      const checkDefinition = stageRun.definition.checks.find(definition => definition.name === work.checkName);
+      if (!checkDefinition) break;
+      const continued = await this.runCheck(stageRun, checkDefinition);
       await this.persist();
-      if (!completed) break;
+      if (!continued) break;
     }
 
     await this.persist();
@@ -162,6 +158,10 @@ export class WorkflowRunner implements WorkflowRunnerContract {
 
   private currentStageRun(): StageRun | null {
     return this.workflowRun.stageRuns.find(candidate => candidate.stage === this.workflowRun.currentStage) ?? null;
+  }
+
+  private stageRun(stage: WorkflowStageId): StageRun | null {
+    return this.workflowRun.stageRuns.find(candidate => candidate.stage === stage) ?? null;
   }
 
   private async runTaskSource(stageRun: StageRun): Promise<boolean> {
