@@ -1,7 +1,7 @@
 import type { CompiledStageDefinition, WorkflowStageId } from '../workflow-definition';
 import { StageCheck } from './stage-check';
 import { TaskRun } from './task-run';
-import { type ApprovalState, type CommitPoint, type FailureDetails, type StageRunStatus, type WorkSourceState } from './types';
+import { type ApprovalState, type CheckRunStatus, type CommitPoint, type FailureDetails, type StageRunStatus, type WorkSourceState } from './types';
 
 export class StageRun {
   readonly tasks: TaskRun[];
@@ -60,9 +60,13 @@ export class StageRun {
     return task;
   }
 
-  addCheck(name: string, title: string): StageCheck {
-    const check = new StageCheck(name, title);
-    this.checks.push(check);
+  recordCheckResult(name: string, result: { status: CheckRunStatus; message?: string | null; output?: unknown }): StageCheck | null {
+    const check = this.checks.find(candidate => candidate.name === name);
+    if (!check) return null;
+    check.status = result.status;
+    check.message = result.message ?? null;
+    check.output = result.output ?? null;
+    if (result.status !== 'pending') check.runCount += 1;
     return check;
   }
 }
