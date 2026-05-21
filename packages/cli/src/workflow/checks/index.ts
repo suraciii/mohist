@@ -8,12 +8,14 @@ export interface Check {
 export { type CheckResult, type CheckContext } from '../stage-context';
 
 export {
-  type CheckFactory,
+  type CheckProvider,
+  type CheckProviderInput,
   type CheckRegistry,
   createCheckRegistry,
   resolveCheck,
   runCheck,
 } from './check-registry';
+export { createDefaultCheckRegistry } from './default-check-registry';
 
 export { ArtifactExistsCheck } from './artifact-exists-check';
 export { ArtifactMarkerCheck } from './artifact-marker-check';

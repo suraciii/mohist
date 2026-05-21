@@ -1,26 +1,52 @@
 import type { Check, CheckContext, CheckResult } from './index';
+import type { CheckDefinition, WorkflowDefinitionSnapshot, WorkflowStageId } from '../model';
 
-export type CheckFactory = (ctx: CheckContext) => Promise<Check> | Check;
+export interface CheckProviderInput {
+  ctx: CheckContext;
+  stage: WorkflowStageId;
+  check: CheckDefinition;
+  worktreePath?: string;
+  workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
+}
+
+export interface CheckProvider {
+  id: string;
+  build(input: CheckProviderInput): Promise<Check | null> | Check | null;
+}
 
 export interface CheckRegistry {
-  get(name: string): CheckFactory | undefined;
-  register(name: string, factory: CheckFactory): void;
-  list(): string[];
+  getProvider(id: string): CheckProvider | undefined;
+  register(id: string, provider: CheckProvider): void;
+  build(input: CheckProviderInput): Promise<Check | null>;
+  listProviders(): string[];
+}
+
+export interface CheckRegistryOptions {
+  providers?: CheckProvider[];
 }
 
 export function createCheckRegistry(
-  factories: Record<string, CheckFactory> = {},
+  input: CheckRegistryOptions = {},
 ): CheckRegistry {
-  const map = new Map<string, CheckFactory>(Object.entries(factories));
+  const providers = new Map<string, CheckProvider>();
+  for (const provider of input.providers ?? []) {
+    providers.set(provider.id, provider);
+  }
+
   return {
-    get(name) {
-      return map.get(name);
+    getProvider(id) {
+      return providers.get(id);
     },
-    register(name, factory) {
-      map.set(name, factory);
+    register(id, provider) {
+      providers.set(id, { ...provider, id });
     },
-    list() {
-      return [...map.keys()];
+    async build(providerInput) {
+      if (!providerInput.check.uses) return null;
+      const provider = providers.get(providerInput.check.uses);
+      return provider ? provider.build(providerInput) : null;
+    },
+    listProviders() {
+      return [...providers.keys()];
     },
   };
 }
@@ -28,20 +54,20 @@ export function createCheckRegistry(
 export async function resolveCheck(
   registry: CheckRegistry,
   ctx: CheckContext,
-  checkName: string,
+  input: Omit<CheckProviderInput, 'ctx'>,
 ): Promise<Check> {
-  const factory = registry.get(checkName);
-  if (!factory) {
-    throw new Error(`Check "${checkName}" is not registered`);
+  const check = await registry.build({ ...input, ctx });
+  if (!check) {
+    throw new Error(`Check "${input.check.name}" uses "${input.check.uses ?? '<none>'}" is not registered`);
   }
-  return factory(ctx);
+  return check;
 }
 
 export async function runCheck(
   registry: CheckRegistry,
   ctx: CheckContext,
-  checkName: string,
+  input: Omit<CheckProviderInput, 'ctx'>,
 ): Promise<CheckResult> {
-  const check = await resolveCheck(registry, ctx, checkName);
+  const check = await resolveCheck(registry, ctx, input);
   return check.run(ctx);
 }
