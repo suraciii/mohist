@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { Stage } from '../src/types';
-import { freezePointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/projection/workflow-run-snapshot';
+import { commitPointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/projection/workflow-run-snapshot';
 import type { StageDefinition, StageRunSnapshot, WorkflowRunSnapshot } from '../src/workflow/model';
 
 describe('workflow run persistence helpers', () => {
-  it('reconstructs Integrate freeze point from service-call wrapped merge output', () => {
+  it('reconstructs Integrate commit point from service-call wrapped merge output', () => {
+    const definition: StageDefinition = {
+      stage: Stage.Integrate,
+      tasks: [{ id: 'integrate:merge', title: 'Merge branch', uses: 'mohist/merge' }],
+      checks: [],
+    };
     const snapshot: StageRunSnapshot = {
       stage: Stage.Integrate,
       status: 'running',
@@ -34,19 +39,23 @@ describe('workflow run persistence helpers', () => {
       checks: [],
       approval: null,
       failure: null,
-      freezePoint: null,
+      commitPoint: null,
     };
 
-    expect(freezePointFromStageSnapshot(Stage.Integrate, snapshot)?.delivery).toEqual({
-      targetBranch: 'main',
-      baseSha: 'base',
-      candidateHeadSha: 'candidate',
-      landedSha: 'landed',
-      rebased: true,
+    expect(commitPointFromStageSnapshot(Stage.Integrate, snapshot, definition)).toMatchObject({
+      taskId: 'integrate:merge',
+      uses: 'mohist/merge',
+      metadata: {
+        targetBranch: 'main',
+        baseSha: 'base',
+        candidateHeadSha: 'candidate',
+        landedSha: 'landed',
+        rebased: true,
+      },
     });
   });
 
-  it('reconstructs custom locking check freeze point and post-delivery failure after hydrate', () => {
+  it('reconstructs custom commit point and post-commit failure after hydrate', () => {
     const definition: StageDefinition = {
       stage: Stage.Check,
       tasks: [],
@@ -85,7 +94,7 @@ describe('workflow run persistence helpers', () => {
       ],
       approval: null,
       failure: null,
-      freezePoint: null,
+      commitPoint: null,
     };
     const snapshot: WorkflowRunSnapshot = {
       id: 'run-custom',
@@ -105,18 +114,20 @@ describe('workflow run persistence helpers', () => {
       failure: null,
     };
 
-    expect(freezePointFromStageSnapshot(Stage.Check, stage, definition)).toMatchObject({
+    expect(commitPointFromStageSnapshot(Stage.Check, stage, definition)).toMatchObject({
       checkName: 'pr-merged',
-      delivery: { landedSha: 'remote-landed' },
+      uses: 'mohist/pr-merged',
+      metadata: { mergedSha: 'remote-landed' },
     });
 
     const run = hydrateWorkflowRun(snapshot);
-    expect(run.stageRun(Stage.Check).freezePoint).toMatchObject({
+    expect(run.stageRun(Stage.Check).commitPoint).toMatchObject({
       checkName: 'pr-merged',
-      delivery: { landedSha: 'remote-landed' },
+      uses: 'mohist/pr-merged',
+      metadata: { mergedSha: 'remote-landed' },
     });
     expect(run.failure).toMatchObject({
-      reason: 'post-delivery-check-failed',
+      reason: 'post-commit-check-failed',
       checkName: 'delivery-health',
     });
   });

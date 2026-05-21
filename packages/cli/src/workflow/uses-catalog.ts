@@ -16,7 +16,7 @@ export interface WorkflowUseDefinition {
   sideEffect: WorkflowUseSideEffect;
   idempotency: WorkflowUseIdempotency;
   deliveryRole: WorkflowDeliveryRole;
-  locksCode?: boolean;
+  createsCommitPoint?: boolean;
   sourceKind?: WorkflowTaskSourceKind;
   raises?: string[];
   evidence?: WorkflowUseEvidenceRequirement;
@@ -158,7 +158,7 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     sideEffect: 'merge',
     idempotency: 'irreversible',
     deliveryRole: 'local-merge',
-    locksCode: true,
+    createsCommitPoint: true,
     evidence: { requiredFields: ['landedSha'] },
     description: 'Merges the issue worktree branch into the base branch.',
     inputs: ['strategy', 'targetBranch'],
@@ -206,7 +206,7 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     sideEffect: 'none',
     idempotency: 'idempotent',
     deliveryRole: 'remote-merge',
-    locksCode: true,
+    createsCommitPoint: true,
     evidence: { requiredFields: ['mergedSha'] },
     description: 'Checks whether a pull request has been merged remotely.',
     inputs: ['prUrl'],
@@ -225,7 +225,8 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
   },
 ];
 
-export function getWorkflowUseDefinition(name: string): WorkflowUseDefinition | undefined {
+export function getWorkflowUseDefinition(name: string | undefined): WorkflowUseDefinition | undefined {
+  if (!name) return undefined;
   return BUILTIN_WORKFLOW_USES.find(use => use.name === name);
 }
 
@@ -239,22 +240,6 @@ export function isWorkflowUseAllowed(name: string, placement: 'task' | 'check'):
   const use = getWorkflowUseDefinition(name);
   if (!use) return false;
   return use.allowedPlacement === 'both' || use.allowedPlacement === placement;
-}
-
-export function inferWorkflowCheckUse(checkName: string): string {
-  if (checkName.startsWith('health:')) return 'mohist/health-gate';
-  if (checkName === 'review-passed' || checkName === 'self-review-passed') return 'mohist/marker';
-  if (checkName === 'merge-ready') return 'mohist/merge-ready';
-  if (checkName.endsWith('-approval')) return 'mohist/approval';
-  return 'mohist/artifact-exists';
-}
-
-export function inferWorkflowTaskUse(taskId: string): string {
-  if (taskId === 'integrate:spec-sync') return 'mohist/openspec-sync';
-  if (taskId === 'integrate:archive-change') return 'mohist/archive-change';
-  if (taskId === 'integrate:merge') return 'mohist/merge';
-  if (taskId === 'rebase-branch') return 'mohist/rebase';
-  return 'mohist/agent';
 }
 
 export function unwrapWorkflowUseOutput(output: unknown): Record<string, unknown> | null {
@@ -279,7 +264,7 @@ export function validateWorkflowUseEvidence(
   if (!useName) return { ok: true };
   const use = getWorkflowUseDefinition(useName);
   if (!use) return { ok: false, reason: 'unknown-use' };
-  if (use.deliveryRole === 'none' && !use.locksCode && !use.evidence) return { ok: true };
+  if (use.deliveryRole === 'none' && !use.createsCommitPoint && !use.evidence) return { ok: true };
   const evidence = use.evidence;
   if (!evidence) return { ok: true };
   const data = unwrapWorkflowUseOutput(output);

@@ -5,7 +5,7 @@ import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
 import { extractReactionOutput } from '../workflow/reaction/convergence';
 import type { CompiledStageDefinition } from '../workflow/model';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
+import { getWorkflowUseDefinition, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
@@ -65,7 +65,7 @@ export type CheckRepairStatus = 'not-needed' | 'available' | 'pending' | 'runnin
 
 export interface CheckRepairState {
   checkName: string;
-  fixTaskId: string;
+  retryTaskId: string;
   status: CheckRepairStatus;
   attemptsUsed: number;
   attemptsMax: number;
@@ -78,7 +78,7 @@ export interface CheckRepairState {
   unresolvedSummary: string | null;
 }
 
-export interface StageDeliveryMetadata {
+export interface StageCommitMetadata {
   specSync: { status: StageTaskStatus; output: unknown } | null;
   archive: { status: StageTaskStatus; output: unknown } | null;
   merge: {
@@ -118,7 +118,7 @@ export interface StageStateRead {
   completedAt: string | null;
   updatedAt: string;
   failure?: StageFailureDetails | null;
-  deliveryMetadata?: StageDeliveryMetadata | null;
+  deliveryMetadata?: StageCommitMetadata | null;
   checkRepair?: CheckRepairState;
   convergence?: WorkflowConvergenceState;
 }
@@ -383,14 +383,14 @@ function approvalVerdictCheckName(stageDefinition?: CompiledStageDefinition): st
   return policies[0]?.checkName ?? '';
 }
 
-function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { checkName: string; fixTaskId: string; maxAttempts: number } | null {
+function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { checkName: string; retryTaskId: string; maxAttempts: number } | null {
   const verdictCheckName = approvalVerdictCheckName(stageDefinition);
   if (!stageDefinition || !verdictCheckName) return null;
   const policy = stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === verdictCheckName);
   if (!policy) return null;
   return {
     checkName: verdictCheckName,
-    fixTaskId: policy.fixTaskId,
+    retryTaskId: policy.retryTaskId,
     maxAttempts: policy.maxAttempts,
   };
 }
@@ -398,7 +398,7 @@ function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition):
 function isApprovalVerdictFixTask(taskId: string, stageDefinition?: CompiledStageDefinition): boolean {
   const repairPolicy = approvalVerdictRepairPolicy(stageDefinition);
   if (!repairPolicy) return false;
-  return isTaskAttemptForBase(taskId, repairPolicy.fixTaskId);
+  return isTaskAttemptForBase(taskId, repairPolicy.retryTaskId);
 }
 
 function extractUnresolvedSummary(output: unknown, message: string | null): string | null {
@@ -484,7 +484,7 @@ function computeCheckRepairState(
 
   return {
     checkName: verdictCheckName,
-    fixTaskId: repairPolicy.fixTaskId,
+    retryTaskId: repairPolicy.retryTaskId,
     status,
     attemptsUsed,
     attemptsMax: maxAttempts,
@@ -911,18 +911,18 @@ export class StageStateService {
         completedAt: stageRun.completedAt,
         updatedAt: stageRun.updatedAt,
         failure: this.workflowRunFailureDetails(stageRun, tasks, checks, stageDefinition),
-        deliveryMetadata: this.workflowRunDeliveryMetadata(tasks, checks, stageDefinition),
+        deliveryMetadata: this.workflowRunCommitMetadata(tasks, checks, stageDefinition),
         ...(checkRepairRaw !== null ? { checkRepair: checkRepairRaw } : {}),
         ...(convergenceRaw !== null ? { convergence: convergenceRaw } : {}),
       };
     });
   }
 
-  private workflowRunDeliveryMetadata(
+  private workflowRunCommitMetadata(
     tasks: StageTaskState[],
     checks: StageCheckState[],
     stageDefinition?: CompiledStageDefinition,
-  ): StageDeliveryMetadata | null {
+  ): StageCommitMetadata | null {
     const deliveryTasks = tasks
       .map(task => ({ task, use: this.workflowTaskUse(stageDefinition, task.taskId) }))
       .filter(({ use }) => getWorkflowUseDefinition(use)?.deliveryRole !== 'none');
@@ -977,14 +977,14 @@ export class StageStateService {
     };
   }
 
-  private workflowTaskUse(stageDefinition: CompiledStageDefinition | undefined, taskId: string): string {
+  private workflowTaskUse(stageDefinition: CompiledStageDefinition | undefined, taskId: string): string | undefined {
     const taskDefinition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
-    return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId);
+    return taskDefinition?.uses;
   }
 
-  private workflowCheckUse(stageDefinition: CompiledStageDefinition | undefined, checkName: string): string {
+  private workflowCheckUse(stageDefinition: CompiledStageDefinition | undefined, checkName: string): string | undefined {
     const checkDefinition = stageDefinition?.checks.find(candidate => candidate.name === checkName);
-    return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
+    return checkDefinition?.uses;
   }
 
   private hasCompletedLockingUse(
@@ -994,10 +994,10 @@ export class StageStateService {
   ): boolean {
     return tasks.some(task => {
       if (task.status !== 'completed') return false;
-      return getWorkflowUseDefinition(this.workflowTaskUse(stageDefinition, task.taskId))?.locksCode === true;
+      return getWorkflowUseDefinition(this.workflowTaskUse(stageDefinition, task.taskId))?.createsCommitPoint === true;
     }) || checks.some(check => {
       if (check.status !== 'passed') return false;
-      return getWorkflowUseDefinition(this.workflowCheckUse(stageDefinition, check.checkName))?.locksCode === true;
+      return getWorkflowUseDefinition(this.workflowCheckUse(stageDefinition, check.checkName))?.createsCommitPoint === true;
     });
   }
 
@@ -1022,7 +1022,7 @@ export class StageStateService {
     if (failedCheck) {
       const codeLocked = this.hasCompletedLockingUse(tasks, checks, stageDefinition);
       return {
-        reason: codeLocked ? 'post-delivery-check-failed' : 'check-unrepaired',
+        reason: codeLocked ? 'post-commit-check-failed' : 'check-unrepaired',
         stage: stageRun.stage,
         checkName: failedCheck.checkName,
         message: failedCheck.message,

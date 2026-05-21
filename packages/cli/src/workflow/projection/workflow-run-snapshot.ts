@@ -1,5 +1,5 @@
 import { Stage } from '../../types';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
+import { getWorkflowUseDefinition } from '../uses-catalog';
 import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '../model';
 import { WorkflowRun } from '../model';
 import { compileRuntimeWorkflowDefinitionSnapshot, type RuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
@@ -7,7 +7,7 @@ import type {
   CausedByMetadata,
   CheckRunStatus,
   FailureDetails,
-  FreezePoint,
+  CommitPoint,
   StageRunSnapshot,
   TaskResetMetadata,
   TaskRunStatus,
@@ -23,16 +23,9 @@ function isTaskResetMetadata(value: unknown): value is TaskResetMetadata {
   return Boolean(value && typeof value === 'object' && (value as { type?: unknown }).type === 'workflow-policy');
 }
 
-function extractDeliveryMetadata(output: unknown): FreezePoint['delivery'] {
+function extractCommitMetadata(output: unknown): CommitPoint['metadata'] {
   const data = unwrapTaskOutput(output);
-  if (!data) return {};
-  return {
-    targetBranch: typeof data.targetBranch === 'string' ? data.targetBranch : undefined,
-    baseSha: typeof data.baseSha === 'string' ? data.baseSha : undefined,
-    candidateHeadSha: typeof data.candidateHeadSha === 'string' ? data.candidateHeadSha : undefined,
-    landedSha: typeof data.landedSha === 'string' ? data.landedSha : typeof data.mergedSha === 'string' ? data.mergedSha : undefined,
-    rebased: typeof data.rebased === 'boolean' ? data.rebased : undefined,
-  };
+  return data ? { ...data } : {};
 }
 
 function unwrapTaskOutput(output: unknown): Record<string, unknown> | null {
@@ -60,9 +53,9 @@ function inferStageFailure(stage: Stage, snapshot: StageRunSnapshot): FailureDet
   }
 
   const failedCheck = snapshot.checks.find(check => check.status === 'failed' || check.status === 'error');
-  if (failedCheck && snapshot.freezePoint) {
+  if (failedCheck && snapshot.commitPoint) {
     return {
-      reason: 'post-delivery-check-failed',
+      reason: 'post-commit-check-failed',
       stage,
       checkName: failedCheck.name,
       message: failedCheck.message ?? undefined,
@@ -116,8 +109,8 @@ export function hydrateWorkflowRun(
     stageRun.attemptSequence = stageSnapshot.attemptSequence ?? 1;
     stageRun.approval = stageSnapshot.approval ? { ...stageSnapshot.approval } : null;
     const stageDefinition = definitions.find(definition => definition.stage === stageSnapshot.stage);
-    stageRun.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
-    stageRun.failure = inferStageFailure(stageSnapshot.stage, { ...stageSnapshot, freezePoint: stageRun.freezePoint });
+    stageRun.commitPoint = commitPointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
+    stageRun.failure = inferStageFailure(stageSnapshot.stage, { ...stageSnapshot, commitPoint: stageRun.commitPoint });
     const legacyStageSnapshot = stageSnapshot as StageRunSnapshot & { buildWorkSourceState?: WorkSourceState };
     const workSourceState = stageSnapshot.workSourceState ?? legacyStageSnapshot.buildWorkSourceState;
     if (workSourceState) {
@@ -189,7 +182,7 @@ export function repairWorkflowRunSnapshot(
         checks: [],
         approval: null,
         failure: null,
-        freezePoint: null,
+        commitPoint: null,
       };
       stageSnapshots.set(definition.stage, stageRun);
     }
@@ -254,37 +247,41 @@ export function workflowDefinitionSnapshotFromUnknown(value: unknown): RuntimeWo
   return compileRuntimeWorkflowDefinitionSnapshot(snapshot as WorkflowDefinitionSnapshot);
 }
 
-export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSnapshot, definition?: CompiledStageDefinition): FreezePoint | null {
-  if (snapshot.freezePoint) return snapshot.freezePoint;
+export function commitPointFromStageSnapshot(_stage: Stage, snapshot: StageRunSnapshot, definition?: CompiledStageDefinition): CommitPoint | null {
+  if (snapshot.commitPoint) return snapshot.commitPoint;
   for (const task of snapshot.tasks) {
     if (task.status !== 'completed') continue;
     const uses = workflowTaskUse(definition, task.id);
-    if (getWorkflowUseDefinition(uses)?.locksCode !== true) continue;
+    if (!uses) continue;
+    if (getWorkflowUseDefinition(uses)?.createsCommitPoint !== true) continue;
     return {
       taskId: task.id,
-      delivery: extractDeliveryMetadata(task.output),
-      frozenAt: new Date().toISOString(),
+      uses,
+      metadata: extractCommitMetadata(task.output),
+      createdAt: new Date().toISOString(),
     };
   }
   for (const check of snapshot.checks) {
     if (check.status !== 'passed') continue;
     const uses = workflowCheckUse(definition, check.name);
-    if (getWorkflowUseDefinition(uses)?.locksCode !== true) continue;
+    if (!uses) continue;
+    if (getWorkflowUseDefinition(uses)?.createsCommitPoint !== true) continue;
     return {
       checkName: check.name,
-      delivery: extractDeliveryMetadata(check.output),
-      frozenAt: new Date().toISOString(),
+      uses,
+      metadata: extractCommitMetadata(check.output),
+      createdAt: new Date().toISOString(),
     };
   }
   return null;
 }
 
-function workflowTaskUse(definition: CompiledStageDefinition | undefined, taskId: string): string {
+function workflowTaskUse(definition: CompiledStageDefinition | undefined, taskId: string): string | undefined {
   const taskDefinition = definition?.tasks.find(task => task.id === taskId);
-  return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId);
+  return taskDefinition?.uses;
 }
 
-function workflowCheckUse(definition: CompiledStageDefinition | undefined, checkName: string): string {
+function workflowCheckUse(definition: CompiledStageDefinition | undefined, checkName: string): string | undefined {
   const checkDefinition = definition?.checks.find(check => check.name === checkName);
-  return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
+  return checkDefinition?.uses;
 }

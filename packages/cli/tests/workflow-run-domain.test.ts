@@ -162,14 +162,14 @@ describe('WorkflowRun domain aggregate', () => {
       agentSessionRef: 'plan-artifacts',
     });
     expect(plan.checkFailurePolicies?.find(policy => policy.checkName === 'self-review-passed')).toMatchObject({
-      fixTaskId: 'fix-plan-review',
+      retryTaskId: 'fix-plan-review',
       maxAttempts: 1,
     });
     expect(runtimePlan.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-plan-review')).toMatchObject({
       workSourceKind: 'runtime',
     });
     expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
-      fixTaskId: 'fix-review-findings',
+      retryTaskId: 'fix-review-findings',
       maxAttempts: 2,
     });
     expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
@@ -701,7 +701,7 @@ describe('WorkflowRun domain aggregate', () => {
           { name: 'failing-check', title: 'Failing check' },
         ],
         checkFailurePolicies: [
-          { checkName: 'failing-check', fixTaskId: 'fix-failing-check', fixTaskTitle: 'Fix failing check', maxAttempts: 1 },
+          { checkName: 'failing-check', retryTaskId: 'fix-failing-check', retryTaskTitle: 'Fix failing check', maxAttempts: 1 },
         ],
       },
     ];
@@ -739,7 +739,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(fixTask.status).toBe('pending');
     expect(fixTask.causedBy).toEqual({ type: 'check-failure', checkName: 'health:build', message: 'typecheck failed' });
     expect(decision.events).toContainEqual({
-      type: 'fix-task-scheduled',
+      type: 'retry-task-scheduled',
       stage: Stage.Build,
       taskId: 'fix-build-health',
       causedBy: fixTask.causedBy,
@@ -1010,8 +1010,8 @@ describe('WorkflowRun domain aggregate', () => {
           { name: 'second-check', title: 'Second check' },
         ],
         checkFailurePolicies: [
-          { checkName: 'first-check', fixTaskId: 'fix-first', fixTaskTitle: 'Fix first', maxAttempts: 1 },
-          { checkName: 'second-check', fixTaskId: 'fix-second', fixTaskTitle: 'Fix second', maxAttempts: 1 },
+          { checkName: 'first-check', retryTaskId: 'fix-first', retryTaskTitle: 'Fix first', maxAttempts: 1 },
+          { checkName: 'second-check', retryTaskId: 'fix-second', retryTaskTitle: 'Fix second', maxAttempts: 1 },
         ],
       },
     ];
@@ -1433,7 +1433,7 @@ describe('WorkflowRun domain aggregate', () => {
 
     expect(run.status).toBe('passed');
     expect(run.currentStage).toBe(Stage.Integrate);
-    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(run.stageRun(Stage.Integrate).commitPoint).toBeNull();
     expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 
@@ -1452,7 +1452,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 
-  it('records Integrate delivery metadata and freezes after merge completion', () => {
+  it('records a generic commit point after merge completion', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -1468,9 +1468,10 @@ describe('WorkflowRun domain aggregate', () => {
       },
     });
 
-    expect(run.stageRun(Stage.Integrate).freezePoint).toMatchObject({
+    expect(run.stageRun(Stage.Integrate).commitPoint).toMatchObject({
       taskId: 'integrate:merge',
-      delivery: {
+      uses: 'mohist/merge',
+      metadata: {
         targetBranch: 'main',
         baseSha: 'base',
         candidateHeadSha: 'candidate',
@@ -1479,13 +1480,13 @@ describe('WorkflowRun domain aggregate', () => {
       },
     });
     expect(decision.events).toContainEqual({
-      type: 'delivery-frozen',
+      type: 'commit-point-created',
       stage: Stage.Integrate,
-      freezePoint: run.stageRun(Stage.Integrate).freezePoint,
+      commitPoint: run.stageRun(Stage.Integrate).commitPoint,
     });
   });
 
-  it('fails archive task immediately when delivery evidence is missing', () => {
+  it('fails archive task immediately when required evidence is missing', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -1496,14 +1497,14 @@ describe('WorkflowRun domain aggregate', () => {
       status: 'failed',
       reason: 'Missing required evidence for mohist/archive-change: archivePath|success',
     });
-    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(run.stageRun(Stage.Integrate).commitPoint).toBeNull();
     expect(decision.nextWork).toEqual({
       kind: 'failed',
       reason: run.failure,
     });
   });
 
-  it('fails merge task immediately when delivery evidence is missing', () => {
+  it('fails merge task immediately when required evidence is missing', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -1515,7 +1516,7 @@ describe('WorkflowRun domain aggregate', () => {
       status: 'failed',
       reason: 'Missing required evidence for mohist/merge: landedSha',
     });
-    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(run.stageRun(Stage.Integrate).commitPoint).toBeNull();
     expect(decision.nextWork).toEqual({
       kind: 'failed',
       reason: run.failure,
@@ -1537,7 +1538,7 @@ describe('WorkflowRun domain aggregate', () => {
       status: 'failed',
       reason: 'Missing required evidence for mohist/merge: landedSha',
     });
-    expect(run.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(run.stageRun(Stage.Integrate).commitPoint).toBeNull();
     expect(decision.nextWork).toEqual({
       kind: 'failed',
       reason: run.failure,
@@ -1559,7 +1560,7 @@ describe('WorkflowRun domain aggregate', () => {
       status: 'failed',
       message: 'Missing required evidence for mohist/pr-merged: mergedSha',
     });
-    expect(missing.stageRun(Stage.Integrate).freezePoint).toBeNull();
+    expect(missing.stageRun(Stage.Integrate).commitPoint).toBeNull();
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: missing.failure });
 
     const passed = startRun(definitions);
@@ -1569,14 +1570,15 @@ describe('WorkflowRun domain aggregate', () => {
       output: { mergedSha: 'remote-landed' },
     });
 
-    expect(passed.stageRun(Stage.Integrate).freezePoint).toMatchObject({
+    expect(passed.stageRun(Stage.Integrate).commitPoint).toMatchObject({
       checkName: 'pr-merged',
-      delivery: { landedSha: 'remote-landed' },
+      uses: 'mohist/pr-merged',
+      metadata: { mergedSha: 'remote-landed' },
     });
     expect(decision.nextWork).toEqual({ kind: 'complete' });
   });
 
-  it('fails post-delivery check with post-delivery-check-failed and does not schedule fixes after freeze', () => {
+  it('fails post-commit check with post-commit-check-failed and does not schedule retries after commit point', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -1589,7 +1591,7 @@ describe('WorkflowRun domain aggregate', () => {
     const decision = run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'post merge test failed' });
 
     expect(run.status).toBe('failed');
-    expect(run.failure?.reason).toBe('post-delivery-check-failed');
+    expect(run.failure?.reason).toBe('post-commit-check-failed');
     expect(run.stageRun(Stage.Integrate).tasks.map(task => task.id)).not.toContain('fix-integrate-health');
     expect(decision.nextWork).toEqual({ kind: 'failed', reason: run.failure });
   });
@@ -1806,7 +1808,7 @@ describe('WorkflowRun domain aggregate', () => {
         tasks: [],
         checks: [{ name: 'health-check', title: 'Health check' }],
         checkFailurePolicies: [
-          { checkName: 'health-check', fixTaskId: 'fix-health', fixTaskTitle: 'Fix health', maxAttempts: 1 },
+          { checkName: 'health-check', retryTaskId: 'fix-health', retryTaskTitle: 'Fix health', maxAttempts: 1 },
         ],
       },
     ];
@@ -1818,7 +1820,7 @@ describe('WorkflowRun domain aggregate', () => {
     const fixTask = run.stageRun(Stage.Build).findTask('fix-health');
 
     expect(fixTask.causedBy).toEqual({ type: 'check-failure', checkName: 'health-check', message: 'health degraded' });
-    expect(decision.events).toContainEqual(expect.objectContaining({ type: 'fix-task-scheduled', taskId: 'fix-health' }));
+    expect(decision.events).toContainEqual(expect.objectContaining({ type: 'retry-task-scheduled', taskId: 'fix-health' }));
   });
 
   it('rebase-branch failure blocks later work through task failure semantics', () => {
@@ -1903,7 +1905,7 @@ describe('WorkflowRun domain aggregate', () => {
     expect(run.stageRun(Stage.Check).findCheck('merge-ready').status).toBe('passed');
   });
 
-  it('integrate merge freezes delivery metadata from service-call wrapped output', () => {
+  it('integrate merge records commit metadata from service-call wrapped output', () => {
     const run = startRun();
     advanceToIntegrate(run);
 
@@ -1924,7 +1926,7 @@ describe('WorkflowRun domain aggregate', () => {
       },
     });
 
-    expect(run.stageRun(Stage.Integrate).freezePoint?.delivery).toEqual({
+    expect(run.stageRun(Stage.Integrate).commitPoint?.metadata).toEqual({
       targetBranch: 'main',
       baseSha: 'base-sha',
       candidateHeadSha: 'candidate-sha',
@@ -2212,7 +2214,7 @@ describe('WorkflowRun domain aggregate', () => {
     });
   });
 
-  it('Integrate post-delivery check failure remains non-repairable after merge freeze', () => {
+  it('Integrate post-commit check failure remains non-retryable after commit point', () => {
     const run = startRun();
     advanceToIntegrate(run);
     run.completeTask(Stage.Integrate, 'integrate:spec-sync', { status: 'completed' });
@@ -2221,7 +2223,7 @@ describe('WorkflowRun domain aggregate', () => {
     run.recordCheckResult(Stage.Integrate, { name: 'health:integrate', status: 'fail', message: 'tests failed' });
 
     expect(run.status).toBe('failed');
-    expect(run.failure?.reason).toBe('post-delivery-check-failed');
+    expect(run.failure?.reason).toBe('post-commit-check-failed');
     expect(run.stageRun(Stage.Integrate).tasks.some(t => t.id === 'fix-integrate-health')).toBe(false);
   });
 });

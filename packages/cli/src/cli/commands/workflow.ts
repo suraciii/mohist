@@ -8,7 +8,6 @@ import {
   type ResolvedWorkflowDefinition,
   type WorkflowDiagnostic,
 } from '../../workflow/definition/workflow-inspector';
-import { inferWorkflowCheckUse, inferWorkflowTaskUse } from '../../workflow/uses-catalog';
 
 export interface CliOutput {
   write(line?: string): void;
@@ -73,10 +72,10 @@ export function renderWorkflowShow(resolved: ResolvedWorkflowDefinition, output:
   for (const stage of resolved.snapshot.compiledStageDefinitions) {
     output.write(chalk.bold(stage.stage[0].toUpperCase() + stage.stage.slice(1)));
     for (const task of stage.tasks) {
-      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(task.uses ?? inferWorkflowTaskUse(task.id)).padEnd(18)} source: ${task.source ?? 'builtin'}`);
+      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(task.uses ?? '<unspecified>').padEnd(18)} source: ${task.source ?? 'builtin'}`);
     }
     for (const check of stage.checks) {
-      output.write(`  Check  ${check.name.padEnd(28)} uses: ${(check.uses ?? inferWorkflowCheckUse(check.name)).padEnd(18)} source: ${check.source ?? 'builtin'}`);
+      output.write(`  Check  ${check.name.padEnd(28)} uses: ${(check.uses ?? '<unspecified>').padEnd(18)} source: ${check.source ?? 'builtin'}`);
     }
     const approvalCheck = stage.approvalPolicy?.checkName ?? stage.approvalCheckName;
     if (approvalCheck) {
@@ -118,7 +117,7 @@ export function renderWorkflowExplanation(item: ExplainedWorkflowItem, output: C
     output.write(`Phase: ${item.phase}`);
     output.write(`Blocking: ${item.blocking ? 'yes' : 'no'}`);
     if (item.reaction) {
-      output.write(`Reaction: ${item.reaction.fixTaskId} (${item.reaction.maxAttempts} attempt${item.reaction.maxAttempts === 1 ? '' : 's'})`);
+      output.write(`Reaction: ${item.reaction.retryTaskId} (${item.reaction.maxAttempts} attempt${item.reaction.maxAttempts === 1 ? '' : 's'})`);
     }
   }
 }

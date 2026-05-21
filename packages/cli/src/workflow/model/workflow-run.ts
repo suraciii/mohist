@@ -1,4 +1,4 @@
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../uses-catalog';
+import { getWorkflowUseDefinition, validateWorkflowUseEvidence } from '../uses-catalog';
 import {
   cloneWorkflowDefinitionSnapshot,
   createWorkflowDefinitionSnapshot,
@@ -21,7 +21,7 @@ export type FailureReason =
   | 'task-failed'
   | 'check-unrepaired'
   | 'approval-rejected'
-  | 'post-delivery-check-failed'
+  | 'post-commit-check-failed'
   | 'work-interrupted';
 
 export interface CausedByMetadata {
@@ -77,19 +77,12 @@ export type WorkSourceState =
   | { evaluated: true; empty: true }
   | { evaluated: false };
 
-export interface DeliveryMetadata {
-  targetBranch?: string;
-  baseSha?: string;
-  candidateHeadSha?: string;
-  landedSha?: string;
-  rebased?: boolean;
-}
-
-export interface FreezePoint {
+export interface CommitPoint {
   taskId?: string;
   checkName?: string;
-  delivery: DeliveryMetadata;
-  frozenAt: string;
+  uses?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface TaskResultInput {
@@ -123,7 +116,7 @@ export type WorkflowEvent =
   | { type: 'task-invalidated'; stage: WorkflowStageId; taskId: string; reason: string }
   | { type: 'check-invalidated'; stage: WorkflowStageId; checkName: string; reason: string }
   | { type: 'check-recorded'; stage: WorkflowStageId; checkName: string; status: CheckRunStatus }
-  | { type: 'fix-task-scheduled'; stage: WorkflowStageId; taskId: string; causedBy: CausedByMetadata }
+  | { type: 'retry-task-scheduled'; stage: WorkflowStageId; taskId: string; causedBy: CausedByMetadata }
   | { type: 'approval-requested'; stage: WorkflowStageId }
   | { type: 'approval-approved'; stage: WorkflowStageId }
   | { type: 'approval-rejected'; stage: WorkflowStageId; reason: FailureDetails }
@@ -131,7 +124,7 @@ export type WorkflowEvent =
   | { type: 'stage-failed'; stage: WorkflowStageId; reason: FailureDetails }
   | { type: 'workflow-completed' }
   | { type: 'workflow-failed'; reason: FailureDetails }
-  | { type: 'delivery-frozen'; stage: WorkflowStageId; freezePoint: FreezePoint };
+  | { type: 'commit-point-created'; stage: WorkflowStageId; commitPoint: CommitPoint };
 
 export type WorkflowWork =
   | { kind: 'task'; stage: WorkflowStageId; taskId: string }
@@ -154,7 +147,7 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'dynamic-source-missing'; stage: WorkflowStageId }
   | { complete: false; reason: 'dynamic-source-invalid'; stage: WorkflowStageId }
   | { complete: false; reason: 'dynamic-source-empty'; stage: WorkflowStageId }
-  | { complete: false; reason: 'delivery-evidence-missing'; stage: WorkflowStageId; taskId?: string; checkName?: string; uses?: string }
+  | { complete: false; reason: 'commit-evidence-missing'; stage: WorkflowStageId; taskId?: string; checkName?: string; uses?: string }
   | { complete: false; reason: 'approval-required'; stage: WorkflowStageId };
 
 export interface WorkflowDecision {
@@ -206,7 +199,7 @@ export interface StageRunSnapshot {
   checks: CheckStateSnapshot[];
   approval: ApprovalSnapshot | null;
   failure: FailureDetails | null;
-  freezePoint: FreezePoint | null;
+  commitPoint: CommitPoint | null;
   workSourceState?: WorkSourceState;
 }
 
@@ -566,7 +559,7 @@ export class StageRun {
   attemptSequence = 1;
   approval: ApprovalSnapshot | null = null;
   failure: FailureDetails | null = null;
-  freezePoint: FreezePoint | null = null;
+  commitPoint: CommitPoint | null = null;
   workSourceState: WorkSourceState = { evaluated: false };
 
   constructor(
@@ -755,16 +748,16 @@ export class StageRun {
     }
   }
 
-  scheduledFixCount(checkName: string): number {
+  scheduledRetryTaskCount(checkName: string): number {
     return this.tasks.filter(task => task.causedBy?.type === 'check-failure' && task.causedBy.checkName === checkName).length;
   }
 
-  appendFixTask(policy: CheckFailurePolicy, causedBy: CausedByMetadata): TaskRun {
-    const suffix = this.scheduledFixCount(policy.checkName);
-    const id = this.tasks.some(task => task.id === policy.fixTaskId) ? `${policy.fixTaskId}:${suffix}` : policy.fixTaskId;
-    const taskDefinition = this.retryTaskDefinition(policy.fixTaskId);
-    const task = new TaskRun(id, policy.fixTaskTitle, this.tasks.length, taskDefinition?.uses);
-    task.reason = causedBy.message ?? `Repair ${policy.checkName}`;
+  appendRetryTask(policy: CheckFailurePolicy, causedBy: CausedByMetadata): TaskRun {
+    const suffix = this.scheduledRetryTaskCount(policy.checkName);
+    const id = this.tasks.some(task => task.id === policy.retryTaskId) ? `${policy.retryTaskId}:${suffix}` : policy.retryTaskId;
+    const taskDefinition = this.retryTaskDefinition(policy.retryTaskId);
+    const task = new TaskRun(id, policy.retryTaskTitle, this.tasks.length, taskDefinition?.uses);
+    task.reason = causedBy.message ?? `Retry after ${policy.checkName}`;
     task.causedBy = causedBy;
     this.tasks.push(task);
     return task;
@@ -777,7 +770,7 @@ export class StageRun {
       .find((task): task is NonNullable<typeof task> => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
-  reopenForRepair(): void {
+  reopenForRecovery(): void {
     this.status = 'running';
     this.failure = null;
     this.approval = null;
@@ -792,15 +785,15 @@ export class StageRun {
   }
 
   removeGeneratedTasks(): void {
-    const repairTaskIds = new Set([
-      ...(this.definition.checkFailurePolicies?.map(policy => policy.fixTaskId) ?? []),
+    const retryTaskIds = new Set([
+      ...(this.definition.checkFailurePolicies?.map(policy => policy.retryTaskId) ?? []),
     ]);
     const staticTaskIds = new Set(this.definition.tasks.map(task => task.id));
     for (let index = this.tasks.length - 1; index >= 0; index--) {
       const task = this.tasks[index];
-      const isRepairTask = [...repairTaskIds].some(fixTaskId => task.id === fixTaskId || task.id.startsWith(`${fixTaskId}:`));
+      const isRetryTask = [...retryTaskIds].some(retryTaskId => task.id === retryTaskId || task.id.startsWith(`${retryTaskId}:`));
       const isRuntimeTask = !staticTaskIds.has(task.id) && task.causedBy !== null;
-      if (isRepairTask || isRuntimeTask) {
+      if (isRetryTask || isRuntimeTask) {
         this.tasks.splice(index, 1);
       }
     }
@@ -872,7 +865,7 @@ export class StageRun {
       checks: this.checks.map(check => check.snapshot()),
       approval: this.approval ? { ...this.approval } : null,
       failure: this.failure,
-      freezePoint: this.freezePoint,
+      commitPoint: this.commitPoint,
       workSourceState: this.hasDynamicWorkSource() ? this.workSourceState : undefined,
     };
   }
@@ -1056,10 +1049,11 @@ export class WorkflowRun {
     }
 
     if (this.taskLocksCode(stageRun, taskId) && effectiveResult.status === 'completed') {
-      stageRun.freezePoint = {
+      stageRun.commitPoint = {
         taskId,
-        delivery: this.extractDeliveryMetadata(effectiveResult.output),
-        frozenAt: new Date().toISOString(),
+        uses: this.taskUse(stageRun, taskId),
+        metadata: this.extractCommitMetadata(effectiveResult.output),
+        createdAt: new Date().toISOString(),
       };
     }
 
@@ -1079,7 +1073,7 @@ export class WorkflowRun {
     const events: WorkflowEvent[] = [{ type: 'task-completed', stage, taskId }];
     const invalidationEvents = this.applyTaskCompletionInvalidation(stageRun, taskId, effectiveResult);
     events.push(...invalidationEvents);
-    if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
+    if (stageRun.commitPoint) events.push({ type: 'commit-point-created', stage, commitPoint: stageRun.commitPoint });
     return this.maybeCompleteStage(stageRun, events);
   }
 
@@ -1121,22 +1115,23 @@ export class WorkflowRun {
     }
 
     if (this.checkLocksCode(stageRun, check.name) && effectiveStatus === 'pass') {
-      stageRun.freezePoint = {
+      stageRun.commitPoint = {
         checkName: check.name,
-        delivery: this.extractDeliveryMetadata(normalizedOutput),
-        frozenAt: new Date().toISOString(),
+        uses: this.checkUse(stageRun, check.name),
+        metadata: this.extractCommitMetadata(normalizedOutput),
+        createdAt: new Date().toISOString(),
       };
     }
 
     const events: WorkflowEvent[] = [{ type: 'check-recorded', stage, checkName: check.name, status: check.status }];
     if (effectiveStatus === 'pending' || effectiveStatus === 'pass') {
-      if (stageRun.freezePoint) events.push({ type: 'delivery-frozen', stage, freezePoint: stageRun.freezePoint });
+      if (stageRun.commitPoint) events.push({ type: 'commit-point-created', stage, commitPoint: stageRun.commitPoint });
       return this.maybeCompleteStage(stageRun, events);
     }
 
-    if (stageRun.freezePoint) {
+    if (stageRun.commitPoint) {
       return this.fail(stageRun, {
-        reason: 'post-delivery-check-failed',
+        reason: 'post-commit-check-failed',
         stage,
         checkName: result.name,
         message: effectiveMessage,
@@ -1144,16 +1139,16 @@ export class WorkflowRun {
     }
 
     const policy = stageRun.definition.checkFailurePolicies?.find(candidate => candidate.checkName === result.name);
-    const scheduledFixCount = stageRun.scheduledFixCount(result.name);
-    if (policy && scheduledFixCount < policy.maxAttempts) {
+    const scheduledRetryTaskCount = stageRun.scheduledRetryTaskCount(result.name);
+    if (policy && scheduledRetryTaskCount < policy.maxAttempts) {
       const causedBy: CausedByMetadata = {
         type: 'check-failure',
         checkName: result.name,
         message: effectiveMessage,
       };
-      const fixTask = stageRun.appendFixTask(policy, causedBy);
+      const retryTask = stageRun.appendRetryTask(policy, causedBy);
       check.status = 'pending';
-      events.push({ type: 'fix-task-scheduled', stage, taskId: fixTask.id, causedBy });
+      events.push({ type: 'retry-task-scheduled', stage, taskId: retryTask.id, causedBy });
       return this.decision(events);
     }
 
@@ -1327,8 +1322,8 @@ export class WorkflowRun {
 
         for (const task of stageRun.tasks) {
           if (!task.terminal) {
-            const isRepairTaskForFailedCheck = task.causedBy?.type === 'check-failure' && task.causedBy.checkName === failedCheck.name;
-            if (!isRepairTaskForFailedCheck) {
+            const isRetryTaskForFailedCheck = task.causedBy?.type === 'check-failure' && task.causedBy.checkName === failedCheck.name;
+            if (!isRetryTaskForFailedCheck) {
               task.resetForFreshAttempt();
             }
           }
@@ -1639,7 +1634,7 @@ export class WorkflowRun {
       const uses = this.taskUse(stageRun, taskRun.id);
       const evidence = validateWorkflowUseEvidence(uses, taskRun.output);
       if (!evidence.ok) {
-        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, taskId: taskRun.id, uses };
+        return { complete: false, reason: 'commit-evidence-missing', stage: stageRun.stage, taskId: taskRun.id, uses };
       }
     }
     for (const checkRun of stageRun.checks) {
@@ -1647,42 +1642,46 @@ export class WorkflowRun {
       const uses = this.checkUse(stageRun, checkRun.name);
       const evidence = validateWorkflowUseEvidence(uses, checkRun.output);
       if (!evidence.ok) {
-        return { complete: false, reason: 'delivery-evidence-missing', stage: stageRun.stage, checkName: checkRun.name, uses };
+        return { complete: false, reason: 'commit-evidence-missing', stage: stageRun.stage, checkName: checkRun.name, uses };
       }
     }
     return { complete: true };
   }
 
-  private workflowUseEvidenceFailure(uses: string, output: unknown): string | null {
+  private workflowUseEvidenceFailure(uses: string | undefined, output: unknown): string | null {
     const evidence = validateWorkflowUseEvidence(uses, output);
     if (evidence.ok) return null;
-    if (evidence.reason === 'unknown-use') return `Unknown workflow use ${uses}`;
+    if (evidence.reason === 'unknown-use') return `Unknown workflow use ${uses ?? '<unspecified>'}`;
     return `Missing required evidence for ${uses}: ${evidence.field ?? 'output'}`;
   }
 
-  private taskUse(stageRun: StageRun, taskId: string): string {
+  private taskUse(stageRun: StageRun, taskId: string): string | undefined {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     const taskRun = stageRun.tasks.find(task => task.id === taskId || task.id === baseTaskId);
     const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId || task.id === baseTaskId)
       ?? stageRun.definition.checks
         .map(check => check.onFailure?.retry?.task)
         .find((task): task is NonNullable<typeof task> => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
-    return taskRun?.uses ?? taskDefinition?.uses ?? inferWorkflowTaskUse(baseTaskId);
+    return taskRun?.uses ?? taskDefinition?.uses;
   }
 
   private taskLocksCode(stageRun: StageRun, taskId: string): boolean {
-    const use = getWorkflowUseDefinition(this.taskUse(stageRun, taskId));
-    return use?.locksCode === true;
+    const uses = this.taskUse(stageRun, taskId);
+    if (!uses) return false;
+    const use = getWorkflowUseDefinition(uses);
+    return use?.createsCommitPoint === true;
   }
 
-  private checkUse(stageRun: StageRun, checkName: string): string {
+  private checkUse(stageRun: StageRun, checkName: string): string | undefined {
     const checkDefinition = stageRun.definition.checks.find(check => check.name === checkName);
-    return checkDefinition?.uses ?? inferWorkflowCheckUse(checkName);
+    return checkDefinition?.uses;
   }
 
   private checkLocksCode(stageRun: StageRun, checkName: string): boolean {
-    const use = getWorkflowUseDefinition(this.checkUse(stageRun, checkName));
-    return use?.locksCode === true;
+    const uses = this.checkUse(stageRun, checkName);
+    if (!uses) return false;
+    const use = getWorkflowUseDefinition(uses);
+    return use?.createsCommitPoint === true;
   }
 
   private completeStage(stageRun: StageRun, events: WorkflowEvent[]): WorkflowDecision {
@@ -1829,16 +1828,9 @@ export class WorkflowRun {
     return taskId.replace(/:\d+$/, '');
   }
 
-  private extractDeliveryMetadata(output: unknown): DeliveryMetadata {
+  private extractCommitMetadata(output: unknown): Record<string, unknown> {
     const data = this.unwrapTaskOutput(output);
-    if (!data) return {};
-    return {
-      targetBranch: typeof data.targetBranch === 'string' ? data.targetBranch : undefined,
-      baseSha: typeof data.baseSha === 'string' ? data.baseSha : undefined,
-      candidateHeadSha: typeof data.candidateHeadSha === 'string' ? data.candidateHeadSha : undefined,
-      landedSha: typeof data.landedSha === 'string' ? data.landedSha : typeof data.mergedSha === 'string' ? data.mergedSha : undefined,
-      rebased: typeof data.rebased === 'boolean' ? data.rebased : undefined,
-    };
+    return data ? { ...data } : {};
   }
 
   private unwrapTaskOutput(output: unknown): Record<string, unknown> | null {

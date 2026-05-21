@@ -595,7 +595,7 @@ describe('API Routes', () => {
         const integrate = response.body.data.stageRuns.find((s: any) => s.stage === 'integrate');
         expect(integrate.deliveryMetadata.merge).toMatchObject({ targetBranch: 'main', candidateHeadSha: 'head-sha', landedSha: 'landed-sha' });
         expect(integrate.deliveryMetadata.health).toMatchObject({ status: 'failed', message: 'typecheck failed' });
-        expect(integrate.failure).toMatchObject({ reason: 'post-delivery-check-failed', checkName: 'health:integrate' });
+        expect(integrate.failure).toMatchObject({ reason: 'post-commit-check-failed', checkName: 'health:integrate' });
         expect(response.body.data.workflowDefinition).toMatchObject({
           workflowId: 'mohist/default',
           source: { type: 'builtin', id: 'mohist/default' },

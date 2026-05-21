@@ -73,7 +73,7 @@ describe('workflow inspector', () => {
       stages: [
         {
           stage: Stage.Build,
-          tasks: [{ id: 'T-002', title: 'Broken task', dependsOn: ['T-001'] }],
+          tasks: [{ id: 'T-002', title: 'Broken task', uses: 'mohist/agent', dependsOn: ['T-001'] }],
           checks: [],
         },
       ],
@@ -440,8 +440,8 @@ workflow:
       expect(diagnostics).toEqual([]);
       expect(check.checks.find(candidate => candidate.name === 'review-passed')?.onFailure?.retry?.limit).toBe(2);
       expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
-        fixTaskId: 'fix-review-findings',
-        fixTaskTitle: 'Fix review findings',
+        retryTaskId: 'fix-review-findings',
+        retryTaskTitle: 'Fix review findings',
         maxAttempts: 2,
       });
       expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
@@ -478,6 +478,7 @@ workflow:
               task:
                 id: fix-review-findings
                 title: Fix review findings
+                uses: mohist/agent
 `, 'utf-8');
 
     try {
@@ -564,7 +565,7 @@ stages:
         },
       });
       expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'custom-verdict')).toMatchObject({
-        fixTaskId: 'fix-custom-verdict',
+        retryTaskId: 'fix-custom-verdict',
         maxAttempts: 1,
       });
       expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-custom-verdict')).toMatchObject({
@@ -820,7 +821,6 @@ function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {
         with: task.with,
         onSuccess: task.onSuccess,
         dependsOn: nonEmpty(task.dependsOn),
-        resultContract: task.resultContract,
       })),
       checks: stage.checks.map(check => compact({
         name: check.name,
@@ -846,7 +846,6 @@ function toSemanticOnFailure(onFailure: CheckFailurePolicy | undefined): unknown
         with: onFailure.retry.task.with,
         onSuccess: onFailure.retry.task.onSuccess,
         dependsOn: nonEmpty(onFailure.retry.task.dependsOn),
-        resultContract: onFailure.retry.task.resultContract,
       }),
     }),
   };

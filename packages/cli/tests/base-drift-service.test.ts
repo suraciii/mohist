@@ -56,7 +56,7 @@ function makeStageRunSnapshot(stage: Stage, overrides: Partial<StageRunSnapshot>
     checks: [],
     approval: null,
     failure: null,
-    freezePoint: null,
+    commitPoint: null,
     ...overrides,
   };
 }
@@ -682,7 +682,7 @@ describe('BaseDriftService.scanActiveCandidatesForDrift', () => {
           respondedAt: new Date().toISOString(),
         },
         failure: null,
-        freezePoint: null,
+        commitPoint: null,
       }],
       failure: null,
     };

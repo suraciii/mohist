@@ -668,7 +668,7 @@ describe('StageStateService', () => {
 
       expect(planState.checkRepair).toMatchObject({
         checkName: 'plan-verdict',
-        fixTaskId: 'fix-plan-verdict',
+        retryTaskId: 'fix-plan-verdict',
         status: 'completed',
         attemptsUsed: 1,
         attemptsMax: 2,

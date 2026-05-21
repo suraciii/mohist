@@ -197,7 +197,7 @@ export interface StageTaskResult {
 
 export interface CheckFailurePolicy {
   checkName: string;
-  fixTaskId: string;
+  retryTaskId: string;
   maxAttempts: number;
 }
 

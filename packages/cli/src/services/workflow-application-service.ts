@@ -503,7 +503,7 @@ export class WorkflowApplicationService {
       stageRun.checks.some(check => check.name === candidate.checkName && check.status === 'failed'),
     ) ?? stageRun.definition.checkFailurePolicies?.find(candidate =>
       stageRun.tasks.some(task =>
-        (task.id === candidate.fixTaskId || task.id.startsWith(`${candidate.fixTaskId}:`)) &&
+        (task.id === candidate.retryTaskId || task.id.startsWith(`${candidate.retryTaskId}:`)) &&
         (task.status === 'pending' || task.status === 'running'),
       ),
     ) ?? stageRun.definition.checkFailurePolicies?.[0];
@@ -514,20 +514,20 @@ export class WorkflowApplicationService {
 
     const verdictCheck = stageRun.checks.find(c => c.name === verdictCheckName);
     const existingPendingFix = stageRun.tasks.find(t =>
-      (t.id === policy.fixTaskId || t.id.startsWith(`${policy.fixTaskId}:`)) &&
+      (t.id === policy.retryTaskId || t.id.startsWith(`${policy.retryTaskId}:`)) &&
       (t.status === 'pending' || t.status === 'running')
     );
     if (existingPendingFix) {
       run.status = 'running';
       run.failure = null;
-      stageRun.reopenForRepair();
+      stageRun.reopenForRecovery();
       this.repo.saveAggregate(run, input.startedBy ?? null);
       this.projection.apply({ run, decision: { events: [], nextWork: run.nextWork() }, sessionId: input.sessionId });
       return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: existingPendingFix.id, repairStatus: 'already-running' };
     }
 
-    const scheduledFixCount = stageRun.scheduledFixCount(verdictCheckName);
-    if (scheduledFixCount >= policy.maxAttempts) {
+    const scheduledRetryTaskCount = stageRun.scheduledRetryTaskCount(verdictCheckName);
+    if (scheduledRetryTaskCount >= policy.maxAttempts) {
       return { run, decision: { events: [], nextWork: run.nextWork() }, repairTaskId: null, repairStatus: 'exhausted' };
     }
 
@@ -540,16 +540,16 @@ export class WorkflowApplicationService {
       checkName: verdictCheckName,
       message: verdictCheck?.message ?? `${verdictCheckName} failed`,
     };
-    const fixTask = stageRun.appendFixTask(policy, causedBy);
+    const retryTask = stageRun.appendRetryTask(policy, causedBy);
     run.status = 'running';
     run.failure = null;
-    stageRun.reopenForRepair();
+    stageRun.reopenForRecovery();
     const events: import('../workflow/model').WorkflowEvent[] = [
-      { type: 'fix-task-scheduled', stage: input.stage, taskId: fixTask.id, causedBy },
+      { type: 'retry-task-scheduled', stage: input.stage, taskId: retryTask.id, causedBy },
     ];
     this.repo.saveAggregate(run, input.startedBy ?? null);
     this.projection.apply({ run, decision: { events, nextWork: run.nextWork() }, sessionId: input.sessionId });
-    return { run, decision: { events, nextWork: run.nextWork() }, repairTaskId: fixTask.id, repairStatus: 'scheduled' };
+    return { run, decision: { events, nextWork: run.nextWork() }, repairTaskId: retryTask.id, repairStatus: 'scheduled' };
   }
 
   resumeDecision(issueId: string, options: WorkflowCommandOptions = {}): { run: WorkflowRun; nextWork: WorkflowWork } {
