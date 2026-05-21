@@ -163,9 +163,9 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       },
     });
     if (result.status === 'completed') {
-      this.workflowRun.completeTask(definition.id);
+      this.workflowRun.completeTask();
     } else {
-      this.workflowRun.failTask(definition.id, result);
+      this.workflowRun.failTask(result);
     }
     return result.status === 'completed';
   }
@@ -182,11 +182,11 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       definition,
     });
     if (result.status === 'pass') {
-      this.workflowRun.passCheck(definition.name, result);
+      this.workflowRun.passCheck(result);
     } else if (result.status === 'pending') {
-      this.workflowRun.resetCheck(definition.name, result);
+      this.workflowRun.resetCheck(result);
     } else {
-      this.workflowRun.failCheck(definition.name, result);
+      this.workflowRun.failCheck(result);
     }
     return result.status === 'pass';
   }
