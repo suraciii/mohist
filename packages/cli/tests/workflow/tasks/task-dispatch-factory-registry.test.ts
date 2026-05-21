@@ -6,7 +6,7 @@ import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
 import type { ExecutableTask, StageTaskResult } from '../../../src/workflow/tasks';
 import { createDefaultTaskDispatchFactoryRegistry, createTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
-import type { AgentSessionTaskInput, ProviderTaskInput } from '../../../src/workflow/tasks/types';
+import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
 import type { TaskDefinition } from '../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {
@@ -99,7 +99,7 @@ function createRegistryWithFakeAgentHandler() {
 }
 
 describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
-  it('dispatches custom task uses through a registered provider', () => {
+  it('dispatches custom task uses through a registered provider', async () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-provider-'));
     const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
     fs.mkdirSync(changeDir, { recursive: true });
@@ -107,20 +107,21 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
     try {
       const provider = {
         id: 'acme/custom-task',
-        build: vi.fn((input) => ({
+        run: vi.fn(async (input) => ({
           taskId: input.task.taskId,
           title: input.task.title,
-          kind: 'service-call' as const,
-          stage: input.ctx.issue.stage,
-          attempt: input.attempt,
-          serviceFn: async () => ({ custom: true }),
+          status: 'completed' as const,
+          attempts: input.attempt,
+          duration: 1,
+          artifacts: [],
+          events: [],
+          output: { custom: true },
         })),
       };
-      const task: ExecutableTask = { taskId: 'custom', title: 'Custom task', kind: 'agent-session' };
-      const dispatchable = createTaskDispatchFactoryRegistry([provider]).build({
+      const task: ExecutableTask = { taskId: 'custom', title: 'Custom task' };
+      const result = await createTaskDispatchFactoryRegistry([provider]).run({
         ctx: makeContext(changeDir),
         task,
-        executionKind: 'agent-session',
         attempt: 2,
         worktreePath: tmpRoot,
         sourceTask: {
@@ -131,38 +132,38 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
         },
       });
 
-      expect(provider.build).toHaveBeenCalledOnce();
-      expect(dispatchable).toMatchObject({
+      expect(provider.run).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({
         taskId: 'custom',
-        kind: 'service-call',
-        attempt: 2,
+        attempts: 2,
+        status: 'completed',
       });
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
-  it('restores a normal pending ai-review task from checkpoint and artifact', () => {
+  it('restores a normal pending ai-review task from checkpoint and artifact', async () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-restore-'));
     const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
     fs.mkdirSync(changeDir, { recursive: true });
     fs.writeFileSync(path.join(changeDir, 'review.md'), '# Review\n<promise>PASS</promise>\n');
 
     try {
-      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
+      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review' };
       const { registry } = createRegistryWithFakeAgentHandler();
-      const dispatchable = registry.build({
+      const result = await registry.run({
         ctx: makeContext(changeDir, pendingAiReviewTask()),
         task,
-        executionKind: 'agent-session',
         attempt: 1,
         worktreePath: tmpRoot,
         sourceTask: aiReviewSourceTask(),
       });
 
-      expect(dispatchable).toMatchObject({
+      expect(result).toMatchObject({
         taskId: 'ai-review',
-        kind: 'service-call',
+        status: 'completed',
+        output: { restoredFromCheckpoint: true },
       });
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -177,9 +178,9 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
     fs.writeFileSync(reviewPath, '# Stale review\n<promise>PASS</promise>\n');
 
     try {
-      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
+      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review' };
       const { registry, agentSessionHandler } = createRegistryWithFakeAgentHandler();
-      const dispatchable = registry.build({
+      const result = await registry.run({
         ctx: makeContext(changeDir, pendingAiReviewTask({
           resetBy: {
             type: 'workflow-policy',
@@ -189,31 +190,23 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
           },
         })),
         task,
-        executionKind: 'agent-session',
         attempt: 1,
         worktreePath: tmpRoot,
         sourceTask: aiReviewSourceTask(),
       });
 
-      expect(dispatchable).toMatchObject({
+      expect(result).toMatchObject({
         taskId: 'ai-review',
-        kind: 'provider-task',
+        status: 'completed',
       });
-      expect(fs.existsSync(reviewPath)).toBe(true);
-      if (!dispatchable || dispatchable.kind !== 'provider-task') {
-        throw new Error('Expected provider-task');
-      }
-      const providerInput = dispatchable.input as ProviderTaskInput;
-      const result = await providerInput.run(makeContext(changeDir));
       expect(fs.existsSync(reviewPath)).toBe(false);
-      expect(result.status).toBe('completed');
       expect(agentSessionHandler).toHaveBeenCalledOnce();
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 
-  it('does not remove review output when restoring ai-review from checkpoint', () => {
+  it('does not remove review output when restoring ai-review from checkpoint', async () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-restore-keeps-review-'));
     const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
     fs.mkdirSync(changeDir, { recursive: true });
@@ -221,20 +214,19 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
     fs.writeFileSync(reviewPath, '# Review\n<promise>PASS</promise>\n');
 
     try {
-      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
+      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review' };
       const { registry } = createRegistryWithFakeAgentHandler();
-      const dispatchable = registry.build({
+      const result = await registry.run({
         ctx: makeContext(changeDir, pendingAiReviewTask()),
         task,
-        executionKind: 'agent-session',
         attempt: 1,
         worktreePath: tmpRoot,
         sourceTask: aiReviewSourceTask(),
       });
 
-      expect(dispatchable).toMatchObject({
+      expect(result).toMatchObject({
         taskId: 'ai-review',
-        kind: 'service-call',
+        status: 'completed',
       });
       expect(fs.existsSync(reviewPath)).toBe(true);
     } finally {

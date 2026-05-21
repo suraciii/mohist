@@ -340,7 +340,6 @@ workflow:
         with: { path: 'design.md' },
       });
       expect(build.taskExecutionPolicies?.find(policy => policy.taskId === 'implement')).toMatchObject({
-        kind: 'agent-session',
         agentSessionRef: 'build-agent',
       });
       expect(explainWorkflowItem('build-clean', resolved)).toMatchObject({
@@ -451,7 +450,6 @@ workflow:
         maxAttempts: 2,
       });
       expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
-        kind: 'agent-session',
         workSourceKind: 'runtime',
       });
       expect(check.invalidationPolicy?.entries).toContainEqual(expect.objectContaining({
@@ -509,7 +507,6 @@ stages:
         maxAttempts: 1,
       });
       expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-custom-verdict')).toMatchObject({
-        kind: 'agent-session',
         workSourceKind: 'runtime',
       });
     } finally {
@@ -676,10 +673,10 @@ workflow:
       const serviceTaskIds = new Set(['sync-specs', 'archive-spec-change', 'land-locally']);
       expect(integrate.taskExecutionPolicies
         ?.filter(policy => serviceTaskIds.has(policy.taskId))
-        .map(policy => [policy.taskId, policy.kind])).toEqual([
-        ['sync-specs', 'service-call'],
-        ['archive-spec-change', 'service-call'],
-        ['land-locally', 'service-call'],
+        .map(policy => [policy.taskId, policy.workSourceKind])).toEqual([
+        ['sync-specs', 'static'],
+        ['archive-spec-change', 'static'],
+        ['land-locally', 'static'],
       ]);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });

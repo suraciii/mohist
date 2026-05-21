@@ -1,13 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { MergeState } from '../../types';
-import type { StageContext, CheckResult } from '../stage-context';
+import type { StageContext, CheckResult, StageTaskResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
-import type { AgentSessionTaskHandler, AgentSessionTaskInput, ExecutableTask, ProviderTaskInput, TaskKind } from './types';
+import type { AgentSessionTaskHandler, AgentSessionTaskInput, ExecutableTask } from './types';
 import type { AgentPromptSource, TaskDefinition } from '../model';
-import type { TaskExecutionKind } from '../runner/workflow-runtime-definition';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
+import { createRalphTaskHandler } from './ralph-task-handler';
+import { createServiceCallTaskHandler } from './service-call-task-handler';
 import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
@@ -21,25 +22,9 @@ interface PlanTaskConfig {
   verifyArtifact: () => boolean;
 }
 
-export type DispatchableTask = ExecutableTask | {
-  taskId: string;
-  title: string;
-  kind: TaskKind;
-  prompt?: string;
-  cwd?: string;
-  stage?: string;
-  attempt?: number;
-  agentSessionRef?: string;
-  artifactVerification?: (artifacts: string[]) => string[];
-  requiredMarkers?: RequiredMarkerDefinition[];
-  serviceFn?: (ctx: StageContext) => Promise<unknown>;
-  input?: unknown;
-};
-
 export interface TaskDispatchFactoryInput {
   ctx: StageContext;
   task: ExecutableTask;
-  executionKind: TaskExecutionKind | TaskKind;
   attempt: number;
   failedCheck?: CheckResult;
   worktreePath: string;
@@ -49,15 +34,24 @@ export interface TaskDispatchFactoryInput {
 
 export interface TaskDispatchProvider {
   id: string;
-  build(input: TaskDispatchFactoryInput): DispatchableTask | null;
+  run(input: TaskDispatchFactoryInput): Promise<StageTaskResult | null>;
+}
+
+export interface DefaultTaskDispatchProviderOverrides {
+  ralphTasks?: TaskDispatchProvider['run'];
+  rebase?: TaskDispatchProvider['run'];
+  openspecSync?: TaskDispatchProvider['run'];
+  archiveChange?: TaskDispatchProvider['run'];
+  merge?: TaskDispatchProvider['run'];
 }
 
 export interface DefaultTaskDispatchFactoryRegistryOptions {
   agentSessionHandler?: AgentSessionTaskHandler;
+  overrides?: DefaultTaskDispatchProviderOverrides;
 }
 
 export interface TaskDispatchFactoryRegistry {
-  build(input: TaskDispatchFactoryInput): DispatchableTask | null;
+  run(input: TaskDispatchFactoryInput): Promise<StageTaskResult | null>;
   get(id: string): TaskDispatchProvider | undefined;
   register(provider: TaskDispatchProvider): void;
 }
@@ -69,9 +63,9 @@ export function createTaskDispatchFactoryRegistry(providers: TaskDispatchProvide
   }
 
   return {
-    build(input) {
+    run(input) {
       const providerId = resolveTaskProviderId(input);
-      return map.get(providerId)?.build(input) ?? null;
+      return map.get(providerId)?.run(input) ?? Promise.resolve(null);
     },
     get(id) {
       return map.get(id);
@@ -88,31 +82,31 @@ export function createDefaultTaskDispatchFactoryRegistry(options: DefaultTaskDis
   return createTaskDispatchFactoryRegistry([
     {
       id: 'mohist/agent',
-      build: createAgentSessionDispatchTask,
+      run: input => runAgentSessionTask(input, agentSessionHandler),
     },
     {
       id: 'mohist/check/ai-review',
-      build: input => createCheckAiReviewDispatchTask(input, agentSessionHandler),
+      run: input => createCheckAiReviewDispatchTask(input, agentSessionHandler),
     },
     {
       id: 'mohist/ralph-tasks',
-      build: input => ({ ...input.task, kind: 'ralph-task' }),
+      run: options.overrides?.ralphTasks ?? (input => createRalphTaskHandler()(input.task, input.ctx)),
     },
     {
       id: 'mohist/rebase',
-      build: createRebaseDispatchTask,
+      run: options.overrides?.rebase ?? createRebaseDispatchTask,
     },
     {
       id: 'mohist/openspec-sync',
-      build: input => createServiceCallDispatchTask(input, integrator, 'mohist/openspec-sync'),
+      run: options.overrides?.openspecSync ?? (input => createServiceCallDispatchTask(input, integrator, 'mohist/openspec-sync') ?? Promise.resolve(null)),
     },
     {
       id: 'mohist/archive-change',
-      build: input => createServiceCallDispatchTask(input, integrator, 'mohist/archive-change'),
+      run: options.overrides?.archiveChange ?? (input => createServiceCallDispatchTask(input, integrator, 'mohist/archive-change') ?? Promise.resolve(null)),
     },
     {
       id: 'mohist/merge',
-      build: input => createServiceCallDispatchTask(input, integrator, 'mohist/merge'),
+      run: options.overrides?.merge ?? (input => createServiceCallDispatchTask(input, integrator, 'mohist/merge') ?? Promise.resolve(null)),
     },
   ]);
 }
@@ -160,11 +154,10 @@ function baseRuntimeTaskId(taskId: string): string {
   return taskId.replace(/:\d+$/, '');
 }
 
-function createRebaseDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
-  return {
+function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Promise<StageTaskResult> {
+  return createServiceCallTaskHandler()({
     taskId: input.task.taskId,
     title: input.task.title,
-    kind: 'service-call',
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     serviceFn: async () => {
@@ -177,42 +170,47 @@ function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Dispatchable
       }
       return result.output;
     },
-  };
+  }, input.ctx);
 }
 
-function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrator: OpenSpecIntegrator, uses: string): DispatchableTask | null {
+function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrator: OpenSpecIntegrator, uses: string): Promise<StageTaskResult> | null {
   const serviceFn = buildWorkflowServiceFn(uses, input, integrator);
   if (!serviceFn) return null;
 
-  return {
+  return createServiceCallTaskHandler()({
     taskId: input.task.taskId,
     title: input.task.title,
-    kind: 'service-call',
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     serviceFn,
-  };
+  }, input.ctx);
 }
 
-function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask | null {
+function runAgentSessionTask(input: TaskDispatchFactoryInput, agentSessionHandler: AgentSessionTaskHandler): Promise<StageTaskResult> {
+  const task = createAgentSessionTask(input);
+  if (!task) {
+    throw new Error(`Agent task '${input.task.taskId}' requires a prompt`);
+  }
+  if (isStageTaskResult(task)) return Promise.resolve(task);
+  return agentSessionHandler(task, input.ctx);
+}
+
+function createAgentSessionTask(input: TaskDispatchFactoryInput): AgentSessionTaskInput | StageTaskResult | null {
   const promptSource = agentPromptSource(input.sourceTask);
   if (promptSource && !isBuiltinAgentPromptRef(promptSource)) {
-    return createGenericAgentSessionDispatchTask(input, resolveCustomAgentPrompt(input, promptSource));
+    return createGenericAgentSessionInput(input, resolveCustomAgentPrompt(input, promptSource));
   }
   if (typeof input.task.prompt === 'string' && input.task.prompt.trim().length > 0) {
-    return createGenericAgentSessionDispatchTask(input, input.task.prompt);
+    return createGenericAgentSessionInput(input, input.task.prompt);
   }
   if (promptSource && 'ref' in promptSource && isBuiltinAgentPromptRef(promptSource)) {
-    return createBuiltinAgentSessionDispatchTask(input, promptSource.ref);
+    return createBuiltinAgentSessionInput(input, promptSource.ref);
   }
-  return {
-    ...input.task,
-    agentSessionRef: input.agentSessionRef,
-  };
+  return null;
 }
 
-function createBuiltinAgentSessionDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
-  if (promptRef.startsWith('mohist/plan/')) return createPlanAgentSessionDispatchTask(input, promptRef);
+function createBuiltinAgentSessionInput(input: TaskDispatchFactoryInput, promptRef: string): AgentSessionTaskInput | StageTaskResult {
+  if (promptRef.startsWith('mohist/plan/')) return createPlanAgentSessionInput(input, promptRef);
   throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
 }
 
@@ -265,11 +263,11 @@ function requiredMarkersForTask(input: TaskDispatchFactoryInput): RequiredMarker
   return rendered.length > 0 ? rendered : undefined;
 }
 
-function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, prompt: string): DispatchableTask {
+function createGenericAgentSessionInput(input: TaskDispatchFactoryInput, prompt: string): AgentSessionTaskInput {
   const declaredArtifacts = extractStringArray((input.task.input as { artifacts?: unknown; outputs?: unknown } | undefined)?.artifacts)
     ?? extractStringArray((input.task.input as { outputs?: unknown } | undefined)?.outputs)
     ?? [];
-  const agentInput = {
+  return {
     taskId: input.task.taskId,
     title: input.task.title,
     prompt,
@@ -280,19 +278,6 @@ function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, 
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
   } satisfies AgentSessionTaskInput;
-  return {
-    taskId: input.task.taskId,
-    title: input.task.title,
-    kind: 'agent-session',
-    prompt,
-    cwd: agentInput.cwd,
-    stage: agentInput.stage,
-    attempt: agentInput.attempt,
-    agentSessionRef: input.agentSessionRef,
-    requiredMarkers: agentInput.requiredMarkers,
-    artifactVerification: agentInput.artifactVerification,
-    input: agentInput,
-  };
 }
 
 function isRequiredMarkerRecord(value: unknown): value is RequiredMarkerDefinition {
@@ -312,7 +297,24 @@ function extractStringArray(value: unknown): string[] | null {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
-function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
+function isStageTaskResult(value: AgentSessionTaskInput | StageTaskResult): value is StageTaskResult {
+  return 'status' in value && 'attempts' in value && 'duration' in value;
+}
+
+function completedTaskResult(input: TaskDispatchFactoryInput, artifacts: string[], result: unknown): StageTaskResult {
+  return {
+    taskId: input.task.taskId,
+    title: input.task.title,
+    status: 'completed',
+    artifacts,
+    attempts: input.attempt,
+    duration: 0,
+    events: [],
+    output: result,
+  };
+}
+
+function createPlanAgentSessionInput(input: TaskDispatchFactoryInput, promptRef: string): AgentSessionTaskInput | StageTaskResult {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
@@ -325,29 +327,15 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput, pro
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'plan');
   if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(taskConfig.type) && taskConfig.verifyArtifact()) {
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, []);
-    return {
-      taskId: input.task.taskId,
-      title: input.task.title,
-      kind: 'service-call',
-      stage: input.ctx.issue.stage,
-      attempt: input.attempt,
-      serviceFn: async () => ({ restoredFromCheckpoint: true }),
-    };
+    return completedTaskResult(input, [], { restoredFromCheckpoint: true });
   }
   if (mayRestoreTaskFromPriorOutput(input) && taskConfig.verifyArtifact()) {
     input.ctx.checkpointManager.markStepComplete(input.ctx.issue.number, 'plan', taskConfig.type, tasks[tasks.indexOf(taskConfig) + 1]?.type ?? null);
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, [taskConfig.label]);
-    return {
-      taskId: input.task.taskId,
-      title: input.task.title,
-      kind: 'service-call',
-      stage: input.ctx.issue.stage,
-      attempt: input.attempt,
-      serviceFn: async () => ({ artifacts: [taskConfig.label], restoredFromDisk: true }),
-    };
+    return completedTaskResult(input, [taskConfig.label], { artifacts: [taskConfig.label], restoredFromDisk: true });
   }
 
-  const agentInput = {
+  return {
     taskId: input.task.taskId,
     title: input.task.title,
     prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
@@ -358,20 +346,6 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput, pro
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => taskConfig.verifyArtifact() ? [taskConfig.label] : [],
   } satisfies AgentSessionTaskInput;
-
-  return {
-    taskId: input.task.taskId,
-    title: input.task.title,
-    kind: 'agent-session',
-    prompt: agentInput.prompt,
-    cwd: agentInput.cwd,
-    stage: agentInput.stage,
-    attempt: agentInput.attempt,
-    agentSessionRef: agentInput.agentSessionRef,
-    requiredMarkers: agentInput.requiredMarkers,
-    artifactVerification: agentInput.artifactVerification,
-    input: agentInput,
-  };
 }
 
 function mayRestoreTaskFromPriorOutput(input: TaskDispatchFactoryInput): boolean {
@@ -382,7 +356,7 @@ function wasResetByWorkflowPolicy(input: TaskDispatchFactoryInput): boolean {
   return input.ctx.requestedTask?.resetBy?.type === 'workflow-policy';
 }
 
-function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, agentSessionHandler: AgentSessionTaskHandler): DispatchableTask {
+async function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, agentSessionHandler: AgentSessionTaskHandler): Promise<StageTaskResult> {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
@@ -392,14 +366,7 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, agentS
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'check');
   if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(input.task.taskId) && fs.existsSync(reviewOutputFullPath)) {
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, []);
-    return {
-      taskId: input.task.taskId,
-      title: input.task.title,
-      kind: 'service-call',
-      stage: input.ctx.issue.stage,
-      attempt: input.attempt,
-      serviceFn: async () => ({ restoredFromCheckpoint: true }),
-    };
+    return completedTaskResult(input, [], { restoredFromCheckpoint: true });
   }
 
   const agentInput = {
@@ -414,25 +381,8 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, agentS
     artifactVerification: () => fs.existsSync(reviewOutputFullPath) ? [reviewOutputPath] : [],
   } satisfies AgentSessionTaskInput;
 
-  const providerInput = {
-    taskId: input.task.taskId,
-    title: input.task.title,
-    stage: input.ctx.issue.stage,
-    attempt: input.attempt,
-    run: async ctx => {
-      removePriorReviewOutput(reviewOutputFullPath);
-      return agentSessionHandler(agentInput, ctx);
-    },
-  } satisfies ProviderTaskInput;
-
-  return {
-    taskId: input.task.taskId,
-    title: input.task.title,
-    kind: 'provider-task',
-    stage: providerInput.stage,
-    attempt: providerInput.attempt,
-    input: providerInput,
-  };
+  removePriorReviewOutput(reviewOutputFullPath);
+  return agentSessionHandler(agentInput, input.ctx);
 }
 
 function removePriorReviewOutput(reviewOutputFullPath: string): void {

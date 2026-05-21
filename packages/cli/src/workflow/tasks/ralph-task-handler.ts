@@ -22,7 +22,7 @@ export function createRalphTaskTaskHandler(deps: RalphTaskRuntimeHandlerDeps): (
   ctx: StageContext,
 ) => Promise<StageTaskResult> {
   return async function runRalphTask(task: ExecutableTask, ctx: StageContext): Promise<StageTaskResult> {
-    if (task.kind !== 'ralph-task' || !task.input) {
+    if (!task.input) {
       throw new Error(`Unsupported task for Ralph handler: ${task.taskId}`);
     }
 

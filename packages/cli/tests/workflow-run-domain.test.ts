@@ -145,7 +145,7 @@ describe('WorkflowRun domain aggregate', () => {
     const runtimePlan = runtime.find(definition => definition.stage === Stage.Plan)!;
     const runtimeCheck = runtime.find(definition => definition.stage === Stage.Check)!;
     expect(compiled[0].taskExecutionPolicies).toBeUndefined();
-    expect(runtimePlan.taskExecutionPolicies?.filter(policy => policy.kind === 'agent-session').map(policy => policy.taskId)).toEqual([
+    expect(runtimePlan.taskExecutionPolicies?.map(policy => policy.taskId)).toEqual([
       'proposal',
       'specs',
       'design',
@@ -154,7 +154,6 @@ describe('WorkflowRun domain aggregate', () => {
       'fix-plan-review',
     ]);
     expect(runtimePlan.taskExecutionPolicies?.find(policy => policy.taskId === 'proposal')).toMatchObject({
-      kind: 'agent-session',
       workSourceKind: 'static',
       agentSessionRef: 'plan-artifacts',
     });
@@ -163,7 +162,6 @@ describe('WorkflowRun domain aggregate', () => {
       maxAttempts: 1,
     });
     expect(runtimePlan.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-plan-review')).toMatchObject({
-      kind: 'agent-session',
       workSourceKind: 'runtime',
     });
     expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
@@ -171,11 +169,9 @@ describe('WorkflowRun domain aggregate', () => {
       maxAttempts: 2,
     });
     expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
-      kind: 'provider-task',
       workSourceKind: 'static',
     });
     expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
-      kind: 'agent-session',
       workSourceKind: 'runtime',
     });
   });
@@ -194,7 +190,6 @@ describe('WorkflowRun domain aggregate', () => {
 
     expect(check?.workSources?.map(source => source.kind)).toContain('static');
     expect(check?.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
-      kind: 'agent-session',
       workSourceKind: 'runtime',
     });
   });

@@ -1,7 +1,6 @@
 import type { StageContext, StageTaskResult } from '../stage-context';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 
-export type TaskKind = 'agent-session' | 'service-call' | 'ralph-task' | 'provider-task';
 export type TaskExecutionStatus = 'completed' | 'failed' | 'skipped';
 
 export interface TaskInputDefinition {
@@ -70,13 +69,11 @@ export interface RalphTaskInput {
 export interface TaskDefinition {
   taskId: string;
   title: string;
-  kind: TaskKind;
 }
 
 export interface ExecutableTask {
   taskId: string;
   title: string;
-  kind: TaskKind;
   uses?: string;
   prompt?: string;
   input?: unknown;
@@ -104,14 +101,6 @@ export interface ServiceCallTaskInput {
   attempt: number;
 }
 
-export interface ProviderTaskInput {
-  taskId: string;
-  title: string;
-  stage: string;
-  attempt: number;
-  run: (ctx: StageContext) => Promise<StageTaskResult>;
-}
-
 export type TaskHandler = (
   task: ExecutableTask,
   ctx: StageContext,
@@ -127,25 +116,20 @@ export type ServiceCallTaskHandler = (
   ctx: StageContext,
 ) => Promise<StageTaskResult>;
 
-export type ProviderTaskHandler = (
-  input: ProviderTaskInput,
-  ctx: StageContext,
-) => Promise<StageTaskResult>;
-
 export type RalphTaskHandler = (
   input: RalphTaskInput,
   ctx: StageContext,
 ) => Promise<StageTaskResult>;
 
 export interface TaskHandlerRegistry {
-  get(kind: TaskKind): TaskHandler | undefined;
-  register(kind: TaskKind, handler: TaskHandler): void;
+  get(kind: string): TaskHandler | undefined;
+  register(kind: string, handler: TaskHandler): void;
 }
 
 export function createTaskHandlerRegistry(
-  handlers: Partial<Record<TaskKind, TaskHandler>>,
+  handlers: Record<string, TaskHandler>,
 ): TaskHandlerRegistry {
-  const map = new Map<TaskKind, TaskHandler>(Object.entries(handlers) as [TaskKind, TaskHandler][]);
+  const map = new Map<string, TaskHandler>(Object.entries(handlers));
   return {
     get(kind) {
       return map.get(kind);

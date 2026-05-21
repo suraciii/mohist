@@ -2,9 +2,9 @@ import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from 
 import type { StageRunner } from './stage-runner';
 import type { CheckContext } from './checks';
 import { resolveCheck } from './checks/check-registry';
-import type { TaskHandlerRegistry, ExecutableTask } from './tasks';
+import type { ExecutableTask } from './tasks';
 import type { TaskLoaderRegistry } from './tasks/task-loader-registry';
-import type { TaskDispatchFactoryRegistry, DispatchableTask } from './tasks/task-dispatch-factory-registry';
+import type { TaskDispatchFactoryRegistry } from './tasks/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './tasks/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
 import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
@@ -26,7 +26,6 @@ type PersistedCheckResult = {
 
 export interface GenericStageRunnerOptions {
   taskLoaderRegistry: TaskLoaderRegistry;
-  taskHandlerRegistry: TaskHandlerRegistry;
   checkRegistry: CheckRegistry;
   taskDispatchFactoryRegistry?: TaskDispatchFactoryRegistry;
   getStageDefinition(stage: WorkflowStageId): RuntimeStageDefinition | undefined;
@@ -36,7 +35,6 @@ export interface GenericStageRunnerOptions {
 
 export class GenericStageRunner implements StageRunner {
   private taskLoaderRegistry: TaskLoaderRegistry;
-  private taskHandlerRegistry: TaskHandlerRegistry;
   private taskDispatchFactoryRegistry: TaskDispatchFactoryRegistry;
   private checkRegistry: CheckRegistry;
   private getStageDefinition: (stage: WorkflowStageId) => RuntimeStageDefinition | undefined;
@@ -47,7 +45,6 @@ export class GenericStageRunner implements StageRunner {
 
   constructor(options: GenericStageRunnerOptions) {
     this.taskLoaderRegistry = options.taskLoaderRegistry;
-    this.taskHandlerRegistry = options.taskHandlerRegistry;
     this.taskDispatchFactoryRegistry = options.taskDispatchFactoryRegistry ?? createDefaultTaskDispatchFactoryRegistry();
     this.checkRegistry = options.checkRegistry;
     this.getStageDefinition = options.getStageDefinition;
@@ -397,17 +394,11 @@ export class GenericStageRunner implements StageRunner {
     options: { failedCheck?: CheckResult; attempt?: number } = {},
   ): Promise<StageTaskResult | null> {
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
-    if (!stageDefinition) return null;
+    if (!stageDefinition) return Promise.resolve(null);
     const resolvedTask = this.resolveExecutableTask(ctx, taskId, stageDefinition);
     if (!resolvedTask) return null;
 
-    const dispatchable = this.buildDispatchableTask(ctx, resolvedTask, options);
-    if (!dispatchable) return null;
-
-    const handler = this.taskHandlerRegistry.get(dispatchable.kind);
-    if (!handler) return null;
-
-    return handler(dispatchable as any, ctx);
+    return this.runTaskEndpoint(ctx, resolvedTask, options);
   }
 
   private failedCheckForRequestedTask(ctx: StageContext): CheckResult | undefined {
@@ -571,13 +562,10 @@ export class GenericStageRunner implements StageRunner {
         if (!allowedTaskIds.has(taskId) && !allowedTaskIds.has(baseTaskId)) continue;
         const taskDef = this.taskLoaderRegistry.get('static')?.load(ctx).find(task => task.taskId === taskId || task.taskId === baseTaskId);
         if (!taskDef) continue;
-        const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, workSource.kind)
-          ?? (baseTaskId !== taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, workSource.kind) : undefined);
         return {
           ...taskDef,
           taskId,
           title: taskDef.title,
-          kind: policy?.kind ?? taskDef.kind,
           uses: taskDef.uses,
         };
       }
@@ -585,11 +573,7 @@ export class GenericStageRunner implements StageRunner {
       const loader = this.taskLoaderRegistry.get(workSource.kind);
       const executableTask = loader?.load(ctx).find(task => task.taskId === taskId);
       if (executableTask) {
-        const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, workSource.kind);
-        return {
-          ...executableTask,
-          kind: policy?.kind ?? executableTask.kind,
-        };
+        return executableTask;
       }
     }
 
@@ -617,12 +601,9 @@ export class GenericStageRunner implements StageRunner {
       ?? this.runtimeTaskDefinition(ctx, taskId)
       ?? (baseTaskId !== taskId ? this.runtimeTaskDefinition(ctx, baseTaskId) : null);
     if (!task) return null;
-    const policy = this.resolveTaskExecutionPolicy(stageDefinition, taskId, 'runtime')
-      ?? (baseTaskId !== taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, 'runtime') : undefined);
     return {
       taskId,
       title: task.title,
-      kind: policy?.kind ?? 'agent-session',
       uses: task.uses,
     };
   }
@@ -659,28 +640,26 @@ export class GenericStageRunner implements StageRunner {
     };
   }
 
-  private buildDispatchableTask(
+  private runTaskEndpoint(
     ctx: StageContext,
     task: ExecutableTask,
     options: { failedCheck?: CheckResult; attempt?: number } = {},
-  ): DispatchableTask | null {
+  ): Promise<StageTaskResult | null> {
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
-    if (!stageDefinition) return null;
+    if (!stageDefinition) return Promise.resolve(null);
     const attempt = options.attempt ?? 1;
     const workSourceKind = this.taskWorkSourceKind(ctx, stageDefinition, task.taskId);
     const baseTaskId = this.baseRuntimeTaskId(task.taskId);
     const policy = this.resolveTaskExecutionPolicy(stageDefinition, task.taskId, workSourceKind)
       ?? (baseTaskId !== task.taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, workSourceKind) : undefined);
-    const executionKind = policy?.kind ?? task.kind;
 
-    return this.taskDispatchFactoryRegistry.build({
+    return this.taskDispatchFactoryRegistry.run({
       ctx,
       task,
-      executionKind,
       attempt,
       failedCheck: options.failedCheck,
       worktreePath: this.worktreePath,
-      agentSessionRef: executionKind === 'agent-session' ? policy?.agentSessionRef : undefined,
+      agentSessionRef: policy?.agentSessionRef,
       sourceTask: this.sourceTaskDefinition(stageDefinition, task.taskId)
         ?? this.runtimeTaskDefinition(ctx, task.taskId)
         ?? (baseTaskId !== task.taskId ? this.runtimeTaskDefinition(ctx, baseTaskId) ?? undefined : undefined),

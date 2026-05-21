@@ -1,10 +1,8 @@
 import {
   createTaskHandlerRegistry,
   type ExecutableTask,
-  type ProviderTaskInput,
   type TaskHandler,
   type TaskHandlerRegistry,
-  type TaskKind,
 } from './types';
 import type { StageContext } from '../stage-context';
 import {
@@ -25,7 +23,7 @@ export interface DefaultTaskHandlerRegistryOptions {
 export function createDefaultTaskHandlerRegistry(
   options: DefaultTaskHandlerRegistryOptions = {},
 ): TaskHandlerRegistry {
-  const handlers: Partial<Record<TaskKind, TaskHandler>> = {
+  const handlers: Record<string, TaskHandler> = {
     'agent-session': async (task: ExecutableTask, ctx: StageContext) => {
       if (!task.input) {
         throw new Error(`Missing input for task: ${task.taskId}`);
@@ -37,12 +35,6 @@ export function createDefaultTaskHandlerRegistry(
         throw new Error(`Missing input for task: ${task.taskId}`);
       }
       return createServiceCallTaskHandler()(task.input as any, ctx);
-    },
-    'provider-task': async (task: ExecutableTask, ctx: StageContext) => {
-      if (!task.input || typeof (task.input as { run?: unknown }).run !== 'function') {
-        throw new Error(`Missing provider task input for task: ${task.taskId}`);
-      }
-      return (task.input as ProviderTaskInput).run(ctx);
     },
   };
 

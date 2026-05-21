@@ -106,7 +106,6 @@ describe('RalphTaskLoader', () => {
       expect(result.executableTasks[0]).toMatchObject({
         taskId: 'T-001',
         title: 'A',
-        kind: 'ralph-task',
         input: {
           taskId: 'T-001',
           title: 'A',

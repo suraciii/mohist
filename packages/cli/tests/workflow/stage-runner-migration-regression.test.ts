@@ -6,16 +6,14 @@ import { Stage, MergeState } from '../../src/types';
 import type { StageContext, StageTaskResult } from '../../src/workflow/stage-context';
 import type { StageRunner } from '../../src/workflow/stage-runner';
 import type { CheckRegistry, CheckContext } from '../../src/workflow/checks';
-import type { TaskLoaderRegistry, TaskHandlerRegistry, ExecutableTask, ProviderTaskInput } from '../../src/workflow/tasks';
-import { createDefaultTaskDispatchFactoryRegistry, createTaskHandlerRegistry } from '../../src/workflow/tasks';
+import type { TaskLoaderRegistry, ExecutableTask } from '../../src/workflow/tasks';
+import { createDefaultTaskDispatchFactoryRegistry, createTaskDispatchFactoryRegistry } from '../../src/workflow/tasks';
 import type { WorkflowRun as DomainWorkflowRun } from '../../src/workflow/model';
 import type { RuntimeStageDefinition } from '../../src/workflow/runner/workflow-runtime-definition';
 import { GenericStageRunner, GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE } from '../../src/workflow/generic-stage-runner';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import { createAgentSessionTaskHandler } from '../../src/workflow/tasks/agent-session-task-handler';
-import { createRalphTaskHandler } from '../../src/workflow/tasks/ralph-task-handler';
 import { createRalphTaskLoader } from '../../src/workflow/tasks/ralph-task-loader';
-import { defaultServiceCallTaskHandler } from '../../src/workflow/tasks/service-call-task-handler';
 import { EventBus } from '../../src/services/event-bus';
 import { WorkflowRun } from '../../src/workflow/model';
 import * as RalphExecutor from '../../src/openspec/ralph-executor';
@@ -129,7 +127,8 @@ function createBasicTaskLoaderRegistry(): TaskLoaderRegistry {
             return definition.tasks.map(task => ({
               taskId: task.id,
               title: task.title,
-              kind: definition.taskExecutionPolicies?.find(policy => policy.taskId === task.id)?.kind ?? 'agent-session',
+              uses: task.uses,
+              input: task.with,
             }));
           },
         };
@@ -142,7 +141,6 @@ function createBasicTaskLoaderRegistry(): TaskLoaderRegistry {
             return (stageRun?.tasks ?? []).map(task => ({
               taskId: (task as any).id ?? (task as any).taskId,
               title: task.title,
-              kind: 'ralph-task' as const,
               uses: 'mohist/ralph-tasks',
               input: (task as any).id ?? (task as any).taskId,
             }));
@@ -155,8 +153,23 @@ function createBasicTaskLoaderRegistry(): TaskLoaderRegistry {
   };
 }
 
-function createBasicTaskHandlerRegistry(handlers: Record<string, ReturnType<typeof vi.fn>> = {}): TaskHandlerRegistry {
-  return createTaskHandlerRegistry(handlers as any);
+function createBasicTaskDispatchRegistry(handlers: Record<string, ReturnType<typeof vi.fn>>) {
+  const providers = [
+    'mohist/agent',
+    'mohist/check/ai-review',
+    'mohist/ralph-tasks',
+    'mohist/rebase',
+    'mohist/openspec-sync',
+    'mohist/archive-change',
+    'mohist/merge',
+  ].map(id => ({
+    id,
+    run: async (input: { task: ExecutableTask; ctx: StageContext }) => {
+      const handler = handlers[id] ?? handlers['*'];
+      return handler ? handler(input.task, input.ctx) : null;
+    },
+  }));
+  return createTaskDispatchFactoryRegistry(providers);
 }
 
 function createBasicCheckRegistry(checks: Record<string, (ctx: CheckContext) => { name: string; status: 'pass' | 'fail' | 'error' | 'pending'; message?: string; output?: unknown }>): CheckRegistry {
@@ -201,11 +214,11 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
       approvalCheckName: 'user-approval',
       workSources: [{ kind: 'static', taskIds: ['proposal', 'specs', 'design', 'tasks', 'self-review'] }],
       taskExecutionPolicies: [
-        { taskId: 'proposal', kind: 'agent-session' },
-        { taskId: 'specs', kind: 'agent-session' },
-        { taskId: 'design', kind: 'agent-session' },
-        { taskId: 'tasks', kind: 'agent-session' },
-        { taskId: 'self-review', kind: 'agent-session' },
+        { taskId: 'proposal' },
+        { taskId: 'specs' },
+        { taskId: 'design' },
+        { taskId: 'tasks' },
+        { taskId: 'self-review' },
       ],
       checkPolicies: [
         { checkName: 'proposal-complete', phase: 'post-task' },
@@ -278,11 +291,11 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
       approvalCheckName: 'user-approval',
       workSources: [{ kind: 'static', taskIds: ['ai-review'] }, { kind: 'runtime' }],
       taskExecutionPolicies: [
-        { taskId: 'ai-review', kind: 'provider-task' },
-        { taskId: 'fix-check-health', kind: 'agent-session', workSourceKind: 'runtime' },
-        { taskId: 'fix-review-findings', kind: 'agent-session', workSourceKind: 'runtime' },
-        { taskId: 'fix-merge-readiness', kind: 'service-call', workSourceKind: 'runtime' },
-        { taskId: 'rebase-branch', kind: 'service-call', workSourceKind: 'runtime' },
+        { taskId: 'ai-review' },
+        { taskId: 'fix-check-health', workSourceKind: 'runtime' },
+        { taskId: 'fix-review-findings', workSourceKind: 'runtime' },
+        { taskId: 'fix-merge-readiness', workSourceKind: 'runtime' },
+        { taskId: 'rebase-branch', workSourceKind: 'runtime' },
       ],
       checkPolicies: [
         { checkName: 'health:check', phase: 'post-task' },
@@ -316,9 +329,9 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
       checks: [{ name: 'health:integrate', title: 'Integrate health gate' }],
       workSources: [{ kind: 'static', taskIds: ['integrate:spec-sync', 'integrate:archive-change', 'integrate:merge'] }],
       taskExecutionPolicies: [
-        { taskId: 'integrate:spec-sync', kind: 'service-call' },
-        { taskId: 'integrate:archive-change', kind: 'service-call' },
-        { taskId: 'integrate:merge', kind: 'service-call' },
+        { taskId: 'integrate:spec-sync' },
+        { taskId: 'integrate:archive-change' },
+        { taskId: 'integrate:merge' },
       ],
       checkPolicies: [{ checkName: 'health:integrate', phase: 'post-task' }],
       checkFailurePolicies: [],
@@ -378,7 +391,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -419,7 +432,7 @@ describe('StageRunner migration regression coverage', () => {
       };
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -471,7 +484,7 @@ describe('StageRunner migration regression coverage', () => {
       };
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({}),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({ 'pr-merged': checkHandler }),
         getStageDefinition: stage => stage === Stage.Integrate ? definition : createStageDefinition(stage),
         worktreePath: '/tmp',
@@ -523,7 +536,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/agent': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -587,7 +600,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'provider-task': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/check/ai-review': taskHandler }),
         checkRegistry: createBasicCheckRegistry({ 'review-passed': checkHandler }),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -644,7 +657,7 @@ describe('StageRunner migration regression coverage', () => {
       try {
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': genericHandler as any }),
+          taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({ agentSessionHandler: genericHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -706,9 +719,6 @@ describe('StageRunner migration regression coverage', () => {
       try {
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({
-            'provider-task': vi.fn(async (task: ExecutableTask, providerCtx: StageContext) => (task.input as ProviderTaskInput).run(providerCtx)),
-          }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -786,7 +796,7 @@ describe('StageRunner migration regression coverage', () => {
           ],
           checks: [],
           workSources: [{ kind: 'static', taskIds: ['handoff'] }],
-          taskExecutionPolicies: [{ taskId: 'handoff', kind: 'agent-session', workSourceKind: 'static' }],
+          taskExecutionPolicies: [{ taskId: 'handoff', workSourceKind: 'static' }],
           checkPolicies: [],
           checkFailurePolicies: [],
           invalidationPolicy: { entries: [] },
@@ -801,13 +811,12 @@ describe('StageRunner migration regression coverage', () => {
                 load: () => customBuildStage.tasks.map(task => ({
                   taskId: task.id,
                   title: task.title,
-                  kind: 'agent-session' as const,
-                })),
+                  })),
               };
             }),
             list: vi.fn().mockReturnValue([]),
           },
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': genericHandler as any }),
+          taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({ agentSessionHandler: genericHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: stage => stage === Stage.Build ? customBuildStage : createStageDefinition(stage),
           worktreePath: tmpDir,
@@ -825,19 +834,14 @@ describe('StageRunner migration regression coverage', () => {
     });
 
     it('GenericStageRunner handles Build stage with Ralph work source', async () => {
-      const ralphHandler = vi.fn().mockImplementation(async (task: ExecutableTask, _ctx: StageContext) => {
-        if (task.kind === 'ralph-task') {
-          return {
-            taskId: task.taskId,
-            title: task.title,
-            status: 'completed',
-            artifacts: [],
-            attempts: 1,
-            duration: 100,
-          };
-        }
-        return null;
-      });
+      const ralphHandler = vi.fn().mockImplementation(async (task: ExecutableTask, _ctx: StageContext) => ({
+        taskId: task.taskId,
+        title: task.title,
+        status: 'completed',
+        artifacts: [],
+        attempts: 1,
+        duration: 100,
+      }));
 
       let tmpDir = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'mohist-build-test-'));
       require('fs').writeFileSync(
@@ -848,7 +852,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'ralph-task': ralphHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/ralph-tasks': ralphHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -922,7 +926,7 @@ describe('StageRunner migration regression coverage', () => {
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'ralph-task': createRalphTaskHandler() as any }),
+          taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry(),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -976,14 +980,14 @@ describe('StageRunner migration regression coverage', () => {
           get: vi.fn().mockImplementation((kind: string) => kind === 'ralph'
             ? {
                 kind: 'ralph' as const,
-                load: () => [{ taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-001' }],
+                load: () => [{ taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', input: 'T-001' }],
               }
             : undefined),
           list: vi.fn().mockReturnValue([]),
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
           checkRegistry: createBasicCheckRegistry({ 'health:build': healthCheck }),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1036,8 +1040,8 @@ describe('StageRunner migration regression coverage', () => {
             ? {
                 kind: 'ralph' as const,
                 load: () => [
-                  { taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-001' },
-                  { taskId: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-002' },
+                  { taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', input: 'T-001' },
+                  { taskId: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', input: 'T-002' },
                 ],
               }
             : undefined),
@@ -1045,7 +1049,7 @@ describe('StageRunner migration regression coverage', () => {
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1100,8 +1104,8 @@ describe('StageRunner migration regression coverage', () => {
             ? {
                 kind: 'ralph' as const,
                 load: () => [
-                  { taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-001' },
-                  { taskId: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: 'T-002' },
+                  { taskId: 'T-001', title: 'Build first task', uses: 'mohist/ralph-tasks', input: 'T-001' },
+                  { taskId: 'T-002', title: 'Build second task', uses: 'mohist/ralph-tasks', input: 'T-002' },
                 ],
               }
             : undefined),
@@ -1109,7 +1113,7 @@ describe('StageRunner migration regression coverage', () => {
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1148,7 +1152,7 @@ describe('StageRunner migration regression coverage', () => {
         const materializeTasks = vi.fn();
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1198,7 +1202,7 @@ describe('StageRunner migration regression coverage', () => {
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1248,7 +1252,7 @@ describe('StageRunner migration regression coverage', () => {
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1297,7 +1301,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -1326,12 +1330,23 @@ describe('StageRunner migration regression coverage', () => {
         };
       });
       const taskDispatchFactoryRegistry = {
-        build: vi.fn().mockImplementation(({ task }) => ({ ...task, title: 'Factory-built task', kind: 'service-call' })),
+        run: vi.fn().mockImplementation(async ({ task }) => {
+          executedTitle = 'Factory-built task';
+          return {
+            taskId: task.taskId,
+            title: 'Factory-built task',
+            status: 'completed',
+            artifacts: [],
+            attempts: 1,
+            duration: 1,
+          };
+        }),
+        get: vi.fn(),
+        register: vi.fn(),
       };
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         taskDispatchFactoryRegistry,
         getStageDefinition: createStageDefinition,
@@ -1344,8 +1359,7 @@ describe('StageRunner migration regression coverage', () => {
       const result = await runner.run(ctx);
 
       expect(result.success).toBe(true);
-      expect(taskDispatchFactoryRegistry.build).toHaveBeenCalledWith(expect.objectContaining({
-        executionKind: 'service-call',
+      expect(taskDispatchFactoryRegistry.run).toHaveBeenCalledWith(expect.objectContaining({
         worktreePath: '/tmp',
       }));
       expect(executedTitle).toBe('Factory-built task');
@@ -1361,20 +1375,20 @@ describe('StageRunner migration regression coverage', () => {
           tasks: [{ id: 'archive-spec-change', title: 'Archive spec change', uses: 'mohist/archive-change' }],
           checks: [],
           workSources: [{ kind: 'static', taskIds: ['archive-spec-change'] }],
-          taskExecutionPolicies: [{ taskId: 'archive-spec-change', kind: 'service-call', workSourceKind: 'static' }],
+          taskExecutionPolicies: [{ taskId: 'archive-spec-change', workSourceKind: 'static' }],
         };
         const taskLoaderRegistry: TaskLoaderRegistry = {
           get: vi.fn().mockImplementation((kind: string) => kind === 'static'
             ? {
                 kind: 'static' as const,
-                load: () => [{ taskId: 'archive-spec-change', title: 'Archive spec change', kind: 'service-call' as const }],
+                load: () => [{ taskId: 'archive-spec-change', title: 'Archive spec change' as const }],
               }
             : undefined),
           list: vi.fn().mockReturnValue([]),
         };
         const runner = new GenericStageRunner({
           taskLoaderRegistry,
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': defaultServiceCallTaskHandler as any }),
+          taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry(),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: () => stageDefinition,
           worktreePath,
@@ -1414,7 +1428,7 @@ describe('StageRunner migration regression coverage', () => {
               kind: 'static' as const,
               load: () => {
                 staticLoaderCalled = true;
-                return [{ taskId: 'integrate:spec-sync', title: 'Loaded static spec sync', kind: 'service-call' as const }];
+                return [{ taskId: 'integrate:spec-sync', title: 'Loaded static spec sync' as const }];
               },
             }
           : undefined),
@@ -1434,7 +1448,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry,
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -1470,7 +1484,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -1498,7 +1512,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({ 'health:integrate': checkHandler }),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -1544,7 +1558,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({ 'health:integrate': checkHandler }),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -1582,7 +1596,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({ 'review-passed': checkHandler }),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -1608,180 +1622,81 @@ describe('StageRunner migration regression coverage', () => {
       expect(stageExecutionRepo.updateStatus).not.toHaveBeenCalledWith('exec-1', 'failed');
     });
 
-    it('generic Check resolves scheduled fix-check-health as an executable repair task', () => {
-      const completeTask = vi.fn().mockReturnValue({ decision: { events: [] } });
-
+    it('generic Check executes scheduled fix-check-health through the task endpoint', async () => {
+      let executedTaskId: string | null = null;
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({
+          'mohist/agent': vi.fn(async (task: ExecutableTask) => {
+            executedTaskId = task.taskId;
+            return { taskId: task.taskId, title: task.title, status: 'completed', artifacts: [], attempts: 1, duration: 1 };
+          }),
+        }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
       });
-
       const ctx = makeMockContext(Stage.Check, {
-        workflowApplicationService: {
-          completeTask,
-          recordCheckResult: vi.fn(),
-          approveStage: vi.fn(),
-        } as any,
-        requestedTask: {
-          id: 'fix-check-health',
-          taskId: 'fix-check-health',
-          title: 'Fix check health',
-          uses: 'mohist/agent',
-          status: 'pending',
-          attempts: 0,
-          order: 1,
-          artifacts: [],
-          output: null,
-          reason: 'health failed',
-          causedBy: { type: 'check-failure', checkName: 'health:check', message: 'build failed' },
-        } as any,
-        workflowRun: {
-          stageRuns: [{
-            stage: Stage.Check,
-            tasks: [
-              { id: 'ai-review', taskId: 'ai-review', title: 'AI review', status: 'completed' },
-              { id: 'fix-check-health', taskId: 'fix-check-health', title: 'Fix check health', uses: 'mohist/agent', status: 'pending' },
-            ],
-            checks: [{ name: 'health:check', status: 'pending', message: 'build failed' }],
-          }],
-        } as any,
+        workflowApplicationService: { completeTask: vi.fn(), recordCheckResult: vi.fn(), approveStage: vi.fn() } as any,
+        workflowRun: { stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'fix-check-health', taskId: 'fix-check-health', title: 'Fix check health', uses: 'mohist/agent', status: 'pending', causedByType: 'check-failure' }], checks: [] }] } as any,
       });
       ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'fix-check-health' };
-
-      const stageDefinition = createStageDefinition(Stage.Check);
-      const task = (runner as any).resolveRuntimeTask(ctx, stageDefinition, 'fix-check-health');
-      const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
-        failedCheck: { name: 'health:check', status: 'fail', message: 'build failed' },
-        attempt: 1,
-      });
-
-      expect(task).toEqual(expect.objectContaining({
-        taskId: 'fix-check-health',
-        kind: 'agent-session',
-      }));
-      expect(dispatchable).toEqual(expect.objectContaining({
-        taskId: 'fix-check-health',
-        kind: 'agent-session',
-      }));
+      const result = await runner.run(ctx);
+      expect(result.success).toBe(true);
+      expect(executedTaskId).toBe('fix-check-health');
     });
 
-    it('generic Check resolves suffixed review repair tasks as executable runtime agent tasks', () => {
+    it('generic Check executes suffixed review repair tasks through the task endpoint', async () => {
+      let executedTaskId: string | null = null;
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({
+          'mohist/agent': vi.fn(async (task: ExecutableTask) => {
+            executedTaskId = task.taskId;
+            return { taskId: task.taskId, title: task.title, status: 'completed', artifacts: [], attempts: 1, duration: 1 };
+          }),
+        }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
       });
-
       const ctx = makeMockContext(Stage.Check, {
-        requestedTask: {
-          id: 'fix-review-findings:1',
-          taskId: 'fix-review-findings:1',
-          title: 'Fix review findings',
-          status: 'pending',
-          attempts: 0,
-          order: 3,
-          artifacts: [],
-          output: null,
-          reason: 'Review failed',
-          causedBy: { type: 'check-failure', checkName: 'review-passed', message: 'Review failed' },
-        } as any,
-        workflowRun: {
-          stageRuns: [{
-            stage: Stage.Check,
-            tasks: [
-              { id: 'ai-review', taskId: 'ai-review', title: 'AI review', status: 'completed' },
-              { id: 'fix-review-findings', taskId: 'fix-review-findings', title: 'Fix review findings', status: 'completed' },
-              { id: 'fix-review-findings:1', taskId: 'fix-review-findings:1', title: 'Fix review findings', status: 'pending' },
-            ],
-            checks: [{ name: 'review-passed', status: 'pending', message: 'Review failed' }],
-          }],
-        } as any,
+        workflowRun: { stageRuns: [{ stage: Stage.Check, tasks: [{ id: 'fix-review-findings:1', taskId: 'fix-review-findings:1', title: 'Fix review findings', uses: 'mohist/agent', status: 'pending', causedByType: 'check-failure' }], checks: [] }] } as any,
       });
       ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'fix-review-findings:1' };
-
-      const stageDefinition = createStageDefinition(Stage.Check);
-      const task = (runner as any).resolveRuntimeTask(ctx, stageDefinition, 'fix-review-findings:1');
-      const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
-        failedCheck: { name: 'review-passed', status: 'fail', message: 'Review failed' },
-        attempt: 1,
-      });
-
-      expect(task).toEqual(expect.objectContaining({
-        taskId: 'fix-review-findings:1',
-        kind: 'agent-session',
-      }));
-      expect(dispatchable).toEqual(expect.objectContaining({
-        taskId: 'fix-review-findings:1',
-        kind: 'agent-session',
-        prompt: 'Fix findings in /tmp/change/review.md',
-        cwd: '/tmp',
-        stage: Stage.Check,
-        attempt: 1,
-        input: expect.objectContaining({
-          taskId: 'fix-review-findings:1',
-          prompt: 'Fix findings in /tmp/change/review.md',
-          cwd: '/tmp',
-          stage: Stage.Check,
-          attempt: 1,
-        }),
-      }));
+      const result = await runner.run(ctx);
+      expect(result.success).toBe(true);
+      expect(executedTaskId).toBe('fix-review-findings:1');
     });
 
-    it('generic Check resolves project-defined retry tasks without builtin task ids', () => {
+    it('generic Check executes project-defined retry tasks without builtin task ids', async () => {
       const stageDefinition: RuntimeStageDefinition = {
         stage: Stage.Check,
         on: { 'code.changed': { reset: { tasks: ['ai-review'], checks: 'all', approval: true } } },
         tasks: [{ id: 'ai-review', title: 'AI review' }],
-        checks: [{
-          name: 'review-passed',
-          title: 'Review passed',
-          onFailure: {
-            retry: {
-              limit: 1,
-              task: {
-                id: 'auto-fix-review',
-                title: 'Auto-fix review',
-                uses: 'mohist/agent',
-                with: { prompt: { inline: 'Fix {{ openspec.changeDir }}/review.md' } },
-              },
-            },
-          },
-        }],
+        checks: [{ name: 'review-passed', title: 'Review passed', onFailure: { retry: { limit: 1, task: { id: 'auto-fix-review', title: 'Auto-fix review', uses: 'mohist/agent', with: { prompt: { inline: 'Fix {{ openspec.changeDir }}/review.md' } } } } } }],
         workSources: [{ kind: 'static', taskIds: ['ai-review'] }, { kind: 'runtime' }],
-        taskExecutionPolicies: [{ taskId: 'auto-fix-review', kind: 'agent-session', workSourceKind: 'runtime' }],
+        taskExecutionPolicies: [{ taskId: 'auto-fix-review', workSourceKind: 'runtime' }],
         checkPolicies: [{ checkName: 'review-passed', phase: 'post-task' }],
       };
+      let executedTaskId: string | null = null;
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({
+          'mohist/agent': vi.fn(async (task: ExecutableTask) => {
+            executedTaskId = task.taskId;
+            return { taskId: task.taskId, title: task.title, status: 'completed', artifacts: [], attempts: 2, duration: 1 };
+          }),
+        }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: () => stageDefinition,
         worktreePath: '/tmp',
       });
-
       const ctx = makeMockContext(Stage.Check);
-      const task = (runner as any).resolveRuntimeTask(ctx, stageDefinition, 'auto-fix-review:1');
-      const dispatchable = (runner as any).buildDispatchableTask(ctx, task, {
-        failedCheck: { name: 'review-passed', status: 'fail', message: 'Review failed' },
-        attempt: 2,
-      });
-
-      expect(task).toEqual(expect.objectContaining({
-        taskId: 'auto-fix-review:1',
-        title: 'Auto-fix review',
-        kind: 'agent-session',
-      }));
-      expect(dispatchable).toEqual(expect.objectContaining({
-        taskId: 'auto-fix-review:1',
-        kind: 'agent-session',
-        prompt: 'Fix /tmp/change/review.md',
-        attempt: 2,
-      }));
+      ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'auto-fix-review:1' };
+      const result = await runner.run(ctx);
+      expect(result.success).toBe(true);
+      expect(executedTaskId).toBe('auto-fix-review:1');
     });
 
     it('Plan self-review completion is not special-cased by the generic runner', async () => {
@@ -1799,15 +1714,19 @@ describe('StageRunner migration regression coverage', () => {
         updateCheckResults: vi.fn(),
         updateStatus: vi.fn(),
       };
-      const serviceCallHandler = vi.fn().mockImplementation(async (task: any, ctx: StageContext) => {
-        const output = task.serviceFn ? await task.serviceFn(ctx) : null;
-        return { taskId: task.taskId, title: task.title, status: 'completed', artifacts: [], attempts: 1, duration: 1, output };
-      });
+      const agentHandler = vi.fn().mockImplementation(async (task: ExecutableTask) => ({
+        taskId: task.taskId,
+        title: task.title,
+        status: 'completed',
+        artifacts: ['self-review.md'],
+        attempts: 1,
+        duration: 1,
+      }));
 
       try {
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': serviceCallHandler }),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/agent': agentHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1883,7 +1802,7 @@ describe('StageRunner migration regression coverage', () => {
 
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -1956,7 +1875,7 @@ describe('StageRunner migration regression coverage', () => {
 
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+          taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
@@ -2000,7 +1919,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({ 'health:integrate': checkHandler }),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -2030,7 +1949,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'service-call': taskHandler }),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({ 'mohist/openspec-sync': taskHandler, 'mohist/archive-change': taskHandler, 'mohist/merge': taskHandler, 'mohist/rebase': taskHandler }),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: '/tmp',
@@ -2581,7 +2500,7 @@ describe('StageRunner migration regression coverage', () => {
       };
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: stage => stage === Stage.Check ? customCheckStage : createStageDefinition(stage),
         worktreePath: tmpRoot,
@@ -2623,7 +2542,7 @@ describe('StageRunner migration regression coverage', () => {
     it('GenericStageRunner handles every compiled pipeline stage from the definition', async () => {
       const genericRunner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -2638,7 +2557,7 @@ describe('StageRunner migration regression coverage', () => {
     it('GenericStageRunner can be enabled for only selected stages', () => {
       const genericRunner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -2654,7 +2573,7 @@ describe('StageRunner migration regression coverage', () => {
     it('WorkflowEngine refuses to execute workflow without aggregate workflow service', async () => {
       const genericRunner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry(),
+        taskDispatchFactoryRegistry: createBasicTaskDispatchRegistry({}),
         checkRegistry: createBasicCheckRegistry({}),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -2781,10 +2700,11 @@ describe('StageRunner migration regression coverage', () => {
 
     it('Integrate stage definition uses service-call execution for all tasks', () => {
       const def = createStageDefinition(Stage.Integrate);
-      expect(def.taskExecutionPolicies).toBeDefined();
-      for (const policy of def.taskExecutionPolicies ?? []) {
-        expect(policy.kind).toBe('service-call');
-      }
+      expect(def.tasks.map(task => [task.id, task.uses])).toEqual([
+        ['integrate:spec-sync', 'mohist/openspec-sync'],
+        ['integrate:archive-change', 'mohist/archive-change'],
+        ['integrate:merge', 'mohist/merge'],
+      ]);
     });
   });
 });

@@ -26,20 +26,16 @@ import {
   type CompiledStageDefinition,
 } from '../../../src/workflow/model';
 import {
-  createTaskHandlerRegistry,
   createDefaultTaskDispatchFactoryRegistry,
   defaultServiceCallTaskHandler,
   createDefaultStaticTaskLoader,
   createTaskLoaderRegistry,
-  type DispatchableTask,
   type ExecutableTask,
   type AgentSessionTaskInput,
-  type ProviderTaskInput,
-  type TaskHandler,
   type ServiceCallTaskInput,
 } from '../../../src/workflow/tasks';
 import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
-import { Stage, type Issue } from '../../../src/types';
+import { MergeState, Stage, type Issue } from '../../../src/types';
 
 export type DefaultWorkflowScenario = {
   reviewFailuresBeforePass?: number;
@@ -51,6 +47,10 @@ export type DefaultWorkflowScenario = {
   failServices?: Partial<Record<string, string>>;
   mergeReadyFailuresBeforePass?: number;
   mergeReadinessRepairRaisesCodeChanged?: boolean;
+};
+
+type HarnessTask = Pick<ExecutableTask, 'taskId' | 'title'> & Partial<AgentSessionTaskInput> & {
+  serviceFn?: (ctx: StageContext) => Promise<unknown>;
 };
 
 export class DefaultWorkflowExternalWorld {
@@ -86,7 +86,7 @@ export class DefaultWorkflowExternalWorld {
     fs.rmSync(this.worktreePath, { recursive: true, force: true });
   }
 
-  agentTask(task: DispatchableTask): StageTaskResult {
+  agentTask(task: HarnessTask): StageTaskResult {
     this.taskCalls.push(task.taskId);
     const baseTaskId = baseRuntimeTaskId(task.taskId);
     this.agentCalls.push(baseTaskId);
@@ -121,7 +121,7 @@ export class DefaultWorkflowExternalWorld {
     }
   }
 
-  ralphTask(task: DispatchableTask): StageTaskResult {
+  ralphTask(task: HarnessTask): StageTaskResult {
     this.taskCalls.push(task.taskId);
     const configuredFailure = this.scenario.failRalphTasks?.[task.taskId];
     if (configuredFailure) return this.failed(task, configuredFailure);
@@ -133,10 +133,10 @@ export class DefaultWorkflowExternalWorld {
     return this.completed(task, [], { output: { kind: 'ralph-task', success: true } });
   }
 
-  async serviceCall(task: DispatchableTask, ctx: StageContext): Promise<StageTaskResult> {
+  async serviceCall(task: HarnessTask, ctx: StageContext): Promise<StageTaskResult> {
     this.taskCalls.push(task.taskId);
     this.serviceCalls.push(task.taskId);
-    const input = task as DispatchableTask & { serviceFn?: (ctx: StageContext) => Promise<unknown>; attempt?: number; stage?: string };
+    const input = task as HarnessTask & { serviceFn?: (ctx: StageContext) => Promise<unknown>; attempt?: number; stage?: string };
     const configuredFailure = this.scenario.failServices?.[task.taskId];
     const serviceFn = configuredFailure
       ? async () => { throw new Error(configuredFailure); }
@@ -252,19 +252,19 @@ export class DefaultWorkflowExternalWorld {
     };
   }
 
-  private writeArtifactTask(task: Pick<DispatchableTask, 'taskId' | 'title'>, artifact: string, content: string, filePath = artifact): StageTaskResult {
+  private writeArtifactTask(task: Pick<HarnessTask, 'taskId' | 'title'>, artifact: string, content: string, filePath = artifact): StageTaskResult {
     if (this.omittedArtifacts.has(artifact)) return this.completed(task, []);
     this.write(filePath, content);
     return this.completed(task, [artifact]);
   }
 
-  private writeTasksArtifact(task: Pick<DispatchableTask, 'taskId' | 'title'>): StageTaskResult {
+  private writeTasksArtifact(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
     if (this.omittedArtifacts.has('tasks.json')) return this.completed(task, []);
     this.write('tasks.json', JSON.stringify({ tasks: defaultBuildTasks() }, null, 2));
     return this.completed(task, ['tasks.json']);
   }
 
-  private writeSelfReviewArtifact(task: Pick<DispatchableTask, 'taskId' | 'title'>): StageTaskResult {
+  private writeSelfReviewArtifact(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
     if (this.omittedArtifacts.has('self-review.md')) return this.completed(task, []);
     this.selfReviewAttempts += 1;
     this.write('self-review.md', this.selfReviewAttempts <= (this.scenario.markerFailuresBeforePass?.['self-review-passed'] ?? 0)
@@ -273,7 +273,7 @@ export class DefaultWorkflowExternalWorld {
     return this.completed(task, ['self-review.md']);
   }
 
-  private writeAiReviewArtifact(task: Pick<DispatchableTask, 'taskId' | 'title'>): StageTaskResult {
+  private writeAiReviewArtifact(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
     this.aiReviewAttempts += 1;
     this.write('review.md', this.aiReviewAttempts <= (this.scenario.reviewFailuresBeforePass ?? 0)
       ? '# Review\nBlocking finding F-001\n<promise>FAIL</promise>\n'
@@ -281,7 +281,7 @@ export class DefaultWorkflowExternalWorld {
     return this.completed(task, ['review.md']);
   }
 
-  private fixPlanReview(task: Pick<DispatchableTask, 'taskId' | 'title'>): StageTaskResult {
+  private fixPlanReview(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
     this.write('proposal.md', '# Proposal fixed\n');
     this.write('specs/feature.md', '# Spec fixed\n');
     this.write('design.md', '# Design fixed\n');
@@ -289,7 +289,7 @@ export class DefaultWorkflowExternalWorld {
     return this.completed(task);
   }
 
-  private fixReviewFindings(task: Pick<DispatchableTask, 'taskId' | 'title'>): StageTaskResult {
+  private fixReviewFindings(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
     this.codeChangeCounter += 1;
     fs.writeFileSync(path.join(this.worktreePath, 'src-feature.ts'), `export const value = ${this.codeChangeCounter};\n`);
     return this.completed(task, [], {
@@ -298,7 +298,7 @@ export class DefaultWorkflowExternalWorld {
     });
   }
 
-  private fixHealth(task: Pick<DispatchableTask, 'taskId' | 'title'>, baseTaskId: string): StageTaskResult {
+  private fixHealth(task: Pick<HarnessTask, 'taskId' | 'title'>, baseTaskId: string): StageTaskResult {
     this.codeChangeCounter += 1;
     fs.writeFileSync(path.join(this.worktreePath, `${baseTaskId}.ts`), `export const value = ${this.codeChangeCounter};\n`);
     return this.completed(task, [], { events: ['code.changed'] });
@@ -321,7 +321,7 @@ export class DefaultWorkflowExternalWorld {
   }
 
   private failed(
-    task: Pick<DispatchableTask, 'taskId' | 'title'>,
+    task: Pick<HarnessTask, 'taskId' | 'title'>,
     reason: string,
     overrides: Partial<StageTaskResult> = {},
   ): StageTaskResult {
@@ -329,7 +329,7 @@ export class DefaultWorkflowExternalWorld {
   }
 
   private completed(
-    task: Pick<DispatchableTask, 'taskId' | 'title'>,
+    task: Pick<HarnessTask, 'taskId' | 'title'>,
     artifacts: string[] = [],
     overrides: Partial<StageTaskResult> = {},
   ): StageTaskResult {
@@ -375,34 +375,65 @@ export class DefaultWorkflowHarness {
           kind: 'ralph',
           load: (): ExecutableTask[] => {
             const parsed = JSON.parse(fs.readFileSync(path.join(this.world.changeDir, 'tasks.json'), 'utf-8'));
-            return parsed.tasks.map((task: any) => ({ taskId: task.id, title: task.title, uses: 'mohist/ralph-tasks', kind: 'ralph-task' as const, input: task.id }));
+            return parsed.tasks.map((task: any) => ({ taskId: task.id, title: task.title, uses: 'mohist/ralph-tasks', input: task.id }));
           },
         },
         { kind: 'runtime', load: () => [] },
       ]),
-      taskHandlerRegistry: createTaskHandlerRegistry({
-        'agent-session': async (task) => this.world.agentTask(task as DispatchableTask),
-        'provider-task': async (task, ctx) => (task.input as ProviderTaskInput).run(ctx),
-        'ralph-task': async (task) => this.world.ralphTask(task as DispatchableTask),
-        'service-call': async (task, ctx) => this.world.serviceCall(task as DispatchableTask, ctx),
-      } satisfies Partial<Record<'agent-session' | 'provider-task' | 'ralph-task' | 'service-call', TaskHandler>>),
       checkRegistry,
       getStageDefinition: stageDefinition,
       worktreePath: this.world.worktreePath,
       taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({
-        agentSessionHandler: async (input: AgentSessionTaskInput) => this.world.agentTask({
-          taskId: input.taskId,
-          title: input.title,
-          kind: 'agent-session',
-          prompt: input.prompt,
-          cwd: input.cwd,
-          stage: input.stage,
-          attempt: input.attempt,
-          agentSessionRef: input.agentSessionRef,
-          artifactVerification: input.artifactVerification,
-          requiredMarkers: input.requiredMarkers,
-          input,
-        } as DispatchableTask),
+        agentSessionHandler: async (input: AgentSessionTaskInput) => this.world.agentTask(input),
+        overrides: {
+          ralphTasks: async input => this.world.ralphTask(input.task),
+          rebase: async input => this.world.serviceCall({
+            taskId: input.task.taskId,
+            title: input.task.title,
+            serviceFn: async () => {
+              const project = input.ctx.projectRepo?.findById(input.ctx.issue.projectId);
+              if (!project) throw new Error(`Project not found: ${input.ctx.issue.projectId}`);
+              const beforeHeadSha = await input.ctx.worktreeManager.getHeadSha(this.world.worktreePath);
+              const canFF = await input.ctx.worktreeManager.canFastForward(project.path, project.name, input.ctx.issue.number, project.baseBranch);
+              if (!canFF) {
+                await input.ctx.worktreeManager.rebaseOntoMaster(project.path, project.name, input.ctx.issue.number, project.baseBranch, { abortOnConflict: false });
+              }
+              const afterHeadSha = await input.ctx.worktreeManager.getHeadSha(this.world.worktreePath);
+              return {
+                rebased: !canFF,
+                baseBranch: project.baseBranch,
+                beforeBaseSha: 'base-sha',
+                afterBaseSha: 'base-sha',
+                beforeHeadSha,
+                afterHeadSha,
+                shaChanged: beforeHeadSha !== afterHeadSha,
+                conflicts: [],
+              };
+            },
+          }, input.ctx),
+          openspecSync: async input => this.world.serviceCall({ taskId: input.task.taskId, title: input.task.title }, input.ctx),
+          archiveChange: async input => this.world.serviceCall({
+            taskId: input.task.taskId,
+            title: input.task.title,
+            serviceFn: async () => ({
+              step: input.task.taskId,
+              archivePath: path.relative(this.world.worktreePath, this.world.changeDir),
+              success: true,
+            }),
+          }, input.ctx),
+          merge: async input => this.world.serviceCall({
+            taskId: input.task.taskId,
+            title: input.task.title,
+            serviceFn: async () => {
+              const project = input.ctx.projectRepo?.findById(input.ctx.issue.projectId);
+              if (!project) throw new Error(`Project not found: ${input.ctx.issue.projectId}`);
+              const mergeTruth = await input.ctx.worktreeManager.mergeApprovedCandidate(project.path, project.name, input.ctx.issue.number, project.baseBranch);
+              if ('failingStep' in mergeTruth) throw new Error(mergeTruth.error);
+              input.ctx.issueRepo.setMergeState?.(input.ctx.issue.id, MergeState.Merged);
+              return mergeTruth;
+            },
+          }, input.ctx),
+        },
       }),
     });
 
