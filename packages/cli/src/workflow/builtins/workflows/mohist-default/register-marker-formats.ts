@@ -41,13 +41,15 @@ export function registerMohistDefaultMarkerFormats(): void {
 async function getCandidateHeadSha(ctx: CheckContext): Promise<string | null> {
   try {
     const project = ctx.projectRepo?.findById(ctx.issue.projectId);
-    const worktreePath = project && ctx.worktreeManager?.getPath(project.name, ctx.issue.number);
+    const getPath = ctx.worktreeManager?.getPath;
+    const worktreePath = project && getPath ? getPath(project.name, ctx.issue.number) : null;
     if (!worktreePath) return null;
     if (ctx.worktreeManager?.isWorktreeClean) {
       const clean = await ctx.worktreeManager.isWorktreeClean(worktreePath);
       if (!clean) return null;
     }
-    return await ctx.worktreeManager!.getHeadSha(worktreePath);
+    if (!ctx.worktreeManager?.getHeadSha) return null;
+    return await ctx.worktreeManager.getHeadSha(worktreePath);
   } catch (err) {
     log.warn('Failed to resolve marker check snapshot SHA', {
       issueNumber: ctx.issue.number,

@@ -9,6 +9,7 @@ import { createTaskDispatchRegistry } from './tasks/task-dispatch-registry';
 import type { CheckRegistry } from './checks/check-registry';
 import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
 import type { RuntimeStageDefinition, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';
+import type { StageContext as WorkflowStageContext } from '@mohist/workflow/runtime';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { readTasks } from '../openspec/ralph-executor';
@@ -23,6 +24,10 @@ type PersistedCheckResult = {
   message?: string;
   output?: unknown;
 };
+
+function asWorkflowStageContext(ctx: StageContext): WorkflowStageContext {
+  return ctx as unknown as WorkflowStageContext;
+}
 
 export interface GenericStageRunnerOptions {
   taskLoaderRegistry: TaskLoaderRegistry;
@@ -530,7 +535,7 @@ export class GenericStageRunner implements StageRunner {
     const loader = this.taskLoaderRegistry.get(kind);
     if (!loader) return [];
 
-    const executableTasks = loader.load(ctx);
+    const executableTasks = loader.load(asWorkflowStageContext(ctx));
     if (executableTasks.length === 0) return [];
 
     const orderedTasks = readTasks(change.tasksPath) ?? [];
@@ -560,7 +565,7 @@ export class GenericStageRunner implements StageRunner {
         const allowedTaskIds = new Set(workSource.taskIds ?? stageDefinition.tasks.map(task => task.id));
         const baseTaskId = this.baseRuntimeTaskId(taskId);
         if (!allowedTaskIds.has(taskId) && !allowedTaskIds.has(baseTaskId)) continue;
-        const taskDef = this.taskLoaderRegistry.get('static')?.load(ctx).find(task => task.taskId === taskId || task.taskId === baseTaskId);
+        const taskDef = this.taskLoaderRegistry.get('static')?.load(asWorkflowStageContext(ctx)).find(task => task.taskId === taskId || task.taskId === baseTaskId);
         if (!taskDef) continue;
         return {
           ...taskDef,
@@ -571,7 +576,7 @@ export class GenericStageRunner implements StageRunner {
       }
 
       const loader = this.taskLoaderRegistry.get(workSource.kind);
-      const executableTask = loader?.load(ctx).find(task => task.taskId === taskId);
+      const executableTask = loader?.load(asWorkflowStageContext(ctx)).find(task => task.taskId === taskId);
       if (executableTask) {
         return executableTask;
       }
@@ -654,7 +659,7 @@ export class GenericStageRunner implements StageRunner {
       ?? (baseTaskId !== task.taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, workSourceKind) : undefined);
 
     return this.taskDispatchRegistry.run({
-      ctx,
+      ctx: asWorkflowStageContext(ctx),
       task,
       attempt,
       failedCheck: options.failedCheck,
@@ -686,7 +691,7 @@ export class GenericStageRunner implements StageRunner {
       if (workSource.kind === 'runtime') continue;
 
       const loader = this.taskLoaderRegistry.get(workSource.kind);
-      if (loader?.load(ctx).some(task => task.taskId === taskId)) {
+      if (loader?.load(asWorkflowStageContext(ctx)).some(task => task.taskId === taskId)) {
         return workSource.kind;
       }
     }

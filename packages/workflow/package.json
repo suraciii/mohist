@@ -1,0 +1,79 @@
+{
+  "name": "@mohist/workflow",
+  "version": "0.1.0",
+  "description": "Pure workflow definition, domain model, and orchestration contracts for Mohist.",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./dist/*.js"
+    },
+    "./model": {
+      "types": "./src/model/index.ts",
+      "default": "./dist/model/index.js"
+    },
+    "./model/*": {
+      "types": "./src/model/*.ts",
+      "default": "./dist/model/*.js"
+    },
+    "./definition/*": {
+      "types": "./src/definition/*.ts",
+      "default": "./dist/definition/*.js"
+    },
+    "./runner/*": {
+      "types": "./src/runner/*.ts",
+      "default": "./dist/runner/*.js"
+    },
+    "./reaction/*": {
+      "types": "./src/reaction/*.ts",
+      "default": "./dist/reaction/*.js"
+    },
+    "./tasks": {
+      "types": "./src/tasks/index.ts",
+      "default": "./dist/tasks/index.js"
+    },
+    "./tasks/*": {
+      "types": "./src/tasks/*.ts",
+      "default": "./dist/tasks/*.js"
+    },
+    "./checks": {
+      "types": "./src/checks/index.ts",
+      "default": "./dist/checks/index.js"
+    },
+    "./checks/*": {
+      "types": "./src/checks/*.ts",
+      "default": "./dist/checks/*.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "model": ["src/model/index.ts"],
+      "model/*": ["src/model/*"],
+      "definition/*": ["src/definition/*"],
+      "runner/*": ["src/runner/*"],
+      "reaction/*": ["src/reaction/*"],
+      "tasks": ["src/tasks/index.ts"],
+      "tasks/*": ["src/tasks/*"],
+      "checks": ["src/checks/index.ts"],
+      "checks/*": ["src/checks/*"],
+      "*": ["src/*"]
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
