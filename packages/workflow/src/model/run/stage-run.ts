@@ -17,7 +17,7 @@ export class StageRun {
     readonly definition: StageDefinition,
     readonly order: number,
   ) {
-    this.tasks = definition.tasks.map(() => new TaskRun());
+    this.tasks = [];
     this.checks = definition.checks.map(check => new StageCheck(check.name, check.title));
   }
 
@@ -27,6 +27,12 @@ export class StageRun {
 
   start(): void {
     this.status = 'running';
+    this.initializeTasks();
+  }
+
+  private initializeTasks(): void {
+    if (this.tasks.length > 0) return;
+    this.tasks.push(...this.definition.tasks.map(() => new TaskRun()));
   }
 
   get currentTask(): TaskRun | null {

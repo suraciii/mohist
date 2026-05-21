@@ -108,7 +108,7 @@ export class WorkflowRun {
     return this.stageRun(stage).definition.checks.find(candidate => candidate.name === checkName) ?? null;
   }
 
-  completeTaskSource(stage: WorkflowStageId, tasks: MaterializedTaskInput[]): void {
+  addTasksFromSource(stage: WorkflowStageId, tasks: MaterializedTaskInput[]): void {
     const stageRun = this.stageRun(stage);
     stageRun.workSourceState = tasks.length === 0
       ? { evaluated: true, empty: true }
@@ -118,15 +118,15 @@ export class WorkflowRun {
     }
   }
 
-  missTaskSource(stage: WorkflowStageId): void {
+  markTaskSourceMissing(stage: WorkflowStageId): void {
     this.stageRun(stage).workSourceState = { evaluated: true, missing: true };
   }
 
-  failTaskSource(stage: WorkflowStageId): void {
+  markTaskSourceInvalid(stage: WorkflowStageId): void {
     this.stageRun(stage).workSourceState = { evaluated: true, invalid: true };
   }
 
-  emptyTaskSource(stage: WorkflowStageId): void {
+  markTaskSourceEmpty(stage: WorkflowStageId): void {
     this.stageRun(stage).workSourceState = { evaluated: true, empty: true };
   }
 

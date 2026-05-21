@@ -67,7 +67,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
       if (work.kind === 'task-source') {
-        const continued = await this.runTaskSource(work.stage);
+        const continued = await this.createTasksFromSource(work.stage);
         await this.persist();
         if (!continued) break;
         continue;
@@ -116,17 +116,17 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.store.save(this.workflowRun);
   }
 
-  private async runTaskSource(stage: WorkflowStageId): Promise<boolean> {
+  private async createTasksFromSource(stage: WorkflowStageId): Promise<boolean> {
     const source = this.workflowRun.taskSourceDefinition(stage);
     const definition = typeof source === 'string'
       ? { uses: source }
       : source;
     const component = this.registry.taskSource(definition?.uses);
     if (!component || !definition) {
-      this.workflowRun.missTaskSource(stage);
+      this.workflowRun.markTaskSourceMissing(stage);
       return false;
     }
-    const result = await component.create({ run: this }).run({
+    const result = await component.create({ run: this }).createTasks({
       run: this,
       stage,
       definition: {
@@ -135,13 +135,13 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       },
     });
     if (result.state === 'missing') {
-      this.workflowRun.missTaskSource(stage);
+      this.workflowRun.markTaskSourceMissing(stage);
     } else if (result.state === 'invalid') {
-      this.workflowRun.failTaskSource(stage);
+      this.workflowRun.markTaskSourceInvalid(stage);
     } else if (result.state === 'empty') {
-      this.workflowRun.emptyTaskSource(stage);
+      this.workflowRun.markTaskSourceEmpty(stage);
     } else {
-      this.workflowRun.completeTaskSource(stage, result.tasks);
+      this.workflowRun.addTasksFromSource(stage, result.tasks);
     }
     return result.tasks.length > 0;
   }

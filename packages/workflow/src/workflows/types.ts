@@ -114,7 +114,7 @@ export interface WorkflowCheck {
 }
 
 export interface WorkflowTaskSource {
-  run(input: WorkflowTaskSourceInput): Awaitable<WorkflowTaskSourceResult>;
+  createTasks(input: WorkflowTaskSourceInput): Awaitable<WorkflowTaskSourceResult>;
 }
 
 export interface WorkflowTaskInput {
