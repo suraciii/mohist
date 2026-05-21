@@ -14,6 +14,10 @@
       "types": "./src/runtime.ts",
       "default": "./dist/runtime.js"
     },
+    "./workflows": {
+      "types": "./src/workflows.ts",
+      "default": "./dist/workflows.js"
+    },
     "./workflow-results": {
       "types": "./src/workflow-results.ts",
       "default": "./dist/workflow-results.js"
@@ -74,6 +78,7 @@
       "tasks/*": ["src/tasks/*"],
       "checks": ["src/checks/index.ts"],
       "checks/*": ["src/checks/*"],
+      "workflows": ["src/workflows.ts"],
       "runtime": ["src/runtime.ts"],
       "workflow-results": ["src/workflow-results.ts"],
       "result-contracts": ["src/result-contracts.ts"],
