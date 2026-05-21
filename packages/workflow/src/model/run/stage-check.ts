@@ -4,7 +4,7 @@ import type {
   WorkItemAttempt,
 } from './types';
 
-export class CheckState {
+export class StageCheck {
   status: CheckRunStatus = 'pending';
   message: string | null = null;
   output: unknown | null = null;
