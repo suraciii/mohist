@@ -9,8 +9,8 @@ import type {
   WorkflowRunStatus as DomainWorkflowRunStatus,
   ResolvedWorkflowDefinition,
   WorkflowStageId,
-} from '../model';
-import type { WorkflowSourceDefinition } from '../definition/workflow-definition-source';
+} from './model';
+import type { WorkflowSourceDefinition } from './definition/workflow-definition-source';
 
 export type Awaitable<T> = T | Promise<T>;
 
@@ -132,7 +132,10 @@ export interface WorkflowCheckInput {
 export interface WorkflowTaskSourceInput {
   run: WorkflowExecutionContext;
   stage: WorkflowStageId;
-  definition: WorkflowTasksFromDefinitionContext;
+  definition: {
+    uses: string;
+    with?: Record<string, unknown>;
+  };
 }
 
 export type WorkflowTaskResult = TaskResultInput;
@@ -142,23 +145,4 @@ export type WorkflowCheckResult = CheckResultInput;
 export interface WorkflowTaskSourceResult {
   tasks: MaterializedTaskInput[];
   state?: 'missing' | 'invalid' | 'empty';
-}
-
-export interface WorkflowTaskDefinitionContext {
-  id: string;
-  title: string;
-  uses?: string;
-  with?: Record<string, unknown>;
-}
-
-export interface WorkflowCheckDefinitionContext {
-  name: string;
-  title: string;
-  uses?: string;
-  with?: Record<string, unknown>;
-}
-
-export interface WorkflowTasksFromDefinitionContext {
-  uses: string;
-  with?: Record<string, unknown>;
 }
