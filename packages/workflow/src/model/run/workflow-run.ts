@@ -269,9 +269,8 @@ export class WorkflowRun {
     if (!this.allRequiredTasksTerminal(stageRun)) throw new WorkflowDomainError(`Stage ${stage} cannot run checks before tasks are terminal`);
     if (!this.allRequiredTasksSucceeded(stageRun)) throw new WorkflowDomainError(`Stage ${stage} has failed tasks`);
 
-    const check = this.requireCheck(stageRun, result.name);
     const expected = this.nextCheck(stageRun);
-    if (!expected || expected.name !== check.name) {
+    if (!expected || expected.name !== result.name) {
       throw new WorkflowDomainError(`Check ${result.name} cannot run before earlier checks pass`);
     }
 
@@ -282,10 +281,12 @@ export class WorkflowRun {
     const effectiveStatus: CheckResultInput['status'] = evidenceFailure ? 'fail' : result.status;
     const effectiveMessage = evidenceFailure ?? result.message;
 
-    check.status = this.toCheckStatus(effectiveStatus);
-    check.message = effectiveMessage ?? null;
-    check.output = normalizedOutput;
-    if (effectiveStatus !== 'pending') check.runCount += 1;
+    const check = stageRun.recordCheckResult(result.name, {
+      status: this.toCheckStatus(effectiveStatus),
+      message: effectiveMessage ?? null,
+      output: normalizedOutput,
+    });
+    if (!check) throw new WorkflowDomainError(`Check ${result.name} does not exist in stage ${stageRun.stage}`);
 
     if (check.latestAttempt?.state === 'running') {
       const attemptNow = new Date().toISOString();
