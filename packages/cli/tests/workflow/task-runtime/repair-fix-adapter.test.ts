@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
 import { createRepairFixAdapter, type RepairFixTaskId } from '../../../src/workflow/task-runtime/repair-fix-adapter';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const { executeMock, closeMock, createMock } = vi.hoisted(() => ({
   executeMock: vi.fn(),
@@ -16,7 +19,8 @@ vi.mock('../../../src/agent-runtime', () => ({
   createWorkflowSessionObservers: vi.fn().mockReturnValue([]),
 }));
 
-function makeContext(overrides?: Partial<StageContext>): StageContext {
+function makeContext(overrides?: Partial<StageContext> & { changeDir?: string }): StageContext {
+  const changeDir = overrides?.changeDir ?? '/tmp/change-dir';
   return {
     issue: {
       id: 'issue-1',
@@ -33,7 +37,7 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
     },
     acpOptions: { cwd: '/tmp/worktree' } as any,
     artifactManager: {
-      getChangeDir: vi.fn().mockReturnValue('/tmp/change-dir'),
+      getChangeDir: vi.fn().mockReturnValue(changeDir),
       exists: vi.fn().mockReturnValue(true),
     } as any,
     worktreeManager: {
@@ -68,6 +72,17 @@ function makeContext(overrides?: Partial<StageContext>): StageContext {
     log: vi.fn(),
     ...overrides,
   } as unknown as StageContext;
+}
+
+function makeChangeDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-reaction-task-'));
+  fs.mkdirSync(path.join(dir, 'specs', 'workflow'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'proposal.md'), '# Proposal');
+  fs.writeFileSync(path.join(dir, 'design.md'), '# Design');
+  fs.writeFileSync(path.join(dir, 'specs', 'workflow', 'spec.md'), '# Spec');
+  fs.writeFileSync(path.join(dir, 'tasks.json'), '{"tasks":[]}');
+  fs.writeFileSync(path.join(dir, 'review.md'), '# Review');
+  return dir;
 }
 
 describe('RepairFixAdapter', () => {
@@ -119,6 +134,42 @@ describe('RepairFixAdapter', () => {
         expect(executeMock).toHaveBeenCalled();
       });
     }
+
+    it('builds health fix prompts with issue and OpenSpec context', async () => {
+      const changeDir = makeChangeDir();
+      executeMock.mockResolvedValue({
+        success: true,
+        text: 'fixed',
+        acpSessionId: 'ses-health-fix',
+      });
+
+      try {
+        const adapter = createRepairFixAdapter();
+        const ctx = makeContext({ changeDir });
+
+        await adapter.dispatch('fix-build-health', ctx, {
+          worktreePath: '/tmp/worktree',
+          failedCheck: {
+            name: 'health:build',
+            status: 'fail',
+            message: 'npm run build failed',
+            output: { command: 'npm run build', logExcerpt: 'TypeScript error' },
+          },
+          attempt: 1,
+        });
+
+        const prompt = executeMock.mock.calls[0][0] as string;
+        expect(prompt).toContain('<mohist-task>');
+        expect(prompt).toContain('Issue #159: Test Issue');
+        expect(prompt).toContain('Test body');
+        expect(prompt).toContain(`@${path.join(changeDir, 'proposal.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'design.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'tasks.json')}`);
+        expect(prompt).toContain('Health command: npm run build');
+      } finally {
+        fs.rmSync(changeDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('agent session repair dispatch', () => {
@@ -147,6 +198,50 @@ describe('RepairFixAdapter', () => {
       expect(result.taskId).toBe('repair-plan-artifacts');
       expect(result.status).toBe('completed');
       expect(createMock).toHaveBeenCalled();
+    });
+
+    it('builds plan reaction prompts with issue and OpenSpec context', async () => {
+      const changeDir = makeChangeDir();
+      executeMock.mockResolvedValue({
+        success: true,
+        text: 'repaired',
+        acpSessionId: 'ses-plan-reaction',
+      });
+
+      try {
+        const adapter = createRepairFixAdapter();
+        const baseCtx = makeContext({ changeDir });
+        const ctx = makeContext({
+          changeDir,
+          issue: {
+            ...baseCtx.issue,
+            number: 199,
+            title: 'Unify session context',
+            body: 'Every agent session must receive issue and OpenSpec context.',
+            stage: Stage.Plan,
+          },
+        });
+
+        await adapter.dispatch('repair-plan-artifacts', ctx, {
+          worktreePath: '/tmp/worktree',
+          failedCheck: {
+            name: 'self-review-passed',
+            status: 'fail',
+            message: 'self-review reported missing requirements',
+          },
+          attempt: 1,
+        });
+
+        const prompt = executeMock.mock.calls[0][0] as string;
+        expect(prompt).toContain('Issue #199: Unify session context');
+        expect(prompt).toContain('Every agent session must receive issue and OpenSpec context.');
+        expect(prompt).toContain(`@${path.join(changeDir, 'proposal.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'design.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'specs', 'workflow', 'spec.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'tasks.json')}`);
+      } finally {
+        fs.rmSync(changeDir, { recursive: true, force: true });
+      }
     });
 
     it('dispatches fix-review-findings through agent session handler', async () => {
@@ -178,6 +273,55 @@ describe('RepairFixAdapter', () => {
       expect(result.taskId).toBe('fix-review-findings');
       expect(result.status).toBe('completed');
       expect(createMock).toHaveBeenCalled();
+    });
+
+    it('builds review reaction prompts with issue and OpenSpec context', async () => {
+      const changeDir = makeChangeDir();
+      executeMock.mockResolvedValue({
+        success: true,
+        text: 'fixed',
+        acpSessionId: 'ses-review-reaction',
+      });
+
+      try {
+        const adapter = createRepairFixAdapter();
+        const baseCtx = makeContext({ changeDir });
+        const ctx = makeContext({
+          changeDir,
+          issue: {
+            ...baseCtx.issue,
+            number: 199,
+            title: 'Unify session context',
+            body: 'Every agent session must receive issue and OpenSpec context.',
+            stage: Stage.Check,
+          },
+        });
+
+        await adapter.dispatch('fix-review-findings', ctx, {
+          worktreePath: '/tmp/worktree',
+          failedCheck: {
+            name: 'review-passed',
+            status: 'fail',
+            output: {
+              verdict: 'FAIL',
+              reviewReport: 'Missing spec coverage.',
+              fixSuggestions: 'Update the workflow runner.',
+            },
+          },
+          attempt: 1,
+        });
+
+        const prompt = executeMock.mock.calls[0][0] as string;
+        expect(prompt).toContain('Issue #199: Unify session context');
+        expect(prompt).toContain('Every agent session must receive issue and OpenSpec context.');
+        expect(prompt).toContain(`@${path.join(changeDir, 'proposal.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'design.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'specs', 'workflow', 'spec.md')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'tasks.json')}`);
+        expect(prompt).toContain(`@${path.join(changeDir, 'review.md')}`);
+      } finally {
+        fs.rmSync(changeDir, { recursive: true, force: true });
+      }
     });
   });
 

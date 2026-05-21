@@ -2,6 +2,9 @@ import type { CheckResult, StageContext, StageTaskResult } from '../stage-contex
 import type { AgentSessionTaskInput } from './types';
 import type { FailedCheckContext } from '../../types/workflow-results';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
+import { formatAgentPrompt } from '../../agents/agent-prompt-schema';
+import { loadAgentConfig } from '../../agents/agent-config';
+import { formatIssueInfo, listOpenSpecContextFiles } from '../../agents/workflow-context';
 
 export type RepairFixTaskId =
   | 'fix-plan-health'
@@ -199,22 +202,38 @@ function buildHealthFixPrompt(taskId: string, ctx: StageContext, context: Repair
   const checkOutput = context.failedCheck.output != null ? JSON.stringify(context.failedCheck.output, null, 2) : '';
   const trimmedOutput = checkOutput.length > 12000 ? checkOutput.slice(-12000) : checkOutput;
   const changeDir = ctx.artifactManager.getChangeDir(ctx.issue.number);
+  const healthCommand = extractHealthCommand(context.failedCheck.output);
 
-  return [
+  const task = [
     `Change Directory: ${changeDir ?? context.worktreePath}`,
     '',
-    `Issue: ${ctx.issue.title}`,
+    formatIssueInfo(ctx.issue),
+    '',
     `Stage: ${stage}`,
     `Failed check: ${context.failedCheck.name}`,
+    healthCommand ? `Health command: ${healthCommand}` : '',
     '',
     'Failure Summary:',
     context.failedCheck.message ?? 'Health gate failed.',
     '',
     'Check Output:',
     trimmedOutput,
-    '',
-    'Contract: Apply the minimal code or artifact changes required to make the health command pass. Do not make unrelated refactors.',
-  ].join('\n');
+  ].filter(line => line !== '').join('\n');
+
+  return formatAgentPrompt({
+    role: `Fix ${stage} health gate failure`,
+    projectContext: loadAgentConfig(context.worktreePath).context,
+    contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+    task,
+    contract: 'Apply the minimal code or artifact changes required to make the health command pass. Do not make unrelated refactors.',
+    instruction: [
+      '1. Read the issue and every @file context reference before editing.',
+      '2. Read the failed health gate output carefully.',
+      '3. Apply the minimal fix required to make the health command pass.',
+      '4. Run the health command to verify your fix when available.',
+      '5. Commit your fix with a descriptive message if you changed tracked files.',
+    ].join('\n'),
+  });
 }
 
 function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, context: RepairFixContext): string {
@@ -230,10 +249,11 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
       }
     }
 
-    return [
+    const task = [
       `Change Directory: ${changeDir ?? context.worktreePath}`,
       '',
-      `Issue: ${ctx.issue.title}`,
+      formatIssueInfo(ctx.issue),
+      '',
       `Failed check: ${context.failedCheck.name}`,
       '',
       'Failure Summary:',
@@ -243,9 +263,21 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
       '',
       'Expected Durable Artifacts:',
       'proposal.md, specs, design.md, tasks.json, self-review.md',
-      '',
-      'Contract: Create or update only the missing or invalid artifact files under the change directory. Do not modify artifacts that already pass their checks.',
     ].filter(Boolean).join('\n');
+
+    return formatAgentPrompt({
+      role: 'Repair invalid Plan artifacts for this issue',
+      projectContext: loadAgentConfig(context.worktreePath).context,
+      contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+      task,
+      contract: 'Create or update only the missing or invalid artifact files under the change directory. Do not modify artifacts that already pass their checks.',
+      instruction: [
+        '1. Read the issue and every @file context reference before editing.',
+        '2. Identify which plan artifact is missing or invalid based on the failed check.',
+        '3. Create or update only the missing or invalid artifact.',
+        '4. Follow the existing artifact format and content conventions.',
+      ].join('\n'),
+    });
   }
 
   if (taskId === 'fix-review-findings') {
@@ -276,10 +308,11 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
         ? `\n\nCandidate Snapshot SHA: ${structuredContext.snapshot.sha}`
         : '';
 
-      return [
+      const task = [
         `Change Directory: ${changeDir ?? context.worktreePath}`,
         '',
-        `Issue: ${ctx.issue.title}`,
+        formatIssueInfo(ctx.issue),
+        '',
         `Failed check: ${context.failedCheck.name}`,
         '',
         `Blocking Items (${structuredContext.blockingItems.length}):`,
@@ -289,9 +322,23 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
         nonBlockingSection,
         snapshotSection,
         priorOutputsSection,
-        '',
-        'Contract: Apply the minimal code or artifact changes required to resolve every listed blocking item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
       ].join('\n');
+
+      return formatAgentPrompt({
+        role: 'Fix review findings for this issue',
+        projectContext: loadAgentConfig(context.worktreePath).context,
+        contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+        task,
+        contract: 'Apply the minimal code or artifact changes required to resolve every listed blocking item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
+        instruction: [
+          '1. Read the issue and every @file context reference before editing.',
+          '2. Read the blocking items carefully. You must address ALL listed blocking items.',
+          '3. Apply only the minimal changes required to resolve every blocking item.',
+          '4. Do not make unrelated refactors.',
+          '5. Add or update focused tests when the fix changes behavior.',
+          '6. Leave non-blocking follow-up items for later unless they directly overlap with a blocking item.',
+        ].join('\n'),
+      });
     }
 
     const output = context.failedCheck.output as { verdict?: string; reviewReport?: string; fixSuggestions?: string } | undefined;
@@ -300,10 +347,11 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
     const trimmedReport = reviewReport.length > 12000 ? reviewReport.slice(-12000) : reviewReport;
     const trimmedSuggestions = fixSuggestions.length > 8000 ? fixSuggestions.slice(-8000) : fixSuggestions;
 
-    return [
+    const task = [
       `Change Directory: ${changeDir ?? context.worktreePath}`,
       '',
-      `Issue: ${ctx.issue.title}`,
+      formatIssueInfo(ctx.issue),
+      '',
       `Failed check: ${context.failedCheck.name}`,
       '',
       'Review Report:',
@@ -312,12 +360,32 @@ function buildAgentSessionRepairPrompt(taskId: string, ctx: StageContext, contex
       'Fix Suggestions:',
       trimmedSuggestions || 'No structured fix suggestions found. Read the review report carefully and address all FAIL items.',
       priorOutputsSection,
-      '',
-      'Contract: Apply the minimal code or artifact changes required to resolve every FAIL item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
     ].join('\n');
+
+    return formatAgentPrompt({
+      role: 'Fix review findings for this issue',
+      projectContext: loadAgentConfig(context.worktreePath).context,
+      contextFiles: listOpenSpecContextFiles(changeDir, { includeReports: true, includeSessionMemories: true }),
+      task,
+      contract: 'Apply the minimal code or artifact changes required to resolve every FAIL item. Do not modify review.md or review-self-check.md. Report which item IDs you attempted, resolved, and left unresolved.',
+      instruction: [
+        '1. Read the issue and every @file context reference before editing.',
+        '2. Read the review report carefully.',
+        '3. Apply only the minimal changes required to resolve the FAIL items.',
+        '4. Do not make unrelated refactors.',
+        '5. Add or update focused tests when the fix changes behavior.',
+      ].join('\n'),
+    });
   }
 
   return '';
+}
+
+function extractHealthCommand(output: unknown): string | null {
+  if (!output || typeof output !== 'object') return null;
+  const data = output as Record<string, unknown>;
+  const value = data.command ?? data.healthCommand;
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
 function formatPriorTaskOutputsSection(priorTaskOutputs?: Record<string, unknown>[]): string {
