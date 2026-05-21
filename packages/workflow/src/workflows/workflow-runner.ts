@@ -148,7 +148,14 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   private async runTask(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task' }>): Promise<boolean> {
-    return this.taskRunner.run(this.workflowRun, work);
+    const result = await this.taskRunner.run(work);
+    if (!result) return false;
+    if (result.status === 'completed') {
+      this.workflowRun.completeTask();
+      return true;
+    }
+    this.workflowRun.failTask(result);
+    return false;
   }
 
   private async runCheck(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'check' }>): Promise<boolean> {
