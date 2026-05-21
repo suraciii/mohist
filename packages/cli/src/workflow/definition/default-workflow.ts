@@ -127,6 +127,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           with: {
             path: '{{ artifacts.openspecChange }}/self-review.md',
             expect: '<promise>PASS</promise>',
+            markers: SELF_REVIEW_RESULT_CONTRACT.allowedMarkers,
+            format: 'mohist/self-review',
           },
           onFailure: {
             retry: {
@@ -286,6 +288,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
           with: {
             path: '{{ artifacts.openspecChange }}/review.md',
             expect: '<promise>PASS</promise>',
+            markers: REVIEW_RESULT_CONTRACT.allowedMarkers,
+            format: 'mohist/review',
           },
           onFailure: {
             retry: {

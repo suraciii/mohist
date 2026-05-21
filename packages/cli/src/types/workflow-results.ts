@@ -36,7 +36,7 @@ export interface WorkflowSnapshot {
 
 export interface StructuredWorkflowResult {
   verdict?: WorkflowVerdict;
-  marker?: '<promise>PASS</promise>' | '<promise>FAIL</promise>';
+  marker?: string;
   items?: WorkflowItem[];
   evidence?: string;
   repairedItemIds?: string[];
@@ -54,10 +54,11 @@ export interface ReactionTaskOutput extends StructuredWorkflowResult {
 }
 
 export interface ResultContract {
-  kind: 'promise-marker';
+  kind: 'marker';
   required: boolean;
   outputSource: ResultOutputSource;
-  allowedMarkers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'];
+  allowedMarkers: string[];
+  verdicts?: Record<string, WorkflowVerdict>;
   itemPolicy?: {
     blockingSeverities: WorkflowItemSeverity[];
     nonBlockingStatuses: WorkflowItemStatus[];

@@ -1,6 +1,6 @@
 import type { Check, CheckContext, CheckResult } from './index';
 import { parseStructuredResult, buildStructuredResult, isParseError } from '../result-contracts';
-import { REVIEW_RESULT_CONTRACT } from './review-result-contracts';
+import { enrichReviewStructuredResult, REVIEW_RESULT_CONTRACT } from './review-result-contracts';
 import { extractFixSuggestions, readReportFile } from '../utils';
 import { Log } from '../../util/log';
 import type { ResultContract } from '../../types/workflow-results';
@@ -48,7 +48,7 @@ export class AiReviewCheck implements Check {
     }
 
     const fixSuggestions = parsed.verdict === 'FAIL' ? extractFixSuggestions(reviewReport!) : '';
-    const structured = buildStructuredResult(parsed);
+    const structured = enrichReviewStructuredResult(buildStructuredResult(parsed), reviewReport!);
 
     return {
       name: this.name,
@@ -72,8 +72,6 @@ function describeParseError(err: import('../result-contracts').ParseError): stri
       return `No valid promise marker found in ${err.source} — review task may have failed to produce valid artifact`;
     case 'duplicate-markers':
       return `Multiple promise markers found in ${err.source} — review task produced ambiguous output`;
-    case 'malformed-marker':
-      return `Malformed promise marker in ${err.source}: ${err.raw}`;
     case 'source-unavailable':
       return `Output source ${err.source} unavailable${err.cause ? `: ${err.cause}` : ''}`;
   }

@@ -31,7 +31,10 @@ function writeArtifact(changeDir: string, filename: string, content: string) {
 
 async function reviewMarkerCheck(changeDir: string) {
   const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
-  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>');
+  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>', 'mohist/review', [
+    '<promise>PASS</promise>',
+    '<promise>FAIL</promise>',
+  ]);
 }
 
 describe('Reaction structured context: T-006', () => {

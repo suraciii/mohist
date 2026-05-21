@@ -70,7 +70,15 @@ export function createDefaultCheckRegistry(input: {
 
 function buildArtifactMarkerCheck(input: CheckProviderInput): Check | null {
   if (typeof input.check.with?.path !== 'string' || typeof input.check.with?.expect !== 'string') return null;
-  return new ArtifactMarkerCheck(input.check.name, renderCheckPath(input), input.check.with.expect);
+  return new ArtifactMarkerCheck(
+    input.check.name,
+    renderCheckPath(input),
+    input.check.with.expect,
+    typeof input.check.with.format === 'string' ? input.check.with.format : undefined,
+    Array.isArray(input.check.with.markers)
+      ? input.check.with.markers.filter((marker): marker is string => typeof marker === 'string')
+      : [input.check.with.expect],
+  );
 }
 
 function renderCheckPath(input: CheckProviderInput): string {

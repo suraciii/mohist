@@ -1,5 +1,6 @@
 import type { ResultContract, WorkflowItem, WorkflowItemSeverity, WorkflowVerification } from '../types/workflow-results';
 import { isParseSuccess, parseStructuredResult } from './result-contracts';
+import { parseReviewItems } from './checks/review-result-contracts';
 
 const NON_BLOCKING_SEVERITIES: WorkflowItemSeverity[] = ['follow-up', 'info'];
 
@@ -36,7 +37,7 @@ export function extractStructuredResultMetadata(
     return empty;
   }
 
-  const allItems = parsed.items;
+  const allItems = parseReviewItems(artifactContent);
   const repairedItems = allItems.filter(
     item => item.status === 'resolved' && item.verification != null && item.verification.length > 0,
   );

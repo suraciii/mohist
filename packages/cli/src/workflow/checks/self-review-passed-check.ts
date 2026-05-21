@@ -1,6 +1,6 @@
 import type { Check, CheckContext, CheckResult } from './index';
 import { parseStructuredResult, buildStructuredResult, isParseError } from '../result-contracts';
-import { SELF_REVIEW_RESULT_CONTRACT } from './review-result-contracts';
+import { enrichReviewStructuredResult, SELF_REVIEW_RESULT_CONTRACT } from './review-result-contracts';
 import { parseDimensions, readReportFile } from '../utils';
 
 export class SelfReviewPassedCheck implements Check {
@@ -20,7 +20,7 @@ export class SelfReviewPassedCheck implements Check {
       return { name: this.name, status: 'error', message };
     }
 
-    const structured = buildStructuredResult(parsed);
+    const structured = enrichReviewStructuredResult(buildStructuredResult(parsed), report!);
     const dimensions = parseDimensions(report!);
 
     if (parsed.verdict === 'PASS') {
@@ -59,8 +59,6 @@ function describeParseError(err: import('../result-contracts').ParseError): stri
       return `No valid promise marker found in ${err.source} — self-review task may have failed to produce valid artifact`;
     case 'duplicate-markers':
       return `Multiple promise markers found in ${err.source} — self-review task produced ambiguous output`;
-    case 'malformed-marker':
-      return `Malformed promise marker in ${err.source}: ${err.raw}`;
     case 'source-unavailable':
       return `Output source ${err.source} unavailable${err.cause ? `: ${err.cause}` : ''}`;
   }
