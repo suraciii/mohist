@@ -1,5 +1,5 @@
 import type { WorkflowDefinitionSnapshot } from '../workflow-definition-snapshot';
-import type { CheckDefinition, TaskDefinition, WorkflowStageId, WorkflowTasksFromSource } from '../workflow-definition';
+import type { WorkflowStageId } from '../workflow-definition';
 import { WorkflowDomainError } from '../errors';
 import { StageRun } from './stage-run';
 import type { CheckResultInput, FailureDetails, MaterializedTaskInput, StageRunState, TaskResultInput, WorkflowRunStatus, WorkflowWork } from './types';
@@ -7,7 +7,7 @@ import type { CheckResultInput, FailureDetails, MaterializedTaskInput, StageRunS
 export class WorkflowRun {
   readonly stageRuns: StageRun[];
   status: WorkflowRunStatus = 'pending';
-  currentStage: WorkflowStageId;
+  currentStage: StageRun;
   failure: FailureDetails | null = null;
 
   constructor(
@@ -18,7 +18,7 @@ export class WorkflowRun {
       throw new WorkflowDomainError('WorkflowRun requires at least one stage definition');
     }
     this.stageRuns = definitionSnapshot.stages.map((definition, index) => new StageRun(definition, index));
-    this.currentStage = definitionSnapshot.stages[0].stage;
+    this.currentStage = this.stageRuns[0];
   }
 
   get stageOrder(): WorkflowStageId[] {
@@ -31,18 +31,18 @@ export class WorkflowRun {
       status: stageRun.status,
       order: stageRun.order,
       attemptSequence: stageRun.attemptSequence,
-      tasks: stageRun.tasks.map((taskRun, index) => {
-        const task = stageRun.definition.tasks[index];
-        return {
-          id: task?.id ?? `task-${index}`,
-          title: task?.title ?? `Task ${index + 1}`,
-          uses: task?.uses,
-          status: taskRun.status,
-        };
-      }),
+      tasks: stageRun.tasks.map(taskRun => ({
+        id: taskRun.id,
+        title: taskRun.title,
+        uses: taskRun.uses,
+        with: taskRun.withInput,
+        status: taskRun.status,
+      })),
       checks: stageRun.checks.map(check => ({
         name: check.name,
         title: check.title,
+        uses: check.uses,
+        with: check.withInput,
         status: check.status,
         message: check.message,
         output: check.output,
@@ -63,17 +63,22 @@ export class WorkflowRun {
   }
 
   next(): WorkflowWork {
-    if (this.status === 'passed') return { kind: 'complete', stage: this.currentStage };
+    if (this.status === 'passed') return { kind: 'complete', stage: this.currentStage.stage };
     if (this.status === 'failed') {
       if (!this.failure) {
         throw new WorkflowDomainError('Failed WorkflowRun requires failure details');
       }
       return { kind: 'failed', reason: this.failure };
     }
-    if (this.status !== 'running') return { kind: 'blocked', stage: this.currentStage, reason: { complete: false, reason: 'workflow-not-running', stage: this.currentStage } };
+    if (this.status !== 'running') {
+      return {
+        kind: 'blocked',
+        stage: this.currentStage.stage,
+        reason: { complete: false, reason: 'workflow-not-running', stage: this.currentStage.stage },
+      };
+    }
 
-    const stageRun = this.stageRuns.find(candidate => candidate.stage === this.currentStage);
-    if (!stageRun) return { kind: 'blocked', stage: this.currentStage, reason: { complete: false, reason: 'missing-current-stage', stage: this.currentStage } };
+    const stageRun = this.currentStage;
     if (stageRun.status === 'awaiting-approval') return { kind: 'await-approval', stage: stageRun.stage };
     if (stageRun.status === 'failed') {
       if (!stageRun.failure) {
@@ -84,28 +89,48 @@ export class WorkflowRun {
     if (stageRun.status !== 'running') return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'stage-not-running', stage: stageRun.stage } };
 
     if (stageRun.definition.tasksFrom && !stageRun.workSourceState.evaluated) {
-      return { kind: 'task-source', stage: stageRun.stage };
+      const source = typeof stageRun.definition.tasksFrom === 'string'
+        ? { uses: stageRun.definition.tasksFrom }
+        : stageRun.definition.tasksFrom;
+      return {
+        kind: 'task-source',
+        stage: stageRun.stage,
+        definition: {
+          uses: source.uses,
+          with: source.with,
+        },
+      };
     }
 
-    const taskDefinition = stageRun.currentTaskDefinition;
-    if (taskDefinition) return { kind: 'task', stage: stageRun.stage, taskId: taskDefinition.id };
+    const task = stageRun.currentTask;
+    if (task) {
+      return {
+        kind: 'task',
+        stage: stageRun.stage,
+        task: {
+          id: task.id,
+          title: task.title,
+          uses: task.uses,
+          with: task.withInput,
+        },
+      };
+    }
 
     const check = stageRun.checks.find(candidate => candidate.status === 'pending');
-    if (check) return { kind: 'check', stage: stageRun.stage, checkName: check.name };
+    if (check) {
+      return {
+        kind: 'check',
+        stage: stageRun.stage,
+        check: {
+          name: check.name,
+          title: check.title,
+          uses: check.uses,
+          with: check.withInput,
+        },
+      };
+    }
 
     return { kind: 'complete', stage: stageRun.stage };
-  }
-
-  taskSourceDefinition(stage: WorkflowStageId): WorkflowTasksFromSource | null {
-    return this.stageRun(stage).definition.tasksFrom ?? null;
-  }
-
-  taskDefinition(stage: WorkflowStageId, taskId: string): TaskDefinition | null {
-    return this.stageRun(stage).definition.tasks.find(candidate => candidate.id === taskId) ?? null;
-  }
-
-  checkDefinition(stage: WorkflowStageId, checkName: string): CheckDefinition | null {
-    return this.stageRun(stage).definition.checks.find(candidate => candidate.name === checkName) ?? null;
   }
 
   addTasks(tasks: MaterializedTaskInput[]): void {
@@ -138,7 +163,7 @@ export class WorkflowRun {
 
   failTask(result: TaskResultInput): void {
     const stageRun = this.requireCurrentTask();
-    const taskId = stageRun.currentTaskDefinition?.id;
+    const taskId = stageRun.currentTask?.id;
     stageRun.startTask();
     stageRun.failTask();
     const failure = {
@@ -187,7 +212,7 @@ export class WorkflowRun {
   }
 
   passStage(): boolean {
-    const stageRun = this.stageRun(this.currentStage);
+    const stageRun = this.currentStage;
     if (stageRun.tasks.some(task => task.status !== 'completed')) return false;
     if (stageRun.checks.some(check => check.status !== 'passed')) return false;
     stageRun.status = 'passed';
@@ -196,15 +221,14 @@ export class WorkflowRun {
       this.status = 'passed';
       return true;
     }
-    this.currentStage = next.stage;
+    this.currentStage = next;
     next.start();
     return true;
   }
 
   private requireCurrentTask(): StageRun {
     const stageRun = this.currentStageRun();
-    const definition = stageRun.currentTaskDefinition;
-    if (!definition) {
+    if (!stageRun.currentTask) {
       throw new WorkflowDomainError(`No current task in stage ${stageRun.stage}`);
     }
     return stageRun;
@@ -218,12 +242,7 @@ export class WorkflowRun {
   }
 
   private currentStageRun(): StageRun {
-    return this.stageRun(this.currentStage);
+    return this.currentStage;
   }
 
-  private stageRun(stage: WorkflowStageId): StageRun {
-    const stageRun = this.stageRuns.find(candidate => candidate.stage === stage);
-    if (!stageRun) throw new WorkflowDomainError(`Stage ${stage} is not admitted by this workflow`);
-    return stageRun;
-  }
 }
