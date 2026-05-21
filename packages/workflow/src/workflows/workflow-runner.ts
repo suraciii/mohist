@@ -65,9 +65,9 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   async start(): Promise<WorkflowRunResult> {
     if (this.run.status === 'pending') {
       this.run.start();
+      await this.persist();
     }
-    await this.persist();
-    return this.resultFromRun();
+    return this.resume();
   }
 
   async resume(): Promise<WorkflowRunResult> {
