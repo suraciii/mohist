@@ -34,6 +34,7 @@ function scheduleRebaseTask(run: WorkflowRun, reason: string) {
   return run.scheduleRuntimeTask({
     taskId: 'rebase-branch',
     title: 'Rebase branch',
+    uses: 'mohist/rebase',
     causedBy: { type: 'branch-changed', message: reason },
   });
 }

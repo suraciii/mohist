@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
 import type { ExecutableTask } from '../../../src/workflow/tasks';
-import { createDefaultTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
+import { createDefaultTaskDispatchFactoryRegistry, createTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
 import type { TaskDefinition } from '../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {
@@ -84,6 +84,49 @@ function pendingAiReviewTask(
 }
 
 describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
+  it('dispatches custom task uses through a registered provider', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-provider-'));
+    const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
+    fs.mkdirSync(changeDir, { recursive: true });
+
+    try {
+      const provider = {
+        id: 'acme/custom-task',
+        build: vi.fn((input) => ({
+          taskId: input.task.taskId,
+          title: input.task.title,
+          kind: 'service-call' as const,
+          stage: input.ctx.issue.stage,
+          attempt: input.attempt,
+          serviceFn: async () => ({ custom: true }),
+        })),
+      };
+      const task: ExecutableTask = { taskId: 'custom', title: 'Custom task', kind: 'agent-session' };
+      const dispatchable = createTaskDispatchFactoryRegistry([provider]).build({
+        ctx: makeContext(changeDir),
+        task,
+        executionKind: 'agent-session',
+        attempt: 2,
+        worktreePath: tmpRoot,
+        sourceTask: {
+          id: 'custom',
+          title: 'Custom task',
+          uses: 'acme/custom-task',
+          with: { message: 'hello' },
+        },
+      });
+
+      expect(provider.build).toHaveBeenCalledOnce();
+      expect(dispatchable).toMatchObject({
+        taskId: 'custom',
+        kind: 'service-call',
+        attempt: 2,
+      });
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
   it('restores a normal pending ai-review task from checkpoint and artifact', () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-restore-'));
     const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');

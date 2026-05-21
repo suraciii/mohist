@@ -57,6 +57,8 @@ export {
   type DispatchableTask,
   type TaskDispatchFactoryInput,
   type TaskDispatchFactoryRegistry,
+  type TaskDispatchProvider,
+  createTaskDispatchFactoryRegistry,
   createDefaultTaskDispatchFactoryRegistry,
 } from './task-dispatch-factory-registry';
 

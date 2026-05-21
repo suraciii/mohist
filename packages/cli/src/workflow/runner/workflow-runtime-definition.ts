@@ -1,4 +1,4 @@
-import { getWorkflowUseDefinition, inferWorkflowTaskUse } from '../uses-catalog';
+import { getWorkflowUseDefinition } from '../uses-catalog';
 import type {
   CompiledStageDefinition,
   TaskDefinition,
@@ -12,7 +12,7 @@ export interface WorkSourceDefinition {
   taskIds?: string[];
 }
 
-export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task' | 'repair-task' | 'rebase-task';
+export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task';
 
 export interface TaskExecutionPolicy {
   taskId: string;
@@ -152,39 +152,19 @@ function compileWorkSources(stage: CompiledStageDefinition, existingSources?: Wo
   return workSources.length > 0 ? workSources : undefined;
 }
 
-function inferTaskExecutionKind(taskId: string, uses?: string): TaskExecutionKind {
-  const resolvedUses = uses ?? inferWorkflowTaskUse(taskId);
+function inferTaskExecutionKind(uses?: string): TaskExecutionKind {
+  const resolvedUses = uses;
   if (resolvedUses === 'mohist/ralph-tasks') return 'ralph-task';
   if (
     resolvedUses === 'mohist/openspec-sync'
     || resolvedUses === 'mohist/archive-change'
     || resolvedUses === 'mohist/merge'
+    || resolvedUses === 'mohist/rebase'
     || resolvedUses === 'mohist/github-pr'
   ) {
     return 'service-call';
   }
-  if (resolvedUses === 'mohist/rebase') return 'rebase-task';
   return 'agent-session';
-}
-
-function promptSourceKind(task: TaskDefinition): 'inline' | 'file' | 'ref' | null {
-  const prompt = task.with?.prompt;
-  if (typeof prompt === 'string') return 'inline';
-  if (!prompt || typeof prompt !== 'object' || Array.isArray(prompt)) return null;
-  const data = prompt as Record<string, unknown>;
-  if (typeof data.inline === 'string') return 'inline';
-  if (typeof data.file === 'string') return 'file';
-  if (typeof data.ref === 'string') return 'ref';
-  return null;
-}
-
-function inferRepairTaskExecutionKind(task: TaskDefinition): TaskExecutionKind {
-  if (task.uses === 'mohist/rebase') return 'rebase-task';
-  if (task.uses === 'mohist/agent') {
-    const promptKind = promptSourceKind(task);
-    if (promptKind) return 'agent-session';
-  }
-  return 'repair-task';
 }
 
 function taskWorkSourceKind(stage: CompiledStageDefinition, taskId: string, workSources: WorkSourceDefinition[] | undefined): WorkSourceKind | undefined {
@@ -213,7 +193,7 @@ function compileTaskExecutionPolicies(stage: CompiledStageDefinition, compiled: 
     const existing = compiled.taskExecutionPolicies?.find(policy => policy.taskId === task.id && policy.workSourceKind === workSourceKind);
     if (existing) continue;
 
-    const kind = inferTaskExecutionKind(task.id, task.uses);
+    const kind = inferTaskExecutionKind(task.uses);
     const policy: TaskExecutionPolicy = {
       taskId: task.id,
       kind,
@@ -234,7 +214,7 @@ function compileTaskExecutionPolicies(stage: CompiledStageDefinition, compiled: 
     if (existing) continue;
     const policy: TaskExecutionPolicy = {
       taskId: task.id,
-      kind: inferRepairTaskExecutionKind(task),
+      kind: inferTaskExecutionKind(task.uses),
       workSourceKind: 'runtime',
     };
     policies.set(policyKey(policy), policy);

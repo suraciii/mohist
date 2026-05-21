@@ -31,6 +31,7 @@ export function createDefaultStaticTaskLoader(worktreePath: string): TaskLoader 
         .map(task => ({
           taskId: task.id,
           title: task.title,
+          uses: task.uses,
           prompt: resolveWorkflowTaskPrompt(task.with, worktreePath),
           input: task.with,
           kind: toTaskKind(definition.taskExecutionPolicies?.find(policy => policy.taskId === task.id)?.kind ?? 'agent-session'),

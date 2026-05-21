@@ -58,6 +58,7 @@ export interface WorkflowTask {
   stageRunId: string;
   taskId: string;
   title: string;
+  uses: string | null;
   status: WorkflowTaskStatus;
   taskOrder: number;
   attempts: number;
@@ -140,6 +141,7 @@ interface WorkflowTaskRow {
   stage_run_id: string;
   task_id: string;
   title: string;
+  uses: string | null;
   status: string;
   task_order: number;
   attempts: number;
@@ -238,6 +240,7 @@ function rowToWorkflowTask(row: WorkflowTaskRow): WorkflowTask {
     stageRunId: row.stage_run_id,
     taskId: row.task_id,
     title: row.title,
+    uses: row.uses,
     status: row.status as WorkflowTaskStatus,
     taskOrder: row.task_order,
     attempts: row.attempts,
@@ -327,6 +330,7 @@ function taskRowToSnapshot(row: WorkflowTaskRow): StageRunSnapshot['tasks'][numb
   return {
     id: row.task_id,
     title: row.title,
+    uses: row.uses ?? undefined,
     status: row.status as WorkflowTaskStatus,
     order: row.task_order,
     dependsOn: [],
@@ -636,6 +640,7 @@ export class WorkflowRunRepo {
           stageRunId,
           taskId: task.id,
           title: task.title,
+          uses: task.uses,
           status: task.status,
           taskOrder: task.order,
           attempts: task.attempts,
@@ -927,6 +932,7 @@ export class WorkflowRunRepo {
     stageRunId: string;
     taskId: string;
     title: string;
+    uses?: string | null;
     taskOrder?: number;
     reason?: string | null;
     causedByType?: string | null;
@@ -942,12 +948,12 @@ export class WorkflowRunRepo {
 
     this.db.run(
       `INSERT INTO workflow_tasks
-       (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, artifacts, created_at, updated_at,
+       (id, workflow_run_id, stage_run_id, task_id, title, uses, status, task_order, artifacts, created_at, updated_at,
         reason, caused_by_type, caused_by_check_name, caused_by_task_id, reset_by_type, reset_by_task_id,
         reset_by_event_name, reset_reason)
-       VALUES (?, ?, ?, ?, ?, 'pending', ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        id, data.workflowRunId, data.stageRunId, data.taskId, data.title, data.taskOrder ?? 0, now, now,
+        id, data.workflowRunId, data.stageRunId, data.taskId, data.title, data.uses ?? null, data.taskOrder ?? 0, now, now,
         data.reason ?? null, data.causedByType ?? null, data.causedByCheckName ?? null, data.causedByTaskId ?? null,
         data.resetByType ?? null, data.resetByTaskId ?? null, data.resetByEventName ?? null, data.resetReason ?? null,
       ],
@@ -959,6 +965,7 @@ export class WorkflowRunRepo {
       stageRunId: data.stageRunId,
       taskId: data.taskId,
       title: data.title,
+      uses: data.uses ?? null,
       status: 'pending',
       taskOrder: data.taskOrder ?? 0,
       attempts: 0,
@@ -1041,6 +1048,7 @@ export class WorkflowRunRepo {
     workflowRunId: string;
     taskId: string;
     title: string;
+    uses?: string | null;
     status?: WorkflowTaskStatus;
     taskOrder?: number;
     attempts?: number;
@@ -1082,12 +1090,14 @@ export class WorkflowRunRepo {
         : data.startedAt ?? existing.started_at ?? now;
       this.db.run(
         `UPDATE workflow_tasks
-         SET status = ?, attempts = ?, duration = ?, artifacts = ?, events = ?, output = ?, reason = ?,
+         SET title = ?, uses = ?, status = ?, attempts = ?, duration = ?, artifacts = ?, events = ?, output = ?, reason = ?,
              caused_by_type = ?, caused_by_check_name = ?, caused_by_task_id = ?,
              reset_by_type = ?, reset_by_task_id = ?, reset_by_event_name = ?, reset_reason = ?,
              started_at = ?, completed_at = ?, updated_at = ?
          WHERE id = ?`,
         [
+          data.title,
+          data.uses !== undefined ? data.uses : existing.uses,
           status,
           attempts,
           duration,
@@ -1112,12 +1122,12 @@ export class WorkflowRunRepo {
     } else {
       this.db.run(
         `INSERT INTO workflow_tasks
-         (id, workflow_run_id, stage_run_id, task_id, title, status, task_order, attempts, duration, artifacts, events, output,
+         (id, workflow_run_id, stage_run_id, task_id, title, uses, status, task_order, attempts, duration, artifacts, events, output,
           reason, caused_by_type, caused_by_check_name, caused_by_task_id, reset_by_type, reset_by_task_id,
           reset_by_event_name, reset_reason, started_at, completed_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          id, data.workflowRunId, data.stageRunId, data.taskId, data.title, status, taskOrder,
+          id, data.workflowRunId, data.stageRunId, data.taskId, data.title, data.uses ?? null, status, taskOrder,
           attempts, duration, artifacts,
           events,
           data.output !== undefined ? JSON.stringify(data.output) : null,

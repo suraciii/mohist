@@ -455,6 +455,7 @@ export class WorkflowApplicationService {
     return this.updateActiveRun(input.issueId, input, run => run.scheduleRuntimeTask({
       taskId: 'rebase-branch',
       title: 'Rebase branch',
+      uses: 'mohist/rebase',
       causedBy: {
         type: 'branch-changed',
         message: input.reason ?? 'Target branch moved; rebase requested',

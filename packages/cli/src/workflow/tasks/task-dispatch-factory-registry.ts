@@ -10,11 +10,9 @@ import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
-import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
 import { loadVerificationContext, buildVerificationPromptSuffix } from '../reaction/convergence';
-import { inferWorkflowTaskUse } from '../uses-catalog';
 
 interface PlanTaskConfig {
   type: string;
@@ -49,21 +47,69 @@ export interface TaskDispatchFactoryInput {
   sourceTask?: TaskDefinition;
 }
 
+export interface TaskDispatchProvider {
+  id: string;
+  build(input: TaskDispatchFactoryInput): DispatchableTask | null;
+}
+
 export interface TaskDispatchFactoryRegistry {
   build(input: TaskDispatchFactoryInput): DispatchableTask | null;
+  get(id: string): TaskDispatchProvider | undefined;
+  register(provider: TaskDispatchProvider): void;
+}
+
+export function createTaskDispatchFactoryRegistry(providers: TaskDispatchProvider[]): TaskDispatchFactoryRegistry {
+  const map = new Map<string, TaskDispatchProvider>();
+  for (const provider of providers) {
+    map.set(provider.id, provider);
+  }
+
+  return {
+    build(input) {
+      const providerId = resolveTaskProviderId(input);
+      return map.get(providerId)?.build(input) ?? null;
+    },
+    get(id) {
+      return map.get(id);
+    },
+    register(provider) {
+      map.set(provider.id, provider);
+    },
+  };
 }
 
 export function createDefaultTaskDispatchFactoryRegistry(): TaskDispatchFactoryRegistry {
   const integrator = new OpenSpecIntegrator();
-  return {
-    build(input) {
-      if (input.executionKind === 'rebase-task') return createRebaseDispatchTask(input);
-      if (input.executionKind === 'repair-task') return createRepairDispatchTask(input);
-      if (input.executionKind === 'service-call') return createServiceCallDispatchTask(input, integrator);
-      if (input.executionKind === 'agent-session') return createAgentSessionDispatchTask(input);
-      return { ...input.task, kind: 'ralph-task' };
+  return createTaskDispatchFactoryRegistry([
+    {
+      id: 'mohist/agent',
+      build: createAgentSessionDispatchTask,
     },
-  };
+    {
+      id: 'mohist/ralph-tasks',
+      build: input => ({ ...input.task, kind: 'ralph-task' }),
+    },
+    {
+      id: 'mohist/rebase',
+      build: createRebaseDispatchTask,
+    },
+    {
+      id: 'mohist/openspec-sync',
+      build: input => createServiceCallDispatchTask(input, integrator, 'mohist/openspec-sync'),
+    },
+    {
+      id: 'mohist/archive-change',
+      build: input => createServiceCallDispatchTask(input, integrator, 'mohist/archive-change'),
+    },
+    {
+      id: 'mohist/merge',
+      build: input => createServiceCallDispatchTask(input, integrator, 'mohist/merge'),
+    },
+  ]);
+}
+
+function resolveTaskProviderId(input: TaskDispatchFactoryInput): string {
+  return input.sourceTask?.uses ?? input.task.uses ?? '';
 }
 
 function createPlanTaskConfigs(changeDir: string): PlanTaskConfig[] {
@@ -125,30 +171,7 @@ function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Dispatchable
   };
 }
 
-function createRepairDispatchTask(input: TaskDispatchFactoryInput): DispatchableTask {
-  return {
-    taskId: input.task.taskId,
-    title: input.task.title,
-    kind: 'service-call',
-    stage: input.ctx.issue.stage,
-    attempt: input.attempt,
-    serviceFn: async () => {
-      const adapter = createRepairFixAdapter();
-      const result = await adapter.dispatch(normalizeRepairTaskId(input.task.taskId), input.ctx, {
-        worktreePath: input.worktreePath,
-        failedCheck: defaultFailedCheckForTask(input.task.taskId, input.failedCheck),
-        attempt: input.attempt,
-      });
-      if (result.status !== 'completed') {
-        throw new Error(result.reason ?? `${input.task.title} failed`);
-      }
-      return result.output;
-    },
-  };
-}
-
-function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrator: OpenSpecIntegrator): DispatchableTask | null {
-  const uses = input.sourceTask?.uses ?? inferWorkflowTaskUse(input.task.taskId, input.executionKind);
+function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrator: OpenSpecIntegrator, uses: string): DispatchableTask | null {
   const serviceFn = buildWorkflowServiceFn(uses, input, integrator);
   if (!serviceFn) return null;
 
@@ -487,25 +510,4 @@ function unwrapWorkflowOutput(output: unknown): Record<string, unknown> | null {
     return data.result as Record<string, unknown>;
   }
   return data;
-}
-
-function normalizeRepairTaskId(taskId: string): RepairFixTaskId {
-  const baseTaskId = taskId.replace(/:\d+$/, '');
-  if (baseTaskId === 'fix-merge-readiness') return 'repair-merge';
-  if (baseTaskId === 'fix-plan-review') return 'repair-plan-artifacts';
-  return baseTaskId as RepairFixTaskId;
-}
-
-function defaultFailedCheckForTask(taskId: string, failedCheck?: CheckResult): CheckResult {
-  if (failedCheck) return failedCheck;
-  const baseTaskId = taskId.replace(/:\d+$/, '');
-  const defaults: Record<string, CheckResult> = {
-    'fix-build-health': { name: 'health:build', status: 'fail' },
-    'fix-check-health': { name: 'health:check', status: 'fail' },
-    'fix-integrate-health': { name: 'health:integrate', status: 'fail' },
-    'fix-review-findings': { name: 'review-passed', status: 'fail', output: { verdict: 'FAIL' } },
-    'fix-merge-readiness': { name: 'merge-ready', status: 'fail' },
-    'fix-plan-review': { name: 'self-review-passed', status: 'fail' },
-  };
-  return defaults[baseTaskId] ?? { name: taskId, status: 'fail' };
 }
