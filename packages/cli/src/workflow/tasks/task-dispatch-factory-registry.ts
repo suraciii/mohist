@@ -3,7 +3,7 @@ import * as path from 'path';
 import { MergeState } from '../../types';
 import type { StageContext, CheckResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
-import type { ExecutableTask, TaskKind } from './types';
+import type { AgentSessionTaskInput, ExecutableTask, TaskKind } from './types';
 import type { AgentPromptSource, TaskDefinition } from '../model';
 import type { TaskExecutionKind } from '../runner/workflow-runtime-definition';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
@@ -12,7 +12,6 @@ import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../templa
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
-import { loadVerificationContext, buildVerificationPromptSuffix } from '../reaction/convergence';
 
 interface PlanTaskConfig {
   type: string;
@@ -271,7 +270,7 @@ function createGenericAgentSessionDispatchTask(input: TaskDispatchFactoryInput, 
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
-  };
+  } satisfies AgentSessionTaskInput;
   return {
     taskId: input.task.taskId,
     title: input.task.title,
@@ -339,10 +338,9 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput, pro
     };
   }
 
-  return {
+  const agentInput = {
     taskId: input.task.taskId,
     title: input.task.title,
-    kind: 'agent-session',
     prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: input.ctx.issue.stage,
@@ -350,6 +348,20 @@ function createPlanAgentSessionDispatchTask(input: TaskDispatchFactoryInput, pro
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => taskConfig.verifyArtifact() ? [taskConfig.label] : [],
+  } satisfies AgentSessionTaskInput;
+
+  return {
+    taskId: input.task.taskId,
+    title: input.task.title,
+    kind: 'agent-session',
+    prompt: agentInput.prompt,
+    cwd: agentInput.cwd,
+    stage: agentInput.stage,
+    attempt: agentInput.attempt,
+    agentSessionRef: agentInput.agentSessionRef,
+    requiredMarkers: agentInput.requiredMarkers,
+    artifactVerification: agentInput.artifactVerification,
+    input: agentInput,
   };
 }
 
@@ -367,8 +379,9 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, prompt
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
 
   const reviewOutputPath = 'review.md';
+  const reviewOutputFullPath = path.join(changeDir, reviewOutputPath);
   const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'check');
-  if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(input.task.taskId) && fs.existsSync(path.join(changeDir, reviewOutputPath))) {
+  if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(input.task.taskId) && fs.existsSync(reviewOutputFullPath)) {
     emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, []);
     return {
       taskId: input.task.taskId,
@@ -380,19 +393,37 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, prompt
     };
   }
 
-  return {
+  const agentInput = {
     taskId: input.task.taskId,
     title: input.task.title,
-    kind: 'agent-session',
     prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
-    artifactVerification: () => fs.existsSync(path.join(changeDir, reviewOutputPath)) ? [reviewOutputPath] : [],
-    input: { mode: 'ai-review' },
+    beforeRun: () => removePriorReviewOutput(reviewOutputFullPath),
+    artifactVerification: () => fs.existsSync(reviewOutputFullPath) ? [reviewOutputPath] : [],
+  } satisfies AgentSessionTaskInput;
+
+  return {
+    taskId: input.task.taskId,
+    title: input.task.title,
+    kind: 'agent-session',
+    prompt: agentInput.prompt,
+    cwd: agentInput.cwd,
+    stage: agentInput.stage,
+    attempt: agentInput.attempt,
+    agentSessionRef: agentInput.agentSessionRef,
+    requiredMarkers: agentInput.requiredMarkers,
+    artifactVerification: agentInput.artifactVerification,
+    input: agentInput,
   };
+}
+
+function removePriorReviewOutput(reviewOutputFullPath: string): void {
+  if (!fs.existsSync(reviewOutputFullPath)) return;
+  fs.rmSync(reviewOutputFullPath, { force: true });
 }
 
 function buildBuiltinAgentPrompt(input: TaskDispatchFactoryInput, promptRef: string, changeDir: string): string {
@@ -415,10 +446,7 @@ function buildBuiltinAgentPrompt(input: TaskDispatchFactoryInput, promptRef: str
 }
 
 function buildCheckReviewPrompt(input: TaskDispatchFactoryInput, changeDir: string): string {
-  const basePrompt = buildReviewerPrompt(input.ctx.issue, changeDir);
-  const verificationCtx = loadVerificationContext(changeDir);
-  if (!verificationCtx) return basePrompt;
-  return basePrompt + buildVerificationPromptSuffix(verificationCtx);
+  return buildReviewerPrompt(input.ctx.issue, changeDir);
 }
 
 function buildWorkflowServiceFn(

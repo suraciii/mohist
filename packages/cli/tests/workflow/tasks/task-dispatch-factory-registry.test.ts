@@ -6,6 +6,7 @@ import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
 import type { ExecutableTask } from '../../../src/workflow/tasks';
 import { createDefaultTaskDispatchFactoryRegistry, createTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
+import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
 import type { TaskDefinition } from '../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {
@@ -153,11 +154,12 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
     }
   });
 
-  it('reruns a workflow-policy-reset ai-review task instead of restoring stale review output', () => {
+  it('reruns a workflow-policy-reset ai-review task instead of restoring stale review output', async () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-reset-'));
     const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
     fs.mkdirSync(changeDir, { recursive: true });
-    fs.writeFileSync(path.join(changeDir, 'review.md'), '# Stale review\n<promise>PASS</promise>\n');
+    const reviewPath = path.join(changeDir, 'review.md');
+    fs.writeFileSync(reviewPath, '# Stale review\n<promise>PASS</promise>\n');
 
     try {
       const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
@@ -181,6 +183,40 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
         taskId: 'ai-review',
         kind: 'agent-session',
       });
+      expect(fs.existsSync(reviewPath)).toBe(true);
+      if (!dispatchable || dispatchable.kind !== 'agent-session') {
+        throw new Error('Expected agent-session task');
+      }
+      await (dispatchable.input as AgentSessionTaskInput).beforeRun?.(makeContext(changeDir));
+      expect(fs.existsSync(reviewPath)).toBe(false);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not remove review output when restoring ai-review from checkpoint', () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-restore-keeps-review-'));
+    const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
+    fs.mkdirSync(changeDir, { recursive: true });
+    const reviewPath = path.join(changeDir, 'review.md');
+    fs.writeFileSync(reviewPath, '# Review\n<promise>PASS</promise>\n');
+
+    try {
+      const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
+      const dispatchable = createDefaultTaskDispatchFactoryRegistry().build({
+        ctx: makeContext(changeDir, pendingAiReviewTask()),
+        task,
+        executionKind: 'agent-session',
+        attempt: 1,
+        worktreePath: tmpRoot,
+        sourceTask: aiReviewSourceTask(),
+      });
+
+      expect(dispatchable).toMatchObject({
+        taskId: 'ai-review',
+        kind: 'service-call',
+      });
+      expect(fs.existsSync(reviewPath)).toBe(true);
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }

@@ -2,6 +2,12 @@
 
 Read the context-files. Understand the proposal scope and design approach before reviewing.
 
+## Report Lifecycle
+
+This review task owns the latest review report. Produce a fresh `review.md` for the current candidate snapshot.
+
+The workflow removes any prior `review.md` before this task starts when this task is actually rerun. Do not rely on old review verdicts or stale report content. If no `review.md` exists at startup, continue normally and create one.
+
 ## Comprehensive Review
 
 You MUST perform a comprehensive review pass. Do NOT stop after finding the first blocker. Inspect ALL of the following before producing your final output:
