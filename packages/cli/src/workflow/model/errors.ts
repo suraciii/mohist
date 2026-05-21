@@ -1,1 +1,1 @@
-export * from '@mohist/workflow/model/errors';
+export * from '@mohist/workflow/internal/model/errors';

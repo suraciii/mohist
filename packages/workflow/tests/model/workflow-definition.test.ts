@@ -5,7 +5,7 @@ import {
   compileWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
   type WorkflowDefinition,
-} from '../../src';
+} from '../../src/model';
 
 describe('workflow definition model', () => {
   it('compiles check failure retry and event reset policies from semantic stage definitions', () => {
