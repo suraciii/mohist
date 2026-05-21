@@ -27,10 +27,7 @@ import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoader, createDefaultStaticTaskLoader } from '../workflow/tasks';
-import { defaultAgentSessionTaskHandler } from '../workflow/tasks/agent-session-task-handler';
-import { defaultServiceCallTaskHandler } from '../workflow/tasks/service-call-task-handler';
-import { createRalphTaskHandler } from '../workflow/tasks/ralph-task-handler';
+import { createTaskLoaderRegistry, createRalphTaskLoader, createDefaultStaticTaskLoader } from '../workflow/tasks';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definition/default-workflow';
 import { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
 export { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
@@ -954,11 +951,6 @@ export class AgentRunnerService {
         ? createCheckpointManager(this.checkpointRepo)
         : createCheckpointManager({ get: () => null, upsert: () => {}, delete: () => {} } as any);
 
-      const taskHandlerRegistry = createTaskHandlerRegistry({
-        'agent-session': defaultAgentSessionTaskHandler as any,
-        'service-call': defaultServiceCallTaskHandler as any,
-        'ralph-task': createRalphTaskHandler(),
-      });
       const taskLoaderRegistry = createTaskLoaderRegistry([
         createDefaultStaticTaskLoader(worktreePath),
         createRalphTaskLoader(),
@@ -970,7 +962,6 @@ export class AgentRunnerService {
 
       const unifiedRunner = new GenericStageRunner({
         taskLoaderRegistry,
-        taskHandlerRegistry,
         checkRegistry,
         getStageDefinition: (stage) => {
           const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);

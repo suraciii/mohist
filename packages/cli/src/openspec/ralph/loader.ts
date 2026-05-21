@@ -66,7 +66,7 @@ export class RalphTaskLoader {
       return {
         taskId: loadedTask.task.id,
         title: loadedTask.task.title,
-        kind: 'ralph-task',
+        uses: 'mohist/ralph-tasks',
         input,
       };
     });

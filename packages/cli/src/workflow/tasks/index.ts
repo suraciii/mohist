@@ -4,15 +4,12 @@ export {
   type TaskExecutionResult,
   type TaskExecutionStatus,
   type ExecutableTask,
-  type TaskKind,
   type TaskHandler,
   type TaskInputDefinition,
   type TaskMetadata,
   type TaskOutputDefinition,
   type TaskProvider,
   type AgentSessionTaskInput,
-  type ProviderTaskInput,
-  type ProviderTaskHandler,
   type ServiceCallTaskInput,
   type RalphTaskInput,
   type RalphTaskHandler,
@@ -56,7 +53,6 @@ export {
 } from './task-loader-registry';
 
 export {
-  type DispatchableTask,
   type TaskDispatchFactoryInput,
   type TaskDispatchFactoryRegistry,
   type TaskDispatchProvider,

@@ -27,7 +27,6 @@ export function createRalphTaskLoader(): TaskLoader {
         return {
           taskId: task.id,
           title: task.title,
-          kind: 'ralph-task' as const,
           uses: 'mohist/ralph-tasks',
           input,
         };

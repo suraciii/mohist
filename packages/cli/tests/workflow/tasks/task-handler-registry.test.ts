@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
-import type { TaskKind, TaskHandler, ExecutableTask } from '../../../src/workflow/tasks/types';
+import type { TaskHandler, ExecutableTask } from '../../../src/workflow/tasks/types';
 import { createTaskHandlerRegistry } from '../../../src/workflow/tasks/types';
 import { createRalphTaskTaskHandler } from '../../../src/workflow/tasks';
 import { Stage, IssueStatus } from '../../../src/types';
@@ -88,7 +88,6 @@ describe('TaskHandlerRegistry', () => {
     const task: ExecutableTask = {
       taskId: 'test-task',
       title: 'Test Task',
-      kind: 'agent-session',
       prompt: 'Do something',
     };
 
@@ -109,7 +108,6 @@ describe('TaskHandlerRegistry', () => {
     const task: ExecutableTask = {
       taskId: 'T-001',
       title: 'Build Task',
-      kind: 'ralph-task',
       input: {
         taskId: 'T-001',
         title: 'Build Task',

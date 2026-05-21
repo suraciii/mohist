@@ -12,11 +12,8 @@ export interface WorkSourceDefinition {
   taskIds?: string[];
 }
 
-export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task' | 'provider-task';
-
 export interface TaskExecutionPolicy {
   taskId: string;
-  kind: TaskExecutionKind;
   workSourceKind?: WorkSourceKind;
   agentSessionRef?: string;
 }
@@ -152,22 +149,6 @@ function compileWorkSources(stage: CompiledStageDefinition, existingSources?: Wo
   return workSources.length > 0 ? workSources : undefined;
 }
 
-function inferTaskExecutionKind(uses?: string): TaskExecutionKind {
-  const resolvedUses = uses;
-  if (resolvedUses === 'mohist/ralph-tasks') return 'ralph-task';
-  if (resolvedUses === 'mohist/check/ai-review') return 'provider-task';
-  if (
-    resolvedUses === 'mohist/openspec-sync'
-    || resolvedUses === 'mohist/archive-change'
-    || resolvedUses === 'mohist/merge'
-    || resolvedUses === 'mohist/rebase'
-    || resolvedUses === 'mohist/github-pr'
-  ) {
-    return 'service-call';
-  }
-  return 'agent-session';
-}
-
 function taskWorkSourceKind(stage: CompiledStageDefinition, taskId: string, workSources: WorkSourceDefinition[] | undefined): WorkSourceKind | undefined {
   for (const source of workSources ?? []) {
     if (source.kind === 'static') {
@@ -194,14 +175,12 @@ function compileTaskExecutionPolicies(stage: CompiledStageDefinition, compiled: 
     const existing = compiled.taskExecutionPolicies?.find(policy => policy.taskId === task.id && policy.workSourceKind === workSourceKind);
     if (existing) continue;
 
-    const kind = inferTaskExecutionKind(task.uses);
     const policy: TaskExecutionPolicy = {
       taskId: task.id,
-      kind,
       workSourceKind,
     };
 
-    if (kind === 'agent-session' && task.with && typeof task.with.session === 'string') {
+    if (task.with && typeof task.with.session === 'string') {
       policy.agentSessionRef = task.with.session;
     }
 
@@ -215,9 +194,11 @@ function compileTaskExecutionPolicies(stage: CompiledStageDefinition, compiled: 
     if (existing) continue;
     const policy: TaskExecutionPolicy = {
       taskId: task.id,
-      kind: inferTaskExecutionKind(task.uses),
       workSourceKind: 'runtime',
     };
+    if (task.with && typeof task.with.session === 'string') {
+      policy.agentSessionRef = task.with.session;
+    }
     policies.set(policyKey(policy), policy);
   }
 

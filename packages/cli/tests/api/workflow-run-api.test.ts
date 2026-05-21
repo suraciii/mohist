@@ -226,7 +226,7 @@ describe('GET /api/issues/:number/workflow-run', () => {
 
     const planStageRun = data.stageRuns[0];
     expect(planStageRun.tasks.length).toBe(5);
-    expect(planStageRun.checks.length).toBe(6);
+    expect(planStageRun.checks.length).toBe(7);
     expect(planStageRun.approval).not.toBeNull();
     if (planStageRun.approval) {
       expect(planStageRun.approval.status).toBe('awaiting');
@@ -469,7 +469,7 @@ describe('GET /api/issues/:number/stage-state backed by WorkflowRun', () => {
     const planStage = data.stages.find((s: any) => s.stage === 'plan');
     expect(planStage).toBeDefined();
     expect(planStage.tasks.length).toBe(5);
-    expect(planStage.checks.length).toBe(6);
+    expect(planStage.checks.length).toBe(7);
   });
 
   it('stage_executions, workflow_log, session logs, and checkpoints are not promoted to tasks/checks', async () => {

@@ -249,12 +249,11 @@ export function inferWorkflowCheckUse(checkName: string): string {
   return 'mohist/artifact-exists';
 }
 
-export function inferWorkflowTaskUse(taskId: string, executionKind?: string): string {
+export function inferWorkflowTaskUse(taskId: string): string {
   if (taskId === 'integrate:spec-sync') return 'mohist/openspec-sync';
   if (taskId === 'integrate:archive-change') return 'mohist/archive-change';
   if (taskId === 'integrate:merge') return 'mohist/merge';
   if (taskId === 'rebase-branch') return 'mohist/rebase';
-  if (executionKind === 'ralph-task') return 'mohist/ralph-tasks';
   return 'mohist/agent';
 }
 

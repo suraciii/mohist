@@ -4,7 +4,7 @@ import { DEFAULT_STAGE_DEFINITIONS } from '../definition/default-workflow';
 import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { Log } from '../../util/log';
 import type { StageContext } from '../stage-context';
-import type { ExecutableTask, TaskKind } from './types';
+import type { ExecutableTask } from './types';
 import type { TaskLoader } from './task-loader-registry';
 
 const log = Log.create({ service: 'default-static-task-loader' });
@@ -34,15 +34,9 @@ export function createDefaultStaticTaskLoader(worktreePath: string): TaskLoader 
           uses: task.uses,
           prompt: resolveWorkflowTaskPrompt(task.with, worktreePath),
           input: task.with,
-          kind: toTaskKind(definition.taskExecutionPolicies?.find(policy => policy.taskId === task.id)?.kind ?? 'agent-session'),
         }));
     },
   };
-}
-
-function toTaskKind(kind: string): TaskKind {
-  if (kind === 'service-call' || kind === 'ralph-task' || kind === 'provider-task') return kind;
-  return 'agent-session';
 }
 
 function resolveWorkflowTaskPrompt(input: Record<string, unknown> | undefined, worktreePath: string): string | undefined {
