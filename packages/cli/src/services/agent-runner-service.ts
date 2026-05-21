@@ -31,20 +31,9 @@ import { createTaskHandlerRegistry, createTaskLoaderRegistry, createRalphTaskLoa
 import { defaultAgentSessionTaskHandler } from '../workflow/tasks/agent-session-task-handler';
 import { defaultServiceCallTaskHandler } from '../workflow/tasks/service-call-task-handler';
 import { createRalphTaskHandler } from '../workflow/tasks/ralph-task-handler';
-import { createCheckRegistry } from '../workflow/checks/check-registry';
-import { createWorkflowTemplateContextFromValues, renderWorkflowTemplate } from '../workflow/template';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definition/default-workflow';
-import { AiReviewCheck } from '../workflow/checks/ai-review-check';
-import { ReviewPassedCheck } from '../workflow/checks/review-passed-check';
-import { MergeReadyCheck } from '../workflow/checks/merge-ready-check';
-import { ProposalCompleteCheck } from '../workflow/checks/proposal-complete-check';
-import { SpecsCompleteCheck } from '../workflow/checks/specs-complete-check';
-import { DesignCompleteCheck } from '../workflow/checks/design-complete-check';
-import { TasksValidCheck } from '../workflow/checks/tasks-valid-check';
-import { SelfReviewPassedCheck } from '../workflow/checks/self-review-passed-check';
-import { UserApprovalCheck } from '../workflow/checks/user-approval-check';
-import { HealthGateCheck } from '../workflow/checks/health-gate-check';
-import { ArtifactExistsCheck, ArtifactMarkerCheck, ShellCommandCheck } from '../workflow/checks';
+import { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
+export { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
 import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/definition/workflow-inspector';
 import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
 
@@ -105,76 +94,6 @@ export interface WaitingQuestion {
 const PIPELINE_TIMEOUT_MS = 90 * 60 * 1000;
 
 const log = Log.create({ service: 'agent-runner' });
-
-export function createDefaultCheckRegistry(input: {
-  worktreePath: string;
-  workflowDefinitionSnapshot?: import('../workflow/model').WorkflowDefinitionSnapshot;
-}) {
-  const { worktreePath, workflowDefinitionSnapshot } = input;
-  const registry = createCheckRegistry({
-    'proposal-complete': () => Promise.resolve(new ProposalCompleteCheck()),
-    'specs-complete': () => Promise.resolve(new SpecsCompleteCheck()),
-    'design-complete': () => Promise.resolve(new DesignCompleteCheck()),
-    'tasks-valid': () => Promise.resolve(new TasksValidCheck()),
-    'self-review-passed': () => Promise.resolve(new SelfReviewPassedCheck()),
-    'user-approval': (ctx) => Promise.resolve(new UserApprovalCheck(ctx.issue.stage)),
-    'ai-review': () => Promise.resolve(new AiReviewCheck()),
-    'review-passed': () => Promise.resolve(new ReviewPassedCheck()),
-    'merge-ready': () => Promise.resolve(new MergeReadyCheck()),
-  });
-  for (const stage of workflowDefinitionSnapshot?.compiledStageDefinitions ?? DEFAULT_STAGE_DEFINITIONS) {
-    for (const check of stage.checks) {
-      if (check.uses === 'mohist/health-gate') {
-        const stageName = stage.stage;
-        registry.register(check.name, () => Promise.resolve(new HealthGateCheck({
-          worktreePath,
-          stage: stageName,
-          name: check.name,
-          policy: {
-            enabled: typeof check.with?.enabled === 'boolean' ? check.with.enabled : true,
-            command: typeof check.with?.command === 'string' ? check.with.command : '',
-            timeout: typeof check.with?.timeout === 'number' ? check.with.timeout : 5 * 60 * 1000,
-            autoFix: typeof check.with?.autoFix === 'boolean' ? check.with.autoFix : false,
-            maxFixAttempts: typeof check.with?.maxFixAttempts === 'number' ? check.with.maxFixAttempts : 0,
-          },
-        })));
-      }
-      if (check.uses === 'mohist/shell' && typeof check.with?.command === 'string') {
-        registry.register(check.name, () => Promise.resolve(new ShellCommandCheck(check.name, {
-          command: check.with!.command as string,
-          timeout: typeof check.with!.timeout === 'number' ? check.with!.timeout as number : undefined,
-          cwd: typeof check.with!.cwd === 'string' ? check.with!.cwd as string : undefined,
-        })));
-      }
-      if (check.uses === 'mohist/artifact-exists' && typeof check.with?.path === 'string') {
-        registry.register(check.name, (ctx) => Promise.resolve(new ArtifactExistsCheck(check.name, renderCheckPath(ctx, check.with!.path as string, worktreePath, workflowDefinitionSnapshot))));
-      }
-      if ((check.uses === 'mohist/marker' || check.uses === 'mohist/verdict') && typeof check.with?.path === 'string' && typeof check.with?.expect === 'string') {
-        registry.register(check.name, (ctx) => Promise.resolve(new ArtifactMarkerCheck(
-          check.name,
-          renderCheckPath(ctx, check.with!.path as string, worktreePath, workflowDefinitionSnapshot),
-          check.with!.expect as string,
-        )));
-      }
-    }
-  }
-  return registry;
-}
-
-function renderCheckPath(
-  ctx: import('../workflow').CheckContext,
-  template: string,
-  worktreePath: string,
-  workflowDefinitionSnapshot: import('../workflow/model').WorkflowDefinitionSnapshot | undefined,
-): string {
-  return renderWorkflowTemplate(template, createWorkflowTemplateContextFromValues({
-    issueNumber: ctx.issue.number,
-    issueTitle: ctx.issue.title,
-    changeDir: ctx.changeDir,
-    worktreePath,
-    artifacts: workflowDefinitionSnapshot?.resolvedDefinition.artifacts,
-  }));
-}
 
 export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {
   return Boolean(issue && isCurrentStageApproval(issue, issue.stage, 'awaiting'));

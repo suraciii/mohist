@@ -35,7 +35,6 @@ import {
   type TaskHandler,
   type ServiceCallTaskInput,
 } from '../../../src/workflow/tasks';
-import type { CheckFactory } from '../../../src/workflow/checks';
 import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
 import { Stage, type Issue } from '../../../src/types';
 
@@ -149,8 +148,8 @@ export class DefaultWorkflowExternalWorld {
     } satisfies ServiceCallTaskInput, ctx);
   }
 
-  fakeHealthCheck(checkName: string): CheckFactory {
-    return () => ({
+  fakeHealthCheck(checkName: string) {
+    return {
       name: checkName,
       run: async (): Promise<CheckResult> => {
         this.checkCalls.push(checkName);
@@ -171,7 +170,7 @@ export class DefaultWorkflowExternalWorld {
           output: { kind: 'health-gate', command: 'fake', candidateHeadSha: 'candidate-head' },
         };
       },
-    });
+    };
   }
 
   artifactManager() {
@@ -359,12 +358,12 @@ export class DefaultWorkflowHarness {
 
     const checkRegistry = createDefaultCheckRegistry({
       worktreePath: this.world.worktreePath,
-      healthGatePolicies: disabledHealthGates(),
       workflowDefinitionSnapshot: createDefaultWorkflowDefinitionSnapshot(),
     });
-    for (const checkName of ['health:plan', 'health:build', 'health:check', 'health:integrate']) {
-      checkRegistry.register(checkName, this.world.fakeHealthCheck(checkName));
-    }
+    checkRegistry.register('mohist/health-gate', {
+      id: 'mohist/health-gate',
+      build: ({ check }) => this.world.fakeHealthCheck(check.name),
+    });
 
     const runner = new GenericStageRunner({
       taskLoaderRegistry: createTaskLoaderRegistry([
@@ -431,14 +430,6 @@ function defaultBuildTasks() {
     { id: 'T-001', order: 1, title: 'Implement feature', description: 'Implement feature', passes: false, attempts: 0 },
     { id: 'T-002', order: 2, title: 'Add regression coverage', description: 'Add tests', dependsOn: ['T-001'], passes: false, attempts: 0 },
   ];
-}
-
-function disabledHealthGates() {
-  return {
-    plan: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
-    build: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
-    check: { enabled: false, command: 'fake', timeout: 1, autoFix: false, maxFixAttempts: 0, fallbackReaction: { type: 'ask-user' as const } },
-  };
 }
 
 function baseRuntimeTaskId(taskId: string): string {

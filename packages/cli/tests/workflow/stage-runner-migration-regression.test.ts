@@ -165,16 +165,20 @@ function createBasicTaskHandlerRegistry(handlers: Record<string, ReturnType<type
 function createBasicCheckRegistry(checks: Record<string, (ctx: CheckContext) => { name: string; status: 'pass' | 'fail' | 'error' | 'pending'; message?: string; output?: unknown }>): CheckRegistry {
   const map = new Map(Object.entries(checks));
   return {
-    get: (name: string) => {
-      const fn = map.get(name);
-      if (!fn) return undefined;
-      return () => Promise.resolve({
-        name: name,
+    getProvider: vi.fn().mockReturnValue(undefined),
+    register: vi.fn((id: string, provider: any) => {
+      map.set(id, async (ctx: CheckContext) => provider.build({ ctx, stage: ctx.issue.stage, check: { name: id, title: id, uses: id } }).run(ctx));
+    }),
+    build: vi.fn().mockImplementation(async ({ ctx, check }) => {
+      const fn = map.get(check.name);
+      if (!fn) return null;
+      return {
+        name: check.name,
         async run(_ctx: CheckContext) { return fn(_ctx); },
-      });
-    },
-    register: vi.fn(),
-  };
+      };
+    }),
+    listProviders: vi.fn().mockReturnValue([]),
+  } as CheckRegistry;
 }
 
 function createStageDefinition(stage: Stage): RuntimeStageDefinition {
@@ -2640,7 +2644,7 @@ describe('StageRunner migration regression coverage', () => {
       });
     });
 
-    it('default check registry names match declared health checks', async () => {
+    it('default check registry resolves checks by uses provider', async () => {
       const { createDefaultCheckRegistry } = await import('../../src/services/agent-runner-service');
       const { createWorkflowDefinitionSnapshot } = await import('../../src/workflow/model');
       const { Stage } = await import('../../src/types');
@@ -2649,9 +2653,7 @@ describe('StageRunner migration regression coverage', () => {
         worktreePath: tmpDir,
       });
 
-      for (const checkName of ['health:plan', 'health:build', 'health:check', 'health:integrate']) {
-        expect(registry.get(checkName)).toBeDefined();
-      }
+      expect(registry.getProvider('mohist/health-gate')).toBeDefined();
 
       const snapshot = createWorkflowDefinitionSnapshot({
         definition: {
@@ -2672,8 +2674,16 @@ describe('StageRunner migration regression coverage', () => {
         worktreePath: tmpDir,
         workflowDefinitionSnapshot: snapshot,
       });
-      const check = await definitionRegistry.get('health:build')!(makeMockContext(Stage.Build) as any);
-      const result = await check.run(makeMockContext(Stage.Build) as any);
+      const ctx = makeMockContext(Stage.Build) as any;
+      const definition = snapshot.compiledStageDefinitions[0];
+      const check = await definitionRegistry.build({
+        ctx,
+        stage: Stage.Build,
+        check: definition.checks[0],
+        worktreePath: tmpDir,
+        workflowDefinitionSnapshot: snapshot,
+      });
+      const result = await check!.run(ctx);
 
       expect(result.output).toMatchObject({ command: 'printf ok', timeout: 1234 });
     });

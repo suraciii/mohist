@@ -12,6 +12,7 @@ import type { RuntimeStageDefinition, TaskExecutionPolicy, WorkSourceKind } from
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
 import { readTasks } from '../openspec/ralph-executor';
+import { workflowDefinitionSnapshotFromUnknown } from './projection/workflow-run-snapshot';
 
 const log = Log.create({ service: 'generic-stage-runner' });
 export const GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE = 'Generic stage runner requires WorkflowRun requestedWork';
@@ -214,12 +215,13 @@ export class GenericStageRunner implements StageRunner {
     this.ensureStageExecution(ctx);
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
     const checkPolicy = stageDefinition?.checkPolicies?.find(policy => policy.checkName === checkName);
-    if (!stageDefinition || !checkPolicy) {
+    const checkDefinition = stageDefinition?.checks.find(check => check.name === checkName);
+    if (!stageDefinition || !checkPolicy || !checkDefinition) {
       return {
         success: false,
         output: null,
         checkResults: [],
-        message: `Check ${checkName} is not declared by stage policy`,
+        message: `Check ${checkName} is not declared by stage definition`,
       };
     }
 
@@ -236,7 +238,12 @@ export class GenericStageRunner implements StageRunner {
         log.warn('startCheckAttempt failed', { checkName, error: e instanceof Error ? e.message : String(e) });
       }
     }
-    const check = await resolveCheck(this.checkRegistry, checkCtx, checkName);
+    const check = await resolveCheck(this.checkRegistry, checkCtx, {
+      stage: stageDefinition.stage,
+      check: checkDefinition,
+      worktreePath: this.worktreePath,
+      workflowDefinitionSnapshot: workflowDefinitionSnapshotFromUnknown(ctx.workflowRun?.workflowDefinition) ?? undefined,
+    });
     const result = await check.run(checkCtx);
     const accepted = this.recordCheckResult(ctx, result);
 
