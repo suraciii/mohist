@@ -255,7 +255,7 @@ describe('WorkflowEngine aggregate progression', () => {
         tasks: [{ id: 'proposal', title: 'Generate proposal' }],
         checks: [{ name: 'health:plan', title: 'Plan health gate' }],
         checkPolicies: [{ checkName: 'health:plan', phase: 'post-task' as const }],
-        repairPolicies: [],
+        checkFailurePolicies: [],
         checkFailurePolicies: [],
         requiresApproval: false,
       },
@@ -510,7 +510,7 @@ describe('WorkflowEngine aggregate progression', () => {
     const issue = makeIssue(Stage.Build);
     const definitions = DEFAULT_STAGE_DEFINITIONS.map(definition => {
       if (definition.stage === Stage.Plan) return { ...definition, requiresApproval: false };
-      if (definition.stage === Stage.Build) return { ...definition, checks: [], checkPolicies: [], repairPolicies: [], checkFailurePolicies: [] };
+      if (definition.stage === Stage.Build) return { ...definition, checks: [], checkPolicies: [], checkFailurePolicies: [], checkFailurePolicies: [] };
       return definition;
     });
     const { run } = WorkflowRun.startWorkflow({ id: 'run-1', issueId: issue.id, issueNumber: issue.number, definitions });

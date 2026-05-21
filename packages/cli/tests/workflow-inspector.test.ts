@@ -166,8 +166,28 @@ checks:
     uses: mohist/shell
     with:
       command: pnpm build
-    repair:
-      maxAttempts: 4
+    onFailure:
+      retry:
+        limit: 4
+        task:
+          id: fix-build-health
+          title: Fix build health
+          uses: mohist/agent
+          with:
+            prompt:
+              ref: mohist/build/fix-health
+  review-passed:
+    uses: mohist/verdict
+    onFailure:
+      retry:
+        limit: 3
+        task:
+          id: fix-review-findings
+          title: Fix review findings
+          uses: mohist/agent
+          with:
+            prompt:
+              inline: Fix review findings.
 stages:
   plan:
     approval: false
@@ -175,9 +195,6 @@ stages:
     disable:
       checks:
         - merge-ready
-    repair:
-      review-passed:
-        maxAttempts: 3
     checks:
       - id: lint
         title: Lint
@@ -200,10 +217,10 @@ stages:
         uses: 'mohist/shell',
         with: { command: 'pnpm build' },
       });
-      expect(build.repairPolicies?.find(policy => policy.checkName === 'health:build')?.maxAttempts).toBe(4);
+      expect(build.checkFailurePolicies?.find(policy => policy.checkName === 'health:build')?.maxAttempts).toBe(4);
       expect(check.checks.map(candidate => candidate.name)).toContain('lint');
       expect(check.checks.map(candidate => candidate.name)).not.toContain('merge-ready');
-      expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')?.maxAttempts).toBe(3);
+      expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')?.maxAttempts).toBe(3);
       expect(explainWorkflowItem('lint', resolved)).toMatchObject({
         kind: 'check',
         source: 'project',
@@ -381,7 +398,7 @@ workflow:
     }
   });
 
-  it('compiles check-local onFailure retry into repair policies', () => {
+  it('compiles check-local onFailure retry into check failure policies', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-on-failure-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));
     fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
@@ -428,7 +445,7 @@ workflow:
 
       expect(diagnostics).toEqual([]);
       expect(check.checks.find(candidate => candidate.name === 'review-passed')?.onFailure?.retry?.limit).toBe(2);
-      expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
+      expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
         fixTaskId: 'fix-review-findings',
         fixTaskTitle: 'Fix review findings',
         maxAttempts: 2,

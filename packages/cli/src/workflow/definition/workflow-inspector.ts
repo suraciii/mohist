@@ -17,6 +17,7 @@ import {
   type WorkflowDefinitionSnapshot,
   type WorkflowStageId,
 } from '../model';
+import { compileRuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
 import {
   parseWorkflowDefinitionSource,
   type WorkflowSourceDefinition,
@@ -83,7 +84,7 @@ export function resolveWorkflowDefinition(cwd: string = process.cwd()): Resolved
   const parsed = parseWorkflowOverride(overridePath);
   if (parsed.diagnostics.some(diagnostic => diagnostic.severity === 'error')) {
     return {
-      snapshot: createWorkflowDefinitionSnapshot({
+      snapshot: createRuntimeSnapshot({
         definition: MOHIST_DEFAULT_WORKFLOW_DEFINITION,
         source: { type: 'builtin', id: MOHIST_DEFAULT_WORKFLOW_DEFINITION.id },
       }),
@@ -95,7 +96,7 @@ export function resolveWorkflowDefinition(cwd: string = process.cwd()): Resolved
   if (isFullCustomWorkflowDocument(parsed.document)) {
     const compiled = compileFullCustomWorkflow(parsed.document, overridePath);
     return {
-      snapshot: createWorkflowDefinitionSnapshot({
+      snapshot: createRuntimeSnapshot({
         definition: compiled.definition,
         source: { type: 'project', path: overridePath },
       }),
@@ -107,7 +108,7 @@ export function resolveWorkflowDefinition(cwd: string = process.cwd()): Resolved
   const definition = cloneWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
   const diagnostics = applyWorkflowOverride(definition, parsed.document, overridePath);
   return {
-    snapshot: createWorkflowDefinitionSnapshot({
+    snapshot: createRuntimeSnapshot({
       definition,
       source: { type: 'project', path: overridePath },
     }),
@@ -422,13 +423,17 @@ function parseStageId(value: unknown): WorkflowStageId | null {
 
 function resolveBuiltinDefault(): ResolvedWorkflowDefinition {
   return {
-    snapshot: createWorkflowDefinitionSnapshot({
+    snapshot: createRuntimeSnapshot({
       definition: MOHIST_DEFAULT_WORKFLOW_DEFINITION,
       source: { type: 'builtin', id: MOHIST_DEFAULT_WORKFLOW_DEFINITION.id },
     }),
     sourceChain: ['mohist/default'],
     diagnostics: [],
   };
+}
+
+function createRuntimeSnapshot(input: Parameters<typeof createWorkflowDefinitionSnapshot>[0]): WorkflowDefinitionSnapshot {
+  return compileRuntimeWorkflowDefinitionSnapshot(createWorkflowDefinitionSnapshot(input));
 }
 
 function findWorkflowOverridePath(cwd: string): string | null {
@@ -541,7 +546,6 @@ function applyStageOverrides(
     }
 
     applyDisableList(stage, raw.disable, stagePath, diagnostics);
-    applyRepairOverrides(stage, raw.repair, stagePath, diagnostics);
     applyStageChecks(stage, raw.checks, stagePath, diagnostics);
   }
 }
@@ -574,34 +578,6 @@ function applyDisableList(
     stage.checks = stage.checks.filter(check => check.name !== value);
     if (stage.tasks.length === taskCount && stage.checks.length === checkCount) {
       diagnostics.push({ severity: 'error', path: `${stagePath}.disable`, message: `Cannot disable unknown task or check '${value}'` });
-    }
-  }
-}
-
-function applyRepairOverrides(
-  stage: StageDefinition,
-  rawRepair: unknown,
-  stagePath: string,
-  diagnostics: WorkflowDiagnostic[],
-): void {
-  if (!rawRepair) return;
-  if (!isRecord(rawRepair)) {
-    diagnostics.push({ severity: 'error', path: `${stagePath}.repair`, message: 'repair must be a mapping keyed by check name' });
-    return;
-  }
-  for (const [checkName, raw] of Object.entries(rawRepair)) {
-    if (!isRecord(raw) || typeof raw.maxAttempts !== 'number') {
-      diagnostics.push({ severity: 'error', path: `${stagePath}.repair.${checkName}.maxAttempts`, message: 'repair maxAttempts must be a number' });
-      continue;
-    }
-    let changed = false;
-    const check = stage.checks.find(candidate => candidate.name === checkName);
-    if (check?.onFailure?.retry) {
-      check.onFailure.retry.limit = raw.maxAttempts;
-      changed = true;
-    }
-    if (!changed) {
-      diagnostics.push({ severity: 'error', path: `${stagePath}.repair.${checkName}`, message: `Unknown repair policy for check '${checkName}'` });
     }
   }
 }
@@ -651,15 +627,9 @@ function applyCheckOverride(
   check.source = 'project';
   if (typeof raw.uses === 'string') check.uses = raw.uses;
   if (isRecord(raw.with)) check.with = { ...raw.with };
-  const maxAttempts = isRecord(raw.repair) ? raw.repair.maxAttempts : raw.maxAttempts;
-  if (maxAttempts !== undefined) {
-    if (typeof maxAttempts !== 'number') {
-      diagnostics.push({ severity: 'error', path: `${checkPath}.maxAttempts`, message: 'repair maxAttempts must be a number' });
-    } else {
-      if (check.onFailure?.retry) {
-        check.onFailure.retry.limit = maxAttempts;
-      }
-    }
+  if (isRecord(raw.onFailure)) {
+    const nextOnFailure = compileCheckOnFailure(raw.onFailure, `${checkPath}.onFailure`, diagnostics);
+    if (nextOnFailure) check.onFailure = nextOnFailure;
   }
 }
 
@@ -734,11 +704,6 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
         diagnostics.push({ severity: 'error', path: `${stagePath}.checkPolicies`, message: `Check policy references unknown check '${policy.checkName}'` });
       }
     }
-    for (const repair of stage.repairPolicies ?? []) {
-      if (!checkNames.has(repair.checkName)) {
-        diagnostics.push({ severity: 'error', path: `${stagePath}.repairPolicies`, message: `Repair policy references unknown check '${repair.checkName}'` });
-      }
-    }
   }
 
   return diagnostics;
@@ -759,9 +724,7 @@ export function explainWorkflowItem(
 }
 
 function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
-  const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
-    ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-  const uses = task.uses ?? inferWorkflowTaskUse(task.id, policy?.kind);
+  const uses = task.uses ?? inferWorkflowTaskUse(task.id);
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'task',
@@ -778,8 +741,7 @@ function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): Expl
 
 function explainCheck(stage: CompiledStageDefinition, check: CheckDefinition): ExplainedWorkflowItem {
   const phase = stage.checkPolicies?.find(candidate => candidate.checkName === check.name)?.phase ?? 'post-task';
-  const reaction = stage.repairPolicies?.find(candidate => candidate.checkName === check.name)
-    ?? stage.checkFailurePolicies?.find(candidate => candidate.checkName === check.name);
+  const reaction = stage.checkFailurePolicies?.find(candidate => candidate.checkName === check.name);
   const uses = check.uses ?? inferWorkflowCheckUse(check.name);
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
@@ -806,9 +768,8 @@ function findCheck(definition: WorkflowDefinition, checkName: string): { stage: 
 }
 
 function inferTaskUseForStage(stage: CompiledStageDefinition, taskId: string): string {
-  const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
-    ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-  return inferWorkflowTaskUse(taskId, policy?.kind);
+  const task = stage.tasks.find(candidate => candidate.id === taskId);
+  return task?.uses ?? inferWorkflowTaskUse(taskId);
 }
 
 function hasAgentPromptSource(withConfig: Record<string, unknown> | undefined): boolean {

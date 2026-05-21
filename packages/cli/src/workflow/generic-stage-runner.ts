@@ -7,7 +7,8 @@ import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
 import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
 import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, CompiledStageDefinition, TaskDefinition, TaskExecutionKind, TaskExecutionPolicy, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId, WorkSourceKind } from './model';
+import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
+import type { RuntimeStageDefinition, TaskExecutionKind, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';
 import { inferWorkflowTaskUse } from './uses-catalog';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
@@ -28,7 +29,7 @@ export interface GenericStageRunnerOptions {
   taskHandlerRegistry: TaskHandlerRegistry;
   checkRegistry: CheckRegistry;
   taskDispatchFactoryRegistry?: TaskDispatchFactoryRegistry;
-  getStageDefinition(stage: WorkflowStageId): CompiledStageDefinition | undefined;
+  getStageDefinition(stage: WorkflowStageId): RuntimeStageDefinition | undefined;
   worktreePath: string;
   enabledStages?: WorkflowStageId[];
 }
@@ -38,7 +39,7 @@ export class GenericStageRunner implements StageRunner {
   private taskHandlerRegistry: TaskHandlerRegistry;
   private taskDispatchFactoryRegistry: TaskDispatchFactoryRegistry;
   private checkRegistry: CheckRegistry;
-  private getStageDefinition: (stage: WorkflowStageId) => CompiledStageDefinition | undefined;
+  private getStageDefinition: (stage: WorkflowStageId) => RuntimeStageDefinition | undefined;
   private worktreePath: string;
   private enabledStages?: Set<WorkflowStageId>;
   private stageExecutionId?: string;
@@ -360,8 +361,7 @@ export class GenericStageRunner implements StageRunner {
 
   private repairAttemptsRemaining(ctx: StageContext, checkName: string): boolean {
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
-    const policy = stageDefinition?.repairPolicies?.find(candidate => candidate.checkName === checkName)
-      ?? stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === checkName);
+    const policy = stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === checkName);
     if (!policy) return false;
 
     const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
@@ -554,7 +554,7 @@ export class GenericStageRunner implements StageRunner {
     return task.taskId ?? task.id ?? '';
   }
 
-  private resolveExecutableTask(ctx: StageContext, taskId: string, stageDefinition: CompiledStageDefinition): ExecutableTask | null {
+  private resolveExecutableTask(ctx: StageContext, taskId: string, stageDefinition: RuntimeStageDefinition): ExecutableTask | null {
     for (const workSource of stageDefinition.workSources ?? []) {
       if (workSource.kind === 'runtime') continue;
 
@@ -592,7 +592,7 @@ export class GenericStageRunner implements StageRunner {
   }
 
   private resolveTaskExecutionPolicy(
-    stageDefinition: CompiledStageDefinition,
+    stageDefinition: RuntimeStageDefinition,
     taskId: string,
     workSourceKind?: WorkSourceKind,
   ): TaskExecutionPolicy | undefined {
@@ -603,7 +603,7 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private resolveRuntimeTask(ctx: StageContext, stageDefinition: CompiledStageDefinition, taskId: string): ExecutableTask | null {
+  private resolveRuntimeTask(ctx: StageContext, stageDefinition: RuntimeStageDefinition, taskId: string): ExecutableTask | null {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     const task = this.sourceTaskDefinition(stageDefinition, taskId)
       ?? this.runtimeTaskDefinition(ctx, taskId)
@@ -681,7 +681,7 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private sourceTaskDefinition(stageDefinition: CompiledStageDefinition, taskId: string): import('./model').TaskDefinition | undefined {
+  private sourceTaskDefinition(stageDefinition: RuntimeStageDefinition, taskId: string): import('./model').TaskDefinition | undefined {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     return stageDefinition.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
       ?? stageDefinition.checks
@@ -689,7 +689,7 @@ export class GenericStageRunner implements StageRunner {
         .find((task): task is import('./model').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
-  private taskWorkSourceKind(ctx: StageContext, stageDefinition: CompiledStageDefinition, taskId: string): WorkSourceKind | undefined {
+  private taskWorkSourceKind(ctx: StageContext, stageDefinition: RuntimeStageDefinition, taskId: string): WorkSourceKind | undefined {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     for (const workSource of stageDefinition.workSources ?? []) {
       if (workSource.kind === 'static') {

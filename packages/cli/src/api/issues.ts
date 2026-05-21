@@ -483,12 +483,10 @@ function projectWorkflowRun(run: WorkflowRunWithStageRuns) {
 
 function taskOrigin(stageDefinition: CompiledStageDefinition | undefined, taskId: string): WorkItemOrigin {
   const definition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
-  const policy = stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
-    ?? stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
 
   return {
     source: definition ? (definition.source ?? 'builtin') : (stageDefinition ? 'runtime' : 'builtin'),
-    uses: definition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind),
+    uses: definition?.uses ?? inferWorkflowTaskUse(taskId),
   };
 }
 

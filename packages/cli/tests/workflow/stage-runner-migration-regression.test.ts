@@ -212,7 +212,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { checkName: 'health:plan', phase: 'post-task' },
       ],
       approvalPolicy: { checkName: 'user-approval' },
-      repairPolicies: [
+      checkFailurePolicies: [
         { checkName: 'self-review-passed', fixTaskId: 'fix-plan-review', fixTaskTitle: 'Fix plan review findings', maxAttempts: 1 },
       ],
       invalidationPolicy: { entries: [] },
@@ -224,7 +224,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
       workSources: [{ kind: 'ralph' }, { kind: 'runtime' }],
       taskExecutionPolicies: [],
       checkPolicies: [{ checkName: 'health:build', phase: 'post-task' }],
-      repairPolicies: [{ checkName: 'health:build', fixTaskId: 'fix-build-health', fixTaskTitle: 'Fix build health', maxAttempts: 1 }],
+      checkFailurePolicies: [{ checkName: 'health:build', fixTaskId: 'fix-build-health', fixTaskTitle: 'Fix build health', maxAttempts: 1 }],
       invalidationPolicy: { entries: [] },
     },
     [Stage.Check]: {
@@ -286,7 +286,7 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { checkName: 'merge-ready', phase: 'post-task' },
       ],
       approvalPolicy: { checkName: 'user-approval' },
-      repairPolicies: [
+      checkFailurePolicies: [
         { checkName: 'health:check', fixTaskId: 'fix-check-health', fixTaskTitle: 'Fix check health', maxAttempts: 1 },
         { checkName: 'review-passed', fixTaskId: 'fix-review-findings', fixTaskTitle: 'Fix review findings', maxAttempts: 1 },
         { checkName: 'merge-ready', fixTaskId: 'fix-merge-readiness', fixTaskTitle: 'Fix merge readiness', maxAttempts: 1 },
@@ -317,12 +317,12 @@ function createStageDefinition(stage: Stage): StageDefinition {
         { taskId: 'integrate:merge', kind: 'service-call' },
       ],
       checkPolicies: [{ checkName: 'health:integrate', phase: 'post-task' }],
-      repairPolicies: [],
+      checkFailurePolicies: [],
       invalidationPolicy: { entries: [] },
     },
-    [Stage.Explore]: { stage: Stage.Explore, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], repairPolicies: [], invalidationPolicy: { entries: [] } },
-    [Stage.Done]: { stage: Stage.Done, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], repairPolicies: [], invalidationPolicy: { entries: [] } },
-    [Stage.Backlog]: { stage: Stage.Backlog, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], repairPolicies: [], invalidationPolicy: { entries: [] } },
+    [Stage.Explore]: { stage: Stage.Explore, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], checkFailurePolicies: [], invalidationPolicy: { entries: [] } },
+    [Stage.Done]: { stage: Stage.Done, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], checkFailurePolicies: [], invalidationPolicy: { entries: [] } },
+    [Stage.Backlog]: { stage: Stage.Backlog, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], checkFailurePolicies: [], invalidationPolicy: { entries: [] } },
   };
   return defs[stage];
 }
@@ -733,7 +733,7 @@ describe('StageRunner migration regression coverage', () => {
           workSources: [{ kind: 'static', taskIds: ['handoff'] }],
           taskExecutionPolicies: [{ taskId: 'handoff', kind: 'agent-session', workSourceKind: 'static' }],
           checkPolicies: [],
-          repairPolicies: [],
+          checkFailurePolicies: [],
           invalidationPolicy: { entries: [] },
         };
 
@@ -2511,7 +2511,7 @@ describe('StageRunner migration regression coverage', () => {
           { name: 'custom-verdict', title: 'Custom verdict' },
           { name: 'custom-candidate', title: 'Custom candidate' },
         ],
-        repairPolicies: [{ checkName: 'custom-verdict', fixTaskId: 'fix-custom-review', fixTaskTitle: 'Fix custom review', maxAttempts: 1 }],
+        checkFailurePolicies: [{ checkName: 'custom-verdict', fixTaskId: 'fix-custom-review', fixTaskTitle: 'Fix custom review', maxAttempts: 1 }],
         invalidationPolicy: {
           entries: [
             {
@@ -2683,12 +2683,12 @@ describe('StageRunner migration regression coverage', () => {
       expect(def.approvalPolicy?.checkName).toBe('user-approval');
     });
 
-    it('Check stage definition includes repair policies', () => {
+    it('Check stage definition includes check failure policies', () => {
       const def = createStageDefinition(Stage.Check);
-      expect(def.repairPolicies).toBeDefined();
-      expect(def.repairPolicies.length).toBeGreaterThan(0);
-      expect(def.repairPolicies.some((p: any) => p.checkName === 'health:check')).toBe(true);
-      expect(def.repairPolicies.some((p: any) => p.checkName === 'review-passed')).toBe(true);
+      expect(def.checkFailurePolicies).toBeDefined();
+      expect(def.checkFailurePolicies.length).toBeGreaterThan(0);
+      expect(def.checkFailurePolicies.some((p: any) => p.checkName === 'health:check')).toBe(true);
+      expect(def.checkFailurePolicies.some((p: any) => p.checkName === 'review-passed')).toBe(true);
       expect(def.checks.map(check => check.name)).toEqual(['health:check', 'review-passed', 'merge-ready']);
     });
 

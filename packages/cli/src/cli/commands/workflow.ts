@@ -73,9 +73,7 @@ export function renderWorkflowShow(resolved: ResolvedWorkflowDefinition, output:
   for (const stage of resolved.snapshot.compiledStageDefinitions) {
     output.write(chalk.bold(stage.stage[0].toUpperCase() + stage.stage.slice(1)));
     for (const task of stage.tasks) {
-      const policy = stage.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
-        ?? stage.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(task.uses ?? inferWorkflowTaskUse(task.id, policy?.kind)).padEnd(18)} source: ${task.source ?? 'builtin'}`);
+      output.write(`  Task   ${task.id.padEnd(28)} uses: ${(task.uses ?? inferWorkflowTaskUse(task.id)).padEnd(18)} source: ${task.source ?? 'builtin'}`);
     }
     for (const check of stage.checks) {
       output.write(`  Check  ${check.name.padEnd(28)} uses: ${(check.uses ?? inferWorkflowCheckUse(check.name)).padEnd(18)} source: ${check.source ?? 'builtin'}`);

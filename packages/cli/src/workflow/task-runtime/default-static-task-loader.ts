@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { WorkflowDefinitionSnapshot } from '../model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../definition/default-workflow';
+import type { RuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
 import { Log } from '../../util/log';
 import type { StageContext } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
@@ -14,7 +14,7 @@ export function createDefaultStaticTaskLoader(worktreePath: string): TaskLoader 
     kind: 'static',
     load(ctx: StageContext): ExecutableTask[] {
       const definition = ctx.workflowRun?.workflowDefinition
-        ? (ctx.workflowRun.workflowDefinition as WorkflowDefinitionSnapshot).compiledStageDefinitions.find(candidate => candidate.stage === ctx.issue.stage)
+        ? (ctx.workflowRun.workflowDefinition as RuntimeWorkflowDefinitionSnapshot).compiledStageDefinitions.find(candidate => candidate.stage === ctx.issue.stage)
         : DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === ctx.issue.stage);
       if (!definition) return [];
 

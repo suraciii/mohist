@@ -2,6 +2,7 @@ import { Stage } from '../../types';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
 import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '../model';
 import { WorkflowRun } from '../model';
+import { compileRuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
 import type {
   CausedByMetadata,
   CheckRunStatus,
@@ -250,7 +251,7 @@ export function workflowDefinitionSnapshotFromUnknown(value: unknown): WorkflowD
   if (!snapshot.resolvedDefinition || typeof snapshot.resolvedDefinition !== 'object') return null;
   if (!Array.isArray(snapshot.compiledStageDefinitions)) return null;
   if (typeof snapshot.capturedAt !== 'string') return null;
-  return snapshot as WorkflowDefinitionSnapshot;
+  return compileRuntimeWorkflowDefinitionSnapshot(snapshot as WorkflowDefinitionSnapshot);
 }
 
 export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSnapshot, definition?: CompiledStageDefinition): FreezePoint | null {
@@ -280,9 +281,7 @@ export function freezePointFromStageSnapshot(_stage: Stage, snapshot: StageRunSn
 
 function workflowTaskUse(definition: CompiledStageDefinition | undefined, taskId: string): string {
   const taskDefinition = definition?.tasks.find(task => task.id === taskId);
-  const policy = definition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
-    ?? definition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-  return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
+  return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId);
 }
 
 function workflowCheckUse(definition: CompiledStageDefinition | undefined, checkName: string): string {

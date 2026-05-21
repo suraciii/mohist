@@ -778,7 +778,6 @@ export class StageRun {
 
   removeGeneratedTasks(): void {
     const repairTaskIds = new Set([
-      ...(this.definition.repairPolicies?.map(policy => policy.fixTaskId) ?? []),
       ...(this.definition.checkFailurePolicies?.map(policy => policy.fixTaskId) ?? []),
     ]);
     const staticTaskIds = new Set(this.definition.tasks.map(task => task.id));
@@ -864,7 +863,7 @@ export class StageRun {
   }
 
   hasDynamicWorkSource(): boolean {
-    return (this.definition.workSources ?? []).some(source => source.kind !== 'static' && source.kind !== 'runtime');
+    return Boolean(this.definition.tasksFrom);
   }
 }
 
@@ -1128,9 +1127,7 @@ export class WorkflowRun {
       }, events);
     }
 
-    const policy =
-      stageRun.definition.repairPolicies?.find(candidate => candidate.checkName === result.name) ??
-      stageRun.definition.checkFailurePolicies?.find(candidate => candidate.checkName === result.name);
+    const policy = stageRun.definition.checkFailurePolicies?.find(candidate => candidate.checkName === result.name);
     const scheduledFixCount = stageRun.scheduledFixCount(result.name);
     if (policy && scheduledFixCount < policy.maxAttempts) {
       const causedBy: CausedByMetadata = {
@@ -1647,11 +1644,11 @@ export class WorkflowRun {
 
   private taskUse(stageRun: StageRun, taskId: string): string {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
-    const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId || task.id === baseTaskId);
-    const policy = stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
-      ?? (baseTaskId !== taskId ? stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === baseTaskId) : undefined)
-      ?? stageRun.definition.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-    return taskDefinition?.uses ?? inferWorkflowTaskUse(baseTaskId, policy?.kind);
+    const taskDefinition = stageRun.definition.tasks.find(task => task.id === taskId || task.id === baseTaskId)
+      ?? stageRun.definition.checks
+        .map(check => check.onFailure?.retry?.task)
+        .find((task): task is NonNullable<typeof task> => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
+    return taskDefinition?.uses ?? inferWorkflowTaskUse(baseTaskId);
   }
 
   private taskLocksCode(stageRun: StageRun, taskId: string): boolean {
