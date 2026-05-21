@@ -4,7 +4,7 @@ import * as yaml from 'yaml';
 import {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   MOHIST_DEFAULT_WORKFLOW_YAML,
-} from './default-workflow';
+} from '../builtins/workflows/mohist-default';
 import {
   cloneWorkflowDefinition,
   createWorkflowDefinitionSnapshot,

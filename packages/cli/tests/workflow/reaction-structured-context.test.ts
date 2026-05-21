@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { registerMohistDefaultMarkerFormats } from '../../src/workflow/builtins/workflows/mohist-default';
+
+registerMohistDefaultMarkerFormats();
 
 function makeIssue() {
   return {
@@ -210,7 +213,7 @@ describe('Reaction structured context: T-006', () => {
 
   describe('Default Check retry prompt shape', () => {
     it('review-passed retry uses a plain review.md prompt instead of input selectors', async () => {
-      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/definition/default-workflow');
+      const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/builtins/workflows/mohist-default');
       const checkStage = DEFAULT_STAGE_DEFINITIONS.find(s => s.stage === 'check');
       expect(checkStage).toBeDefined();
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { IssueStatus, MergeState, Stage } from '../../src/types';
-import { DefaultWorkflowHarness, type DefaultWorkflowScenario } from './default-workflow/harness';
+import { IssueStatus, MergeState, Stage } from '../../../../src/types';
+import { DefaultWorkflowHarness, type DefaultWorkflowScenario } from './harness';
 
 describe('default workflow external-system harness', () => {
   let harnesses: DefaultWorkflowHarness[] = [];
@@ -82,7 +82,7 @@ describe('default workflow external-system harness', () => {
         verification: [
           expect.objectContaining({
             checkName: 'repair:F-001',
-            command: 'npm test -- tests/workflow/default-workflow-harness.test.ts',
+            command: 'npm test -- tests/workflow/builtins/workflows/mohist-default/default-workflow-harness.test.ts',
             status: 'pass',
           }),
         ],

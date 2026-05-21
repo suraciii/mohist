@@ -1,8 +1,1 @@
-export interface RequiredMarkerDefinition {
-  path: string;
-  markers: string[];
-  onMissing?: {
-    action: 'continue-session';
-    maxAttempts?: number;
-  };
-}
+export * from '../builtins/tasks/agent-required-markers';

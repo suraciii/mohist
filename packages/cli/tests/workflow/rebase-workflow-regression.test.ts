@@ -3,7 +3,7 @@ import {
   WorkflowRun,
   type StageDefinition,
 } from '../../src/workflow/model';
-import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/definition/default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/builtins/workflows/mohist-default';
 import { Stage } from '../../src/types';
 
 function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): WorkflowRun {
