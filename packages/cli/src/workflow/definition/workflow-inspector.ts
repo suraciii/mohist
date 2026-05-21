@@ -239,7 +239,7 @@ function compileCustomTasks(
       diagnostics.push({
         severity: 'error',
         path: `${taskPath}.with.prompt`,
-        message: `Agent task '${task.id}' requires with.prompt ref/file/inline or with.promptFile`,
+        message: `Agent task '${task.id}' requires with.prompt file/inline or with.promptFile`,
       });
     }
     tasks.push(task);
@@ -272,7 +272,7 @@ function validateAgentTaskPrompt(task: TaskDefinition, path: string): WorkflowDi
     return {
       severity: 'error',
       path,
-      message: `Agent task '${task.id}' requires with.prompt ref/file/inline or with.promptFile`,
+      message: `Agent task '${task.id}' requires with.prompt file/inline or with.promptFile`,
     };
   }
   return null;
@@ -708,7 +708,7 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
         diagnostics.push({
           severity: 'error',
           path: `${stagePath}.tasks[${taskIndex}].with.prompt`,
-          message: `Agent task '${task.id}' requires with.prompt ref/file/inline or with.promptFile`,
+          message: `Agent task '${task.id}' requires with.prompt file/inline or with.promptFile`,
         });
       }
       for (const dependency of task.dependsOn ?? []) {
@@ -846,8 +846,7 @@ function hasAgentPromptSource(withConfig: Record<string, unknown> | undefined): 
   if (typeof withConfig.prompt === 'string' && withConfig.prompt.trim().length > 0) return true;
   if (!isRecord(withConfig.prompt)) return false;
   const prompt = withConfig.prompt;
-  return (typeof prompt.ref === 'string' && prompt.ref.trim().length > 0)
-    || (typeof prompt.file === 'string' && prompt.file.trim().length > 0)
+  return (typeof prompt.file === 'string' && prompt.file.trim().length > 0)
     || (typeof prompt.inline === 'string' && prompt.inline.trim().length > 0);
 }
 

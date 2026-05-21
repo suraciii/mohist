@@ -51,6 +51,7 @@ describe('workflow inspector', () => {
       expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'health:check').with).not.toHaveProperty('approvalEvidence');
       expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'merge-ready').with).toBeUndefined();
       expect(parsed.workflow.stages[2].checks.find((check: any) => check.id === 'merge-ready')).not.toHaveProperty('approvalEvidence');
+      expect(yamlText).not.toContain('mohist/plan/');
       expect(yamlText).not.toContain('mohist/plan/fix-review');
       expect(yamlText).not.toContain('mohist/build/fix-health');
       expect(yamlText).not.toContain('mohist/check/fix-health');
@@ -175,7 +176,7 @@ checks:
           uses: mohist/agent
           with:
             prompt:
-              ref: mohist/build/fix-health
+              inline: Fix build health.
   review-passed:
     uses: mohist/verdict
     onFailure:
@@ -374,11 +375,6 @@ workflow:
           with:
             prompt:
               file: .mohist/prompts/handoff.md
-        - id: builtin-report
-          uses: mohist/agent
-          with:
-            prompt:
-              ref: mohist/check/ai-review
       checks: []
 `, 'utf-8');
 
@@ -388,10 +384,9 @@ workflow:
       const build = resolved.snapshot.compiledStageDefinitions[0];
 
       expect(diagnostics).toEqual([]);
-      expect(build.tasks.map(task => task.id)).toEqual(['inline-report', 'file-report', 'builtin-report']);
+      expect(build.tasks.map(task => task.id)).toEqual(['inline-report', 'file-report']);
       expect(build.tasks[0].with).toMatchObject({ prompt: { inline: 'Write a short report.' } });
       expect(build.tasks[1].with).toMatchObject({ prompt: { file: '.mohist/prompts/handoff.md' } });
-      expect(build.tasks[2].with).toMatchObject({ prompt: { ref: 'mohist/check/ai-review' } });
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -490,7 +485,7 @@ workflow:
       expect(diagnostics).toContainEqual(expect.objectContaining({
         severity: 'error',
         path: expect.stringContaining('workflow.stages[0].checks[0].onFailure.retry.task.with.prompt'),
-        message: "Agent task 'fix-review-findings' requires with.prompt ref/file/inline or with.promptFile",
+        message: "Agent task 'fix-review-findings' requires with.prompt file/inline or with.promptFile",
       }));
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
