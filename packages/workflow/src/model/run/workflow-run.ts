@@ -178,7 +178,7 @@ export class WorkflowRun {
       throw new WorkflowDomainError(`Cannot schedule runtime task in stage ${stageRun.stage}; current stage is ${this.currentStage}`);
     }
 
-    const existingTask = stageRun.tasks.find(t => t.id === input.taskId && !t.terminal);
+    const existingTask = stageRun.tasks.find(t => t.id === input.taskId && t.run.status !== 'completed' && t.run.status !== 'failed');
     if (existingTask) {
       return this.decision([]);
     }
@@ -221,24 +221,14 @@ export class WorkflowRun {
       effectiveResult.events = this.mergeTaskEvents(effectiveResult.events, this.taskSuccessEvents(stageRun, taskId));
     }
 
-    task.status = effectiveResult.status;
-    task.attempts = effectiveResult.attempts ?? task.attempts + 1;
-    task.duration = effectiveResult.duration ?? task.duration;
-    task.artifacts = effectiveResult.artifacts ?? task.artifacts;
-    task.events = effectiveResult.events ?? task.events;
-    task.output = effectiveResult.output ?? task.output;
-    task.reason = effectiveResult.reason ?? task.reason;
-    task.causedBy = effectiveResult.causedBy ?? task.causedBy;
-    task.resetBy = null;
-
-    if (task.latestAttempt?.state === 'running') {
-      const attemptNow = new Date().toISOString();
-      if (effectiveResult.status === 'completed') {
-        task.completeWorkAttempt({ output: effectiveResult.output, artifacts: effectiveResult.artifacts, events: effectiveResult.events, duration: effectiveResult.duration }, attemptNow);
-      } else if (effectiveResult.status === 'failed' || effectiveResult.status === 'skipped') {
-        task.failWorkAttempt(effectiveResult.reason ?? 'Task failed', null, attemptNow);
-      }
+    if (effectiveResult.status === 'completed') {
+      task.run.complete();
+    } else {
+      task.run.fail();
     }
+    task.output = effectiveResult.output ?? task.output;
+    task.events = effectiveResult.events ?? task.events;
+    task.reason = effectiveResult.reason ?? task.reason;
 
     if (this.taskLocksCode(stageRun, taskId) && effectiveResult.status === 'completed') {
       stageRun.commitPoint = {
@@ -249,7 +239,7 @@ export class WorkflowRun {
       };
     }
 
-    if (effectiveResult.status === 'failed' || effectiveResult.status === 'skipped') {
+    if (effectiveResult.status === 'failed') {
       const failure: FailureDetails = {
         reason: 'task-failed',
         stage,
@@ -392,11 +382,11 @@ export class WorkflowRun {
     return this.fail(stageRun, failure, [{ type: 'approval-rejected', stage, reason: failure }]);
   }
 
-  startTaskAttempt(stage: WorkflowStageId, taskId: string, now: string): void {
+  startTaskAttempt(stage: WorkflowStageId, taskId: string): void {
     if (this.status !== 'running') return;
     const stageRun = this.stageRun(stage);
     const task = stageRun.findTask(taskId);
-    task.startWorkAttempt(now);
+    task.run.start();
   }
 
   startCheckAttempt(stage: WorkflowStageId, checkName: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
@@ -414,13 +404,6 @@ export class WorkflowRun {
     const pending = new Set(attempts);
     let interrupted = 0;
 
-    for (const task of stageRun.tasks) {
-      if (task.latestAttempt?.state === 'running' && pending.has(task.latestAttempt)) {
-        task.interruptWorkAttempt(reason, diagnostic, now);
-        pending.delete(task.latestAttempt);
-        interrupted++;
-      }
-    }
     for (const check of stageRun.checks) {
       if (check.latestAttempt?.state === 'running' && pending.has(check.latestAttempt)) {
         check.interruptWorkAttempt(reason, diagnostic, now);
@@ -437,12 +420,6 @@ export class WorkflowRun {
     if (!stageRun) return;
     const now = new Date().toISOString();
     let interrupted = 0;
-    for (const task of stageRun.tasks) {
-      if (task.latestAttempt?.state === 'running') {
-        task.interruptWorkAttempt(reason, diagnostic, now);
-        interrupted++;
-      }
-    }
     for (const check of stageRun.checks) {
       if (check.latestAttempt?.state === 'running') {
         check.interruptWorkAttempt(reason, diagnostic, now);
@@ -474,25 +451,26 @@ export class WorkflowRun {
       if (priorStageRun.order >= stageRun.order) break;
       if (priorStageRun.status !== 'passed') continue;
       for (const task of priorStageRun.tasks) {
-        if (task.status === 'completed') continue;
-        task.status = 'completed';
-        if (task.attempts === 0) task.attempts = 1;
+        if (task.run.status === 'completed') continue;
+        task.run.complete();
         task.reason = null;
-        task.causedBy = null;
       }
     }
 
     stageRun.status = 'running';
     stageRun.attemptSequence += 1;
     const wasApprovalRejected = (stageFailureReason ?? runFailureReason) === 'approval-rejected';
-    const failedTask = stageRun.tasks.find(t => t.status === 'failed' || t.status === 'skipped');
+    const failedTask = stageRun.tasks.find(t => t.run.status === 'failed');
     const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
     stageRun.failure = null;
     stageRun.approval = null;
 
     if (wasApprovalRejected) {
       for (const task of stageRun.tasks) {
-        task.resetForFreshAttempt();
+        task.run.resetForFreshAttempt();
+        task.events = [];
+        task.output = null;
+        task.reason = null;
       }
       for (const check of stageRun.checks) {
         check.resetForFreshAttempt();
@@ -513,18 +491,25 @@ export class WorkflowRun {
         }
 
         for (const task of stageRun.tasks) {
-          if (!task.terminal) {
-            const isRetryTaskForFailedCheck = task.causedBy?.type === 'check-failure' && task.causedBy.checkName === failedCheck.name;
+          if (task.run.status !== 'completed' && task.run.status !== 'failed') {
+            const retryPolicy = stageRun.definition.checkFailurePolicies?.find(policy => policy.checkName === failedCheck.name);
+            const isRetryTaskForFailedCheck = Boolean(retryPolicy && (task.id === retryPolicy.retryTaskId || task.id.startsWith(`${retryPolicy.retryTaskId}:`)));
             if (!isRetryTaskForFailedCheck) {
-              task.resetForFreshAttempt();
+              task.run.resetForFreshAttempt();
+              task.events = [];
+              task.output = null;
+              task.reason = null;
             }
           }
         }
         stageRun.resetCheckAndDownstream(failedCheck.name);
       } else {
         for (const task of stageRun.tasks) {
-          if (!task.terminal) {
-            task.resetForFreshAttempt();
+          if (task.run.status !== 'completed' && task.run.status !== 'failed') {
+            task.run.resetForFreshAttempt();
+            task.events = [];
+            task.output = null;
+            task.reason = null;
           }
         }
         for (const check of stageRun.checks) {
@@ -542,7 +527,7 @@ export class WorkflowRun {
 
     const events: WorkflowEvent[] = [];
     for (const task of stageRun.tasks) {
-      if (task.status !== 'completed') continue;
+      if (task.run.status !== 'completed') continue;
       const baseTaskId = baseRuntimeTaskId(task.id);
       const raisedEvents = new Set(task.events);
       for (const entry of policy.entries) {
@@ -552,12 +537,8 @@ export class WorkflowRun {
         const reason = entry.reason ?? `Policy invalidation while retrying after ${task.id}`;
         for (const taskId of entry.invalidates.tasks ?? []) {
           try {
-            const newTaskRun = stageRun.appendTaskRun(taskId, {
-              type: 'workflow-policy',
-              taskId: task.id,
-              eventName: entry.eventName,
-              message: reason,
-            });
+            const newTaskRun = stageRun.appendTaskRun(taskId);
+            newTaskRun.reason = reason;
             events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: newTaskRun.id, reason });
           } catch {
             // Task may not belong to this stage definition.
@@ -603,11 +584,9 @@ export class WorkflowRun {
       if (priorStageRun.order >= stageRun.order) break;
       if (priorStageRun.status !== 'passed') continue;
       for (const task of priorStageRun.tasks) {
-        if (task.status === 'completed') continue;
-        task.status = 'completed';
-        if (task.attempts === 0) task.attempts = 1;
+        if (task.run.status === 'completed') continue;
+        task.run.complete();
         task.reason = null;
-        task.causedBy = null;
       }
     }
 
@@ -623,7 +602,10 @@ export class WorkflowRun {
     }
 
     for (const task of stageRun.tasks) {
-      task.resetForFreshAttempt();
+      task.run.resetForFreshAttempt();
+      task.events = [];
+      task.output = null;
+      task.reason = null;
     }
     for (const check of stageRun.checks) {
       check.resetForFreshAttempt();
@@ -636,14 +618,13 @@ export class WorkflowRun {
     if (this.status === 'passed') return { kind: 'complete' };
     if (this.status === 'failed') return { kind: 'failed', reason: this.failure! };
     const stageRun = this.currentStageRun();
-    const failedTask = stageRun.currentTasks().find(task => task.status === 'failed' || task.status === 'skipped');
+    const failedTask = stageRun.currentTasks().find(task => task.run.status === 'failed');
     if (failedTask) {
       const failure: FailureDetails = {
         reason: 'task-failed',
         stage: stageRun.stage,
         taskId: failedTask.id,
         message: failedTask.reason ?? undefined,
-        causedBy: failedTask.causedBy ?? undefined,
       };
       this.fail(stageRun, failure, []);
       return { kind: 'failed', reason: failure };
@@ -688,7 +669,7 @@ export class WorkflowRun {
     const latestRunningAttempt = this.findCurrentStageRunningAttempt(stageRun);
     if (latestRunningAttempt) return 'running';
 
-    const failedTask = stageRun.currentTasks().find(t => t.status === 'failed' || t.status === 'skipped');
+    const failedTask = stageRun.currentTasks().find(t => t.run.status === 'failed');
     const failedCheck = stageRun.checks.find(c => c.status === 'failed' || c.status === 'error');
     if (failedTask || failedCheck) return 'waiting-for-recovery';
 
@@ -697,7 +678,6 @@ export class WorkflowRun {
 
     const currentWorkItem = this.findCurrentStagePendingWorkItem(stageRun);
     if (currentWorkItem?.latestAttempt?.state === 'failed') return 'waiting-for-recovery';
-    if (currentWorkItem?.latestAttempt === null && currentWorkItem.causedBy) return 'waiting-for-recovery';
 
     if (this.status === 'failed') return 'waiting-for-recovery';
 
@@ -706,21 +686,17 @@ export class WorkflowRun {
 
   private findCurrentStagePendingWorkItem(stageRun: StageRun): {
     latestAttempt: WorkItemAttempt | null;
-    causedBy?: CausedByMetadata | null;
   } | null {
     const preTaskCheck = stageRun.nextCheck('pre-task');
     if (preTaskCheck) return { latestAttempt: preTaskCheck.latestAttempt };
     const task = stageRun.nextTask();
-    if (task) return { latestAttempt: task.latestAttempt, causedBy: task.causedBy };
+    if (task) return { latestAttempt: null };
     const postTaskCheck = stageRun.nextCheck('post-task');
     if (postTaskCheck) return { latestAttempt: postTaskCheck.latestAttempt };
     return null;
   }
 
   private findCurrentStageRunningAttempt(stageRun: StageRun): WorkItemAttempt | null {
-    for (const task of stageRun.currentTasks()) {
-      if (task.latestAttempt?.state === 'running') return task.latestAttempt;
-    }
     for (const check of stageRun.checks) {
       if (check.latestAttempt?.state === 'running') return check.latestAttempt;
     }
@@ -728,9 +704,6 @@ export class WorkflowRun {
   }
 
   private findCurrentStageInterruptedAttempt(stageRun: StageRun): WorkItemAttempt | null {
-    for (const task of stageRun.currentTasks()) {
-      if (task.latestAttempt?.state === 'interrupted') return task.latestAttempt;
-    }
     for (const check of stageRun.checks) {
       if (check.latestAttempt?.state === 'interrupted') return check.latestAttempt;
     }
@@ -738,9 +711,6 @@ export class WorkflowRun {
   }
 
   private findCurrentStageFailedAttempt(stageRun: StageRun): WorkItemAttempt | null {
-    for (const task of stageRun.currentTasks()) {
-      if (task.latestAttempt?.state === 'failed') return task.latestAttempt;
-    }
     for (const check of stageRun.checks) {
       if (check.latestAttempt?.state === 'failed') return check.latestAttempt;
     }
@@ -791,7 +761,7 @@ export class WorkflowRun {
     for (const taskDef of stageRun.definition.tasks) {
       const taskRun = stageRun.currentTasks().find(t => baseRuntimeTaskId(t.id) === taskDef.id);
       if (!taskRun) return { complete: false, reason: 'missing-static-task', taskId: taskDef.id };
-      if (taskRun.status !== 'completed') return { complete: false, reason: 'static-task-not-successful', taskId: taskDef.id, status: taskRun.status };
+      if (taskRun.run.status !== 'completed') return { complete: false, reason: 'static-task-not-successful', taskId: taskDef.id, status: taskRun.run.status };
     }
 
     const nonApprovalCheckNames = new Set(stageRun.nonApprovalCheckPolicies().map(policy => policy.checkName));
@@ -809,7 +779,7 @@ export class WorkflowRun {
     if (!deliveryEvidenceGuard.complete) return deliveryEvidenceGuard;
 
     for (const taskRun of stageRun.currentTasks()) {
-      if (!taskRun.terminal) return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
+      if (taskRun.run.status !== 'completed' && taskRun.run.status !== 'failed') return { complete: false, reason: 'run-task-pending', taskId: taskRun.id };
     }
 
     if ((options.includeApproval ?? true) && stageRun.requiresApproval() && stageRun.approval?.status !== 'approved') {
@@ -821,7 +791,7 @@ export class WorkflowRun {
 
   private evaluateDeliveryEvidenceGuard(stageRun: StageRun): StageCompletionGuard {
     for (const taskRun of stageRun.currentTasks()) {
-      if (taskRun.status !== 'completed') continue;
+      if (taskRun.run.status !== 'completed') continue;
       const uses = this.taskUse(stageRun, taskRun.id);
       const evidence = validateWorkflowUseEvidence(uses, taskRun.output);
       if (!evidence.ok) {
@@ -960,12 +930,8 @@ export class WorkflowRun {
         for (const t of entry.invalidates.tasks) {
           try {
             const reason = entry.reason ?? `Policy invalidation after ${taskId}`;
-            const task = stageRun.appendTaskRun(t, {
-              type: 'workflow-policy',
-              taskId,
-              eventName: entry.eventName,
-              message: reason,
-            });
+            const task = stageRun.appendTaskRun(t);
+            task.reason = reason;
             events.push({ type: 'task-invalidated', stage: stageRun.stage, taskId: task.id, reason });
           } catch {
             // task not in stage, skip

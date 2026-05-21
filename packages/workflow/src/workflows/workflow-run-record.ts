@@ -76,20 +76,12 @@ function restoreTasks(stageRun: ReturnType<WorkflowRun['currentStageRun']>, task
     const task = stageRun.restoreTaskState(
       taskState.id,
       taskState.title,
-      taskState.order,
       taskState.uses,
     );
-    task.status = taskState.status;
-    task.dependsOn = [...taskState.dependsOn];
-    task.attempts = taskState.attempts;
-    task.duration = taskState.duration;
-    task.artifacts = [...taskState.artifacts];
+    task.run.status = taskState.status;
     task.events = [...taskState.events];
     task.output = taskState.output;
     task.reason = taskState.reason;
-    task.causedBy = taskState.causedBy;
-    task.resetBy = taskState.resetBy;
-    task.latestAttempt = taskState.latestAttempt;
   }
 }
 

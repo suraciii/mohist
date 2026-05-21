@@ -2,7 +2,7 @@ import type { CheckFailurePolicy, CompiledStageDefinition, WorkflowStageId } fro
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
-export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type CheckRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
 export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted';
 export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed';
@@ -75,7 +75,7 @@ export interface CommitPoint {
 }
 
 export interface TaskResultInput {
-  status: 'completed' | 'failed' | 'skipped';
+  status: 'completed' | 'failed';
   attempts?: number;
   duration?: number;
   artifacts?: string[];
@@ -131,7 +131,6 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'static-check-not-passed'; checkName: string }
   | { complete: false; reason: 'run-task-pending'; taskId: string }
   | { complete: false; reason: 'run-task-failed'; taskId: string }
-  | { complete: false; reason: 'run-task-skipped'; taskId: string }
   | { complete: false; reason: 'dynamic-source-not-evaluated'; stage: WorkflowStageId }
   | { complete: false; reason: 'dynamic-source-missing'; stage: WorkflowStageId }
   | { complete: false; reason: 'dynamic-source-invalid'; stage: WorkflowStageId }
@@ -149,17 +148,9 @@ export interface TaskRunState {
   title: string;
   uses?: string;
   status: TaskRunStatus;
-  order: number;
-  dependsOn: string[];
-  attempts: number;
-  duration: number;
-  artifacts: string[];
   events: string[];
   output: unknown | null;
   reason: string | null;
-  causedBy: CausedByMetadata | null;
-  resetBy: TaskResetMetadata | null;
-  latestAttempt: WorkItemAttempt | null;
 }
 
 export interface CheckRunState {

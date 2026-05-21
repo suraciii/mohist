@@ -2,10 +2,20 @@ import type { CheckFailurePolicy, CheckPhase, CheckPolicy, CompiledStageDefiniti
 import { WorkflowDomainError } from '../errors';
 import { CheckState } from './check-state';
 import { TaskRun } from './task-run';
-import { baseRuntimeTaskId, escapeRegExp, type ApprovalState, type CausedByMetadata, type CommitPoint, type FailureDetails, type MaterializedTaskInput, type StageRunState, type StageRunStatus, type TaskResetMetadata, type WorkSourceState } from './types';
+import { baseRuntimeTaskId, escapeRegExp, type ApprovalState, type CausedByMetadata, type CommitPoint, type FailureDetails, type MaterializedTaskInput, type StageRunState, type StageRunStatus, type WorkSourceState } from './types';
+
+interface TaskEntry {
+  id: string;
+  title: string;
+  uses?: string;
+  run: TaskRun;
+  events: string[];
+  output: unknown | null;
+  reason: string | null;
+}
 
 export class StageRun {
-  readonly tasks: TaskRun[];
+  readonly tasks: TaskEntry[];
   readonly checks: CheckState[];
   status: StageRunStatus = 'pending';
   attemptSequence = 1;
@@ -18,11 +28,7 @@ export class StageRun {
     readonly definition: CompiledStageDefinition,
     readonly order: number,
   ) {
-    this.tasks = definition.tasks.map((task, index) => {
-      const taskRun = new TaskRun(task.id, task.title, index, task.uses);
-      taskRun.dependsOn = [...(task.dependsOn ?? [])];
-      return taskRun;
-    });
+    this.tasks = definition.tasks.map(task => this.createTaskEntry(task.id, task.title, task.uses));
     this.checks = definition.checks.map(check => new CheckState(check.name, check.title));
   }
 
@@ -41,21 +47,15 @@ export class StageRun {
     for (const task of [...tasks].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
       const existing = this.tasks.find(candidate => candidate.id === task.id);
       if (existing) {
-        existing.dependsOn = [...(task.dependsOn ?? existing.dependsOn)];
         continue;
       }
-      const taskRun = new TaskRun(task.id, task.title, task.order ?? this.tasks.length, task.uses);
-      taskRun.dependsOn = [...(task.dependsOn ?? [])];
+      const taskRun = this.createTaskEntry(task.id, task.title, task.uses);
       this.tasks.push(taskRun);
     }
-    this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   }
 
-  nextTask(): TaskRun | null {
-    return this.currentTasks().find(task => {
-      if (task.terminal) return false;
-      return task.dependsOn.every(depId => this.tasks.find(dep => dep.id === depId)?.succeeded);
-    }) ?? null;
+  nextTask(): TaskEntry | null {
+    return this.currentTasks().find(task => !this.isTaskTerminal(task)) ?? null;
   }
 
   nextCheck(phase?: 'pre-task' | 'post-task'): CheckState | null {
@@ -86,47 +86,44 @@ export class StageRun {
   }
 
   allRequiredTasksTerminal(): boolean {
-    return this.currentTasks().every(task => task.terminal);
+    return this.currentTasks().every(task => this.isTaskTerminal(task));
   }
 
   allRequiredTasksSucceeded(): boolean {
-    return this.currentTasks().every(task => task.status === 'completed');
+    return this.currentTasks().every(task => task.run.status === 'completed');
   }
 
   hasFailedTask(): boolean {
-    return this.currentTasks().some(task => task.status === 'failed' || task.status === 'skipped');
+    return this.currentTasks().some(task => task.run.status === 'failed');
   }
 
-  currentTasks(): TaskRun[] {
-    const latestByBaseTaskId = new Map<string, TaskRun>();
+  currentTasks(): TaskEntry[] {
+    const latestByBaseTaskId = new Map<string, TaskEntry>();
     for (const task of this.tasks) {
       const baseTaskId = baseRuntimeTaskId(task.id);
       const existing = latestByBaseTaskId.get(baseTaskId);
-      if (!existing || task.order > existing.order || (task.order === existing.order && task.id.localeCompare(existing.id) > 0)) {
+      if (!existing || this.tasks.indexOf(task) > this.tasks.indexOf(existing)) {
         latestByBaseTaskId.set(baseTaskId, task);
       }
     }
     return this.tasks.filter(task => latestByBaseTaskId.get(baseRuntimeTaskId(task.id)) === task);
   }
 
-  appendTaskRun(taskId: string, resetBy: TaskResetMetadata): TaskRun {
+  appendTaskRun(taskId: string): TaskEntry {
     const baseTaskId = baseRuntimeTaskId(taskId);
     const latest = this.latestTaskRun(baseTaskId);
     if (!latest) throw new WorkflowDomainError(`Task ${taskId} does not exist in stage ${this.stage}`);
     const nextIndex = this.nextTaskRunIndex(baseTaskId);
     const id = `${baseTaskId}:${nextIndex}`;
-    const task = new TaskRun(id, latest.title, latest.order + 1, latest.uses);
-    task.dependsOn = [...latest.dependsOn];
-    task.resetBy = resetBy;
+    const task = this.createTaskEntry(id, latest.title, latest.uses);
     this.tasks.push(task);
-    this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
     return task;
   }
 
-  private latestTaskRun(baseTaskId: string): TaskRun | undefined {
+  private latestTaskRun(baseTaskId: string): TaskEntry | undefined {
     return this.tasks
       .filter(task => baseRuntimeTaskId(task.id) === baseTaskId)
-      .sort((a, b) => b.order - a.order || b.id.localeCompare(a.id))[0];
+      .at(-1);
   }
 
   private nextTaskRunIndex(baseTaskId: string): number {
@@ -145,7 +142,7 @@ export class StageRun {
       .every(check => check.status === 'passed');
   }
 
-  findTask(taskId: string): TaskRun {
+  findTask(taskId: string): TaskEntry {
     const task = taskId === baseRuntimeTaskId(taskId)
       ? this.currentTasks().find(candidate => baseRuntimeTaskId(candidate.id) === taskId)
       : this.tasks.find(candidate => candidate.id === taskId);
@@ -159,9 +156,12 @@ export class StageRun {
     return check;
   }
 
-  resetTask(taskId: string, resetBy: TaskResetMetadata | null = null): void {
+  resetTask(taskId: string): void {
     const task = this.findTask(taskId);
-    task.resetForFreshAttempt(resetBy);
+    task.run.resetForFreshAttempt();
+    task.events = [];
+    task.output = null;
+    task.reason = null;
   }
 
   resetCheck(checkName: string): void {
@@ -171,12 +171,13 @@ export class StageRun {
 
   resetTaskAndDownstream(taskId: string): void {
     const task = this.findTask(taskId);
-    const boundaryOrder = task.order;
+    const boundaryIndex = this.tasks.indexOf(task);
 
-    for (const t of this.tasks) {
-      if (t.order >= boundaryOrder) {
-        t.resetForFreshAttempt();
-      }
+    for (const t of this.tasks.slice(boundaryIndex)) {
+      t.run.resetForFreshAttempt();
+      t.events = [];
+      t.output = null;
+      t.reason = null;
     }
   }
 
@@ -188,25 +189,20 @@ export class StageRun {
         c.resetForFreshAttempt();
       }
     }
-
-    for (const t of this.tasks) {
-      if (t.causedBy?.type === 'check-failure' && t.causedBy.checkName === checkName) {
-        t.resetForFreshAttempt();
-      }
-    }
   }
 
   scheduledRetryTaskCount(checkName: string): number {
-    return this.tasks.filter(task => task.causedBy?.type === 'check-failure' && task.causedBy.checkName === checkName).length;
+    const policy = this.definition.checkFailurePolicies?.find(candidate => candidate.checkName === checkName);
+    if (!policy) return 0;
+    return this.tasks.filter(task => task.id === policy.retryTaskId || task.id.startsWith(`${policy.retryTaskId}:`)).length;
   }
 
-  appendRetryTask(policy: CheckFailurePolicy, causedBy: CausedByMetadata): TaskRun {
+  appendRetryTask(policy: CheckFailurePolicy, causedBy: CausedByMetadata): TaskEntry {
     const suffix = this.scheduledRetryTaskCount(policy.checkName);
     const id = this.tasks.some(task => task.id === policy.retryTaskId) ? `${policy.retryTaskId}:${suffix}` : policy.retryTaskId;
     const taskDefinition = this.retryTaskDefinition(policy.retryTaskId);
-    const task = new TaskRun(id, policy.retryTaskTitle, this.tasks.length, taskDefinition?.uses);
+    const task = this.createTaskEntry(id, policy.retryTaskTitle, taskDefinition?.uses);
     task.reason = causedBy.message ?? `Retry after ${policy.checkName}`;
-    task.causedBy = causedBy;
     this.tasks.push(task);
     return task;
   }
@@ -224,10 +220,9 @@ export class StageRun {
     this.approval = null;
   }
 
-  appendAdHocTask(id: string, title: string, causedBy: CausedByMetadata, uses?: string): TaskRun {
-    const task = new TaskRun(id, title, this.tasks.length, uses);
+  appendAdHocTask(id: string, title: string, causedBy: CausedByMetadata, uses?: string): TaskEntry {
+    const task = this.createTaskEntry(id, title, uses);
     task.reason = causedBy.message ?? title;
-    task.causedBy = causedBy;
     this.tasks.push(task);
     return task;
   }
@@ -240,7 +235,7 @@ export class StageRun {
     for (let index = this.tasks.length - 1; index >= 0; index--) {
       const task = this.tasks[index];
       const isRetryTask = [...retryTaskIds].some(retryTaskId => task.id === retryTaskId || task.id.startsWith(`${retryTaskId}:`));
-      const isRuntimeTask = !staticTaskIds.has(task.id) && task.causedBy !== null;
+      const isRuntimeTask = !staticTaskIds.has(task.id);
       if (isRetryTask || isRuntimeTask) {
         this.tasks.splice(index, 1);
       }
@@ -276,12 +271,11 @@ export class StageRun {
     this.workSourceState = { evaluated: false };
   }
 
-  restoreTaskState(id: string, title: string, order: number, uses?: string): TaskRun {
+  restoreTaskState(id: string, title: string, uses?: string): TaskEntry {
     const existing = this.tasks.find(task => task.id === id);
     if (existing) return existing;
-    const task = new TaskRun(id, title, order, uses);
+    const task = this.createTaskEntry(id, title, uses);
     this.tasks.push(task);
-    this.tasks.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
     return task;
   }
 
@@ -309,7 +303,15 @@ export class StageRun {
       status: this.status,
       order: this.order,
       attemptSequence: this.attemptSequence,
-      tasks: this.tasks.map(task => task.state()),
+      tasks: this.tasks.map(task => ({
+        id: task.id,
+        title: task.title,
+        uses: task.uses,
+        status: task.run.status,
+        events: [...task.events],
+        output: task.output,
+        reason: task.reason,
+      })),
       checks: this.checks.map(check => check.state()),
       approval: this.approval ? { ...this.approval } : null,
       failure: this.failure,
@@ -320,5 +322,21 @@ export class StageRun {
 
   hasDynamicWorkSource(): boolean {
     return Boolean(this.definition.tasksFrom);
+  }
+
+  private isTaskTerminal(task: TaskEntry): boolean {
+    return task.run.status === 'completed' || task.run.status === 'failed';
+  }
+
+  private createTaskEntry(id: string, title: string, uses?: string): TaskEntry {
+    return {
+      id,
+      title,
+      uses,
+      run: new TaskRun(),
+      events: [],
+      output: null,
+      reason: null,
+    };
   }
 }
