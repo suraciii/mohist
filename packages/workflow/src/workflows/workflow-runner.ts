@@ -141,7 +141,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     } else if (result.state === 'empty') {
       this.workflowRun.markTaskSourceEmpty(stage);
     } else {
-      this.workflowRun.addTasksFromSource(stage, result.tasks);
+      this.workflowRun.addTasks(stage, result.tasks);
     }
     return result.tasks.length > 0;
   }

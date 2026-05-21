@@ -108,7 +108,7 @@ export class WorkflowRun {
     return this.stageRun(stage).definition.checks.find(candidate => candidate.name === checkName) ?? null;
   }
 
-  addTasksFromSource(stage: WorkflowStageId, tasks: MaterializedTaskInput[]): void {
+  addTasks(stage: WorkflowStageId, tasks: MaterializedTaskInput[]): void {
     const stageRun = this.stageRun(stage);
     stageRun.workSourceState = tasks.length === 0
       ? { evaluated: true, empty: true }
