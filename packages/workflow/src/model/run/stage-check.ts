@@ -16,12 +16,27 @@ export class StageCheck {
     readonly title: string,
   ) {}
 
-  resetForFreshAttempt(): void {
+  reset(): void {
     this.status = 'pending';
     this.message = null;
     this.output = null;
     this.runCount = 0;
     this.latestAttempt = null;
+  }
+
+  pass(): void {
+    this.status = 'passed';
+    this.runCount += 1;
+  }
+
+  fail(): void {
+    this.status = 'failed';
+    this.runCount += 1;
+  }
+
+  error(): void {
+    this.status = 'error';
+    this.runCount += 1;
   }
 
   state(): CheckRunState {

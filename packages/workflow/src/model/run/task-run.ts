@@ -12,7 +12,7 @@ export class TaskRun {
     readonly uses?: string,
   ) {}
 
-  resetForFreshAttempt(): void {
+  reset(): void {
     this.status = 'pending';
     this.events = [];
     this.output = null;
