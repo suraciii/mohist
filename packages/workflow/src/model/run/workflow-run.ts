@@ -16,7 +16,6 @@ import {
   type ApprovalInput,
   type CausedByMetadata,
   type CheckResultInput,
-  type CheckRunStatus,
   type FailureDetails,
   type MaterializedTaskInput,
   type StageCompletionGuard,
@@ -281,12 +280,10 @@ export class WorkflowRun {
     const effectiveStatus: CheckResultInput['status'] = evidenceFailure ? 'fail' : result.status;
     const effectiveMessage = evidenceFailure ?? result.message;
 
-    const check = stageRun.recordCheckResult(result.name, {
-      status: this.toCheckStatus(effectiveStatus),
-      message: effectiveMessage ?? null,
-      output: normalizedOutput,
-    });
+    const check = this.applyCheckResult(stageRun, result.name, effectiveStatus);
     if (!check) throw new WorkflowDomainError(`Check ${result.name} does not exist in stage ${stageRun.stage}`);
+    check.message = effectiveMessage ?? null;
+    check.output = normalizedOutput;
 
     if (check.latestAttempt?.state === 'running') {
       const attemptNow = new Date().toISOString();
@@ -468,19 +465,19 @@ export class WorkflowRun {
 
     if (wasApprovalRejected) {
       for (const task of stageRun.tasks) {
-        task.resetForFreshAttempt();
+        task.reset();
         task.events = [];
         task.output = null;
         task.reason = null;
       }
       for (const check of stageRun.checks) {
-        check.resetForFreshAttempt();
+        check.reset();
       }
     } else {
       if (failedTask) {
         this.resetTaskAndDownstream(stageRun, failedTask.id);
         for (const check of stageRun.checks) {
-          check.resetForFreshAttempt();
+          check.reset();
         }
       } else if (failedCheck) {
         const retryInvalidationEvents = this.applyRetryInvalidationForCompletedTasks(stageRun);
@@ -496,7 +493,7 @@ export class WorkflowRun {
             const retryPolicy = stageRun.definition.checkFailurePolicies?.find(policy => policy.checkName === failedCheck.name);
             const isRetryTaskForFailedCheck = Boolean(retryPolicy && (task.id === retryPolicy.retryTaskId || task.id.startsWith(`${retryPolicy.retryTaskId}:`)));
             if (!isRetryTaskForFailedCheck) {
-              task.resetForFreshAttempt();
+              task.reset();
               task.events = [];
               task.output = null;
               task.reason = null;
@@ -507,14 +504,14 @@ export class WorkflowRun {
       } else {
         for (const task of stageRun.tasks) {
           if (task.status !== 'completed' && task.status !== 'failed') {
-            task.resetForFreshAttempt();
+            task.reset();
             task.events = [];
             task.output = null;
             task.reason = null;
           }
         }
         for (const check of stageRun.checks) {
-          check.resetForFreshAttempt();
+          check.reset();
         }
       }
     }
@@ -603,13 +600,13 @@ export class WorkflowRun {
     }
 
     for (const task of stageRun.tasks) {
-      task.resetForFreshAttempt();
+      task.reset();
       task.events = [];
       task.output = null;
       task.reason = null;
     }
     for (const check of stageRun.checks) {
-      check.resetForFreshAttempt();
+      check.reset();
     }
 
     return this.decision([{ type: 'stage-retried', stage }]);
@@ -751,6 +748,17 @@ export class WorkflowRun {
     return check;
   }
 
+  private applyCheckResult(
+    stageRun: StageRun,
+    checkName: string,
+    status: CheckResultInput['status'],
+  ) {
+    if (status === 'pass') return stageRun.passCheck(checkName);
+    if (status === 'fail') return stageRun.failCheck(checkName);
+    if (status === 'error') return stageRun.errorCheck(checkName);
+    return stageRun.resetCheck(checkName);
+  }
+
   private nextCheck(stageRun: StageRun) {
     if (!this.allRequiredTasksTerminal(stageRun)) return null;
     return stageRun.checks.find(check => !this.isApprovalCheck(stageRun, check.name) && check.status !== 'passed') ?? null;
@@ -805,13 +813,13 @@ export class WorkflowRun {
   }
 
   private resetCheck(stageRun: StageRun, checkName: string): void {
-    this.requireCheck(stageRun, checkName).resetForFreshAttempt();
+    this.requireCheck(stageRun, checkName).reset();
   }
 
   private resetCheckAndDownstream(stageRun: StageRun, checkName: string): void {
     const boundaryIndex = stageRun.checks.findIndex(check => check.name === checkName);
     for (const check of stageRun.checks.slice(boundaryIndex)) {
-      check.resetForFreshAttempt();
+      check.reset();
     }
   }
 
@@ -819,7 +827,7 @@ export class WorkflowRun {
     const task = this.requireTask(stageRun, taskId);
     const boundaryIndex = stageRun.tasks.indexOf(task);
     for (const candidate of stageRun.tasks.slice(boundaryIndex)) {
-      candidate.resetForFreshAttempt();
+      candidate.reset();
     }
   }
 
@@ -1063,12 +1071,6 @@ export class WorkflowRun {
       result: 'PASS',
       checks: passedChecks,
     };
-  }
-
-  private toCheckStatus(status: CheckResultInput['status']): CheckRunStatus {
-    if (status === 'pass') return 'passed';
-    if (status === 'fail') return 'failed';
-    return status;
   }
 
   private applyTaskCompletionInvalidation(stageRun: StageRun, taskId: string, result: TaskResultInput): WorkflowEvent[] {
