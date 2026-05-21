@@ -14,7 +14,7 @@ import type { ConfigInfo } from '../config/config-schema';
 import type { StageStateService } from '../services/stage-state-service';
 import { resolveStageModel } from '../config/model-resolution';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { StageCompletionGuard, TaskRunSnapshot, WorkflowStageId, WorkflowWork } from './model';
+import type { StageCompletionGuard, TaskRunSnapshot, WorkflowStageId, WorkflowWork } from '@mohist/workflow/internal/model';
 
 export interface PipelineResult {
   completed: boolean;

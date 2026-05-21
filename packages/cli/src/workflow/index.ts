@@ -31,7 +31,7 @@ export {
   type Check,
   type CheckResult as CheckTypeCheckResult,
   type CheckContext as CheckTypeCheckContext,
-} from './checks';
+} from '@mohist/workflow/checks';
 
 export {
   CheckpointManager,
@@ -68,8 +68,8 @@ export {
   type WorkflowDefinition,
   type StageDefinition,
   type ReactionInputSelector,
-} from './model';
+} from '@mohist/workflow/internal/model';
 
 export {
   buildFailedCheckContext,
-} from './reaction/reaction-context';
+} from '@mohist/workflow/reaction/reaction-context';

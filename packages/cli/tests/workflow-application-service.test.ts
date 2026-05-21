@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WorkflowApplicationService, type WorkflowRunProjectionPort, type WorkflowRunRepositoryPort } from '../src/services/workflow-application-service';
-import { WorkflowRun, createWorkflowDefinitionSnapshot } from '../src/workflow/model';
-import { parseWorkflowDefinitionSource } from '../src/workflow/definition/workflow-definition-source';
+import { WorkflowRun, createWorkflowDefinitionSnapshot } from '@mohist/workflow/internal/model';
+import { parseWorkflowDefinitionSource } from '@mohist/workflow/definition/workflow-definition-source';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 import { Stage } from '../src/types';
 import type { WorkflowAttemptEvidencePort } from '../src/services/attempt-reconciliation-service';

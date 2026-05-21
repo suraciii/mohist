@@ -1,5 +1,5 @@
-import type { Check, CheckContext, CheckResult } from '../../checks';
-import { parseStructuredResult, buildStructuredResult, isParseError } from '../../result-contracts';
+import type { Check, CheckContext, CheckResult } from '@mohist/workflow/checks';
+import { parseStructuredResult, buildStructuredResult, isParseError } from '@mohist/workflow/result-contracts';
 import { enrichReviewStructuredResult, REVIEW_RESULT_CONTRACT } from './review-result-contracts';
 import { extractFixSuggestions, readReportFile } from '../../utils';
 import { Log } from '../../../util/log';
@@ -64,7 +64,7 @@ export class AiReviewCheck implements Check {
   }
 }
 
-function describeParseError(err: import('../../result-contracts').ParseError): string {
+function describeParseError(err: import('@mohist/workflow/result-contracts').ParseError): string {
   switch (err.error) {
     case 'source-missing':
       return `${err.source} not found — review round may not have completed`;

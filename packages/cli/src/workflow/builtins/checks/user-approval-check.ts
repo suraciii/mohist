@@ -1,4 +1,4 @@
-import type { Check, CheckContext, CheckResult } from '../../checks';
+import type { Check, CheckContext, CheckResult } from '@mohist/workflow/checks';
 import { isCurrentStageApproval } from '../../issue-lifecycle';
 import type { Issue } from '../../../types';
 

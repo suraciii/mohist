@@ -1,5 +1,5 @@
 import type { MergeabilitySnapshot } from '../git/worktree-manager';
-import type { WorkflowRunSnapshot, StageRunSnapshot } from '../workflow/model';
+import type { WorkflowRunSnapshot, StageRunSnapshot } from '@mohist/workflow/internal/model';
 import type { StageApprovalState } from './stage-state-service';
 import type { EventBus } from './event-bus';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';

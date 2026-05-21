@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Check, CheckContext, CheckResult } from '../../checks';
+import type { Check, CheckContext, CheckResult } from '@mohist/workflow/checks';
 
 export class AllTasksCompleteCheck implements Check {
   public readonly name = 'all-tasks-complete';

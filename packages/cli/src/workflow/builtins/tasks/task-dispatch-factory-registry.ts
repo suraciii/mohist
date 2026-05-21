@@ -3,8 +3,8 @@ import * as path from 'path';
 import { MergeState } from '../../../types';
 import type { StageContext, StageTaskResult } from '../../stage-context';
 import { emitStageTaskUpdate } from '../../stage-context';
-import type { ExecutableTask } from '../../tasks/types';
-import type { TaskDefinition } from '../../model';
+import type { ExecutableTask } from '@mohist/workflow/tasks/types';
+import type { TaskDefinition } from '@mohist/workflow/internal/model';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
 import { createServiceCallTaskHandler } from './service-call-task-handler';
@@ -12,8 +12,8 @@ import type {
   TaskDispatchInput,
   TaskDispatchProvider,
   TaskDispatchRegistry,
-} from '../../tasks/task-dispatch-registry';
-import { createTaskDispatchRegistry } from '../../tasks/task-dispatch-registry';
+} from '@mohist/workflow/tasks/task-dispatch-registry';
+import { createTaskDispatchRegistry } from '@mohist/workflow/tasks/task-dispatch-registry';
 import { workflowDefinitionSnapshotFromUnknown } from '../../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';

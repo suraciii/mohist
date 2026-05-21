@@ -1,7 +1,7 @@
 import { Log } from '../../../../util/log';
 import { extractFixSuggestions, parseDimensions } from '../../../utils';
-import type { CheckContext }  from '../../../checks';
-import { registerMarkerFormat }  from '../../../checks/marker-format-registry';
+import type { CheckContext }  from '@mohist/workflow/checks';
+import { registerMarkerFormat }  from '@mohist/workflow/checks/marker-format-registry';
 import { enrichReviewStructuredResult } from './review-contracts';
 import { extractStructuredResultMetadata } from './review-metadata';
 

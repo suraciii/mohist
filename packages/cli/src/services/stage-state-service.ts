@@ -3,9 +3,9 @@ import { Stage } from '../types';
 import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { WorkflowConvergenceState } from '../types';
-import { extractReactionOutput } from '../workflow/reaction/convergence';
-import type { CompiledStageDefinition } from '../workflow/model';
-import { getWorkflowUseDefinition, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
+import { extractReactionOutput } from '@mohist/workflow/reaction/convergence';
+import type { CompiledStageDefinition } from '@mohist/workflow/internal/model';
+import { getWorkflowUseDefinition, unwrapWorkflowUseOutput } from '@mohist/workflow/uses-catalog';
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';

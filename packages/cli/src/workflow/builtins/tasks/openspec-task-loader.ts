@@ -1,12 +1,12 @@
 import type { StageContext as MohistStageContext } from '../../stage-context';
 import type { StageContext } from '@mohist/workflow/runtime';
-import type { TaskLoader } from '../../tasks/task-loader-registry';
-import type { ExecutableTask } from '../../tasks/types';
+import type { TaskLoader } from '@mohist/workflow/tasks/task-loader-registry';
+import type { ExecutableTask } from '@mohist/workflow/tasks/types';
 import * as path from 'path';
 import { detectOpenSpecChange } from '../../../openspec/detector';
 import { readTasks } from '../../../openspec/ralph-executor';
-import type { RuntimeStageDefinition } from '../../runner/workflow-runtime-definition';
-import type { WorkflowTasksFromDefinition } from '../../model';
+import type { RuntimeStageDefinition } from '@mohist/workflow/runner/workflow-runtime-definition';
+import type { WorkflowTasksFromDefinition } from '@mohist/workflow/internal/model';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../../template';
 import type { Task } from '../../../openspec/context-assembler';
 import { workflowDefinitionSnapshotFromUnknown } from '../../projection/workflow-run-snapshot';

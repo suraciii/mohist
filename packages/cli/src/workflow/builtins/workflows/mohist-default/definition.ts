@@ -4,18 +4,18 @@ import {
   compileWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
   type WorkflowDefinition,
-} from '../../../model';
+} from '@mohist/workflow/internal/model';
 import {
   compileRuntimeStageDefinitions,
   compileRuntimeWorkflowDefinitionSnapshot,
   type RuntimeStageDefinition,
   type RuntimeWorkflowDefinitionSnapshot,
-} from '../../../runner/workflow-runtime-definition';
+} from '@mohist/workflow/runner/workflow-runtime-definition';
 import {
   parseWorkflowDefinitionSource,
   workflowDefinitionSourceToYaml,
   type WorkflowSourceDefinition,
-} from '../../../definition/workflow-definition-source';
+} from '@mohist/workflow/definition/workflow-definition-source';
 
 const DEFAULT_PLAN_HEALTH_COMMAND = 'npm ci && npm run typecheck';
 const DEFAULT_BUILD_HEALTH_COMMAND = 'npm ci && npm run build';

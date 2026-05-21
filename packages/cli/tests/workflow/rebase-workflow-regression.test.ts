@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   WorkflowRun,
   type StageDefinition,
-} from '../../src/workflow/model';
+} from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/builtins/workflows/mohist-default';
 import { Stage } from '../../src/types';
 

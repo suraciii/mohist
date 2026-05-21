@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Stage, IssueStatus } from '../../../../src/types';
 import { createOpenSpecTaskLoader } from '../../../../src/workflow/builtins/tasks';
 import type { StageContext } from '../../../../src/workflow/stage-context';
-import { createWorkflowDefinitionSnapshot } from '../../../../src/workflow/model';
+import { createWorkflowDefinitionSnapshot } from '@mohist/workflow/internal/model';
 
 function makeContext(worktreePath: string, changeDir: string): StageContext {
   const workflowDefinition = createWorkflowDefinitionSnapshot({

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateBaseDrift, BaseDriftService, type BaseDriftInput, type GitFacts, type CandidateEvidence, type WorkflowFacts } from '../src/services/base-drift-service';
 import { Stage, IssueStatus, MergeState } from '../src/types';
-import type { WorkflowRunSnapshot, StageRunSnapshot } from '../src/workflow/model';
+import type { WorkflowRunSnapshot, StageRunSnapshot } from '@mohist/workflow/internal/model';
 
 function makeGitFacts(overrides: Partial<GitFacts> = {}): GitFacts {
   return {

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Stage, IssueStatus, type Issue } from '../src/types';
 import { WorkflowEngine } from '../src/workflow/workflow-engine';
 import { EventBus } from '../src/services/event-bus';
-import { WorkflowRun } from '../src/workflow/model';
+import { WorkflowRun } from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 import type { WorkflowApplicationRuntime } from '../src/workflow/stage-context';
 import type {

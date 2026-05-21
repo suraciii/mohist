@@ -1,5 +1,5 @@
 import type { ResultContract, WorkflowItem, WorkflowItemSeverity, WorkflowVerification } from '../../../../types/workflow-results';
-import { isParseSuccess, parseStructuredResult } from '../../../result-contracts';
+import { isParseSuccess, parseStructuredResult } from '@mohist/workflow/result-contracts';
 import { parseReviewItems } from './review-contracts';
 
 const NON_BLOCKING_SEVERITIES: WorkflowItemSeverity[] = ['follow-up', 'info'];

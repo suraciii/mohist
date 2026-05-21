@@ -1,9 +1,9 @@
-import type { WorkflowDefinitionSnapshot } from '../../model';
+import type { WorkflowDefinitionSnapshot } from '@mohist/workflow/internal/model';
 import { createWorkflowTemplateContextFromValues, renderWorkflowTemplate } from '../../template';
-import type { Check, CheckContext } from '../../checks';
+import type { Check, CheckContext } from '@mohist/workflow/checks';
 import { ArtifactExistsCheck } from './artifact-exists-check';
 import { ArtifactMarkerCheck } from './artifact-marker-check';
-import { createCheckRegistry, type CheckProvider, type CheckProviderInput, type CheckRegistry } from '../../checks/check-registry';
+import { createCheckRegistry, type CheckProvider, type CheckProviderInput, type CheckRegistry } from '@mohist/workflow/checks/check-registry';
 import { HealthGateCheck } from './health-gate-check';
 import { MergeReadyCheck } from './merge-ready-check';
 import { ShellCommandCheck } from './shell-command-check';

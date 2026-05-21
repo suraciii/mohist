@@ -14,7 +14,7 @@ import { WorkflowRunProjection } from '../src/services/workflow-run-projection';
 import { StageStateService } from '../src/services/stage-state-service';
 import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { IssueStatus, MergeState, Stage } from '../src/types';
-import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/model';
+import { createWorkflowDefinitionSnapshot, WorkflowRun } from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 
 describe('WorkflowRun aggregate end-to-end regressions', () => {
