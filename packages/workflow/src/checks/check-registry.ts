@@ -1,12 +1,12 @@
-import type { Check, CheckContext, CheckResult } from './index';
-import type { CheckDefinition, ResolvedWorkflowDefinition, WorkflowStageId } from '../model';
+import type { Check } from './index';
+import type { WorkflowContext, CheckResult } from '../runtime';
+import type { CheckDefinition, WorkflowStageId } from '../model';
 
 export interface CheckProviderInput {
-  ctx: CheckContext;
+  ctx: WorkflowContext;
   stage: WorkflowStageId;
   check: CheckDefinition;
   worktreePath?: string;
-  definition?: ResolvedWorkflowDefinition;
 }
 
 export interface CheckProvider {
@@ -53,7 +53,7 @@ export function createCheckRegistry(
 
 export async function resolveCheck(
   registry: CheckRegistry,
-  ctx: CheckContext,
+  ctx: WorkflowContext,
   input: Omit<CheckProviderInput, 'ctx'>,
 ): Promise<Check> {
   const check = await registry.build({ ...input, ctx });
@@ -65,7 +65,7 @@ export async function resolveCheck(
 
 export async function runCheck(
   registry: CheckRegistry,
-  ctx: CheckContext,
+  ctx: WorkflowContext,
   input: Omit<CheckProviderInput, 'ctx'>,
 ): Promise<CheckResult> {
   const check = await resolveCheck(registry, ctx, input);

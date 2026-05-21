@@ -1,4 +1,3 @@
-export type StageCheckResult = 'pass' | 'failed';
 export type StageCheckStatus = 'pending' | 'passed' | 'failed';
 
 export class StageCheck {

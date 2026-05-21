@@ -1,11 +1,11 @@
-import type { StageContext } from '../runtime';
+import type { WorkflowContext } from '../runtime';
 import type { ExecutableTask } from './types';
 
 export type TaskLoaderKind = 'static' | 'openspec' | 'runtime';
 
 export interface TaskLoader {
   kind: TaskLoaderKind;
-  load(ctx: StageContext): ExecutableTask[];
+  load(ctx: WorkflowContext): ExecutableTask[];
 }
 
 export interface TaskLoaderRegistry {

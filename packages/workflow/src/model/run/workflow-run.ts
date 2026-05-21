@@ -1,5 +1,4 @@
-import type { WorkflowDefinitionSnapshot } from '../workflow-definition-snapshot';
-import type { WorkflowStageId } from '../workflow-definition';
+import type { StageDefinition, WorkflowStageId } from '../workflow-definition';
 import { WorkflowDomainError } from '../errors';
 import { StageRun } from './stage-run';
 import type { ApprovalInput, CheckResultInput, FailureDetails, MaterializedTaskInput, StageRunState, TaskResultInput, WorkflowRunStatus, WorkflowWork } from './types';
@@ -13,17 +12,17 @@ export class WorkflowRun {
 
   constructor(
     readonly id: string,
-    readonly definitionSnapshot: WorkflowDefinitionSnapshot,
+    readonly definitionStages: StageDefinition[],
   ) {
-    if (definitionSnapshot.stages.length === 0) {
+    if (definitionStages.length === 0) {
       throw new WorkflowDomainError('WorkflowRun requires at least one stage definition');
     }
-    this.stageRuns = definitionSnapshot.stages.map((definition, index) => new StageRun(definition, index));
+    this.stageRuns = definitionStages.map((definition, index) => new StageRun(definition, index));
     this.currentStage = this.stageRuns[0];
   }
 
   get stageOrder(): WorkflowStageId[] {
-    return this.definitionSnapshot.stages.map(definition => definition.stage);
+    return this.definitionStages.map(definition => definition.stage);
   }
 
   get stages(): StageRunState[] {

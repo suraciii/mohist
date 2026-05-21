@@ -1,5 +1,4 @@
 export * from './definition/workflow-definition-source';
-export * from './runner/workflow-runtime-definition';
 export * from './workflows';
 
 export * from './runtime';
