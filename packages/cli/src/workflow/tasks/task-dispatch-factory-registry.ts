@@ -4,7 +4,7 @@ import { MergeState } from '../../types';
 import type { StageContext, CheckResult, StageTaskResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
 import type { AgentSessionTaskHandler, AgentSessionTaskInput, ExecutableTask } from './types';
-import type { AgentPromptSource, TaskDefinition } from '../model';
+import type { TaskDefinition } from '../model';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
 import { createServiceCallTaskHandler } from './service-call-task-handler';
@@ -13,6 +13,10 @@ import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../templa
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
+
+type AgentPromptSource =
+  | { file: string }
+  | { inline: string };
 
 export interface TaskDispatchFactoryInput {
   ctx: StageContext;
@@ -165,6 +169,9 @@ function createAgentSessionTask(
 function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource | null {
   const rawPrompt = task?.with?.prompt;
   if (typeof rawPrompt === 'string') return { inline: rawPrompt };
+  if (typeof task?.with?.promptFile === 'string' && task.with.promptFile.trim().length > 0) {
+    return { file: task.with.promptFile };
+  }
   if (!rawPrompt || typeof rawPrompt !== 'object' || Array.isArray(rawPrompt)) return null;
   const prompt = rawPrompt as Record<string, unknown>;
   if (typeof prompt.file === 'string') return { file: prompt.file };

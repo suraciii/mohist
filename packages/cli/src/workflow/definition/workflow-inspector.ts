@@ -25,8 +25,6 @@ import {
 } from './workflow-definition-source';
 import {
   getWorkflowUseDefinition,
-  inferWorkflowCheckUse,
-  inferWorkflowTaskUse,
   isWorkflowUseAllowed,
 } from '../uses-catalog';
 
@@ -234,7 +232,6 @@ function compileCustomTasks(
       with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
       onSuccess: compileTaskSuccessAction(rawTask.onSuccess),
       dependsOn: arrayValue(rawTask.dependsOn ?? rawTask.needs).filter((value): value is string => typeof value === 'string'),
-      resultContract: isRecord(rawTask.resultContract) ? rawTask.resultContract as unknown as TaskDefinition['resultContract'] : undefined,
     };
     if (task.uses === 'mohist/agent' && !hasAgentPromptSource(task.with)) {
       diagnostics.push({
@@ -324,7 +321,11 @@ function compileCustomChecks(
       diagnostics.push({ severity: 'error', path: checkPath, message: 'check requires id' });
       continue;
     }
-    const uses = typeof rawCheck.uses === 'string' ? rawCheck.uses : inferWorkflowCheckUse(rawCheck.id);
+    if (typeof rawCheck.uses !== 'string') {
+      diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Check '${rawCheck.id}' requires uses` });
+      continue;
+    }
+    const uses = rawCheck.uses;
     if (!isWorkflowUseAllowed(uses, 'check')) {
       diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${rawCheck.uses}' is not allowed as a check` });
       continue;
@@ -339,7 +340,7 @@ function compileCustomChecks(
       name: rawCheck.id,
       title: typeof rawCheck.title === 'string' ? rawCheck.title : rawCheck.id,
       source: 'project',
-      uses: typeof rawCheck.uses === 'string' ? rawCheck.uses : undefined,
+      uses: rawCheck.uses,
       with: isRecord(rawCheck.with) ? { ...rawCheck.with } : undefined,
     };
     const onFailure = compileCheckOnFailure(rawCheck.onFailure, checkPath, diagnostics);
@@ -373,7 +374,11 @@ function compileCheckOnFailure(
     diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.task.emits`, message: 'task.emits is not supported; use onSuccess.emit for unconditional success events or let the task runtime raise events' });
     return undefined;
   }
-  const uses = typeof rawTask.uses === 'string' ? rawTask.uses : 'mohist/agent';
+  if (typeof rawTask.uses !== 'string') {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.task.uses`, message: `Retry task '${rawTask.id}' requires uses` });
+    return undefined;
+  }
+  const uses = rawTask.uses;
   const usesDiagnostic = validateExecutableTaskUse(uses, `${checkPath}.onFailure.retry.task.uses`);
   if (usesDiagnostic) {
     diagnostics.push(usesDiagnostic);
@@ -706,7 +711,15 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
       if (!task.id.trim()) {
         diagnostics.push({ severity: 'error', path: `${stagePath}.tasks[${taskIndex}].id`, message: 'Task id is required' });
       }
-      const uses = task.uses ?? inferTaskUseForStage(stage, task.id);
+      const uses = task.uses;
+      if (!uses) {
+        diagnostics.push({
+          severity: 'error',
+          path: `${stagePath}.tasks[${taskIndex}].uses`,
+          message: `Task '${task.id}' requires uses`,
+        });
+        continue;
+      }
       if (!isWorkflowUseAllowed(uses, 'task')) {
         diagnostics.push({
           severity: 'error',
@@ -735,7 +748,15 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
 
     const checkNames = new Set(stage.checks.map(check => check.name));
     for (const [checkIndex, check] of stage.checks.entries()) {
-      const uses = check.uses ?? inferWorkflowCheckUse(check.name);
+      const uses = check.uses;
+      if (!uses) {
+        diagnostics.push({
+          severity: 'error',
+          path: `${stagePath}.checks[${checkIndex}].uses`,
+          message: `Check '${check.name}' requires uses`,
+        });
+        continue;
+      }
       if (!isWorkflowUseAllowed(uses, 'check')) {
         diagnostics.push({
           severity: 'error',
@@ -760,7 +781,15 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
       const retryTask = check.onFailure?.retry?.task;
       if (retryTask) {
         const retryTaskPath = `${stagePath}.checks[${checkIndex}].onFailure.retry.task`;
-        const retryUses = retryTask.uses ?? inferWorkflowTaskUse(retryTask.id);
+        const retryUses = retryTask.uses;
+        if (!retryUses) {
+          diagnostics.push({
+            severity: 'error',
+            path: `${retryTaskPath}.uses`,
+            message: `Retry task '${retryTask.id}' requires uses`,
+          });
+          continue;
+        }
         const usesDiagnostic = validateExecutableTaskUse(retryUses, `${retryTaskPath}.uses`);
         if (usesDiagnostic) diagnostics.push(usesDiagnostic);
         const promptDiagnostic = validateAgentTaskPrompt({ ...retryTask, uses: retryUses }, `${retryTaskPath}.with.prompt`);
@@ -802,7 +831,7 @@ export function explainWorkflowItem(
 }
 
 function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): ExplainedWorkflowItem {
-  const uses = task.uses ?? inferWorkflowTaskUse(task.id);
+  const uses = task.uses ?? '<unspecified>';
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'task',
@@ -820,7 +849,7 @@ function explainTask(stage: CompiledStageDefinition, task: TaskDefinition): Expl
 function explainCheck(stage: CompiledStageDefinition, check: CheckDefinition): ExplainedWorkflowItem {
   const phase = stage.checkPolicies?.find(candidate => candidate.checkName === check.name)?.phase ?? 'post-task';
   const reaction = stage.checkFailurePolicies?.find(candidate => candidate.checkName === check.name);
-  const uses = check.uses ?? inferWorkflowCheckUse(check.name);
+  const uses = check.uses ?? '<unspecified>';
   const useDefinition = getWorkflowUseDefinition(uses);
   return {
     kind: 'check',
@@ -843,11 +872,6 @@ function findCheck(definition: WorkflowDefinition, checkName: string): { stage: 
     if (check) return { stage, check };
   }
   return null;
-}
-
-function inferTaskUseForStage(stage: CompiledStageDefinition, taskId: string): string {
-  const task = stage.tasks.find(candidate => candidate.id === taskId);
-  return task?.uses ?? inferWorkflowTaskUse(taskId);
 }
 
 function hasAgentPromptSource(withConfig: Record<string, unknown> | undefined): boolean {

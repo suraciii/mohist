@@ -10,7 +10,7 @@ import {
   WorkflowRun as DomainWorkflowRun,
 } from '../workflow/model';
 import {
-  freezePointFromStageSnapshot,
+  commitPointFromStageSnapshot,
   hydrateWorkflowRun,
   repairWorkflowRunSnapshot,
   workflowDefinitionSnapshotFromUnknown,
@@ -483,7 +483,7 @@ export class WorkflowRunRepo {
         }))),
         approval: approvalFromStageRow(stageRow),
         failure: null,
-        freezePoint: null,
+        commitPoint: null,
         workSourceState: stageRow.work_source_state
           ? safeParseJson(stageRow.work_source_state) as WorkSourceState
           : undefined,
@@ -492,7 +492,7 @@ export class WorkflowRunRepo {
         stageSnapshot.workSourceState = safeParseJson(stageRow.build_work_source_state) as WorkSourceState;
       }
       const stageDefinition = stageDefinitions.find(definition => definition.stage === stageSnapshot.stage);
-      stageSnapshot.freezePoint = freezePointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
+      stageSnapshot.commitPoint = commitPointFromStageSnapshot(stageSnapshot.stage, stageSnapshot, stageDefinition);
       return stageSnapshot;
     });
 

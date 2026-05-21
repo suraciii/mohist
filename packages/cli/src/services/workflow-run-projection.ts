@@ -6,7 +6,7 @@ import { IssueStatus, Stage, type CheckState, type CheckSuiteStatus } from '../t
 import { eventBus, type EventBus } from './event-bus';
 import { StageStateService, type StageCheckStatus, type StageStateStatus, type StageTaskStatus } from './stage-state-service';
 import type { WorkflowDecision, WorkflowEvent, WorkflowRun, WorkflowRunSnapshot } from '../workflow/model';
-import { inferWorkflowCheckUse, inferWorkflowTaskUse, validateWorkflowUseEvidence } from '../workflow/uses-catalog';
+import { validateWorkflowUseEvidence } from '../workflow/uses-catalog';
 
 interface IssueProjectionRow {
   id: string;
@@ -172,14 +172,14 @@ export class WorkflowRunProjection {
       for (const task of stageRun.tasks) {
         if (task.status !== 'completed') continue;
         const taskDefinition = stageDefinition.tasks.find(candidate => candidate.id === task.id);
-        const uses = taskDefinition?.uses ?? inferWorkflowTaskUse(task.id);
+        const uses = taskDefinition?.uses;
         const evidence = validateWorkflowUseEvidence(uses, task.output);
         if (!evidence.ok) return { ok: false, reason: `${task.id} ${evidence.field ?? 'delivery'} evidence is missing` };
       }
       for (const check of stageRun.checks) {
         if (check.status !== 'passed') continue;
         const checkDefinition = stageDefinition.checks.find(candidate => candidate.name === check.name);
-        const uses = checkDefinition?.uses ?? inferWorkflowCheckUse(check.name);
+        const uses = checkDefinition?.uses;
         const evidence = validateWorkflowUseEvidence(uses, check.output);
         if (!evidence.ok) return { ok: false, reason: `${check.name} ${evidence.field ?? 'delivery'} evidence is missing` };
       }

@@ -215,7 +215,7 @@ describe('Reaction structured context: T-006', () => {
       expect(checkStage).toBeDefined();
 
       const reviewFailureTaskPolicy = checkStage!.checkFailurePolicies?.find(
-        p => p.fixTaskId === 'fix-review-findings',
+        p => p.retryTaskId === 'fix-review-findings',
       );
       expect(reviewFailureTaskPolicy).toBeDefined();
       expect(reviewFailureTaskPolicy!.inputFrom).toBeUndefined();

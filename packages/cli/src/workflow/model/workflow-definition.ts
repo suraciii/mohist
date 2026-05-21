@@ -1,11 +1,6 @@
-import type { ResultContract } from '../../types/workflow-results';
 import { WorkflowDomainError } from './errors';
 
 export type WorkflowStageId = string;
-
-export type AgentPromptSource =
-  | { file: string }
-  | { inline: string };
 
 export interface TaskDefinition {
   id: string;
@@ -17,7 +12,6 @@ export interface TaskDefinition {
     emit?: string[];
   };
   dependsOn?: string[];
-  resultContract?: ResultContract;
 }
 
 export interface CheckDefinition {
@@ -41,8 +35,8 @@ export interface CheckFailureAction {
 
 export interface CheckFailurePolicy {
   checkName: string;
-  fixTaskId: string;
-  fixTaskTitle: string;
+  retryTaskId: string;
+  retryTaskTitle: string;
   maxAttempts: number;
   inputFrom?: ReactionInputSelector[];
 }
@@ -140,39 +134,14 @@ export interface WorkflowDefinitionSnapshot {
   capturedAt: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function clonePromptSource(value: unknown): AgentPromptSource | string | undefined {
-  if (typeof value === 'string') return value;
-  if (!isRecord(value)) return undefined;
-  if (typeof value.file === 'string') return { file: value.file };
-  if (typeof value.inline === 'string') return { inline: value.inline };
-  return undefined;
-}
-
-function normalizeAgentPromptSource(task: TaskDefinition): TaskDefinition {
-  if (task.uses !== 'mohist/agent') return task;
-  const withConfig = task.with ? { ...task.with } : {};
-  const prompt = clonePromptSource(withConfig.prompt);
-  if (prompt !== undefined) withConfig.prompt = prompt;
-  if (typeof withConfig.promptFile === 'string' && prompt === undefined) {
-    withConfig.prompt = { file: withConfig.promptFile };
-    delete withConfig.promptFile;
-  }
-  return { ...task, with: Object.keys(withConfig).length > 0 ? withConfig : undefined };
-}
-
 function cloneTaskDefinition(task: TaskDefinition): TaskDefinition {
-  const normalized = normalizeAgentPromptSource(task);
   return {
-    ...normalized,
-    with: normalized.with ? { ...normalized.with } : undefined,
-    onSuccess: normalized.onSuccess ? {
-      emit: normalized.onSuccess.emit ? [...normalized.onSuccess.emit] : undefined,
+    ...task,
+    with: task.with ? { ...task.with } : undefined,
+    onSuccess: task.onSuccess ? {
+      emit: task.onSuccess.emit ? [...task.onSuccess.emit] : undefined,
     } : undefined,
-    dependsOn: normalized.dependsOn ? [...normalized.dependsOn] : undefined,
+    dependsOn: task.dependsOn ? [...task.dependsOn] : undefined,
   };
 }
 
@@ -269,8 +238,8 @@ function compileCheckFailurePoliciesFromChecks(stage: StageDefinition): CheckFai
     if (!retry) return [];
     return [{
       checkName: check.name,
-      fixTaskId: retry.task.id,
-      fixTaskTitle: retry.task.title,
+      retryTaskId: retry.task.id,
+      retryTaskTitle: retry.task.title,
       maxAttempts: retry.limit,
       inputFrom: retry.inputFrom?.map(input => ({ ...input })),
     }];

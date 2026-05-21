@@ -33,14 +33,14 @@ import { WorkflowDomainError, type StageCompletionGuard, type CompiledStageDefin
 import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
 import { isValidModelId } from '../config/model-resolution';
 import { classifyMergeDelivery, isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
+import { getWorkflowUseDefinition, unwrapWorkflowUseOutput } from '../workflow/uses-catalog';
 
 type ChangesUnavailableReason = 'worktree_removed' | 'branch_missing' | 'not_started' | 'git_error';
 type IncompleteStageCompletionGuard = Extract<StageCompletionGuard, { complete: false }>;
 
 type WorkItemOrigin = {
   source: 'builtin' | 'project' | 'runtime';
-  uses: string;
+  uses?: string;
 };
 
 function hasStageCompletionGuardDetails(error: unknown): error is { message: string; details: { stageCompletionGuard: IncompleteStageCompletionGuard } } {
@@ -357,10 +357,10 @@ function deliveryMetadata(stageRun: WorkflowStageRunWithTasksAndChecks, stageDef
 function hasCompletedLockingUse(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefinition?: CompiledStageDefinition): boolean {
   return stageRun.tasks.some(task => {
     if (task.status !== 'completed') return false;
-    return getWorkflowUseDefinition(taskOrigin(stageDefinition, task.taskId).uses)?.locksCode === true;
+    return getWorkflowUseDefinition(taskOrigin(stageDefinition, task.taskId).uses)?.createsCommitPoint === true;
   }) || stageRun.checks.some(check => {
     if (check.status !== 'passed') return false;
-    return getWorkflowUseDefinition(checkOrigin(stageDefinition, check.checkName).uses)?.locksCode === true;
+    return getWorkflowUseDefinition(checkOrigin(stageDefinition, check.checkName).uses)?.createsCommitPoint === true;
   });
 }
 
@@ -381,7 +381,7 @@ function failureDetails(stageRun: WorkflowStageRunWithTasksAndChecks, stageDefin
   if (failedCheck) {
     const codeLocked = hasCompletedLockingUse(stageRun, stageDefinition);
     return {
-      reason: codeLocked ? 'post-delivery-check-failed' : 'check-unrepaired',
+      reason: codeLocked ? 'post-commit-check-failed' : 'check-unrepaired',
       stage: stageRun.stage,
       checkName: failedCheck.checkName,
       message: failedCheck.message,
@@ -486,7 +486,7 @@ function taskOrigin(stageDefinition: CompiledStageDefinition | undefined, taskId
 
   return {
     source: definition ? (definition.source ?? 'builtin') : (stageDefinition ? 'runtime' : 'builtin'),
-    uses: definition?.uses ?? inferWorkflowTaskUse(taskId),
+    uses: definition?.uses,
   };
 }
 
@@ -495,7 +495,7 @@ function checkOrigin(stageDefinition: CompiledStageDefinition | undefined, check
 
   return {
     source: definition ? (definition.source ?? 'builtin') : (stageDefinition ? 'runtime' : 'builtin'),
-    uses: definition?.uses ?? inferWorkflowCheckUse(checkName),
+    uses: definition?.uses,
   };
 }
 

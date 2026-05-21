@@ -353,7 +353,7 @@ export class GenericStageRunner implements StageRunner {
     }
 
     if (result.status === 'fail' || result.status === 'error') {
-      return this.repairAttemptsRemaining(ctx, result.name) ? 'running' : 'failed';
+      return this.retryAttemptsRemaining(ctx, result.name) ? 'running' : 'failed';
     }
     if (result.status === 'pending') return 'awaiting-approval';
     if (!this.allPolicyChecksPassedAfter(ctx, result)) return 'running';
@@ -362,17 +362,17 @@ export class GenericStageRunner implements StageRunner {
     return stageDefinition?.approvalPolicy ? 'awaiting-approval' : 'passed';
   }
 
-  private repairAttemptsRemaining(ctx: StageContext, checkName: string): boolean {
+  private retryAttemptsRemaining(ctx: StageContext, checkName: string): boolean {
     const stageDefinition = this.getStageDefinition(ctx.issue.stage);
     const policy = stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === checkName);
     if (!policy) return false;
 
     const stageRun = ctx.workflowRun?.stageRuns.find(candidate => candidate.stage === ctx.issue.stage);
-    const scheduledFixCount = stageRun?.tasks.filter(task => {
+    const scheduledRetryTaskCount = stageRun?.tasks.filter(task => {
       const causedBy = (task as { causedBy?: { type?: string; checkName?: string } }).causedBy;
       return causedBy?.type === 'check-failure' && causedBy.checkName === checkName;
     }).length ?? 0;
-    return scheduledFixCount < policy.maxAttempts;
+    return scheduledRetryTaskCount < policy.maxAttempts;
   }
 
   private allPolicyChecksPassedAfter(ctx: StageContext, result: CheckResult): boolean {

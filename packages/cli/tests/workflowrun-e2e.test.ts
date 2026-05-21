@@ -441,10 +441,11 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
       kind: 'service-call-task',
       result: { targetBranch: 'master', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed' },
     };
-    integrate.freezePoint = {
+    integrate.commitPoint = {
       taskId: 'integrate:merge',
-      delivery: { targetBranch: 'master', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed' },
-      frozenAt: '2026-05-18T00:00:00.000Z',
+      uses: 'mohist/merge',
+      metadata: { targetBranch: 'master', baseSha: 'base', candidateHeadSha: 'head', landedSha: 'landed' },
+      createdAt: '2026-05-18T00:00:00.000Z',
     };
     const health = integrate.checks.find(check => check.name === 'health:integrate')!;
     health.status = 'passed';
@@ -477,10 +478,11 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     const merge = integrate.tasks.find(task => task.id === 'integrate:merge')!;
     merge.status = 'completed';
     merge.output = { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head' };
-    integrate.freezePoint = {
+    integrate.commitPoint = {
       taskId: 'integrate:merge',
-      delivery: { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head' },
-      frozenAt: '2026-05-18T00:00:00.000Z',
+      uses: 'mohist/merge',
+      metadata: { targetBranch: 'main', baseSha: 'base', candidateHeadSha: 'head' },
+      createdAt: '2026-05-18T00:00:00.000Z',
     };
     const health = integrate.checks.find(check => check.name === 'health:integrate')!;
     health.status = 'passed';
@@ -657,7 +659,7 @@ describe('WorkflowRun aggregate end-to-end regressions', () => {
     expect(latest.status).toBe('failed');
     expect(integrate.tasks.find(task => task.taskId === 'integrate:merge')?.output).toMatchObject({ landedSha: 'landed789', targetBranch: 'main' });
     expect(integrate.tasks.some(task => task.taskId === 'fix-integrate-health')).toBe(false);
-    expect(stageProjection.failure).toMatchObject({ reason: 'post-delivery-check-failed', checkName: 'health:integrate', message: 'post-delivery health failed' });
+    expect(stageProjection.failure).toMatchObject({ reason: 'post-commit-check-failed', checkName: 'health:integrate', message: 'post-delivery health failed' });
     expect(stageProjection.deliveryMetadata?.merge).toMatchObject({ landedSha: 'landed789', targetBranch: 'main', rebased: true });
     expect(stageProjection.deliveryMetadata?.frozen).toBe(true);
     expect(issueRepo.findById(issueId)).toMatchObject({ stage: Stage.Integrate, status: IssueStatus.Blocked });

@@ -56,7 +56,7 @@ function makeStageRunSnapshot(stage: Stage, overrides: Partial<StageRunSnapshot>
     checks: [],
     approval: null,
     failure: null,
-    freezePoint: null,
+    commitPoint: null,
     ...overrides,
   };
 }
