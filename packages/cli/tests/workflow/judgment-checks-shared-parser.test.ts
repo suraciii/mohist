@@ -32,10 +32,14 @@ function writeArtifact(changeDir: string, filename: string, content: string) {
 
 async function reviewMarkerCheck(changeDir: string) {
   const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
-  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>', 'mohist/review', [
-    '<promise>PASS</promise>',
-    '<promise>FAIL</promise>',
-  ]);
+  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>', {
+    format: 'mohist/review',
+    markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+    verdicts: {
+      '<promise>PASS</promise>': 'PASS',
+      '<promise>FAIL</promise>': 'FAIL',
+    },
+  });
 }
 
 describe('judgment-checks: shared parser regression', () => {
@@ -327,10 +331,14 @@ describe('judgment-checks: shared parser regression', () => {
         '  Status: open',
       ].join('\n'));
 
-      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>', 'mohist/review', [
-        '<promise>PASS</promise>',
-        '<promise>FAIL</promise>',
-      ]);
+      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>', {
+        format: 'mohist/review',
+        markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+        verdicts: {
+          '<promise>PASS</promise>': 'PASS',
+          '<promise>FAIL</promise>': 'FAIL',
+        },
+      });
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
@@ -345,10 +353,13 @@ describe('judgment-checks: shared parser regression', () => {
       const reviewPath = path.join(changeDir, 'review.md');
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n<promise>FAIL</promise>\n');
 
-      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>', undefined, [
-        '<promise>PASS</promise>',
-        '<promise>FAIL</promise>',
-      ]);
+      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>', {
+        markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+        verdicts: {
+          '<promise>PASS</promise>': 'PASS',
+          '<promise>FAIL</promise>': 'FAIL',
+        },
+      });
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
@@ -361,10 +372,14 @@ describe('judgment-checks: shared parser regression', () => {
       const reviewPath = path.join(changeDir, 'self-review.md');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n\n### Quality: PASS\n');
 
-      const check = new ArtifactMarkerCheck('self-review-passed', reviewPath, '<promise>PASS</promise>', 'mohist/self-review', [
-        '<promise>PASS</promise>',
-        '<promise>FAIL</promise>',
-      ]);
+      const check = new ArtifactMarkerCheck('self-review-passed', reviewPath, '<promise>PASS</promise>', {
+        format: 'mohist/self-review',
+        markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
+        verdicts: {
+          '<promise>PASS</promise>': 'PASS',
+          '<promise>FAIL</promise>': 'FAIL',
+        },
+      });
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('pass');

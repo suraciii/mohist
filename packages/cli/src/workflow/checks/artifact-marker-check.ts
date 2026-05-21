@@ -11,22 +11,35 @@ import {
 } from '../result-contracts';
 import { extractStructuredResultMetadata } from '../structured-result-metadata';
 import { enrichReviewStructuredResult } from './review-result-contracts';
-import type { StructuredWorkflowResult } from '../../types/workflow-results';
+import type { StructuredWorkflowResult, WorkflowVerdict } from '../../types/workflow-results';
 
 const log = Log.create({ service: 'artifact-marker-check' });
 
+export interface ArtifactMarkerCheckOptions {
+  format?: string;
+  markers?: string[];
+  verdicts?: Record<string, WorkflowVerdict>;
+}
+
 export class ArtifactMarkerCheck implements Check {
+  private readonly format?: string;
+  private readonly allowedMarkers: string[];
+  private readonly verdicts?: Record<string, WorkflowVerdict>;
+
   constructor(
     public readonly name: string,
     private readonly filePath: string,
     private readonly expectMarker: string,
-    private readonly format?: string,
-    private readonly allowedMarkers: string[] = [expectMarker],
-  ) {}
+    options: ArtifactMarkerCheckOptions = {},
+  ) {
+    this.format = options.format;
+    this.allowedMarkers = normalizeMarkers(options.markers, expectMarker);
+    this.verdicts = options.verdicts;
+  }
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     const content = readMarkerFile(this.filePath);
-    const contract = markerContractForPath(this.filePath, this.allowedMarkers, defaultVerdictsForMarkers(this.allowedMarkers));
+    const contract = markerContractForPath(this.filePath, this.allowedMarkers, this.verdicts);
     const parsed = validateMarkerFile(this.filePath, content, contract.allowedMarkers, contract.verdicts);
     if (isParseError(parsed)) {
       return {
@@ -38,11 +51,13 @@ export class ArtifactMarkerCheck implements Check {
     }
     const matched = parsed.marker.toUpperCase() === this.expectMarker.toUpperCase();
     const structured = this.enrichStructuredResult(buildStructuredResult(parsed), content ?? '');
-    const repairResult = extractStructuredResultMetadata(contract, content);
+    const repairResult = this.format === 'mohist/review'
+      ? extractStructuredResultMetadata(contract, content)
+      : null;
     const finalStructured = {
       ...structured,
-      ...(repairResult.repairedItemIds.length > 0 ? { repairedItemIds: repairResult.repairedItemIds } : {}),
-      ...(repairResult.verification.length > 0 ? { verification: repairResult.verification } : {}),
+      ...(repairResult && repairResult.repairedItemIds.length > 0 ? { repairedItemIds: repairResult.repairedItemIds } : {}),
+      ...(repairResult && repairResult.verification.length > 0 ? { verification: repairResult.verification } : {}),
     };
 
     return {
@@ -67,14 +82,14 @@ export class ArtifactMarkerCheck implements Check {
   }
 
   private async enrichOutput(ctx: CheckContext, content: string, output: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (this.name === 'self-review-passed') {
+    if (this.format === 'mohist/self-review') {
       return {
         ...output,
         selfReviewNotes: content,
         dimensions: parseDimensions(content),
       };
     }
-    if (this.name === 'review-passed') {
+    if (this.format === 'mohist/review') {
       const snapshotSha = await this.getCandidateHeadSha(ctx);
       return {
         ...output,
@@ -106,12 +121,9 @@ export class ArtifactMarkerCheck implements Check {
   }
 }
 
-function defaultVerdictsForMarkers(markers: string[]): Record<string, 'PASS' | 'FAIL'> {
-  const verdicts: Record<string, 'PASS' | 'FAIL'> = {};
-  for (const marker of markers) {
-    verdicts[marker] = marker.toLowerCase().includes('pass') ? 'PASS' : 'FAIL';
-  }
-  return verdicts;
+function normalizeMarkers(markers: string[] | undefined, expectMarker: string): string[] {
+  const normalized = (markers ?? []).filter(marker => marker.trim().length > 0);
+  return normalized.length > 0 ? normalized : [expectMarker];
 }
 
 function readMarkerFile(filePath: string): string | null {
