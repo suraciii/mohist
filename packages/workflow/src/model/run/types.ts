@@ -104,7 +104,7 @@ export type WorkflowWork =
   | { kind: 'task'; stage: WorkflowStageId; taskId: string }
   | { kind: 'check'; stage: WorkflowStageId; checkName: string }
   | { kind: 'await-approval'; stage: WorkflowStageId }
-  | { kind: 'complete' }
+  | { kind: 'complete'; stage: WorkflowStageId }
   | { kind: 'blocked'; stage: WorkflowStageId; reason: StageCompletionGuard }
   | { kind: 'failed'; reason: FailureDetails };
 
