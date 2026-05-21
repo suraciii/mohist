@@ -125,7 +125,7 @@ export type WorkflowDefinitionSource =
   | { type: 'project'; path: string }
   | { type: 'runtime'; id: string };
 
-export interface WorkflowDefinitionSnapshot {
+export interface ResolvedWorkflowDefinition {
   workflowId: string;
   name?: string;
   source: WorkflowDefinitionSource;
@@ -349,11 +349,11 @@ export function cloneWorkflowDefinition(definition: WorkflowDefinition): Workflo
   };
 }
 
-export function createWorkflowDefinitionSnapshot(input: {
+export function createResolvedWorkflowDefinition(input: {
   definition: WorkflowDefinition;
   source?: WorkflowDefinitionSource;
   capturedAt?: string;
-}): WorkflowDefinitionSnapshot {
+}): ResolvedWorkflowDefinition {
   const resolvedDefinition = cloneWorkflowDefinition(input.definition);
   const compiledStageDefinitions = compileWorkflowDefinition(resolvedDefinition);
   return {
@@ -366,7 +366,7 @@ export function createWorkflowDefinitionSnapshot(input: {
   };
 }
 
-export function cloneWorkflowDefinitionSnapshot(snapshot: WorkflowDefinitionSnapshot): WorkflowDefinitionSnapshot {
+export function cloneResolvedWorkflowDefinition(snapshot: ResolvedWorkflowDefinition): ResolvedWorkflowDefinition {
   return {
     workflowId: snapshot.workflowId,
     name: snapshot.name,

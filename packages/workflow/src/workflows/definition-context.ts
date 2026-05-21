@@ -1,30 +1,16 @@
-import type {
-  WorkflowDefinitionSnapshot,
-  WorkflowStageId,
-} from '../model';
+import { WorkflowRun, type WorkflowStageId } from '../model';
 import type {
   WorkflowCheckDefinitionContext,
   WorkflowTaskDefinitionContext,
   WorkflowTasksFromDefinitionContext,
 } from './types';
 
-export function taskSourceDefinition(snapshot: WorkflowDefinitionSnapshot, stageId: WorkflowStageId): WorkflowTasksFromDefinitionContext | null {
-  const source = snapshot.compiledStageDefinitions.find(stage => stage.stage === stageId)?.tasksFrom;
-  if (!source) return null;
-  if (typeof source === 'string') return { uses: source };
-  return {
-    uses: source.uses,
-    with: source.with ? { ...source.with } : undefined,
-  };
+export function taskSourceDefinition(run: WorkflowRun, stageId: WorkflowStageId): WorkflowTasksFromDefinitionContext | null {
+  return run.tasksFromDefinition(stageId);
 }
 
-export function taskDefinition(snapshot: WorkflowDefinitionSnapshot, stageId: WorkflowStageId, taskId: string): WorkflowTaskDefinitionContext | null {
-  const baseTaskId = baseRuntimeTaskId(taskId);
-  const stage = snapshot.compiledStageDefinitions.find(candidate => candidate.stage === stageId);
-  const task = stage?.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
-    ?? stage?.checks
-      .map(check => check.onFailure?.retry?.task)
-      .find(candidate => candidate && (candidate.id === taskId || candidate.id === baseTaskId));
+export function taskDefinition(run: WorkflowRun, stageId: WorkflowStageId, taskId: string): WorkflowTaskDefinitionContext | null {
+  const task = run.taskDefinition(stageId, taskId);
   if (!task) return null;
   return {
     id: taskId,
@@ -34,10 +20,8 @@ export function taskDefinition(snapshot: WorkflowDefinitionSnapshot, stageId: Wo
   };
 }
 
-export function checkDefinition(snapshot: WorkflowDefinitionSnapshot, stageId: WorkflowStageId, checkName: string): WorkflowCheckDefinitionContext | null {
-  const check = snapshot.compiledStageDefinitions
-    .find(candidate => candidate.stage === stageId)
-    ?.checks.find(candidate => candidate.name === checkName);
+export function checkDefinition(run: WorkflowRun, stageId: WorkflowStageId, checkName: string): WorkflowCheckDefinitionContext | null {
+  const check = run.checkDefinition(stageId, checkName);
   if (!check) return null;
   return {
     name: check.name,
@@ -45,8 +29,4 @@ export function checkDefinition(snapshot: WorkflowDefinitionSnapshot, stageId: W
     uses: check.uses,
     with: check.with ? { ...check.with } : undefined,
   };
-}
-
-function baseRuntimeTaskId(taskId: string): string {
-  return taskId.replace(/:\d+$/, '');
 }

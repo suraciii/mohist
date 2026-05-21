@@ -1,31 +1,31 @@
 import YAML from 'yaml';
 import {
-  createWorkflowDefinitionSnapshot,
-  type WorkflowDefinitionSnapshot,
+  createResolvedWorkflowDefinition,
+  type ResolvedWorkflowDefinition,
 } from '../model';
 import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from '../definition/workflow-definition-source';
 import type { WorkflowDefinitionInput } from './types';
 
-export function workflowDefinitionSnapshotFromInput(input: WorkflowDefinitionInput, capturedAt?: string): WorkflowDefinitionSnapshot {
-  if (isWorkflowDefinitionSnapshot(input)) return input;
+export function resolvedWorkflowDefinitionFromInput(input: WorkflowDefinitionInput, capturedAt?: string): ResolvedWorkflowDefinition {
+  if (isResolvedWorkflowDefinition(input)) return input;
   if (isYamlWorkflowInput(input)) {
     const parsed = YAML.parse(input.yaml);
-    return createWorkflowDefinitionSnapshot({
+    return createResolvedWorkflowDefinition({
       definition: parseWorkflowDefinitionSource(normalizeWorkflowSource(parsed)),
       source: input.source,
       capturedAt: input.capturedAt ?? capturedAt,
     });
   }
   if (isWorkflowSourceDefinition(input)) {
-    return createWorkflowDefinitionSnapshot({
+    return createResolvedWorkflowDefinition({
       definition: parseWorkflowDefinitionSource(input),
       capturedAt,
     });
   }
-  return createWorkflowDefinitionSnapshot({ definition: input, capturedAt });
+  return createResolvedWorkflowDefinition({ definition: input, capturedAt });
 }
 
-function isWorkflowDefinitionSnapshot(value: unknown): value is WorkflowDefinitionSnapshot {
+function isResolvedWorkflowDefinition(value: unknown): value is ResolvedWorkflowDefinition {
   return isPlainObject(value)
     && 'workflowId' in value
     && 'resolvedDefinition' in value

@@ -1,13 +1,16 @@
 import { getWorkflowUseDefinition, validateWorkflowUseEvidence } from '../uses-catalog';
 import {
-  cloneWorkflowDefinitionSnapshot,
-  createWorkflowDefinitionSnapshot,
+  cloneResolvedWorkflowDefinition,
+  createResolvedWorkflowDefinition,
   type CheckFailurePolicy,
   type CheckPhase,
   type CheckPolicy,
+  type CheckDefinition,
   type CompiledStageDefinition,
+  type TaskDefinition,
   type WorkflowStageId,
-  type WorkflowDefinitionSnapshot,
+  type ResolvedWorkflowDefinition,
+  type WorkflowTasksFromDefinition,
 } from './workflow-definition';
 import { WorkflowDomainError } from './errors';
 
@@ -155,7 +158,7 @@ export interface WorkflowDecision {
   nextWork: WorkflowWork;
 }
 
-export interface TaskRunSnapshot {
+export interface TaskRunState {
   id: string;
   title: string;
   uses?: string;
@@ -173,7 +176,7 @@ export interface TaskRunSnapshot {
   latestAttempt: WorkItemAttempt | null;
 }
 
-export interface CheckStateSnapshot {
+export interface CheckRunState {
   name: string;
   title: string;
   status: CheckRunStatus;
@@ -183,35 +186,34 @@ export interface CheckStateSnapshot {
   latestAttempt: WorkItemAttempt | null;
 }
 
-export interface ApprovalSnapshot {
+export interface ApprovalState {
   status: 'awaiting' | 'approved' | 'rejected';
   output: unknown | null;
   requestedAt: string;
   respondedAt: string | null;
 }
 
-export interface StageRunSnapshot {
+export interface StageRunState {
   stage: WorkflowStageId;
   status: StageRunStatus;
   order: number;
   attemptSequence?: number;
-  tasks: TaskRunSnapshot[];
-  checks: CheckStateSnapshot[];
-  approval: ApprovalSnapshot | null;
+  tasks: TaskRunState[];
+  checks: CheckRunState[];
+  approval: ApprovalState | null;
   failure: FailureDetails | null;
   commitPoint: CommitPoint | null;
   workSourceState?: WorkSourceState;
 }
 
-export interface WorkflowRunSnapshot {
+export interface WorkflowRunState {
   id: string;
   issueId: string;
   issueNumber: number;
   status: WorkflowRunStatus;
   currentStage: WorkflowStageId;
   stageOrder: WorkflowStageId[];
-  workflowDefinitionSnapshot: WorkflowDefinitionSnapshot;
-  stageRuns: StageRunSnapshot[];
+  stageRuns: StageRunState[];
   failure: FailureDetails | null;
 }
 
@@ -270,7 +272,7 @@ export class TaskRun {
     this.latestAttempt = null;
   }
 
-  snapshot(): TaskRunSnapshot {
+  state(): TaskRunState {
     return {
       id: this.id,
       title: this.title,
@@ -429,7 +431,7 @@ export class CheckState {
     this.latestAttempt = null;
   }
 
-  snapshot(): CheckStateSnapshot {
+  state(): CheckRunState {
     return {
       name: this.name,
       title: this.title,
@@ -557,7 +559,7 @@ export class StageRun {
   readonly checks: CheckState[];
   status: StageRunStatus = 'pending';
   attemptSequence = 1;
-  approval: ApprovalSnapshot | null = null;
+  approval: ApprovalState | null = null;
   failure: FailureDetails | null = null;
   commitPoint: CommitPoint | null = null;
   workSourceState: WorkSourceState = { evaluated: false };
@@ -828,7 +830,7 @@ export class StageRun {
     this.workSourceState = { evaluated: false };
   }
 
-  materializeTaskForPersistence(id: string, title: string, order: number, uses?: string): TaskRun {
+  restoreTaskState(id: string, title: string, order: number, uses?: string): TaskRun {
     const existing = this.tasks.find(task => task.id === id);
     if (existing) return existing;
     const task = new TaskRun(id, title, order, uses);
@@ -837,7 +839,7 @@ export class StageRun {
     return task;
   }
 
-  materializeCheckForPersistence(name: string, title: string): CheckState {
+  restoreCheckState(name: string, title: string): CheckState {
     const existing = this.checks.find(check => check.name === name);
     if (existing) return existing;
     const check = new CheckState(name, title);
@@ -855,14 +857,14 @@ export class StageRun {
     };
   }
 
-  snapshot(): StageRunSnapshot {
+  state(): StageRunState {
     return {
       stage: this.stage,
       status: this.status,
       order: this.order,
       attemptSequence: this.attemptSequence,
-      tasks: this.tasks.map(task => task.snapshot()),
-      checks: this.checks.map(check => check.snapshot()),
+      tasks: this.tasks.map(task => task.state()),
+      checks: this.checks.map(check => check.state()),
       approval: this.approval ? { ...this.approval } : null,
       failure: this.failure,
       commitPoint: this.commitPoint,
@@ -888,7 +890,7 @@ export class WorkflowRun {
     readonly issueId: string,
     readonly issueNumber: number,
     readonly definitions: CompiledStageDefinition[],
-    readonly workflowDefinitionSnapshot: WorkflowDefinitionSnapshot,
+    readonly definition: ResolvedWorkflowDefinition,
   ) {
     if (definitions.length === 0) throw new WorkflowDomainError('WorkflowRun requires at least one stage definition');
     this.stageRuns = definitions.map((definition, index) => new StageRun(definition, index));
@@ -900,13 +902,13 @@ export class WorkflowRun {
     issueId: string;
     issueNumber: number;
     definitions?: CompiledStageDefinition[];
-    workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
+    definition?: ResolvedWorkflowDefinition;
     now?: string;
   }): { run: WorkflowRun; decision: WorkflowDecision } {
-    const workflowDefinitionSnapshot = input.workflowDefinitionSnapshot
-      ? cloneWorkflowDefinitionSnapshot(input.workflowDefinitionSnapshot)
+    const definition = input.definition
+      ? cloneResolvedWorkflowDefinition(input.definition)
       : input.definitions
-        ? createWorkflowDefinitionSnapshot({
+        ? createResolvedWorkflowDefinition({
           definition: {
             id: 'runtime/custom',
             name: 'Runtime custom workflow',
@@ -916,15 +918,15 @@ export class WorkflowRun {
           capturedAt: input.now,
         })
         : null;
-    if (!workflowDefinitionSnapshot) {
-      throw new WorkflowDomainError('WorkflowRun requires a workflow definition snapshot');
+    if (!definition) {
+      throw new WorkflowDomainError('WorkflowRun requires a workflow definition');
     }
     const run = new WorkflowRun(
       input.id,
       input.issueId,
       input.issueNumber,
-      input.definitions ?? workflowDefinitionSnapshot.compiledStageDefinitions,
-      workflowDefinitionSnapshot,
+      input.definitions ?? definition.compiledStageDefinitions,
+      definition,
     );
     const firstStage = run.currentStageRun();
     firstStage.start();
@@ -951,6 +953,44 @@ export class WorkflowRun {
     const stageRun = this.stageRuns.find(candidate => candidate.stage === stage);
     if (!stageRun) throw new WorkflowDomainError(`Stage ${stage} is not admitted by this workflow`);
     return stageRun;
+  }
+
+  tasksFromDefinition(stage: WorkflowStageId): WorkflowTasksFromDefinition | null {
+    const source = this.definitions.find(definition => definition.stage === stage)?.tasksFrom;
+    if (!source) return null;
+    if (typeof source === 'string') return { uses: source };
+    return {
+      uses: source.uses,
+      with: source.with ? { ...source.with } : undefined,
+    };
+  }
+
+  taskDefinition(stage: WorkflowStageId, taskId: string): TaskDefinition | null {
+    const stageRun = this.stageRun(stage);
+    const baseTaskId = this.baseRuntimeTaskId(taskId);
+    const task = stageRun.definition.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
+      ?? stageRun.definition.checks
+        .map(check => check.onFailure?.retry?.task)
+        .find((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate && (candidate.id === taskId || candidate.id === baseTaskId)));
+    if (!task) return null;
+    return {
+      ...task,
+      id: taskId,
+      with: task.with ? { ...task.with } : undefined,
+      dependsOn: task.dependsOn ? [...task.dependsOn] : undefined,
+      onSuccess: task.onSuccess ? {
+        emit: task.onSuccess.emit ? [...task.onSuccess.emit] : undefined,
+      } : undefined,
+    };
+  }
+
+  checkDefinition(stage: WorkflowStageId, checkName: string): CheckDefinition | null {
+    const check = this.stageRun(stage).definition.checks.find(candidate => candidate.name === checkName);
+    if (!check) return null;
+    return {
+      ...check,
+      with: check.with ? { ...check.with } : undefined,
+    };
   }
 
   materializeTasks(stage: WorkflowStageId, tasks: MaterializedTaskInput[], workSourceState?: 'missing' | 'invalid' | 'empty'): WorkflowDecision {
@@ -1470,7 +1510,7 @@ export class WorkflowRun {
     return { kind: 'complete' };
   }
 
-  snapshot(): WorkflowRunSnapshot {
+  state(): WorkflowRunState {
     return {
       id: this.id,
       issueId: this.issueId,
@@ -1478,8 +1518,7 @@ export class WorkflowRun {
       status: this.status,
       currentStage: this.currentStage,
       stageOrder: this.stageOrder,
-      workflowDefinitionSnapshot: cloneWorkflowDefinitionSnapshot(this.workflowDefinitionSnapshot),
-      stageRuns: this.stageRuns.map(stageRun => stageRun.snapshot()),
+      stageRuns: this.stageRuns.map(stageRun => stageRun.state()),
       failure: this.failure,
     };
   }

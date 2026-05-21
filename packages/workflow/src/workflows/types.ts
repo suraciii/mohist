@@ -2,10 +2,11 @@ import type {
   CheckResultInput,
   FailureDetails,
   MaterializedTaskInput,
-  StageRunSnapshot,
+  StageRunState,
   TaskResultInput,
   WorkflowDefinition,
-  WorkflowDefinitionSnapshot,
+  WorkflowRunStatus as DomainWorkflowRunStatus,
+  ResolvedWorkflowDefinition,
   WorkflowStageId,
 } from '../model';
 import type { WorkflowSourceDefinition } from '../definition/workflow-definition-source';
@@ -14,20 +15,22 @@ export type Awaitable<T> = T | Promise<T>;
 
 export type WorkflowRunId = string;
 
-export type WorkflowStateStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+export type WorkflowRunStatus = DomainWorkflowRunStatus | 'completed';
 
-export type WorkflowStageState = StageRunSnapshot;
+export type WorkflowStageState = StageRunState;
 
 export type WorkflowFailure = FailureDetails;
 
-export interface WorkflowState {
+export interface WorkflowRunRecord {
   id: WorkflowRunId;
-  status: WorkflowStateStatus;
-  currentStage: WorkflowStageId;
-  stageOrder: WorkflowStageId[];
-  definition: WorkflowDefinitionSnapshot;
-  stages: WorkflowStageState[];
-  failure: WorkflowFailure | null;
+  definition: ResolvedWorkflowDefinition;
+  run: {
+    status: WorkflowRunStatus;
+    currentStage: WorkflowStageId;
+    stageOrder: WorkflowStageId[];
+    stages: WorkflowStageState[];
+    failure: WorkflowFailure | null;
+  };
 }
 
 export type WorkflowStatus =
@@ -40,11 +43,11 @@ export type WorkflowStatus =
 
 export type WorkflowDefinitionInput =
   | WorkflowDefinition
-  | WorkflowDefinitionSnapshot
+  | ResolvedWorkflowDefinition
   | WorkflowSourceDefinition
   | {
       yaml: string;
-      source?: WorkflowDefinitionSnapshot['source'];
+      source?: ResolvedWorkflowDefinition['source'];
       capturedAt?: string;
     };
 
@@ -55,8 +58,8 @@ export interface CreateWorkflowsInput {
 }
 
 export interface Workflows {
-  create(input: WorkflowCreateInput): Promise<Workflow>;
-  load(id: WorkflowRunId): Promise<Workflow | null>;
+  create(input: WorkflowCreateInput): Promise<WorkflowRun>;
+  load(id: WorkflowRunId): Promise<WorkflowRun | null>;
   register(component: WorkflowComponent): void;
 }
 
@@ -66,9 +69,12 @@ export interface WorkflowCreateInput {
   now?: string;
 }
 
-export interface Workflow {
+export interface WorkflowRun {
   readonly id: WorkflowRunId;
-  readonly state: WorkflowState;
+  readonly status: WorkflowRunStatus;
+  readonly currentStage: WorkflowStageId;
+  readonly stages: WorkflowStageState[];
+  readonly failure: WorkflowFailure | null;
 
   start(): Promise<WorkflowRunResult>;
   resume(): Promise<WorkflowRunResult>;
@@ -79,8 +85,8 @@ export interface Workflow {
 }
 
 export interface WorkflowStore {
-  load(id: WorkflowRunId): Awaitable<WorkflowState | null>;
-  save(state: WorkflowState): Awaitable<void>;
+  load(id: WorkflowRunId): Awaitable<WorkflowRunRecord | null>;
+  save(record: WorkflowRunRecord): Awaitable<void>;
 }
 
 export type WorkflowComponent =
@@ -89,7 +95,7 @@ export type WorkflowComponent =
   | WorkflowTaskSourceType;
 
 export interface WorkflowComponentContext {
-  state: WorkflowState;
+  run: WorkflowRun;
 }
 
 export interface WorkflowTaskType {
@@ -123,21 +129,21 @@ export interface WorkflowTaskSource {
 }
 
 export interface WorkflowTaskInput {
-  state: WorkflowState;
+  run: WorkflowRun;
   stage: WorkflowStageId;
   taskId: string;
   definition: WorkflowTaskDefinitionContext;
 }
 
 export interface WorkflowCheckInput {
-  state: WorkflowState;
+  run: WorkflowRun;
   stage: WorkflowStageId;
   checkName: string;
   definition: WorkflowCheckDefinitionContext;
 }
 
 export interface WorkflowTaskSourceInput {
-  state: WorkflowState;
+  run: WorkflowRun;
   stage: WorkflowStageId;
   definition: WorkflowTasksFromDefinitionContext;
 }
@@ -155,7 +161,6 @@ export interface WorkflowRunResult {
   status: WorkflowStatus;
   stage: WorkflowStageId;
   message?: string;
-  state: WorkflowState;
 }
 
 export interface WorkflowTaskDefinitionContext {
