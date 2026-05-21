@@ -94,6 +94,7 @@ export interface AgentSessionTaskInput {
   artifactVerification?: (artifacts: string[]) => string[];
   retryPromptFactory?: (ctx: StageContext, attempt: number) => string | null;
   requiredMarkers?: RequiredMarkerDefinition[];
+  beforeRun?: (ctx: StageContext) => void | Promise<void>;
 }
 
 export interface ServiceCallTaskInput {

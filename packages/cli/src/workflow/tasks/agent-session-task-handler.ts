@@ -22,7 +22,10 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
   ): Promise<StageTaskResult> {
     const startedAt = Date.now();
     const { taskId, title, prompt, cwd, stage, attempt } = input;
-    const worktreeBefore = await captureWorktreeChangeState(ctx, cwd);
+    const sharedRef = input.agentSessionRef;
+    const isNamedSession = sharedRef != null && ctx.agentSessionRegistry != null;
+    let session: AgentSession | undefined;
+    let taskLocalSession = false;
 
     emitStageTaskUpdate(
       ctx.eventBus,
@@ -36,39 +39,36 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
       [],
     );
 
-    const observers = deps?.createObservers
-      ? deps.createObservers(ctx, title, stage)
-      : createWorkflowSessionObservers({
-          eventBus: ctx.eventBus,
-          workflowLogRepo: ctx.workflowLogRepo,
-          sessionStreamLogRepo: ctx.sessionStreamLogRepo,
-          coderSessionRepo: ctx.coderSessionRepo,
-          stage,
-          title,
-        });
-
-    const acpOptions: AgentSessionOptions = {
-      ...ctx.acpOptions,
-      cwd,
-      issueId: ctx.issue.id,
-      projectId: ctx.issue.projectId,
-      issueNumber: ctx.issue.number,
-      executionId: `${stage}-${ctx.issue.number}-${taskId}-${attempt}`,
-      stage,
-      title,
-      observers,
-    };
-
-    const createSessionFn = deps?.createSession ?? (async (opts: AgentSessionOptions) => {
-      return AgentSession.create(opts);
-    });
-
-    const sharedRef = input.agentSessionRef;
-    const isNamedSession = sharedRef != null && ctx.agentSessionRegistry != null;
-    let session: AgentSession | undefined;
-    let taskLocalSession = false;
-
     try {
+      await input.beforeRun?.(ctx);
+      const worktreeBefore = await captureWorktreeChangeState(ctx, cwd);
+      const observers = deps?.createObservers
+        ? deps.createObservers(ctx, title, stage)
+        : createWorkflowSessionObservers({
+            eventBus: ctx.eventBus,
+            workflowLogRepo: ctx.workflowLogRepo,
+            sessionStreamLogRepo: ctx.sessionStreamLogRepo,
+            coderSessionRepo: ctx.coderSessionRepo,
+            stage,
+            title,
+          });
+
+      const acpOptions: AgentSessionOptions = {
+        ...ctx.acpOptions,
+        cwd,
+        issueId: ctx.issue.id,
+        projectId: ctx.issue.projectId,
+        issueNumber: ctx.issue.number,
+        executionId: `${stage}-${ctx.issue.number}-${taskId}-${attempt}`,
+        stage,
+        title,
+        observers,
+      };
+
+      const createSessionFn = deps?.createSession ?? (async (opts: AgentSessionOptions) => {
+        return AgentSession.create(opts);
+      });
+
       if (isNamedSession) {
         session = await ctx.agentSessionRegistry!.getOrCreate(sharedRef, () => createSessionFn(acpOptions));
       } else {

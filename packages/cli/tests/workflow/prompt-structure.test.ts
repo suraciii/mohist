@@ -45,6 +45,13 @@ describe('review.md prompt structure', () => {
     expect(content).toContain('<promise>FAIL</promise>');
   });
 
+  it('treats review.md as a fresh latest report produced by the task', () => {
+    expect(content).toContain('Report Lifecycle');
+    expect(content).toContain('Produce a fresh `review.md`');
+    expect(content).toContain('removes any prior `review.md` before this task starts');
+    expect(content).toContain('Do not rely on old review verdicts or stale report content');
+  });
+
   it('emits follow-up and out-of-scope items as visible non-blocking items', () => {
     expect(content).toContain('do not prevent PASS');
     expect(content).toMatch(/Status: follow-up/);
