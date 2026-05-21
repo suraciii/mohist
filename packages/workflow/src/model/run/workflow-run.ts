@@ -1,7 +1,8 @@
 import type { StageDefinition, WorkflowStageId } from '../workflow-definition';
 import { WorkflowDomainError } from '../errors';
 import { StageRun } from './stage-run';
-import type { ApprovalInput, CheckResultInput, FailureDetails, MaterializedTaskInput, StageRunState, TaskResultInput, WorkflowRunStatus, WorkflowWork } from './types';
+import type { ApprovalInput, FailureDetails, MaterializedTaskInput, StageRunState, WorkflowRunStatus, WorkflowWork } from './types';
+import type { CheckResult, TaskResult } from '../../runtime';
 
 export class WorkflowRun {
   readonly stageRuns: StageRun[];
@@ -74,7 +75,7 @@ export class WorkflowRun {
       return {
         kind: 'blocked',
         stage: this.currentStage.stage,
-        reason: { complete: false, reason: 'workflow-not-running', stage: this.currentStage.stage },
+        reason: 'workflow-not-running',
       };
     }
 
@@ -82,11 +83,11 @@ export class WorkflowRun {
     if (stageRun.status === 'awaiting-approval') return { kind: 'await-approval', stage: stageRun.stage };
     if (stageRun.status === 'failed') {
       if (!stageRun.failure) {
-        return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'stage-failed', stage: stageRun.stage } };
+        return { kind: 'blocked', stage: stageRun.stage, reason: 'stage-failed' };
       }
       return { kind: 'failed', reason: stageRun.failure };
     }
-    if (stageRun.status !== 'running') return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'stage-not-running', stage: stageRun.stage } };
+    if (stageRun.status !== 'running') return { kind: 'blocked', stage: stageRun.stage, reason: 'stage-not-running' };
 
     if (!stageRun.initialized) {
       const source = typeof stageRun.definition.tasksFrom === 'string'
@@ -171,7 +172,7 @@ export class WorkflowRun {
     stageRun.completeTask();
   }
 
-  failTask(result: TaskResultInput): void {
+  failTask(result: TaskResult): void {
     const stageRun = this.requireCurrentTask();
     const taskId = stageRun.currentTask?.id;
     stageRun.startTask();
@@ -181,7 +182,6 @@ export class WorkflowRun {
       stage: stageRun.stage,
       taskId,
       message: result.reason,
-      causedBy: result.causedBy,
     };
     stageRun.status = 'failed';
     stageRun.failure = failure;
@@ -189,21 +189,21 @@ export class WorkflowRun {
     this.failure = failure;
   }
 
-  passCheck(result: CheckResultInput): void {
+  passCheck(result: CheckResult): void {
     const check = this.requireCurrentCheck();
     check.message = result.message ?? null;
     check.output = result.output ?? null;
     check.pass();
   }
 
-  resetCheck(result: CheckResultInput): void {
+  resetCheck(result: CheckResult): void {
     const check = this.requireCurrentCheck();
     check.reset();
     check.message = result.message ?? null;
     check.output = result.output ?? null;
   }
 
-  pendingCheck(result: CheckResultInput): void {
+  pendingCheck(result: CheckResult): void {
     if (this.isCurrentCheckApproval()) {
       this.requestApproval(result);
       return;
@@ -211,7 +211,7 @@ export class WorkflowRun {
     this.resetCheck(result);
   }
 
-  failCheck(result: CheckResultInput): void {
+  failCheck(result: CheckResult): void {
     const stageRun = this.currentStageRun();
     const check = this.requireCurrentCheck();
     check.message = result.message ?? null;
@@ -229,7 +229,7 @@ export class WorkflowRun {
     this.failure = failure;
   }
 
-  requestApproval(result: CheckResultInput): void {
+  requestApproval(result: CheckResult): void {
     const stageRun = this.currentStageRun();
     const check = this.requireCurrentCheck();
     check.message = result.message ?? null;

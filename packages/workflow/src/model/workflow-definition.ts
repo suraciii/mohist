@@ -26,20 +26,11 @@ export interface CheckDefinition {
 export interface CheckFailureRetry {
   limit: number;
   task: TaskDefinition;
-  inputFrom?: ReactionInputSelector[];
 }
 
 export interface CheckFailureAction {
   retry?: CheckFailureRetry;
 }
-
-export type ReactionInputSelector =
-  | { type: 'failed-check-output' }
-  | { type: 'check-items'; filter?: 'blocking' | 'all' }
-  | { type: 'task-output'; taskId: string }
-  | { type: 'artifact'; path: string }
-  | { type: 'snapshot' }
-  | { type: 'prior-task-outputs' };
 
 export interface StageResetAction {
   tasks?: string[];
