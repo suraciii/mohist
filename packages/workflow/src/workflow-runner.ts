@@ -127,7 +127,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
 
     const component = this.registry.taskSource(work.definition.tasksFrom.uses);
     if (!component) {
-      this.workflowRun.markTaskSourceMissing();
+      this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is not registered`);
       return false;
     }
     const result = await component.create({ run: this }).createTasks({
@@ -139,13 +139,13 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       },
     });
     if (result.state === 'missing') {
-      this.workflowRun.markTaskSourceMissing();
+      this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is missing`);
     } else if (result.state === 'invalid') {
-      this.workflowRun.markTaskSourceInvalid();
+      this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is invalid`);
     } else if (result.state === 'empty') {
-      this.workflowRun.markTaskSourceEmpty();
+      this.workflowRun.initTasks();
     } else {
-      this.workflowRun.initTasks(result.tasks, result.tasks.length === 0 ? { evaluated: true, empty: true } : undefined);
+      this.workflowRun.initTasks(result.tasks);
     }
     return true;
   }
