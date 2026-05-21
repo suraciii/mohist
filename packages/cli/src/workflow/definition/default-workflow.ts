@@ -22,6 +22,17 @@ const DEFAULT_BUILD_HEALTH_COMMAND = 'npm ci && npm run build';
 const DEFAULT_CHECK_HEALTH_COMMAND = 'npm ci && npm run build && npm test';
 const DEFAULT_HEALTH_TIMEOUT_MS = 5 * 60 * 1000;
 
+function planArtifactPrompt(artifactName: string, outputPath: string, extraInstructions: string[] = []): string {
+  return [
+    `Create the ${artifactName} artifact for issue #{{ issue.number }}: {{ issue.title }}.`,
+    '',
+    `Write the result to: ${outputPath}`,
+    '',
+    'Use the existing change artifacts in {{ artifacts.openspecChange }} as context when relevant.',
+    ...extraInstructions.length > 0 ? ['', ...extraInstructions] : [],
+  ].join('\n');
+}
+
 export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
   id: 'mohist/default',
   name: 'Mohist default issue delivery workflow',
@@ -41,17 +52,59 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         },
       },
       tasks: [
-        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } } },
-        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/specs' } } },
-        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/design' } } },
-        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/tasks' } } },
+        {
+          id: 'proposal',
+          title: 'Generate proposal',
+          uses: 'mohist/agent',
+          with: {
+            session: 'plan-artifacts',
+            outputs: ['{{ artifacts.openspecChange }}/proposal.md'],
+            prompt: { inline: planArtifactPrompt('proposal', '{{ artifacts.openspecChange }}/proposal.md') },
+          },
+        },
+        {
+          id: 'specs',
+          title: 'Write specs',
+          uses: 'mohist/agent',
+          with: {
+            session: 'plan-artifacts',
+            outputs: ['{{ artifacts.openspecChange }}/specs'],
+            prompt: { inline: planArtifactPrompt('specs', '{{ artifacts.openspecChange }}/specs') },
+          },
+        },
+        {
+          id: 'design',
+          title: 'Create design',
+          uses: 'mohist/agent',
+          with: {
+            session: 'plan-artifacts',
+            outputs: ['{{ artifacts.openspecChange }}/design.md'],
+            prompt: { inline: planArtifactPrompt('design', '{{ artifacts.openspecChange }}/design.md') },
+          },
+        },
+        {
+          id: 'tasks',
+          title: 'Generate tasks',
+          uses: 'mohist/agent',
+          with: {
+            session: 'plan-artifacts',
+            outputs: ['{{ artifacts.openspecChange }}/tasks.json'],
+            prompt: { inline: planArtifactPrompt('tasks.json implementation plan', '{{ artifacts.openspecChange }}/tasks.json') },
+          },
+        },
         {
           id: 'self-review',
           title: 'Self review',
           uses: 'mohist/agent',
           with: {
             session: 'plan-artifacts',
-            prompt: { ref: 'mohist/plan/self-review' },
+            outputs: ['{{ artifacts.openspecChange }}/self-review.md'],
+            prompt: {
+              inline: planArtifactPrompt('self-review', '{{ artifacts.openspecChange }}/self-review.md', [
+                'Review proposal.md, specs, design.md, and tasks.json.',
+                'End the file with exactly one marker: <promise>PASS</promise> or <promise>FAIL</promise>.',
+              ]),
+            },
             requiredMarkers: [
               {
                 path: '{{ artifacts.openspecChange }}/self-review.md',

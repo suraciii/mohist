@@ -4,7 +4,6 @@ import { WorkflowDomainError } from './errors';
 export type WorkflowStageId = string;
 
 export type AgentPromptSource =
-  | { ref: string }
   | { file: string }
   | { inline: string };
 
@@ -143,7 +142,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function clonePromptSource(value: unknown): AgentPromptSource | string | undefined {
   if (typeof value === 'string') return value;
   if (!isRecord(value)) return undefined;
-  if (typeof value.ref === 'string') return { ref: value.ref };
   if (typeof value.file === 'string') return { file: value.file };
   if (typeof value.inline === 'string') return { inline: value.inline };
   return undefined;

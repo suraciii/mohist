@@ -12,15 +12,8 @@ import { createServiceCallTaskHandler } from './service-call-task-handler';
 import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
-import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
+import { buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
-
-interface PlanTaskConfig {
-  type: string;
-  promptRef: string;
-  label: string;
-  verifyArtifact: () => boolean;
-}
 
 export interface TaskDispatchFactoryInput {
   ctx: StageContext;
@@ -117,45 +110,6 @@ function resolveTaskProviderId(input: TaskDispatchFactoryInput): string {
   return input.sourceTask?.uses ?? input.task.uses ?? '';
 }
 
-function createPlanTaskConfigs(changeDir: string): PlanTaskConfig[] {
-  return [
-    {
-      type: 'proposal',
-      promptRef: 'mohist/plan/proposal',
-      label: 'proposal.md',
-      verifyArtifact: () => fs.existsSync(path.join(changeDir, 'proposal.md')),
-    },
-    {
-      type: 'specs',
-      promptRef: 'mohist/plan/specs',
-      label: 'specs/',
-      verifyArtifact: () => fs.existsSync(path.join(changeDir, 'specs')),
-    },
-    {
-      type: 'design',
-      promptRef: 'mohist/plan/design',
-      label: 'design.md',
-      verifyArtifact: () => fs.existsSync(path.join(changeDir, 'design.md')),
-    },
-    {
-      type: 'tasks',
-      promptRef: 'mohist/plan/tasks',
-      label: 'tasks.json',
-      verifyArtifact: () => fs.existsSync(path.join(changeDir, 'tasks.json')),
-    },
-    {
-      type: 'self-review',
-      promptRef: 'mohist/plan/self-review',
-      label: 'self-review.md',
-      verifyArtifact: () => fs.existsSync(path.join(changeDir, 'self-review.md')),
-    },
-  ];
-}
-
-function baseRuntimeTaskId(taskId: string): string {
-  return taskId.replace(/:\d+$/, '');
-}
-
 function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Promise<StageTaskResult> {
   return createServiceCallTaskHandler()({
     taskId: input.task.taskId,
@@ -197,30 +151,21 @@ function runAgentSessionTask(
   if (!task) {
     throw new Error(`Agent task '${input.task.taskId}' requires a prompt`);
   }
-  if (isStageTaskResult(task)) return Promise.resolve(task);
   return agentSessionHandler(task, input.ctx);
 }
 
 function createAgentSessionTask(
   input: TaskDispatchFactoryInput,
   readFile: (path: string, encoding: BufferEncoding) => string,
-): AgentSessionTaskInput | StageTaskResult | null {
+): AgentSessionTaskInput | null {
   const promptSource = agentPromptSource(input.sourceTask);
-  if (promptSource && !isBuiltinAgentPromptRef(promptSource)) {
+  if (promptSource) {
     return createGenericAgentSessionInput(input, resolveCustomAgentPrompt(input, promptSource, readFile));
   }
   if (typeof input.task.prompt === 'string' && input.task.prompt.trim().length > 0) {
     return createGenericAgentSessionInput(input, input.task.prompt);
   }
-  if (promptSource && 'ref' in promptSource && isBuiltinAgentPromptRef(promptSource)) {
-    return createBuiltinAgentSessionInput(input, promptSource.ref);
-  }
   return null;
-}
-
-function createBuiltinAgentSessionInput(input: TaskDispatchFactoryInput, promptRef: string): AgentSessionTaskInput | StageTaskResult {
-  if (promptRef.startsWith('mohist/plan/')) return createPlanAgentSessionInput(input, promptRef);
-  throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
 }
 
 function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource | null {
@@ -228,14 +173,9 @@ function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource 
   if (typeof rawPrompt === 'string') return { inline: rawPrompt };
   if (!rawPrompt || typeof rawPrompt !== 'object' || Array.isArray(rawPrompt)) return null;
   const prompt = rawPrompt as Record<string, unknown>;
-  if (typeof prompt.ref === 'string') return { ref: prompt.ref };
   if (typeof prompt.file === 'string') return { file: prompt.file };
   if (typeof prompt.inline === 'string') return { inline: prompt.inline };
   return null;
-}
-
-function isBuiltinAgentPromptRef(source: AgentPromptSource): boolean {
-  return 'ref' in source && source.ref.startsWith('mohist/');
 }
 
 function resolveCustomAgentPrompt(
@@ -248,7 +188,7 @@ function resolveCustomAgentPrompt(
     const promptPath = resolvePromptFilePath(input.worktreePath, source.file);
     return renderPromptTemplate(input, readFile(promptPath, 'utf-8'));
   }
-  throw new Error(`Unknown agent prompt ref '${source.ref}' for task '${input.task.taskId}'`);
+  throw new Error(`Unsupported agent prompt source for task '${input.task.taskId}'`);
 }
 
 function resolvePromptFilePath(worktreePath: string, promptFile: string): string {
@@ -286,9 +226,7 @@ function requiredMarkersForTask(input: TaskDispatchFactoryInput): RequiredMarker
 }
 
 function createGenericAgentSessionInput(input: TaskDispatchFactoryInput, prompt: string): AgentSessionTaskInput {
-  const declaredArtifacts = extractStringArray((input.task.input as { artifacts?: unknown; outputs?: unknown } | undefined)?.artifacts)
-    ?? extractStringArray((input.task.input as { outputs?: unknown } | undefined)?.outputs)
-    ?? [];
+  const declaredArtifacts = renderDeclaredArtifacts(input);
   return {
     taskId: input.task.taskId,
     title: input.task.title,
@@ -298,8 +236,16 @@ function createGenericAgentSessionInput(input: TaskDispatchFactoryInput, prompt:
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
-    artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.join(input.worktreePath, artifact))),
+    artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.resolve(input.worktreePath, artifact))),
   } satisfies AgentSessionTaskInput;
+}
+
+function renderDeclaredArtifacts(input: TaskDispatchFactoryInput): string[] {
+  const rawInput = input.task.input as { artifacts?: unknown; outputs?: unknown } | undefined;
+  const declaredArtifacts = extractStringArray(rawInput?.artifacts)
+    ?? extractStringArray(rawInput?.outputs)
+    ?? [];
+  return declaredArtifacts.map(artifact => renderPromptTemplate(input, artifact));
 }
 
 function isRequiredMarkerRecord(value: unknown): value is RequiredMarkerDefinition {
@@ -319,10 +265,6 @@ function extractStringArray(value: unknown): string[] | null {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
-function isStageTaskResult(value: AgentSessionTaskInput | StageTaskResult): value is StageTaskResult {
-  return 'status' in value && 'attempts' in value && 'duration' in value;
-}
-
 function completedTaskResult(input: TaskDispatchFactoryInput, artifacts: string[], result: unknown): StageTaskResult {
   return {
     taskId: input.task.taskId,
@@ -334,40 +276,6 @@ function completedTaskResult(input: TaskDispatchFactoryInput, artifacts: string[
     events: [],
     output: result,
   };
-}
-
-function createPlanAgentSessionInput(input: TaskDispatchFactoryInput, promptRef: string): AgentSessionTaskInput | StageTaskResult {
-  const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
-    || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
-  if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
-
-  const tasks = createPlanTaskConfigs(changeDir);
-  const baseTaskId = baseRuntimeTaskId(input.task.taskId);
-  const taskConfig = tasks.find(candidate => candidate.promptRef === promptRef || candidate.type === input.task.taskId || candidate.type === baseTaskId);
-  if (!taskConfig) throw new Error(`Unknown Plan task: ${input.task.taskId}`);
-
-  const completedSteps = input.ctx.checkpointManager.getResumeSteps(input.ctx.issue.number, 'plan');
-  if (mayRestoreTaskFromPriorOutput(input) && completedSteps.includes(taskConfig.type) && taskConfig.verifyArtifact()) {
-    emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, []);
-    return completedTaskResult(input, [], { restoredFromCheckpoint: true });
-  }
-  if (mayRestoreTaskFromPriorOutput(input) && taskConfig.verifyArtifact()) {
-    input.ctx.checkpointManager.markStepComplete(input.ctx.issue.number, 'plan', taskConfig.type, tasks[tasks.indexOf(taskConfig) + 1]?.type ?? null);
-    emitStageTaskUpdate(input.ctx.eventBus, input.ctx.issue.id, input.ctx.issue.projectId, input.ctx.issue.stage, input.task.taskId, input.task.title, 'completed', input.attempt, [taskConfig.label]);
-    return completedTaskResult(input, [taskConfig.label], { artifacts: [taskConfig.label], restoredFromDisk: true });
-  }
-
-  return {
-    taskId: input.task.taskId,
-    title: input.task.title,
-    prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
-    cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
-    stage: input.ctx.issue.stage,
-    attempt: input.attempt,
-    agentSessionRef: input.agentSessionRef,
-    requiredMarkers: requiredMarkersForTask(input),
-    artifactVerification: () => taskConfig.verifyArtifact() ? [taskConfig.label] : [],
-  } satisfies AgentSessionTaskInput;
 }
 
 function mayRestoreTaskFromPriorOutput(input: TaskDispatchFactoryInput): boolean {
@@ -410,23 +318,6 @@ async function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, 
 function removePriorReviewOutput(reviewOutputFullPath: string): void {
   if (!fs.existsSync(reviewOutputFullPath)) return;
   fs.rmSync(reviewOutputFullPath, { force: true });
-}
-
-function buildBuiltinAgentPrompt(input: TaskDispatchFactoryInput, promptRef: string, changeDir: string): string {
-  switch (promptRef) {
-    case 'mohist/plan/proposal':
-      return buildArtifactPrompt('proposal', input.ctx.issue, changeDir);
-    case 'mohist/plan/specs':
-      return buildArtifactPrompt('specs', input.ctx.issue, changeDir);
-    case 'mohist/plan/design':
-      return buildArtifactPrompt('design', input.ctx.issue, changeDir);
-    case 'mohist/plan/tasks':
-      return buildArtifactPrompt('tasks', input.ctx.issue, changeDir);
-    case 'mohist/plan/self-review':
-      return buildSelfReviewPrompt(input.ctx.issue, changeDir);
-    default:
-      throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
-  }
 }
 
 function buildCheckReviewPrompt(input: TaskDispatchFactoryInput, changeDir: string): string {

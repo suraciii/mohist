@@ -196,11 +196,11 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
     [Stage.Plan]: {
       stage: Stage.Plan,
       tasks: [
-        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/proposal' } } },
-        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/specs' } } },
-        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/design' } } },
-        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/tasks' } } },
-        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/plan/self-review' } } },
+        { id: 'proposal', title: 'Generate proposal', uses: 'mohist/agent', with: { prompt: { inline: 'Generate proposal' } } },
+        { id: 'specs', title: 'Write specs', uses: 'mohist/agent', with: { prompt: { inline: 'Write specs' } } },
+        { id: 'design', title: 'Create design', uses: 'mohist/agent', with: { prompt: { inline: 'Create design' } } },
+        { id: 'tasks', title: 'Generate tasks', uses: 'mohist/agent', with: { prompt: { inline: 'Generate tasks' } } },
+        { id: 'self-review', title: 'Self review', uses: 'mohist/agent', with: { prompt: { inline: 'Self review' } } },
       ],
       checks: [
         { name: 'proposal-complete', title: 'Proposal complete' },

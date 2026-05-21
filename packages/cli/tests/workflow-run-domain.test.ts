@@ -130,7 +130,11 @@ describe('WorkflowRun domain aggregate', () => {
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.taskExecutionPolicies).toBeUndefined();
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Plan)?.tasks.find(task => task.id === 'proposal')).toMatchObject({
       uses: 'mohist/agent',
-      with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } },
+      with: {
+        session: 'plan-artifacts',
+        outputs: ['{{ artifacts.openspecChange }}/proposal.md'],
+        prompt: { inline: expect.stringContaining('proposal') },
+      },
     });
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Check)?.tasks.find(task => task.id === 'ai-review')).toMatchObject({
       uses: 'mohist/check/ai-review',
