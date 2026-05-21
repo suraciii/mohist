@@ -392,11 +392,11 @@ export class WorkflowRun {
     return this.fail(stageRun, failure, [{ type: 'approval-rejected', stage, reason: failure }]);
   }
 
-  startTaskAttempt(stage: WorkflowStageId, taskId: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {
+  startTaskAttempt(stage: WorkflowStageId, taskId: string, now: string): void {
     if (this.status !== 'running') return;
     const stageRun = this.stageRun(stage);
     const task = stageRun.findTask(taskId);
-    task.startWorkAttempt(now, evidence);
+    task.startWorkAttempt(now);
   }
 
   startCheckAttempt(stage: WorkflowStageId, checkName: string, now: string, evidence?: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>>): void {

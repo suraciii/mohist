@@ -67,7 +67,7 @@ export class TaskRun {
     };
   }
 
-  startWorkAttempt(now: string, evidence: Partial<Pick<WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> = {}): WorkItemAttempt {
+  startWorkAttempt(now: string): WorkItemAttempt {
     this.status = 'running';
     const attemptNumber = this.latestAttempt ? this.latestAttempt.attemptNumber + 1 : 1;
     this.latestAttempt = {
@@ -78,11 +78,11 @@ export class TaskRun {
       output: null,
       error: null,
       diagnostic: null,
-      queueTaskId: evidence.queueTaskId ?? null,
-      acpSessionId: evidence.acpSessionId ?? null,
-      coderSessionId: evidence.coderSessionId ?? null,
-      executionId: evidence.executionId ?? null,
-      processPid: evidence.processPid ?? null,
+      queueTaskId: null,
+      acpSessionId: null,
+      coderSessionId: null,
+      executionId: null,
+      processPid: null,
     };
     return this.latestAttempt;
   }
