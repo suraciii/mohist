@@ -22,14 +22,6 @@ export type WorkflowStageState = StageRunState;
 
 export type WorkflowFailure = FailureDetails;
 
-export type WorkflowStatus =
-  | 'running'
-  | 'completed'
-  | 'awaiting-approval'
-  | 'blocked'
-  | 'failed'
-  | 'stopped';
-
 export type WorkflowDefinitionInput =
   | WorkflowDefinition
   | ResolvedWorkflowDefinition
@@ -64,13 +56,13 @@ export interface WorkflowRunner {
   readonly stages: WorkflowStageState[];
   readonly failure: WorkflowFailure | null;
 
-  run(): Promise<WorkflowRunResult>;
-  start(): Promise<WorkflowRunResult>;
-  resume(): Promise<WorkflowRunResult>;
-  pause(reason?: string): Promise<WorkflowRunResult>;
+  run(): Promise<void>;
+  start(): Promise<void>;
+  resume(): Promise<void>;
+  pause(reason?: string): Promise<void>;
 
-  approve(): Promise<WorkflowRunResult>;
-  reject(reason?: string): Promise<WorkflowRunResult>;
+  approve(): Promise<void>;
+  reject(reason?: string): Promise<void>;
 }
 
 export interface WorkflowStore {
@@ -150,12 +142,6 @@ export type WorkflowCheckResult = CheckResultInput;
 export interface WorkflowTaskSourceResult {
   tasks: MaterializedTaskInput[];
   state?: 'missing' | 'invalid' | 'empty';
-}
-
-export interface WorkflowRunResult {
-  status: WorkflowStatus;
-  stage: WorkflowStageId;
-  message?: string;
 }
 
 export interface WorkflowTaskDefinitionContext {

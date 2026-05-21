@@ -88,18 +88,28 @@ export class WorkflowRun {
     }
     if (stageRun.status !== 'running') return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'stage-not-running', stage: stageRun.stage } };
 
-    if (stageRun.definition.tasksFrom && !stageRun.workSourceState.evaluated) {
+    if (!stageRun.initialized) {
       const source = typeof stageRun.definition.tasksFrom === 'string'
         ? { uses: stageRun.definition.tasksFrom }
         : stageRun.definition.tasksFrom;
       return {
-        kind: 'task-source',
+        kind: 'stage-init',
         stage: stageRun.stage,
         definition: {
-          uses: source.uses,
-          with: source.with,
+          tasksFrom: source
+            ? {
+                uses: source.uses,
+                with: source.with,
+              }
+            : undefined,
         },
       };
+    }
+    if (stageRun.workSourceState.evaluated && 'missing' in stageRun.workSourceState) {
+      return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'dynamic-source-missing', stage: stageRun.stage } };
+    }
+    if (stageRun.workSourceState.evaluated && 'invalid' in stageRun.workSourceState) {
+      return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'dynamic-source-invalid', stage: stageRun.stage } };
     }
 
     const task = stageRun.currentTask;
@@ -133,26 +143,28 @@ export class WorkflowRun {
     return { kind: 'complete', stage: stageRun.stage };
   }
 
-  addTasks(tasks: MaterializedTaskInput[]): void {
+  initTasks(tasks: MaterializedTaskInput[] = [], workSourceState?: Exclude<StageRun['workSourceState'], { evaluated: false }>): void {
     const stageRun = this.currentStageRun();
-    stageRun.workSourceState = tasks.length === 0
-      ? { evaluated: true, empty: true }
-      : { evaluated: true, tasks };
-    for (const task of tasks) {
-      stageRun.addTask(task.id, task.title, task.uses);
-    }
+    stageRun.initTasks(
+      tasks,
+      workSourceState ?? (
+        tasks.length === 0
+          ? { evaluated: true, none: true }
+          : { evaluated: true, tasks }
+      ),
+    );
   }
 
   markTaskSourceMissing(): void {
-    this.currentStageRun().workSourceState = { evaluated: true, missing: true };
+    this.currentStageRun().initTasks([], { evaluated: true, missing: true });
   }
 
   markTaskSourceInvalid(): void {
-    this.currentStageRun().workSourceState = { evaluated: true, invalid: true };
+    this.currentStageRun().initTasks([], { evaluated: true, invalid: true });
   }
 
   markTaskSourceEmpty(): void {
-    this.currentStageRun().workSourceState = { evaluated: true, empty: true };
+    this.currentStageRun().initTasks([], { evaluated: true, empty: true });
   }
 
   completeTask(): void {

@@ -39,6 +39,7 @@ export interface MaterializedTaskInput {
   id: string;
   title: string;
   uses?: string;
+  with?: Record<string, unknown>;
   order?: number;
   dependsOn?: string[];
 }
@@ -48,6 +49,7 @@ export type WorkSourceState =
   | { evaluated: true; missing: true }
   | { evaluated: true; invalid: true }
   | { evaluated: true; empty: true }
+  | { evaluated: true; none: true }
   | { evaluated: false };
 
 export interface CommitPoint {
@@ -100,7 +102,7 @@ export type WorkflowEvent =
   | { type: 'commit-point-created'; stage: WorkflowStageId; commitPoint: CommitPoint };
 
 export type WorkflowWork =
-  | { kind: 'task-source'; stage: WorkflowStageId; definition: { uses: string; with?: Record<string, unknown> } }
+  | { kind: 'stage-init'; stage: WorkflowStageId; definition: { tasksFrom?: { uses: string; with?: Record<string, unknown> } } }
   | { kind: 'task'; stage: WorkflowStageId; task: { id: string; title: string; uses?: string; with?: Record<string, unknown> } }
   | { kind: 'check'; stage: WorkflowStageId; check: { name: string; title: string; uses?: string; with?: Record<string, unknown> } }
   | { kind: 'await-approval'; stage: WorkflowStageId }
