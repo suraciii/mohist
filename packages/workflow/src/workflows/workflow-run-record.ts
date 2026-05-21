@@ -3,7 +3,7 @@ import type {
   TaskRunState,
   WorkflowRunState,
 } from '../model';
-import { WorkflowRun } from '../model';
+import { StageCheck, TaskRun, WorkflowRun } from '../model';
 import type { WorkflowRunRecord } from './types';
 
 export function recordFromRun(run: WorkflowRun): WorkflowRunRecord {
@@ -73,26 +73,24 @@ function restoreRunFields(run: WorkflowRun, state: WorkflowRunState): void {
 function restoreTasks(stageRun: ReturnType<WorkflowRun['currentStageRun']>, taskStates: TaskRunState[]): void {
   stageRun.tasks.splice(0, stageRun.tasks.length);
   for (const taskState of taskStates) {
-    const task = stageRun.restoreTaskState(
-      taskState.id,
-      taskState.title,
-      taskState.uses,
-    );
-    task.run.status = taskState.status;
+    const task = new TaskRun(taskState.id, taskState.title, taskState.uses);
+    task.status = taskState.status;
     task.events = [...taskState.events];
     task.output = taskState.output;
     task.reason = taskState.reason;
+    stageRun.tasks.push(task);
   }
 }
 
 function restoreChecks(stageRun: ReturnType<WorkflowRun['currentStageRun']>, checkStates: CheckRunState[]): void {
   stageRun.checks.splice(0, stageRun.checks.length);
   for (const checkState of checkStates) {
-    const check = stageRun.restoreCheckState(checkState.name, checkState.title);
+    const check = new StageCheck(checkState.name, checkState.title);
     check.status = checkState.status;
     check.message = checkState.message;
     check.output = checkState.output;
     check.runCount = checkState.runCount;
     check.latestAttempt = checkState.latestAttempt;
+    stageRun.checks.push(check);
   }
 }
