@@ -263,8 +263,33 @@ export class DefaultWorkflowExternalWorld {
 
   private writeAiReviewArtifact(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
     this.aiReviewAttempts += 1;
-    this.write('review.md', this.aiReviewAttempts <= (this.scenario.reviewFailuresBeforePass ?? 0)
-      ? '# Review\nBlocking finding F-001\n<promise>FAIL</promise>\n'
+    const reviewFailed = this.aiReviewAttempts <= (this.scenario.reviewFailuresBeforePass ?? 0);
+    if (reviewFailed) {
+      this.write('review.md', [
+        '# Review',
+        '<promise>FAIL</promise>',
+        '',
+        '- [ID: F-001]',
+        '  Severity: high',
+        '  Evidence: Blocking finding from fake review',
+        '  Status: open',
+        '',
+      ].join('\n'));
+      return this.completed(task, ['review.md']);
+    }
+
+    this.write('review.md', this.aiReviewAttempts > 1
+      ? [
+          '# Review',
+          '<promise>PASS</promise>',
+          '',
+          '- [ID: F-001]',
+          '  Severity: high',
+          '  Evidence: Blocking finding from fake review',
+          '  Verification: npm test -- tests/workflow/default-workflow-harness.test.ts',
+          '  Status: resolved',
+          '',
+        ].join('\n')
       : '# Review\nAll clear\n<promise>PASS</promise>\n');
     return this.completed(task, ['review.md']);
   }
