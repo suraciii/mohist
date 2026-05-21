@@ -7,7 +7,8 @@ import type { StageContext } from '../../src/workflow/stage-context';
 import type { StageRunner } from '../../src/workflow/stage-runner';
 import type { CheckRegistry, CheckContext } from '../../src/workflow/checks';
 import type { TaskLoaderRegistry, TaskHandlerRegistry, ExecutableTask } from '../../src/workflow/task-runtime';
-import type { StageDefinition, WorkflowRun as DomainWorkflowRun } from '../../src/workflow/model';
+import type { WorkflowRun as DomainWorkflowRun } from '../../src/workflow/model';
+import type { RuntimeStageDefinition } from '../../src/workflow/runner/workflow-runtime-definition';
 import { GenericStageRunner, GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE } from '../../src/workflow/generic-stage-runner';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import { createAgentSessionTaskHandler } from '../../src/workflow/task-runtime/agent-session-task-handler';
@@ -174,8 +175,8 @@ function createBasicCheckRegistry(checks: Record<string, (ctx: CheckContext) => 
   };
 }
 
-function createStageDefinition(stage: Stage): StageDefinition {
-  const defs: Record<Stage, StageDefinition> = {
+function createStageDefinition(stage: Stage): RuntimeStageDefinition {
+  const defs: Record<Stage, RuntimeStageDefinition> = {
     [Stage.Plan]: {
       stage: Stage.Plan,
       tasks: [
@@ -418,7 +419,7 @@ describe('StageRunner migration regression coverage', () => {
 
     it('GenericStageRunner mirrors aggregate-rejected check pass as failed execution evidence', async () => {
       const checkHandler = vi.fn().mockReturnValue({ name: 'pr-merged', status: 'pass' as const });
-      const definition: StageDefinition = {
+      const definition: RuntimeStageDefinition = {
         stage: Stage.Integrate,
         tasks: [],
         checks: [{ name: 'pr-merged', title: 'PR merged', uses: 'mohist/pr-merged' }],
@@ -718,7 +719,7 @@ describe('StageRunner migration regression coverage', () => {
       try {
         fs.mkdirSync(path.join(tmpDir, '.mohist', 'prompts'), { recursive: true });
         fs.writeFileSync(path.join(tmpDir, '.mohist', 'prompts', 'handoff.md'), 'Write a custom handoff report.', 'utf-8');
-        const customBuildStage: StageDefinition = {
+        const customBuildStage: RuntimeStageDefinition = {
           stage: Stage.Build,
           tasks: [
             {
@@ -1299,7 +1300,7 @@ describe('StageRunner migration regression coverage', () => {
       try {
         const changeDir = path.join(worktreePath, 'openspec', 'changes', 'custom-service');
         fs.mkdirSync(changeDir, { recursive: true });
-        const stageDefinition: StageDefinition = {
+        const stageDefinition: RuntimeStageDefinition = {
           stage: Stage.Integrate,
           tasks: [{ id: 'archive-spec-change', title: 'Archive spec change', uses: 'mohist/archive-change' }],
           checks: [],
@@ -1676,7 +1677,7 @@ describe('StageRunner migration regression coverage', () => {
     });
 
     it('generic Check resolves project-defined retry tasks without builtin task ids', () => {
-      const stageDefinition: StageDefinition = {
+      const stageDefinition: RuntimeStageDefinition = {
         stage: Stage.Check,
         on: { 'code.changed': { reset: { tasks: ['ai-review'], checks: 'all', approval: true } } },
         tasks: [{ id: 'ai-review', title: 'AI review' }],

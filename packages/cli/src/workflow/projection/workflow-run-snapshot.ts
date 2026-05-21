@@ -2,7 +2,7 @@ import { Stage } from '../../types';
 import { getWorkflowUseDefinition, inferWorkflowCheckUse, inferWorkflowTaskUse } from '../uses-catalog';
 import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '../model';
 import { WorkflowRun } from '../model';
-import { compileRuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
+import { compileRuntimeWorkflowDefinitionSnapshot, type RuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
 import type {
   CausedByMetadata,
   CheckRunStatus,
@@ -243,7 +243,7 @@ export function repairWorkflowRunSnapshot(
   };
 }
 
-export function workflowDefinitionSnapshotFromUnknown(value: unknown): WorkflowDefinitionSnapshot | null {
+export function workflowDefinitionSnapshotFromUnknown(value: unknown): RuntimeWorkflowDefinitionSnapshot | null {
   if (!value || typeof value !== 'object') return null;
   const snapshot = value as Partial<WorkflowDefinitionSnapshot>;
   if (typeof snapshot.workflowId !== 'string') return null;

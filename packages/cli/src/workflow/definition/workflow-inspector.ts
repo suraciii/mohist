@@ -609,6 +609,7 @@ function applyStageChecks(
       source: 'project',
       uses: raw.uses,
       with: isRecord(raw.with) ? { ...raw.with } : undefined,
+      onFailure: compileCheckOnFailure(raw.onFailure, checkPath, diagnostics),
     });
   }
 }
