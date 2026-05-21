@@ -238,7 +238,11 @@ function cloneCompiledStageDefinition(stage: CompiledStageDefinition): CompiledS
 
 function compileCheckPolicies(stage: StageDefinition, existingPolicies?: CheckPolicy[]): CheckPolicy[] {
   if (existingPolicies) return existingPolicies.map(policy => ({ ...policy }));
-  return stage.checks.map(check => ({ checkName: check.name, phase: 'post-task' as const }));
+  const approvalCheckName = stage.requiresApproval ? stage.approvalCheckName ?? 'user-approval' : undefined;
+  return stage.checks.map(check => ({
+    checkName: check.name,
+    phase: check.name === approvalCheckName ? 'approval' : 'post-task' as const,
+  }));
 }
 
 function compileApprovalPolicy(stage: StageDefinition, existingPolicy?: ApprovalPolicy): ApprovalPolicy | undefined {

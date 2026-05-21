@@ -603,6 +603,10 @@ function applyStageChecks(
       diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${raw.uses}' is not allowed as a check` });
       continue;
     }
+    if (!isExecutableCustomCheckUse(raw.uses)) {
+      diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${raw.uses}' is not supported for full custom check execution yet` });
+      continue;
+    }
     stage.checks.push({
       name: raw.id,
       title: typeof raw.title === 'string' ? raw.title : raw.id,
@@ -623,6 +627,10 @@ function applyCheckOverride(
 ): void {
   if (raw.uses !== undefined && (typeof raw.uses !== 'string' || !isWorkflowUseAllowed(raw.uses, 'check'))) {
     diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${String(raw.uses)}' is not allowed as a check` });
+    return;
+  }
+  if (typeof raw.uses === 'string' && !isExecutableCustomCheckUse(raw.uses)) {
+    diagnostics.push({ severity: 'error', path: `${checkPath}.uses`, message: `Use '${raw.uses}' is not supported for full custom check execution yet` });
     return;
   }
   check.source = 'project';
@@ -692,6 +700,13 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
           message: `Use '${uses}' is not allowed as a check`,
         });
       }
+      if (!isExecutableCustomCheckUse(uses)) {
+        diagnostics.push({
+          severity: 'error',
+          path: `${stagePath}.checks[${checkIndex}].uses`,
+          message: `Use '${uses}' is not supported for full custom check execution yet`,
+        });
+      }
       if (uses === 'mohist/shell' && (!check.with || typeof check.with.command !== 'string' || check.with.command.length === 0)) {
         diagnostics.push({
           severity: 'error',
@@ -708,6 +723,16 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
   }
 
   return diagnostics;
+}
+
+function isExecutableCustomCheckUse(uses: string): boolean {
+  return uses === 'mohist/artifact-exists'
+    || uses === 'mohist/marker'
+    || uses === 'mohist/verdict'
+    || uses === 'mohist/health-gate'
+    || uses === 'mohist/merge-ready'
+    || uses === 'mohist/shell'
+    || uses === 'mohist/approval';
 }
 
 export function explainWorkflowItem(

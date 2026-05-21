@@ -154,7 +154,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
     expect(snapshot.currentStage).toBe(Stage.Build);
     expect(plan.stage).toBe(Stage.Plan);
     expect(plan.tasks.map(task => task.id)).toEqual(['proposal', 'specs', 'design', 'tasks', 'self-review']);
-    expect(plan.checks.map(check => check.name)).toEqual(['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan']);
+    expect(plan.checks.map(check => check.name)).toEqual(['proposal-complete', 'specs-complete', 'design-complete', 'tasks-valid', 'self-review-passed', 'health:plan', 'user-approval']);
     expect(plan.approval).toMatchObject({ status: 'approved', output: { approved: true } });
     expect(build.tasks).toHaveLength(1);
     expect(build.workSourceState).toMatchObject({

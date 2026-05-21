@@ -629,10 +629,10 @@ export class StageRun {
   }
 
   nonApprovalCheckPolicies(): CheckPolicy[] {
-    if (this.definition.checkPolicies?.length) {
+    if (this.definition.checkPolicies) {
       return this.definition.checkPolicies.filter(policy => policy.phase !== 'approval');
     }
-    return this.checks.map(check => ({ checkName: check.name, phase: 'post-task' as const }));
+    return this.definition.checks.map(check => ({ checkName: check.name, phase: 'post-task' as const }));
   }
 
   requiresApproval(): boolean {
@@ -698,7 +698,10 @@ export class StageRun {
   }
 
   allChecksPassed(): boolean {
-    return this.checks.every(check => check.status === 'passed');
+    const nonApprovalCheckNames = new Set(this.nonApprovalCheckPolicies().map(policy => policy.checkName));
+    return this.checks
+      .filter(check => nonApprovalCheckNames.has(check.name))
+      .every(check => check.status === 'passed');
   }
 
   findTask(taskId: string): TaskRun {
@@ -1605,7 +1608,9 @@ export class WorkflowRun {
       if (taskRun.status !== 'completed') return { complete: false, reason: 'static-task-not-successful', taskId: taskDef.id, status: taskRun.status };
     }
 
+    const nonApprovalCheckNames = new Set(stageRun.nonApprovalCheckPolicies().map(policy => policy.checkName));
     for (const checkDef of stageRun.definition.checks) {
+      if (!nonApprovalCheckNames.has(checkDef.name)) continue;
       const checkRun = stageRun.checks.find(c => c.name === checkDef.name);
       if (!checkRun) return { complete: false, reason: 'missing-static-check', checkName: checkDef.name };
       if (checkRun.status !== 'passed') return { complete: false, reason: 'static-check-not-passed', checkName: checkDef.name };

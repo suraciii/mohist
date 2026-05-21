@@ -386,8 +386,8 @@ describe('WorkflowEngine aggregate progression', () => {
     for (const task of run.stageRun(Stage.Plan).tasks) {
       run.completeTask(Stage.Plan, task.id, { status: 'completed' });
     }
-    for (const check of run.stageRun(Stage.Plan).checks) {
-      run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
+    for (const policy of run.stageRun(Stage.Plan).nonApprovalCheckPolicies()) {
+      run.recordCheckResult(Stage.Plan, { name: policy.checkName, status: 'pass' });
     }
     run.recordCheckResult(Stage.Build, { name: 'health:build', status: 'pass' });
     scheduleRebaseTask(run, 'Target branch moved');
@@ -458,8 +458,8 @@ describe('WorkflowEngine aggregate progression', () => {
     for (const task of run.stageRun(Stage.Plan).tasks) {
       run.completeTask(Stage.Plan, task.id, { status: 'completed' });
     }
-    for (const check of run.stageRun(Stage.Plan).checks) {
-      run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
+    for (const policy of run.stageRun(Stage.Plan).nonApprovalCheckPolicies()) {
+      run.recordCheckResult(Stage.Plan, { name: policy.checkName, status: 'pass' });
     }
 
     const service: WorkflowApplicationRuntime = {
@@ -519,8 +519,8 @@ describe('WorkflowEngine aggregate progression', () => {
     for (const task of run.stageRun(Stage.Plan).tasks) {
       run.completeTask(Stage.Plan, task.id, { status: 'completed' });
     }
-    for (const check of run.stageRun(Stage.Plan).checks) {
-      run.recordCheckResult(Stage.Plan, { name: check.name, status: 'pass' });
+    for (const policy of run.stageRun(Stage.Plan).nonApprovalCheckPolicies()) {
+      run.recordCheckResult(Stage.Plan, { name: policy.checkName, status: 'pass' });
     }
 
     const service: WorkflowApplicationRuntime = {

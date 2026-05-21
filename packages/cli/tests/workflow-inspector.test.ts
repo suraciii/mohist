@@ -714,6 +714,33 @@ workflow:
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('rejects catalog check uses that do not have an executable check provider yet', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-unsupported-check-use-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/unsupported-check-use
+  stages:
+    - id: check
+      tasks: []
+      checks:
+        - id: pr-merged
+          uses: mohist/pr-merged
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          message: "Use 'mohist/pr-merged' is not supported for full custom check execution yet",
+        }),
+      ]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 function toSemanticWorkflowDefinition(definition: WorkflowDefinition): unknown {

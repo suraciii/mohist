@@ -142,6 +142,7 @@ export class WorkflowRunProjection {
         if (task?.status !== 'completed') return { ok: false, reason: `${taskDefinition.id} task is ${task?.status ?? 'missing'}` };
       }
       for (const checkDefinition of stageDefinition.checks) {
+        if (this.isApprovalCheck(stageDefinition, checkDefinition.name)) continue;
         const check = stageRun.checks.find(candidate => candidate.name === checkDefinition.name);
         if (check?.status !== 'passed') return { ok: false, reason: `${checkDefinition.name} check is ${check?.status ?? 'missing'}` };
       }
@@ -155,6 +156,13 @@ export class WorkflowRunProjection {
   private stageRequiresApproval(stageDefinition: WorkflowRunSnapshot['workflowDefinitionSnapshot']['compiledStageDefinitions'][number]): boolean {
     if (stageDefinition.requiresApproval === false) return false;
     return Boolean(stageDefinition.requiresApproval ?? stageDefinition.approvalPolicy);
+  }
+
+  private isApprovalCheck(
+    stageDefinition: WorkflowRunSnapshot['workflowDefinitionSnapshot']['compiledStageDefinitions'][number],
+    checkName: string,
+  ): boolean {
+    return stageDefinition.checkPolicies?.some(policy => policy.checkName === checkName && policy.phase === 'approval') ?? false;
   }
 
   private validateCompletedWorkEvidence(snapshot: WorkflowRunSnapshot): { ok: true } | { ok: false; reason: string } {
