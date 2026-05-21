@@ -32,7 +32,10 @@ function writeArtifact(changeDir: string, filename: string, content: string) {
 
 async function reviewMarkerCheck(changeDir: string) {
   const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
-  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>');
+  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>', 'mohist/review', [
+    '<promise>PASS</promise>',
+    '<promise>FAIL</promise>',
+  ]);
 }
 
 describe('judgment-checks: shared parser regression', () => {
@@ -83,14 +86,14 @@ describe('judgment-checks: shared parser regression', () => {
       expect(result.message).toContain('No valid promise marker');
     });
 
-    it('returns error when marker is malformed', async () => {
+    it('returns error when marker-like text is not allowed', async () => {
       writeArtifact(changeDir, 'review.md', '<promise>PARTIAL</promise>\n\nSome text\n');
 
       const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
-      expect(result.message).toContain('Malformed');
+      expect(result.message).toContain('No valid promise marker');
     });
 
     it('returns error for duplicate markers', async () => {
@@ -121,14 +124,14 @@ describe('judgment-checks: shared parser regression', () => {
       expect(result.message).toContain('No valid promise marker');
     });
 
-    it('malformed marker does not become implicit FAIL', async () => {
+    it('unknown marker-like text does not become implicit FAIL', async () => {
       writeArtifact(changeDir, 'review.md', '<promise>MAYBE</promise>\n\nSome text\n');
 
       const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
-      expect((result.output as any).error).toBe('malformed-marker');
+      expect((result.output as any).error).toBe('no-marker');
     });
 
     it('remains read-only and does not modify files', async () => {
@@ -181,7 +184,7 @@ describe('judgment-checks: shared parser regression', () => {
       expect(result.message).toContain('No valid promise marker');
     });
 
-    it('returns error when marker is malformed', async () => {
+    it('returns error when marker-like text is not allowed', async () => {
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '<promise>PARTIAL</promise>\n\nSome text\n');
 
@@ -189,7 +192,7 @@ describe('judgment-checks: shared parser regression', () => {
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('error');
-      expect(result.message).toContain('Malformed');
+      expect(result.message).toContain('No valid promise marker');
     });
 
     it('returns error for duplicate markers', async () => {
@@ -222,7 +225,7 @@ describe('judgment-checks: shared parser regression', () => {
       expect(result.status).toBe('error');
     });
 
-    it('malformed marker does not become implicit FAIL', async () => {
+    it('unknown marker-like text does not become implicit FAIL', async () => {
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '<promise>UNKNOWN</promise>\n\nText\n');
 
@@ -297,7 +300,7 @@ describe('judgment-checks: shared parser regression', () => {
       expect(selfReviewResult.status).toBe('error');
     });
 
-    it('review and self-review both produce error for malformed markers', async () => {
+    it('review and self-review both produce error for unknown marker-like text', async () => {
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>MAYBE</promise>');
@@ -324,7 +327,10 @@ describe('judgment-checks: shared parser regression', () => {
         '  Status: open',
       ].join('\n'));
 
-      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>');
+      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>', 'mohist/review', [
+        '<promise>PASS</promise>',
+        '<promise>FAIL</promise>',
+      ]);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
@@ -339,7 +345,10 @@ describe('judgment-checks: shared parser regression', () => {
       const reviewPath = path.join(changeDir, 'review.md');
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n<promise>FAIL</promise>\n');
 
-      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>');
+      const check = new ArtifactMarkerCheck('review-passed', reviewPath, '<promise>PASS</promise>', undefined, [
+        '<promise>PASS</promise>',
+        '<promise>FAIL</promise>',
+      ]);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
@@ -352,7 +361,10 @@ describe('judgment-checks: shared parser regression', () => {
       const reviewPath = path.join(changeDir, 'self-review.md');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n\n### Quality: PASS\n');
 
-      const check = new ArtifactMarkerCheck('self-review-passed', reviewPath, '<promise>PASS</promise>');
+      const check = new ArtifactMarkerCheck('self-review-passed', reviewPath, '<promise>PASS</promise>', 'mohist/self-review', [
+        '<promise>PASS</promise>',
+        '<promise>FAIL</promise>',
+      ]);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('pass');

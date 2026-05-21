@@ -5,11 +5,13 @@ import { Log } from '../../util/log';
 import {
   buildStructuredResult,
   isParseError,
-  promiseMarkerContractForPath,
-  validatePromiseMarkerFile,
+  markerContractForPath,
+  validateMarkerFile,
   type ParseError,
 } from '../result-contracts';
 import { extractStructuredResultMetadata } from '../structured-result-metadata';
+import { enrichReviewStructuredResult } from './review-result-contracts';
+import type { StructuredWorkflowResult } from '../../types/workflow-results';
 
 const log = Log.create({ service: 'artifact-marker-check' });
 
@@ -18,11 +20,14 @@ export class ArtifactMarkerCheck implements Check {
     public readonly name: string,
     private readonly filePath: string,
     private readonly expectMarker: string,
+    private readonly format?: string,
+    private readonly allowedMarkers: string[] = [expectMarker],
   ) {}
 
   async run(ctx: CheckContext): Promise<CheckResult> {
     const content = readMarkerFile(this.filePath);
-    const parsed = validatePromiseMarkerFile(this.filePath, content);
+    const contract = markerContractForPath(this.filePath, this.allowedMarkers, defaultVerdictsForMarkers(this.allowedMarkers));
+    const parsed = validateMarkerFile(this.filePath, content, contract.allowedMarkers, contract.verdicts);
     if (isParseError(parsed)) {
       return {
         name: this.name,
@@ -32,8 +37,8 @@ export class ArtifactMarkerCheck implements Check {
       };
     }
     const matched = parsed.marker.toUpperCase() === this.expectMarker.toUpperCase();
-    const structured = buildStructuredResult(parsed);
-    const repairResult = extractStructuredResultMetadata(promiseMarkerContractForPath(this.filePath), content);
+    const structured = this.enrichStructuredResult(buildStructuredResult(parsed), content ?? '');
+    const repairResult = extractStructuredResultMetadata(contract, content);
     const finalStructured = {
       ...structured,
       ...(repairResult.repairedItemIds.length > 0 ? { repairedItemIds: repairResult.repairedItemIds } : {}),
@@ -52,6 +57,13 @@ export class ArtifactMarkerCheck implements Check {
         structuredResult: finalStructured,
       }),
     };
+  }
+
+  private enrichStructuredResult(output: StructuredWorkflowResult, content: string): StructuredWorkflowResult {
+    if (this.format === 'mohist/review' || this.format === 'mohist/self-review') {
+      return enrichReviewStructuredResult(output, content);
+    }
+    return output;
   }
 
   private async enrichOutput(ctx: CheckContext, content: string, output: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -94,6 +106,14 @@ export class ArtifactMarkerCheck implements Check {
   }
 }
 
+function defaultVerdictsForMarkers(markers: string[]): Record<string, 'PASS' | 'FAIL'> {
+  const verdicts: Record<string, 'PASS' | 'FAIL'> = {};
+  for (const marker of markers) {
+    verdicts[marker] = marker.toLowerCase().includes('pass') ? 'PASS' : 'FAIL';
+  }
+  return verdicts;
+}
+
 function readMarkerFile(filePath: string): string | null {
   try {
     if (!fs.existsSync(filePath)) return null;
@@ -112,8 +132,6 @@ function describeParseError(err: ParseError): string {
       return `No valid promise marker found in ${err.source}`;
     case 'duplicate-markers':
       return `Multiple promise markers found in ${err.source}`;
-    case 'malformed-marker':
-      return `Malformed promise marker in ${err.source}: ${err.raw}`;
     case 'source-unavailable':
       return `Output source ${err.source} unavailable${err.cause ? `: ${err.cause}` : ''}`;
   }
