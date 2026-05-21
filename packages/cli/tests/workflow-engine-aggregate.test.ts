@@ -376,7 +376,7 @@ describe('WorkflowEngine aggregate progression', () => {
     }));
   });
 
-  it('materializes Build Ralph tasks before selecting a pending runtime task', async () => {
+  it('materializes Build source tasks before selecting a pending runtime task', async () => {
     const issue = makeIssue(Stage.Build);
     const definitions = DEFAULT_STAGE_DEFINITIONS.map(definition => definition.stage === Stage.Plan
       ? { ...definition, requiresApproval: false }

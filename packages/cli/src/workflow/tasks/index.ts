@@ -11,16 +11,7 @@ export {
   type TaskProvider,
   type AgentSessionTaskInput,
   type ServiceCallTaskInput,
-  type RalphTaskInput,
-  type RalphTaskHandler,
-  type TaskHandlerRegistry,
-  createTaskHandlerRegistry,
 } from './types';
-
-export {
-  createDefaultTaskHandlerRegistry,
-  type DefaultTaskHandlerRegistryOptions,
-} from './registry';
 
 export {
   type AgentSessionTaskHandlerDeps,
@@ -32,11 +23,6 @@ export {
   createServiceCallTaskHandler,
   defaultServiceCallTaskHandler,
 } from './service-call-task-handler';
-
-export {
-  createRalphTaskTaskHandler,
-  type RalphTaskRuntimeHandlerDeps,
-} from './ralph-task-handler';
 
 export {
   createRepairFixAdapter,
@@ -65,17 +51,12 @@ export {
 } from './agent-required-markers';
 
 export {
-  createRalphTaskLoader,
-} from './ralph-task-loader';
+  createOpenSpecTaskLoader,
+} from './openspec-task-loader';
 
 export {
   createDefaultStaticTaskLoader,
 } from './default-static-task-loader';
-
-export {
-  createRalphTaskHandler,
-  materializeRalphTasks,
-} from './ralph-task-handler';
 
 export {
   extractRepairResultFromArtifact,

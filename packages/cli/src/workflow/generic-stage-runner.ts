@@ -524,7 +524,7 @@ export class GenericStageRunner implements StageRunner {
 
   private materializeLoadedTasks(
     ctx: StageContext,
-    kind: 'ralph',
+    kind: 'openspec',
     change: NonNullable<ReturnType<typeof detectOpenSpecChange>>,
   ): Array<{ id: string; title: string; uses?: string; order: number; dependsOn: string[] }> {
     const loader = this.taskLoaderRegistry.get(kind);

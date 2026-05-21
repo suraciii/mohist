@@ -43,7 +43,6 @@ export type DefaultWorkflowScenario = {
   markerFailuresBeforePass?: Partial<Record<string, number>>;
   omitArtifacts?: string[];
   failAgentTasks?: Partial<Record<string, string>>;
-  failRalphTasks?: Partial<Record<string, string>>;
   failServices?: Partial<Record<string, string>>;
   mergeReadyFailuresBeforePass?: number;
   mergeReadinessRepairRaisesCodeChanged?: boolean;
@@ -117,20 +116,9 @@ export class DefaultWorkflowExternalWorld {
       case 'fix-merge-readiness':
         return this.failed(task, 'fix-merge-readiness must run through mohist/rebase service-call');
       default:
+        if (/^T-\d+$/.test(baseTaskId)) return this.implementOpenSpecTask(task);
         return this.failed(task, `Unexpected agent task routed to fake external agent: ${task.taskId}`);
     }
-  }
-
-  ralphTask(task: HarnessTask): StageTaskResult {
-    this.taskCalls.push(task.taskId);
-    const configuredFailure = this.scenario.failRalphTasks?.[task.taskId];
-    if (configuredFailure) return this.failed(task, configuredFailure);
-
-    const tasksPath = path.join(this.changeDir, 'tasks.json');
-    const parsed = JSON.parse(fs.readFileSync(tasksPath, 'utf-8'));
-    parsed.tasks = parsed.tasks.map((item: any) => item.id === task.taskId ? { ...item, passes: true, attempts: (item.attempts ?? 0) + 1 } : item);
-    fs.writeFileSync(tasksPath, JSON.stringify(parsed, null, 2));
-    return this.completed(task, [], { output: { kind: 'ralph-task', success: true } });
   }
 
   async serviceCall(task: HarnessTask, ctx: StageContext): Promise<StageTaskResult> {
@@ -304,6 +292,12 @@ export class DefaultWorkflowExternalWorld {
     return this.completed(task, [], { events: ['code.changed'] });
   }
 
+  private implementOpenSpecTask(task: Pick<HarnessTask, 'taskId' | 'title'>): StageTaskResult {
+    this.codeChangeCounter += 1;
+    fs.writeFileSync(path.join(this.worktreePath, `${task.taskId}.ts`), `export const value = ${this.codeChangeCounter};\n`);
+    return this.completed(task, [], { events: ['code.changed'], output: { implementedTaskId: task.taskId } });
+  }
+
   private write(relativePath: string, content: string): void {
     const target = path.join(this.changeDir, relativePath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -372,10 +366,20 @@ export class DefaultWorkflowHarness {
       taskLoaderRegistry: createTaskLoaderRegistry([
         createDefaultStaticTaskLoader(this.world.worktreePath),
         {
-          kind: 'ralph',
+          kind: 'openspec',
           load: (): ExecutableTask[] => {
             const parsed = JSON.parse(fs.readFileSync(path.join(this.world.changeDir, 'tasks.json'), 'utf-8'));
-            return parsed.tasks.map((task: any) => ({ taskId: task.id, title: task.title, uses: 'mohist/ralph-tasks', input: task.id }));
+            return parsed.tasks.map((task: any) => ({
+              taskId: task.id,
+              title: task.title,
+              uses: 'mohist/agent',
+              input: {
+                session: 'build',
+                prompt: {
+                  inline: `<task>\n  <id>${task.id}</id>\n  <title>${task.title}</title>\n  <description>${task.description ?? ''}</description>\n</task>`,
+                },
+              },
+            }));
           },
         },
         { kind: 'runtime', load: () => [] },
@@ -386,7 +390,6 @@ export class DefaultWorkflowHarness {
       taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({
         agentSessionHandler: async (input: AgentSessionTaskInput) => this.world.agentTask(input),
         overrides: {
-          ralphTasks: async input => this.world.ralphTask(input.task),
           rebase: async input => this.world.serviceCall({
             taskId: input.task.taskId,
             title: input.task.title,

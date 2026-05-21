@@ -27,7 +27,7 @@ import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { createTaskLoaderRegistry, createRalphTaskLoader, createDefaultStaticTaskLoader } from '../workflow/tasks';
+import { createTaskLoaderRegistry, createOpenSpecTaskLoader, createDefaultStaticTaskLoader } from '../workflow/tasks';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/definition/default-workflow';
 import { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
 export { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
@@ -953,7 +953,7 @@ export class AgentRunnerService {
 
       const taskLoaderRegistry = createTaskLoaderRegistry([
         createDefaultStaticTaskLoader(worktreePath),
-        createRalphTaskLoader(),
+        createOpenSpecTaskLoader(),
       ]);
 
       const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);

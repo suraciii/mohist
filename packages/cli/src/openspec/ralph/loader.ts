@@ -2,7 +2,6 @@ import type { OpenSpecChange } from '../detector';
 import type { Task } from '../context-assembler';
 import { readTasks, sortTasksByOrder, validateTaskDependencies } from './task-utils';
 import { type DependencyValidationResult } from './types';
-import type { ExecutableTask, RalphTaskInput } from '../../workflow/tasks/types';
 
 export { type DependencyValidationResult } from './types';
 export { sortTasksByOrder, readTasks } from './task-utils';
@@ -19,7 +18,6 @@ export interface RalphLoadedTask {
 
 export interface RalphTaskLoaderResult {
   tasks: RalphLoadedTask[];
-  executableTasks: ExecutableTask[];
   sortedTasks: Task[];
   validation: DependencyValidationResult;
 }
@@ -30,7 +28,6 @@ export class RalphTaskLoader {
     if (!rawTasks || rawTasks.length === 0) {
       return {
         tasks: [],
-        executableTasks: [],
         sortedTasks: [],
         validation: { valid: true, errors: [] },
       };
@@ -52,28 +49,8 @@ export class RalphTaskLoader {
       change,
     }));
 
-    const executableTasks: ExecutableTask[] = loadedTasks.map((loadedTask) => {
-      const input: RalphTaskInput = {
-        taskId: loadedTask.task.id,
-        title: loadedTask.task.title,
-        task: loadedTask.task,
-        change: loadedTask.change,
-        totalTasks: loadedTask.totalTasks,
-        stage: 'build',
-        attempt: loadedTask.task.attempts + 1,
-      };
-
-      return {
-        taskId: loadedTask.task.id,
-        title: loadedTask.task.title,
-        uses: 'mohist/ralph-tasks',
-        input,
-      };
-    });
-
     return {
       tasks: loadedTasks,
-      executableTasks,
       sortedTasks,
       validation,
     };

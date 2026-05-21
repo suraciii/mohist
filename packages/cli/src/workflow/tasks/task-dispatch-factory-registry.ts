@@ -7,7 +7,6 @@ import type { AgentSessionTaskHandler, AgentSessionTaskInput, ExecutableTask } f
 import type { AgentPromptSource, TaskDefinition } from '../model';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
-import { createRalphTaskHandler } from './ralph-task-handler';
 import { createServiceCallTaskHandler } from './service-call-task-handler';
 import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
@@ -31,7 +30,6 @@ export interface TaskDispatchProvider {
 }
 
 export interface DefaultTaskDispatchProviderOverrides {
-  ralphTasks?: TaskDispatchProvider['run'];
   rebase?: TaskDispatchProvider['run'];
   openspecSync?: TaskDispatchProvider['run'];
   archiveChange?: TaskDispatchProvider['run'];
@@ -82,10 +80,6 @@ export function createDefaultTaskDispatchFactoryRegistry(options: DefaultTaskDis
     {
       id: 'mohist/check/ai-review',
       run: input => createCheckAiReviewDispatchTask(input, agentSessionHandler),
-    },
-    {
-      id: 'mohist/ralph-tasks',
-      run: options.overrides?.ralphTasks ?? (input => createRalphTaskHandler()(input.task, input.ctx)),
     },
     {
       id: 'mohist/rebase',
@@ -158,7 +152,7 @@ function createAgentSessionTask(
   input: TaskDispatchFactoryInput,
   readFile: (path: string, encoding: BufferEncoding) => string,
 ): AgentSessionTaskInput | null {
-  const promptSource = agentPromptSource(input.sourceTask);
+  const promptSource = agentPromptSource(input.sourceTask) ?? executableTaskPromptSource(input.task);
   if (promptSource) {
     return createGenericAgentSessionInput(input, resolveCustomAgentPrompt(input, promptSource, readFile));
   }
@@ -170,6 +164,18 @@ function createAgentSessionTask(
 
 function agentPromptSource(task: TaskDefinition | undefined): AgentPromptSource | null {
   const rawPrompt = task?.with?.prompt;
+  if (typeof rawPrompt === 'string') return { inline: rawPrompt };
+  if (!rawPrompt || typeof rawPrompt !== 'object' || Array.isArray(rawPrompt)) return null;
+  const prompt = rawPrompt as Record<string, unknown>;
+  if (typeof prompt.file === 'string') return { file: prompt.file };
+  if (typeof prompt.inline === 'string') return { inline: prompt.inline };
+  return null;
+}
+
+function executableTaskPromptSource(task: ExecutableTask): AgentPromptSource | null {
+  const input = task.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const rawPrompt = (input as Record<string, unknown>).prompt;
   if (typeof rawPrompt === 'string') return { inline: rawPrompt };
   if (!rawPrompt || typeof rawPrompt !== 'object' || Array.isArray(rawPrompt)) return null;
   const prompt = rawPrompt as Record<string, unknown>;
@@ -213,7 +219,7 @@ function buildTaskTemplateContext(input: TaskDispatchFactoryInput) {
 }
 
 function requiredMarkersForTask(input: TaskDispatchFactoryInput): RequiredMarkerDefinition[] | undefined {
-  const markers = input.sourceTask?.with?.requiredMarkers;
+  const markers = input.sourceTask?.with?.requiredMarkers ?? inputFromExecutableTask(input.task)?.requiredMarkers;
   if (!Array.isArray(markers)) return undefined;
   const rendered = markers
     .filter(isRequiredMarkerRecord)
@@ -234,7 +240,7 @@ function createGenericAgentSessionInput(input: TaskDispatchFactoryInput, prompt:
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
-    agentSessionRef: input.agentSessionRef,
+    agentSessionRef: input.agentSessionRef ?? sessionFromExecutableTask(input.task),
     requiredMarkers: requiredMarkersForTask(input),
     artifactVerification: () => declaredArtifacts.filter(artifact => fs.existsSync(path.resolve(input.worktreePath, artifact))),
   } satisfies AgentSessionTaskInput;
@@ -246,6 +252,17 @@ function renderDeclaredArtifacts(input: TaskDispatchFactoryInput): string[] {
     ?? extractStringArray(rawInput?.outputs)
     ?? [];
   return declaredArtifacts.map(artifact => renderPromptTemplate(input, artifact));
+}
+
+function inputFromExecutableTask(task: ExecutableTask): Record<string, unknown> | undefined {
+  return task.input && typeof task.input === 'object' && !Array.isArray(task.input)
+    ? task.input as Record<string, unknown>
+    : undefined;
+}
+
+function sessionFromExecutableTask(task: ExecutableTask): string | undefined {
+  const session = inputFromExecutableTask(task)?.session;
+  return typeof session === 'string' ? session : undefined;
 }
 
 function isRequiredMarkerRecord(value: unknown): value is RequiredMarkerDefinition {

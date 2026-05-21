@@ -56,16 +56,6 @@ export interface TaskProvider {
   run(ctx: TaskExecutionContext): Promise<TaskExecutionResult>;
 }
 
-export interface RalphTaskInput {
-  taskId: string;
-  title: string;
-  task: import('../../openspec/context-assembler').Task;
-  change: import('../../openspec/detector').OpenSpecChange;
-  totalTasks: number;
-  stage: string;
-  attempt: number;
-}
-
 export interface TaskDefinition {
   taskId: string;
   title: string;
@@ -113,11 +103,6 @@ export type AgentSessionTaskHandler = (
 
 export type ServiceCallTaskHandler = (
   input: ServiceCallTaskInput,
-  ctx: StageContext,
-) => Promise<StageTaskResult>;
-
-export type RalphTaskHandler = (
-  input: RalphTaskInput,
   ctx: StageContext,
 ) => Promise<StageTaskResult>;
 

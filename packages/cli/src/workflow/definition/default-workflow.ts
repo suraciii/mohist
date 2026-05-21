@@ -166,7 +166,35 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
     },
     {
       id: Stage.Build,
-      tasksFrom: 'mohist/ralph-tasks',
+      tasksFrom: {
+        uses: 'mohist/openspec-tasks',
+        with: {
+          path: '{{ artifacts.openspecChange }}/tasks.json',
+          task: {
+            uses: 'mohist/agent',
+            with: {
+              session: 'build',
+              prompt: {
+                inline: [
+                  '<task>',
+                  '  <id>{{ task.id }}</id>',
+                  '  <title>{{ task.title }}</title>',
+                  '  <description>{{ task.description }}</description>',
+                  '  <acceptanceCriteria>',
+                  '{{ task.acceptanceCriteria }}',
+                  '  </acceptanceCriteria>',
+                  '  <changeDir>{{ artifacts.openspecChange }}</changeDir>',
+                  '</task>',
+                  '',
+                  'Implement this task in the current worktree.',
+                  'Satisfy every acceptance criterion.',
+                  'Keep the change scoped to this task.',
+                ].join('\n'),
+              },
+            },
+          },
+        },
+      },
       checks: [
         {
           id: 'health:build',

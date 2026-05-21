@@ -333,7 +333,7 @@ describe('WorkflowRunRepo aggregate persistence', () => {
         ? {
           stage: Stage.Check,
           tasks: [],
-          tasksFrom: 'mohist/ralph-tasks',
+          tasksFrom: 'mohist/openspec-tasks',
           checks: [{ name: 'custom-check', title: 'Custom check', uses: 'mohist/health-gate' }],
         }
         : definition),

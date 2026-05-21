@@ -26,7 +26,6 @@ import {
   type RalphTaskHandlerDeps,
   type RalphTaskHandlerOptions,
 } from './ralph';
-import { createDefaultTaskHandlerRegistry } from '../workflow/tasks';
 
 const execFileAsync = promisify(execFile);
 
@@ -654,30 +653,17 @@ export async function runRalphLoop(
       change,
     };
 
-    const executableTask = loaderResult.executableTasks.find(task => task.taskId === nextTask.id);
-    const taskRegistry = createDefaultTaskHandlerRegistry({
-      ralphTask: {
-        ...deps,
-        createOptions: () => handlerOptions,
-      },
-    });
-
-    const taskHandler = taskRegistry.get('ralph-task');
     const taskStartTime = Date.now();
-    const directHandlerResult = options.onlyTaskId && executableTask && taskHandler
-      ? undefined
-      : await executeRalphTask(loadedTask, mockCtx, handlerOptions, deps);
-    const stageTaskResult = options.onlyTaskId && executableTask && taskHandler
-      ? await taskHandler(executableTask, mockCtx)
-      : directHandlerResult!.stageTaskResult;
+    const directHandlerResult = await executeRalphTask(loadedTask, mockCtx, handlerOptions, deps);
+    const stageTaskResult = directHandlerResult.stageTaskResult;
 
     const persistedTask = readTasks(change.tasksPath)?.find(task => task.id === nextTask.id);
     const handlerResult = {
       stageTaskResult,
-      paused: directHandlerResult?.paused ?? (stageTaskResult.status === 'failed' && !persistedTask?.passes),
-      pauseReason: directHandlerResult?.pauseReason ?? stageTaskResult.reason,
-      lastError: directHandlerResult?.lastError ?? (stageTaskResult.output as { error?: string } | undefined)?.error,
-      lastCategory: directHandlerResult?.lastCategory ?? stageTaskResult.failureCategory,
+      paused: directHandlerResult.paused ?? (stageTaskResult.status === 'failed' && !persistedTask?.passes),
+      pauseReason: directHandlerResult.pauseReason ?? stageTaskResult.reason,
+      lastError: directHandlerResult.lastError ?? (stageTaskResult.output as { error?: string } | undefined)?.error,
+      lastCategory: directHandlerResult.lastCategory ?? stageTaskResult.failureCategory,
     };
 
     const measuredDuration = Math.max(1, handlerResult.stageTaskResult.duration || Date.now() - taskStartTime);

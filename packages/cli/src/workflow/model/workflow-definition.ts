@@ -94,7 +94,12 @@ export interface StageEventPolicy {
   reset: StageResetAction;
 }
 
-export type WorkflowTasksFromSource = string;
+export interface WorkflowTasksFromDefinition {
+  uses: string;
+  with?: Record<string, unknown>;
+}
+
+export type WorkflowTasksFromSource = string | WorkflowTasksFromDefinition;
 
 export interface StageDefinition {
   stage: WorkflowStageId;
@@ -209,10 +214,19 @@ function cloneInvalidationPolicy(policy: InvalidationPolicy): InvalidationPolicy
   };
 }
 
+function cloneTasksFrom(tasksFrom: WorkflowTasksFromSource | undefined): WorkflowTasksFromSource | undefined {
+  if (!tasksFrom || typeof tasksFrom === 'string') return tasksFrom;
+  return {
+    uses: tasksFrom.uses,
+    with: tasksFrom.with ? { ...tasksFrom.with } : undefined,
+  };
+}
+
 function cloneStageDefinition(stage: StageDefinition): StageDefinition {
   return {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
+    tasksFrom: cloneTasksFrom(stage.tasksFrom),
     checks: stage.checks.map(cloneOnFailure),
     on: stage.on ? Object.fromEntries(Object.entries(stage.on).map(([event, policy]) => [event, {
       reset: {

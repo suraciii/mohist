@@ -16,6 +16,7 @@ import {
   type WorkflowDefinition,
   type WorkflowDefinitionSnapshot,
   type WorkflowStageId,
+  type WorkflowTasksFromDefinition,
 } from '../model';
 import { compileRuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
 import {
@@ -250,7 +251,6 @@ function compileCustomTasks(
 function isExecutableCustomTaskUse(uses: string): boolean {
   return uses === 'mohist/agent'
     || uses === 'mohist/check/ai-review'
-    || uses === 'mohist/ralph-tasks'
     || uses === 'mohist/openspec-sync'
     || uses === 'mohist/archive-change'
     || uses === 'mohist/merge'
@@ -287,6 +287,16 @@ function compileTasksFrom(
   if (typeof rawTasksFrom === 'string') {
     const use = getWorkflowUseDefinition(rawTasksFrom);
     if (use && use.allowedPlacement === 'task' && use.sourceKind) return rawTasksFrom;
+  }
+  if (isRecord(rawTasksFrom) && typeof rawTasksFrom.uses === 'string') {
+    const use = getWorkflowUseDefinition(rawTasksFrom.uses);
+    if (use && use.allowedPlacement === 'task' && use.sourceKind) {
+      const tasksFrom: WorkflowTasksFromDefinition = {
+        uses: rawTasksFrom.uses,
+        with: isRecord(rawTasksFrom.with) ? { ...rawTasksFrom.with } : undefined,
+      };
+      return tasksFrom;
+    }
   }
   diagnostics.push({
     severity: 'error',
