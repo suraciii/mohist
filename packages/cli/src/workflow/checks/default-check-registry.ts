@@ -70,15 +70,24 @@ export function createDefaultCheckRegistry(input: {
 
 function buildArtifactMarkerCheck(input: CheckProviderInput): Check | null {
   if (typeof input.check.with?.path !== 'string' || typeof input.check.with?.expect !== 'string') return null;
+  const markers = Array.isArray(input.check.with.markers)
+    ? input.check.with.markers.filter((marker): marker is string => typeof marker === 'string')
+    : undefined;
   return new ArtifactMarkerCheck(
     input.check.name,
     renderCheckPath(input),
     input.check.with.expect,
-    typeof input.check.with.format === 'string' ? input.check.with.format : undefined,
-    Array.isArray(input.check.with.markers)
-      ? input.check.with.markers.filter((marker): marker is string => typeof marker === 'string')
-      : [input.check.with.expect],
+    {
+      format: typeof input.check.with.format === 'string' ? input.check.with.format : undefined,
+      markers: markers && markers.length > 0 ? markers : [input.check.with.expect],
+      verdicts: isStringRecord(input.check.with.verdicts) ? input.check.with.verdicts : undefined,
+    },
   );
+}
+
+function isStringRecord(value: unknown): value is Record<string, 'PASS' | 'FAIL'> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every(item => item === 'PASS' || item === 'FAIL');
 }
 
 function renderCheckPath(input: CheckProviderInput): string {
