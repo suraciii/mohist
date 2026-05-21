@@ -257,6 +257,27 @@ function isExecutableCustomTaskUse(uses: string): boolean {
     || uses === 'mohist/rebase';
 }
 
+function validateExecutableTaskUse(uses: string, path: string): WorkflowDiagnostic | null {
+  if (!isWorkflowUseAllowed(uses, 'task')) {
+    return { severity: 'error', path, message: `Use '${uses}' is not allowed as a task` };
+  }
+  if (!isExecutableCustomTaskUse(uses)) {
+    return { severity: 'error', path, message: `Use '${uses}' is not supported for full custom task execution yet` };
+  }
+  return null;
+}
+
+function validateAgentTaskPrompt(task: TaskDefinition, path: string): WorkflowDiagnostic | null {
+  if (task.uses === 'mohist/agent' && task.source === 'project' && !hasAgentPromptSource(task.with)) {
+    return {
+      severity: 'error',
+      path,
+      message: `Agent task '${task.id}' requires with.prompt ref/file/inline or with.promptFile`,
+    };
+  }
+  return null;
+}
+
 function compileTasksFrom(
   rawTasksFrom: unknown,
   stagePath: string,
@@ -342,14 +363,25 @@ function compileCheckOnFailure(
     diagnostics.push({ severity: 'error', path: `${checkPath}.onFailure.retry.task.emits`, message: 'task.emits is not supported; use onSuccess.emit for unconditional success events or let the task runtime raise events' });
     return undefined;
   }
+  const uses = typeof rawTask.uses === 'string' ? rawTask.uses : 'mohist/agent';
+  const usesDiagnostic = validateExecutableTaskUse(uses, `${checkPath}.onFailure.retry.task.uses`);
+  if (usesDiagnostic) {
+    diagnostics.push(usesDiagnostic);
+    return undefined;
+  }
   const task: TaskDefinition = {
     id: rawTask.id,
     title: typeof rawTask.title === 'string' ? rawTask.title : rawTask.id,
     source: 'project',
-    uses: typeof rawTask.uses === 'string' ? rawTask.uses : 'mohist/agent',
+    uses,
     with: isRecord(rawTask.with) ? { ...rawTask.with } : undefined,
     onSuccess: compileTaskSuccessAction(rawTask.onSuccess),
   };
+  const promptDiagnostic = validateAgentTaskPrompt(task, `${checkPath}.onFailure.retry.task.with.prompt`);
+  if (promptDiagnostic) {
+    diagnostics.push(promptDiagnostic);
+    return undefined;
+  }
   return {
     retry: {
       limit: retry.limit,
@@ -714,6 +746,15 @@ export function validateWorkflowDefinition(resolved: ResolvedWorkflowDefinition 
           path: `${stagePath}.checks[${checkIndex}].with.command`,
           message: `Shell check '${check.name}' requires with.command`,
         });
+      }
+      const retryTask = check.onFailure?.retry?.task;
+      if (retryTask) {
+        const retryTaskPath = `${stagePath}.checks[${checkIndex}].onFailure.retry.task`;
+        const retryUses = retryTask.uses ?? inferWorkflowTaskUse(retryTask.id);
+        const usesDiagnostic = validateExecutableTaskUse(retryUses, `${retryTaskPath}.uses`);
+        if (usesDiagnostic) diagnostics.push(usesDiagnostic);
+        const promptDiagnostic = validateAgentTaskPrompt({ ...retryTask, uses: retryUses }, `${retryTaskPath}.with.prompt`);
+        if (promptDiagnostic) diagnostics.push(promptDiagnostic);
       }
     }
     for (const policy of stage.checkPolicies ?? []) {

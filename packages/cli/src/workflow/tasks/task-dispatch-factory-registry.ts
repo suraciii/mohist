@@ -48,6 +48,7 @@ export interface DefaultTaskDispatchProviderOverrides {
 export interface DefaultTaskDispatchFactoryRegistryOptions {
   agentSessionHandler?: AgentSessionTaskHandler;
   overrides?: DefaultTaskDispatchProviderOverrides;
+  readFile?: (path: string, encoding: BufferEncoding) => string;
 }
 
 export interface TaskDispatchFactoryRegistry {
@@ -79,10 +80,11 @@ export function createTaskDispatchFactoryRegistry(providers: TaskDispatchProvide
 export function createDefaultTaskDispatchFactoryRegistry(options: DefaultTaskDispatchFactoryRegistryOptions = {}): TaskDispatchFactoryRegistry {
   const integrator = new OpenSpecIntegrator();
   const agentSessionHandler = options.agentSessionHandler ?? createAgentSessionTaskHandler();
+  const readFile = options.readFile ?? ((filePath, encoding) => fs.readFileSync(filePath, encoding));
   return createTaskDispatchFactoryRegistry([
     {
       id: 'mohist/agent',
-      run: input => runAgentSessionTask(input, agentSessionHandler),
+      run: input => runAgentSessionTask(input, agentSessionHandler, readFile),
     },
     {
       id: 'mohist/check/ai-review',
@@ -186,8 +188,12 @@ function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrat
   }, input.ctx);
 }
 
-function runAgentSessionTask(input: TaskDispatchFactoryInput, agentSessionHandler: AgentSessionTaskHandler): Promise<StageTaskResult> {
-  const task = createAgentSessionTask(input);
+function runAgentSessionTask(
+  input: TaskDispatchFactoryInput,
+  agentSessionHandler: AgentSessionTaskHandler,
+  readFile: (path: string, encoding: BufferEncoding) => string,
+): Promise<StageTaskResult> {
+  const task = createAgentSessionTask(input, readFile);
   if (!task) {
     throw new Error(`Agent task '${input.task.taskId}' requires a prompt`);
   }
@@ -195,10 +201,13 @@ function runAgentSessionTask(input: TaskDispatchFactoryInput, agentSessionHandle
   return agentSessionHandler(task, input.ctx);
 }
 
-function createAgentSessionTask(input: TaskDispatchFactoryInput): AgentSessionTaskInput | StageTaskResult | null {
+function createAgentSessionTask(
+  input: TaskDispatchFactoryInput,
+  readFile: (path: string, encoding: BufferEncoding) => string,
+): AgentSessionTaskInput | StageTaskResult | null {
   const promptSource = agentPromptSource(input.sourceTask);
   if (promptSource && !isBuiltinAgentPromptRef(promptSource)) {
-    return createGenericAgentSessionInput(input, resolveCustomAgentPrompt(input, promptSource));
+    return createGenericAgentSessionInput(input, resolveCustomAgentPrompt(input, promptSource, readFile));
   }
   if (typeof input.task.prompt === 'string' && input.task.prompt.trim().length > 0) {
     return createGenericAgentSessionInput(input, input.task.prompt);
@@ -229,13 +238,26 @@ function isBuiltinAgentPromptRef(source: AgentPromptSource): boolean {
   return 'ref' in source && source.ref.startsWith('mohist/');
 }
 
-function resolveCustomAgentPrompt(input: TaskDispatchFactoryInput, source: AgentPromptSource): string {
+function resolveCustomAgentPrompt(
+  input: TaskDispatchFactoryInput,
+  source: AgentPromptSource,
+  readFile: (path: string, encoding: BufferEncoding) => string,
+): string {
   if ('inline' in source) return renderPromptTemplate(input, source.inline);
   if ('file' in source) {
-    const promptPath = path.isAbsolute(source.file) ? source.file : path.join(input.worktreePath, source.file);
-    return renderPromptTemplate(input, fs.readFileSync(promptPath, 'utf-8'));
+    const promptPath = resolvePromptFilePath(input.worktreePath, source.file);
+    return renderPromptTemplate(input, readFile(promptPath, 'utf-8'));
   }
   throw new Error(`Unknown agent prompt ref '${source.ref}' for task '${input.task.taskId}'`);
+}
+
+function resolvePromptFilePath(worktreePath: string, promptFile: string): string {
+  const worktreeRoot = path.resolve(worktreePath);
+  const promptPath = path.resolve(worktreeRoot, promptFile);
+  if (promptPath !== worktreeRoot && !promptPath.startsWith(worktreeRoot + path.sep)) {
+    throw new Error(`Agent prompt file '${promptFile}' is outside worktree`);
+  }
+  return promptPath;
 }
 
 function renderPromptTemplate(input: TaskDispatchFactoryInput, template: string): string {

@@ -465,6 +465,72 @@ workflow:
     }
   });
 
+  it('rejects onFailure retry agent tasks without a prompt source', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-retry-missing-prompt-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/retry-missing-prompt
+  stages:
+    - id: check
+      tasks: []
+      checks:
+        - id: review-passed
+          uses: mohist/verdict
+          onFailure:
+            retry:
+              limit: 1
+              task:
+                id: fix-review-findings
+                title: Fix review findings
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toContainEqual(expect.objectContaining({
+        severity: 'error',
+        path: expect.stringContaining('workflow.stages[0].checks[0].onFailure.retry.task.with.prompt'),
+        message: "Agent task 'fix-review-findings' requires with.prompt ref/file/inline or with.promptFile",
+      }));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects onFailure retry task uses without an executable task handler', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-retry-unsupported-use-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+workflow:
+  id: project/retry-unsupported-use
+  stages:
+    - id: check
+      tasks: []
+      checks:
+        - id: review-passed
+          uses: mohist/verdict
+          onFailure:
+            retry:
+              limit: 1
+              task:
+                id: run-script
+                uses: mohist/shell
+                with:
+                  command: npm test
+`, 'utf-8');
+
+    try {
+      const diagnostics = validateWorkflowDefinition(resolveWorkflowDefinition(tempDir));
+      expect(diagnostics).toContainEqual(expect.objectContaining({
+        severity: 'error',
+        path: expect.stringContaining('workflow.stages[0].checks[0].onFailure.retry.task.uses'),
+        message: "Use 'mohist/shell' is not supported for full custom task execution yet",
+      }));
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves onFailure retry for checks added by default workflow overrides', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-stage-check-retry-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));
