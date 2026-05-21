@@ -3,10 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Stage, MergeState } from '../../src/types';
-import type { StageContext } from '../../src/workflow/stage-context';
+import type { StageContext, StageTaskResult } from '../../src/workflow/stage-context';
 import type { StageRunner } from '../../src/workflow/stage-runner';
 import type { CheckRegistry, CheckContext } from '../../src/workflow/checks';
-import type { TaskLoaderRegistry, TaskHandlerRegistry, ExecutableTask } from '../../src/workflow/tasks';
+import type { TaskLoaderRegistry, TaskHandlerRegistry, ExecutableTask, ProviderTaskInput } from '../../src/workflow/tasks';
+import { createDefaultTaskDispatchFactoryRegistry, createTaskHandlerRegistry } from '../../src/workflow/tasks';
 import type { WorkflowRun as DomainWorkflowRun } from '../../src/workflow/model';
 import type { RuntimeStageDefinition } from '../../src/workflow/runner/workflow-runtime-definition';
 import { GenericStageRunner, GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE } from '../../src/workflow/generic-stage-runner';
@@ -155,11 +156,7 @@ function createBasicTaskLoaderRegistry(): TaskLoaderRegistry {
 }
 
 function createBasicTaskHandlerRegistry(handlers: Record<string, ReturnType<typeof vi.fn>> = {}): TaskHandlerRegistry {
-  const map = new Map(Object.entries(handlers));
-  return {
-    get: (kind: string) => map.get(kind) ?? undefined,
-    register: vi.fn(),
-  };
+  return createTaskHandlerRegistry(handlers as any);
 }
 
 function createBasicCheckRegistry(checks: Record<string, (ctx: CheckContext) => { name: string; status: 'pass' | 'fail' | 'error' | 'pending'; message?: string; output?: unknown }>): CheckRegistry {
@@ -239,7 +236,7 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
       on: {
         'code.changed': { reset: { tasks: ['ai-review'], checks: 'all', approval: true } },
       },
-      tasks: [{ id: 'ai-review', title: 'AI review', uses: 'mohist/agent', with: { prompt: { ref: 'mohist/check/ai-review' } } }],
+      tasks: [{ id: 'ai-review', title: 'AI review', uses: 'mohist/check/ai-review', with: {} }],
       checks: [
         {
           name: 'health:check',
@@ -281,7 +278,7 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
       approvalCheckName: 'user-approval',
       workSources: [{ kind: 'static', taskIds: ['ai-review'] }, { kind: 'runtime' }],
       taskExecutionPolicies: [
-        { taskId: 'ai-review', kind: 'agent-session' },
+        { taskId: 'ai-review', kind: 'provider-task' },
         { taskId: 'fix-check-health', kind: 'agent-session', workSourceKind: 'runtime' },
         { taskId: 'fix-review-findings', kind: 'agent-session', workSourceKind: 'runtime' },
         { taskId: 'fix-merge-readiness', kind: 'service-call', workSourceKind: 'runtime' },
@@ -332,6 +329,33 @@ function createStageDefinition(stage: Stage): RuntimeStageDefinition {
     [Stage.Backlog]: { stage: Stage.Backlog, tasks: [], checks: [], workSources: [], taskExecutionPolicies: [], checkPolicies: [], checkFailurePolicies: [], invalidationPolicy: { entries: [] } },
   };
   return defs[stage];
+}
+
+function completedTaskDecision(stage: Stage, result?: Partial<StageTaskResult>) {
+  return {
+    decision: { nextWork: { kind: 'complete' as const } },
+    run: {
+      snapshot: () => ({
+        stageRuns: [
+          {
+            stage,
+            tasks: [
+              {
+                id: result?.taskId ?? 'task',
+                status: result?.status ?? 'completed',
+                attempts: result?.attempts ?? 1,
+                duration: result?.duration ?? 1,
+                artifacts: result?.artifacts ?? [],
+                output: result?.output ?? null,
+                reason: result?.reason ?? null,
+                causedBy: result?.causedBy ?? null,
+              },
+            ],
+          },
+        ],
+      }),
+    },
+  };
 }
 
 describe('StageRunner migration regression coverage', () => {
@@ -563,7 +587,7 @@ describe('StageRunner migration regression coverage', () => {
 
       const runner = new GenericStageRunner({
         taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': taskHandler }),
+        taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'provider-task': taskHandler }),
         checkRegistry: createBasicCheckRegistry({ 'review-passed': checkHandler }),
         getStageDefinition: createStageDefinition,
         worktreePath: tmpDir,
@@ -581,12 +605,20 @@ describe('StageRunner migration regression coverage', () => {
           updateTaskPasses: vi.fn(),
           archiveChange: vi.fn(),
         } as any,
+        workflowApplicationService: {
+          completeTask: vi.fn().mockImplementation((_input: { result: StageTaskResult }) => completedTaskDecision(Stage.Check, {
+            ..._input.result,
+            taskId: 'ai-review',
+          })),
+          recordCheckResult: vi.fn(),
+          approveStage: vi.fn(),
+        } as any,
       });
       ctx.requestedWork = { kind: 'task', stage: Stage.Check, taskId: 'ai-review' };
       const result = await runner.run(ctx);
 
       try {
-        expect(result.success).toBe(true);
+        expect(result).toMatchObject({ success: true });
         expect(taskHandler).toHaveBeenCalledTimes(1);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -644,7 +676,7 @@ describe('StageRunner migration regression coverage', () => {
         ctx.requestedWork = { kind: 'task', stage: Stage.Plan, taskId: 'proposal' };
         const result = await runner.run(ctx);
 
-        expect(result.success).toBe(true);
+        expect(result).toMatchObject({ success: true });
         expect(createSession).toHaveBeenCalledTimes(1);
         expect(createSession.mock.calls[0]?.[0]).toMatchObject({
           cwd: tmpDir,
@@ -674,10 +706,18 @@ describe('StageRunner migration regression coverage', () => {
       try {
         const runner = new GenericStageRunner({
           taskLoaderRegistry: createBasicTaskLoaderRegistry(),
-          taskHandlerRegistry: createBasicTaskHandlerRegistry({ 'agent-session': genericHandler as any }),
+          taskHandlerRegistry: createBasicTaskHandlerRegistry({
+            'provider-task': vi.fn(async (task: ExecutableTask, providerCtx: StageContext) => (task.input as ProviderTaskInput).run(providerCtx)),
+          }),
           checkRegistry: createBasicCheckRegistry({}),
           getStageDefinition: createStageDefinition,
           worktreePath: tmpDir,
+          taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({
+            agentSessionHandler: async (input, innerCtx) => genericHandler({
+              ...input,
+              requiredMarkers: undefined,
+            }, innerCtx),
+          }),
         });
 
         const ctx = makeMockContext(Stage.Check, {
@@ -691,6 +731,14 @@ describe('StageRunner migration regression coverage', () => {
             readTasks: vi.fn().mockReturnValue(null),
             updateTaskPasses: vi.fn(),
             archiveChange: vi.fn(),
+          } as any,
+          workflowApplicationService: {
+            completeTask: vi.fn().mockImplementation((_input: { result: StageTaskResult }) => completedTaskDecision(Stage.Check, {
+              ..._input.result,
+              taskId: 'ai-review',
+            })),
+            recordCheckResult: vi.fn(),
+            approveStage: vi.fn(),
           } as any,
         });
 

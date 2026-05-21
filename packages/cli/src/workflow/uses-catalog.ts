@@ -39,6 +39,18 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     outputContract: 'ACP-backed agent task result, session evidence, and declared artifacts.',
   },
   {
+    name: 'mohist/check/ai-review',
+    allowedPlacement: 'task',
+    mutates: true,
+    sideEffect: 'worktree',
+    idempotency: 'checkpointed',
+    deliveryRole: 'none',
+    raises: ['code.changed'],
+    description: 'Runs Mohist code review through an ACP agent session and owns the latest review.md report lifecycle.',
+    inputs: ['requiredMarkers', 'session'],
+    outputContract: 'ACP-backed review task result and review.md artifact evidence.',
+  },
+  {
     name: 'mohist/shell',
     allowedPlacement: 'both',
     mutates: false,

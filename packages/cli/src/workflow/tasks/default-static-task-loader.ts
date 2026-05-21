@@ -41,7 +41,7 @@ export function createDefaultStaticTaskLoader(worktreePath: string): TaskLoader 
 }
 
 function toTaskKind(kind: string): TaskKind {
-  if (kind === 'service-call' || kind === 'ralph-task') return kind;
+  if (kind === 'service-call' || kind === 'ralph-task' || kind === 'provider-task') return kind;
   return 'agent-session';
 }
 

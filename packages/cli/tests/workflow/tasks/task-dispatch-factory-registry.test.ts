@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
-import type { ExecutableTask } from '../../../src/workflow/tasks';
+import type { ExecutableTask, StageTaskResult } from '../../../src/workflow/tasks';
 import { createDefaultTaskDispatchFactoryRegistry, createTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
-import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
+import type { AgentSessionTaskInput, ProviderTaskInput } from '../../../src/workflow/tasks/types';
 import type { TaskDefinition } from '../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {
@@ -53,10 +53,8 @@ function aiReviewSourceTask(): TaskDefinition {
   return {
     id: 'ai-review',
     title: 'AI review',
-    uses: 'mohist/agent',
-    with: {
-      prompt: { ref: 'mohist/check/ai-review' },
-    },
+    uses: 'mohist/check/ai-review',
+    with: {},
   };
 }
 
@@ -81,6 +79,22 @@ function pendingAiReviewTask(
     causedBy: input.causedBy ?? null,
     resetBy: input.resetBy ?? null,
     latestAttempt: null,
+  };
+}
+
+function createRegistryWithFakeAgentHandler() {
+  const agentSessionHandler = vi.fn(async (input: AgentSessionTaskInput): Promise<StageTaskResult> => ({
+    taskId: input.taskId,
+    title: input.title,
+    status: 'completed',
+    artifacts: input.artifactVerification?.([]) ?? [],
+    attempts: input.attempt,
+    duration: 1,
+    events: [],
+  }));
+  return {
+    registry: createDefaultTaskDispatchFactoryRegistry({ agentSessionHandler }),
+    agentSessionHandler,
   };
 }
 
@@ -136,7 +150,8 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
 
     try {
       const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
-      const dispatchable = createDefaultTaskDispatchFactoryRegistry().build({
+      const { registry } = createRegistryWithFakeAgentHandler();
+      const dispatchable = registry.build({
         ctx: makeContext(changeDir, pendingAiReviewTask()),
         task,
         executionKind: 'agent-session',
@@ -163,7 +178,8 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
 
     try {
       const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
-      const dispatchable = createDefaultTaskDispatchFactoryRegistry().build({
+      const { registry, agentSessionHandler } = createRegistryWithFakeAgentHandler();
+      const dispatchable = registry.build({
         ctx: makeContext(changeDir, pendingAiReviewTask({
           resetBy: {
             type: 'workflow-policy',
@@ -181,14 +197,17 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
 
       expect(dispatchable).toMatchObject({
         taskId: 'ai-review',
-        kind: 'agent-session',
+        kind: 'provider-task',
       });
       expect(fs.existsSync(reviewPath)).toBe(true);
-      if (!dispatchable || dispatchable.kind !== 'agent-session') {
-        throw new Error('Expected agent-session task');
+      if (!dispatchable || dispatchable.kind !== 'provider-task') {
+        throw new Error('Expected provider-task');
       }
-      await (dispatchable.input as AgentSessionTaskInput).beforeRun?.(makeContext(changeDir));
+      const providerInput = dispatchable.input as ProviderTaskInput;
+      const result = await providerInput.run(makeContext(changeDir));
       expect(fs.existsSync(reviewPath)).toBe(false);
+      expect(result.status).toBe('completed');
+      expect(agentSessionHandler).toHaveBeenCalledOnce();
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
@@ -203,7 +222,8 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
 
     try {
       const task: ExecutableTask = { taskId: 'ai-review', title: 'AI review', kind: 'agent-session' };
-      const dispatchable = createDefaultTaskDispatchFactoryRegistry().build({
+      const { registry } = createRegistryWithFakeAgentHandler();
+      const dispatchable = registry.build({
         ctx: makeContext(changeDir, pendingAiReviewTask()),
         task,
         executionKind: 'agent-session',

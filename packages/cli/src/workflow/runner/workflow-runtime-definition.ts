@@ -12,7 +12,7 @@ export interface WorkSourceDefinition {
   taskIds?: string[];
 }
 
-export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task';
+export type TaskExecutionKind = 'agent-session' | 'service-call' | 'ralph-task' | 'provider-task';
 
 export interface TaskExecutionPolicy {
   taskId: string;
@@ -155,6 +155,7 @@ function compileWorkSources(stage: CompiledStageDefinition, existingSources?: Wo
 function inferTaskExecutionKind(uses?: string): TaskExecutionKind {
   const resolvedUses = uses;
   if (resolvedUses === 'mohist/ralph-tasks') return 'ralph-task';
+  if (resolvedUses === 'mohist/check/ai-review') return 'provider-task';
   if (
     resolvedUses === 'mohist/openspec-sync'
     || resolvedUses === 'mohist/archive-change'

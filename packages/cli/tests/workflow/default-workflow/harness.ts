@@ -27,11 +27,14 @@ import {
 } from '../../../src/workflow/model';
 import {
   createTaskHandlerRegistry,
+  createDefaultTaskDispatchFactoryRegistry,
   defaultServiceCallTaskHandler,
   createDefaultStaticTaskLoader,
   createTaskLoaderRegistry,
   type DispatchableTask,
   type ExecutableTask,
+  type AgentSessionTaskInput,
+  type ProviderTaskInput,
   type TaskHandler,
   type ServiceCallTaskInput,
 } from '../../../src/workflow/tasks';
@@ -379,12 +382,28 @@ export class DefaultWorkflowHarness {
       ]),
       taskHandlerRegistry: createTaskHandlerRegistry({
         'agent-session': async (task) => this.world.agentTask(task as DispatchableTask),
+        'provider-task': async (task, ctx) => (task.input as ProviderTaskInput).run(ctx),
         'ralph-task': async (task) => this.world.ralphTask(task as DispatchableTask),
         'service-call': async (task, ctx) => this.world.serviceCall(task as DispatchableTask, ctx),
-      } satisfies Partial<Record<'agent-session' | 'ralph-task' | 'service-call', TaskHandler>>),
+      } satisfies Partial<Record<'agent-session' | 'provider-task' | 'ralph-task' | 'service-call', TaskHandler>>),
       checkRegistry,
       getStageDefinition: stageDefinition,
       worktreePath: this.world.worktreePath,
+      taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({
+        agentSessionHandler: async (input: AgentSessionTaskInput) => this.world.agentTask({
+          taskId: input.taskId,
+          title: input.title,
+          kind: 'agent-session',
+          prompt: input.prompt,
+          cwd: input.cwd,
+          stage: input.stage,
+          attempt: input.attempt,
+          agentSessionRef: input.agentSessionRef,
+          artifactVerification: input.artifactVerification,
+          requiredMarkers: input.requiredMarkers,
+          input,
+        } as DispatchableTask),
+      }),
     });
 
     this.engine = new WorkflowEngine({

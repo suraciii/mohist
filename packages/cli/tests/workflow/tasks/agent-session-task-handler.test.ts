@@ -122,64 +122,6 @@ describe('AgentSessionTaskHandler', () => {
     expect(executeMock).toHaveBeenCalledWith('Generate plan artifacts', { kind: 'task', title: 'Plan artifact task' });
   });
 
-  it('runs beforeRun hook before starting the agent session', async () => {
-    const order: string[] = [];
-    executeMock.mockResolvedValue({
-      success: true,
-      text: 'done',
-      acpSessionId: 'ses-before-run',
-    });
-    createMock.mockImplementation(async () => {
-      order.push('create-session');
-      return {
-        execute: executeMock,
-        close: closeMock,
-      };
-    });
-
-    const handler = createAgentSessionTaskHandler();
-    const result = await handler({
-      taskId: 'ai-review',
-      title: 'AI review',
-      prompt: 'Review current code',
-      cwd: '/tmp/worktree',
-      stage: 'check',
-      attempt: 1,
-      beforeRun: () => {
-        order.push('before-run');
-      },
-    }, makeContext());
-
-    expect(result.status).toBe('completed');
-    expect(order).toEqual(['before-run', 'create-session']);
-  });
-
-  it('returns failed result when beforeRun fails', async () => {
-    const handler = createAgentSessionTaskHandler();
-    const result = await handler({
-      taskId: 'ai-review',
-      title: 'AI review',
-      prompt: 'Review current code',
-      cwd: '/tmp/worktree',
-      stage: 'check',
-      attempt: 1,
-      beforeRun: () => {
-        throw new Error('failed to prepare review output');
-      },
-    }, makeContext());
-
-    expect(result).toMatchObject({
-      taskId: 'ai-review',
-      status: 'failed',
-      output: expect.objectContaining({
-        kind: 'agent-session-task',
-        success: false,
-        error: 'failed to prepare review output',
-      }),
-    });
-    expect(createMock).not.toHaveBeenCalled();
-  });
-
   it('normalizes failure result with stage_task_update events', async () => {
     executeMock.mockResolvedValue({
       success: false,

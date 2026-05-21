@@ -3,10 +3,11 @@ import * as path from 'path';
 import { MergeState } from '../../types';
 import type { StageContext, CheckResult } from '../stage-context';
 import { emitStageTaskUpdate } from '../stage-context';
-import type { AgentSessionTaskInput, ExecutableTask, TaskKind } from './types';
+import type { AgentSessionTaskHandler, AgentSessionTaskInput, ExecutableTask, ProviderTaskInput, TaskKind } from './types';
 import type { AgentPromptSource, TaskDefinition } from '../model';
 import type { TaskExecutionKind } from '../runner/workflow-runtime-definition';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
+import { createAgentSessionTaskHandler } from './agent-session-task-handler';
 import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
@@ -23,7 +24,7 @@ interface PlanTaskConfig {
 export type DispatchableTask = ExecutableTask | {
   taskId: string;
   title: string;
-  kind: 'agent-session' | 'service-call' | 'ralph-task';
+  kind: TaskKind;
   prompt?: string;
   cwd?: string;
   stage?: string;
@@ -49,6 +50,10 @@ export interface TaskDispatchFactoryInput {
 export interface TaskDispatchProvider {
   id: string;
   build(input: TaskDispatchFactoryInput): DispatchableTask | null;
+}
+
+export interface DefaultTaskDispatchFactoryRegistryOptions {
+  agentSessionHandler?: AgentSessionTaskHandler;
 }
 
 export interface TaskDispatchFactoryRegistry {
@@ -77,12 +82,17 @@ export function createTaskDispatchFactoryRegistry(providers: TaskDispatchProvide
   };
 }
 
-export function createDefaultTaskDispatchFactoryRegistry(): TaskDispatchFactoryRegistry {
+export function createDefaultTaskDispatchFactoryRegistry(options: DefaultTaskDispatchFactoryRegistryOptions = {}): TaskDispatchFactoryRegistry {
   const integrator = new OpenSpecIntegrator();
+  const agentSessionHandler = options.agentSessionHandler ?? createAgentSessionTaskHandler();
   return createTaskDispatchFactoryRegistry([
     {
       id: 'mohist/agent',
       build: createAgentSessionDispatchTask,
+    },
+    {
+      id: 'mohist/check/ai-review',
+      build: input => createCheckAiReviewDispatchTask(input, agentSessionHandler),
     },
     {
       id: 'mohist/ralph-tasks',
@@ -203,7 +213,6 @@ function createAgentSessionDispatchTask(input: TaskDispatchFactoryInput): Dispat
 
 function createBuiltinAgentSessionDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
   if (promptRef.startsWith('mohist/plan/')) return createPlanAgentSessionDispatchTask(input, promptRef);
-  if (promptRef === 'mohist/check/ai-review') return createCheckAiReviewDispatchTask(input, promptRef);
   throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
 }
 
@@ -373,7 +382,7 @@ function wasResetByWorkflowPolicy(input: TaskDispatchFactoryInput): boolean {
   return input.ctx.requestedTask?.resetBy?.type === 'workflow-policy';
 }
 
-function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, promptRef: string): DispatchableTask {
+function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, agentSessionHandler: AgentSessionTaskHandler): DispatchableTask {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
@@ -396,28 +405,33 @@ function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, prompt
   const agentInput = {
     taskId: input.task.taskId,
     title: input.task.title,
-    prompt: buildBuiltinAgentPrompt(input, promptRef, changeDir),
+    prompt: buildCheckReviewPrompt(input, changeDir),
     cwd: input.ctx.acpOptions.cwd ?? input.worktreePath,
     stage: input.ctx.issue.stage,
     attempt: input.attempt,
     agentSessionRef: input.agentSessionRef,
     requiredMarkers: requiredMarkersForTask(input),
-    beforeRun: () => removePriorReviewOutput(reviewOutputFullPath),
     artifactVerification: () => fs.existsSync(reviewOutputFullPath) ? [reviewOutputPath] : [],
   } satisfies AgentSessionTaskInput;
+
+  const providerInput = {
+    taskId: input.task.taskId,
+    title: input.task.title,
+    stage: input.ctx.issue.stage,
+    attempt: input.attempt,
+    run: async ctx => {
+      removePriorReviewOutput(reviewOutputFullPath);
+      return agentSessionHandler(agentInput, ctx);
+    },
+  } satisfies ProviderTaskInput;
 
   return {
     taskId: input.task.taskId,
     title: input.task.title,
-    kind: 'agent-session',
-    prompt: agentInput.prompt,
-    cwd: agentInput.cwd,
-    stage: agentInput.stage,
-    attempt: agentInput.attempt,
-    agentSessionRef: agentInput.agentSessionRef,
-    requiredMarkers: agentInput.requiredMarkers,
-    artifactVerification: agentInput.artifactVerification,
-    input: agentInput,
+    kind: 'provider-task',
+    stage: providerInput.stage,
+    attempt: providerInput.attempt,
+    input: providerInput,
   };
 }
 
@@ -438,8 +452,6 @@ function buildBuiltinAgentPrompt(input: TaskDispatchFactoryInput, promptRef: str
       return buildArtifactPrompt('tasks', input.ctx.issue, changeDir);
     case 'mohist/plan/self-review':
       return buildSelfReviewPrompt(input.ctx.issue, changeDir);
-    case 'mohist/check/ai-review':
-      return buildCheckReviewPrompt(input, changeDir);
     default:
       throw new Error(`Unknown built-in agent prompt ref '${promptRef}' for task '${input.task.taskId}'`);
   }

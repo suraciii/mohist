@@ -133,8 +133,14 @@ describe('WorkflowRun domain aggregate', () => {
       with: { session: 'plan-artifacts', prompt: { ref: 'mohist/plan/proposal' } },
     });
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.stages.find(definition => definition.stage === Stage.Check)?.tasks.find(task => task.id === 'ai-review')).toMatchObject({
-      uses: 'mohist/agent',
-      with: { prompt: { ref: 'mohist/check/ai-review' } },
+      uses: 'mohist/check/ai-review',
+      with: {
+        requiredMarkers: [
+          expect.objectContaining({
+            path: '{{ artifacts.openspecChange }}/review.md',
+          }),
+        ],
+      },
     });
     const runtimePlan = runtime.find(definition => definition.stage === Stage.Plan)!;
     const runtimeCheck = runtime.find(definition => definition.stage === Stage.Check)!;
@@ -165,7 +171,7 @@ describe('WorkflowRun domain aggregate', () => {
       maxAttempts: 2,
     });
     expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
-      kind: 'agent-session',
+      kind: 'provider-task',
       workSourceKind: 'static',
     });
     expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
