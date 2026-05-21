@@ -25,13 +25,6 @@ export {
 } from './service-call-task-handler';
 
 export {
-  createRepairFixAdapter,
-  defaultRepairFixAdapter,
-  type RepairFixTaskId,
-  type RepairFixContext,
-} from './repair-fix-adapter';
-
-export {
   type TaskLoaderKind,
   type TaskLoader,
   type TaskLoaderRegistry,
