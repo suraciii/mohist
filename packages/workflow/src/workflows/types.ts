@@ -43,7 +43,6 @@ export type WorkflowDefinitionInput =
 export interface CreateWorkflowsInput {
   store: WorkflowStore;
   components?: WorkflowComponent[];
-  maxSteps?: number;
 }
 
 export interface Workflows {

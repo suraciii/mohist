@@ -100,6 +100,7 @@ export type WorkflowEvent =
   | { type: 'commit-point-created'; stage: WorkflowStageId; commitPoint: CommitPoint };
 
 export type WorkflowWork =
+  | { kind: 'task-source'; stage: WorkflowStageId }
   | { kind: 'task'; stage: WorkflowStageId; taskId: string }
   | { kind: 'check'; stage: WorkflowStageId; checkName: string }
   | { kind: 'await-approval'; stage: WorkflowStageId }
@@ -120,7 +121,11 @@ export type StageCompletionGuard =
   | { complete: false; reason: 'dynamic-source-invalid'; stage: WorkflowStageId }
   | { complete: false; reason: 'dynamic-source-empty'; stage: WorkflowStageId }
   | { complete: false; reason: 'commit-evidence-missing'; stage: WorkflowStageId; taskId?: string; checkName?: string; uses?: string }
-  | { complete: false; reason: 'approval-required'; stage: WorkflowStageId };
+  | { complete: false; reason: 'approval-required'; stage: WorkflowStageId }
+  | { complete: false; reason: 'workflow-not-running'; stage: WorkflowStageId }
+  | { complete: false; reason: 'missing-current-stage'; stage: WorkflowStageId }
+  | { complete: false; reason: 'stage-failed'; stage: WorkflowStageId }
+  | { complete: false; reason: 'stage-not-running'; stage: WorkflowStageId };
 
 export interface WorkflowDecision {
   events: WorkflowEvent[];

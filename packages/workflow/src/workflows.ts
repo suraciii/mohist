@@ -22,13 +22,13 @@ export function createWorkflows(input: CreateWorkflowsInput): Workflows {
         workflowDefinitionId: definition.resolvedDefinition.id,
         stages: definition.resolvedDefinition.stages,
       });
-      return new WorkflowRunner(run, input.store, registry, input.maxSteps);
+      return new WorkflowRunner(run, input.store, registry);
     },
 
     async load(id) {
       const run = await input.store.load(id);
       if (!run) return null;
-      return new WorkflowRunner(run, input.store, registry, input.maxSteps);
+      return new WorkflowRunner(run, input.store, registry);
     },
 
     register(component) {
