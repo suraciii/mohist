@@ -108,8 +108,8 @@ export class WorkflowRun {
     return this.stageRun(stage).definition.checks.find(candidate => candidate.name === checkName) ?? null;
   }
 
-  addTasks(stage: WorkflowStageId, tasks: MaterializedTaskInput[]): void {
-    const stageRun = this.stageRun(stage);
+  addTasks(tasks: MaterializedTaskInput[]): void {
+    const stageRun = this.currentStageRun();
     stageRun.workSourceState = tasks.length === 0
       ? { evaluated: true, empty: true }
       : { evaluated: true, tasks };
@@ -118,31 +118,31 @@ export class WorkflowRun {
     }
   }
 
-  markTaskSourceMissing(stage: WorkflowStageId): void {
-    this.stageRun(stage).workSourceState = { evaluated: true, missing: true };
+  markTaskSourceMissing(): void {
+    this.currentStageRun().workSourceState = { evaluated: true, missing: true };
   }
 
-  markTaskSourceInvalid(stage: WorkflowStageId): void {
-    this.stageRun(stage).workSourceState = { evaluated: true, invalid: true };
+  markTaskSourceInvalid(): void {
+    this.currentStageRun().workSourceState = { evaluated: true, invalid: true };
   }
 
-  markTaskSourceEmpty(stage: WorkflowStageId): void {
-    this.stageRun(stage).workSourceState = { evaluated: true, empty: true };
+  markTaskSourceEmpty(): void {
+    this.currentStageRun().workSourceState = { evaluated: true, empty: true };
   }
 
-  completeTask(stage: WorkflowStageId, taskId: string): void {
-    const stageRun = this.requireCurrentTask(stage, taskId);
+  completeTask(taskId: string): void {
+    const stageRun = this.requireCurrentTask(taskId);
     stageRun.startTask();
     stageRun.completeTask();
   }
 
-  failTask(stage: WorkflowStageId, taskId: string, result: TaskResultInput): void {
-    const stageRun = this.requireCurrentTask(stage, taskId);
+  failTask(taskId: string, result: TaskResultInput): void {
+    const stageRun = this.requireCurrentTask(taskId);
     stageRun.startTask();
     stageRun.failTask();
     const failure = {
       reason: 'task-failed' as const,
-      stage,
+      stage: stageRun.stage,
       taskId,
       message: result.reason,
       causedBy: result.causedBy,
@@ -153,29 +153,29 @@ export class WorkflowRun {
     this.failure = failure;
   }
 
-  passCheck(stage: WorkflowStageId, checkName: string, result: CheckResultInput): void {
-    const check = this.requireCheck(stage, checkName);
+  passCheck(checkName: string, result: CheckResultInput): void {
+    const check = this.requireCheck(checkName);
     check.message = result.message ?? null;
     check.output = result.output ?? null;
     check.pass();
   }
 
-  resetCheck(stage: WorkflowStageId, checkName: string, result: CheckResultInput): void {
-    const check = this.requireCheck(stage, checkName);
+  resetCheck(checkName: string, result: CheckResultInput): void {
+    const check = this.requireCheck(checkName);
     check.reset();
     check.message = result.message ?? null;
     check.output = result.output ?? null;
   }
 
-  failCheck(stage: WorkflowStageId, checkName: string, result: CheckResultInput): void {
-    const stageRun = this.stageRun(stage);
-    const check = this.requireCheck(stage, checkName);
+  failCheck(checkName: string, result: CheckResultInput): void {
+    const stageRun = this.currentStageRun();
+    const check = this.requireCheck(checkName);
     check.message = result.message ?? null;
     check.output = result.output ?? null;
     check.fail();
     const failure = {
       reason: 'check-unrepaired' as const,
-      stage,
+      stage: stageRun.stage,
       checkName,
       message: result.message,
     };
@@ -200,20 +200,24 @@ export class WorkflowRun {
     return true;
   }
 
-  private requireCurrentTask(stage: WorkflowStageId, taskId: string): StageRun {
-    const stageRun = this.stageRun(stage);
+  private requireCurrentTask(taskId: string): StageRun {
+    const stageRun = this.currentStageRun();
     const definition = stageRun.currentTaskDefinition;
     if (!definition || definition.id !== taskId) {
-      throw new WorkflowDomainError(`Task ${taskId} is not current task in stage ${stage}`);
+      throw new WorkflowDomainError(`Task ${taskId} is not current task in stage ${stageRun.stage}`);
     }
     return stageRun;
   }
 
-  private requireCheck(stage: WorkflowStageId, checkName: string) {
-    const stageRun = this.stageRun(stage);
+  private requireCheck(checkName: string) {
+    const stageRun = this.currentStageRun();
     const check = stageRun.checks.find(candidate => candidate.name === checkName);
-    if (!check) throw new WorkflowDomainError(`Check ${checkName} does not exist in stage ${stage}`);
+    if (!check) throw new WorkflowDomainError(`Check ${checkName} does not exist in stage ${stageRun.stage}`);
     return check;
+  }
+
+  private currentStageRun(): StageRun {
+    return this.stageRun(this.currentStage);
   }
 
   private stageRun(stage: WorkflowStageId): StageRun {

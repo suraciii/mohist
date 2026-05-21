@@ -123,7 +123,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       : source;
     const component = this.registry.taskSource(definition?.uses);
     if (!component || !definition) {
-      this.workflowRun.markTaskSourceMissing(stage);
+      this.workflowRun.markTaskSourceMissing();
       return false;
     }
     const result = await component.create({ run: this }).createTasks({
@@ -135,13 +135,13 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       },
     });
     if (result.state === 'missing') {
-      this.workflowRun.markTaskSourceMissing(stage);
+      this.workflowRun.markTaskSourceMissing();
     } else if (result.state === 'invalid') {
-      this.workflowRun.markTaskSourceInvalid(stage);
+      this.workflowRun.markTaskSourceInvalid();
     } else if (result.state === 'empty') {
-      this.workflowRun.markTaskSourceEmpty(stage);
+      this.workflowRun.markTaskSourceEmpty();
     } else {
-      this.workflowRun.addTasks(stage, result.tasks);
+      this.workflowRun.addTasks(result.tasks);
     }
     return result.tasks.length > 0;
   }
@@ -163,9 +163,9 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       },
     });
     if (result.status === 'completed') {
-      this.workflowRun.completeTask(stage, definition.id);
+      this.workflowRun.completeTask(definition.id);
     } else {
-      this.workflowRun.failTask(stage, definition.id, result);
+      this.workflowRun.failTask(definition.id, result);
     }
     return result.status === 'completed';
   }
@@ -182,11 +182,11 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       definition,
     });
     if (result.status === 'pass') {
-      this.workflowRun.passCheck(stage, definition.name, result);
+      this.workflowRun.passCheck(definition.name, result);
     } else if (result.status === 'pending') {
-      this.workflowRun.resetCheck(stage, definition.name, result);
+      this.workflowRun.resetCheck(definition.name, result);
     } else {
-      this.workflowRun.failCheck(stage, definition.name, result);
+      this.workflowRun.failCheck(definition.name, result);
     }
     return result.status === 'pass';
   }
