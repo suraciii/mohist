@@ -1,8 +1,6 @@
 import type { WorkflowStageId } from './model';
 import { WorkflowRun } from './model';
-import type { WorkflowComponentRegistry } from './component-registry';
-import { CheckRunner } from './check-runner';
-import { TaskRunner } from './task-runner';
+import type { Registry } from './registry';
 import type {
   WorkflowRunId,
   WorkflowRunner as WorkflowRunnerContract,
@@ -16,14 +14,8 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   constructor(
     private readonly workflowRun: WorkflowRun,
     private readonly store: WorkflowStore,
-    private readonly registry: WorkflowComponentRegistry,
-  ) {
-    this.checkRunner = new CheckRunner(registry);
-    this.taskRunner = new TaskRunner(registry);
-  }
-
-  private readonly checkRunner: CheckRunner;
-  private readonly taskRunner: TaskRunner;
+    private readonly registry: Registry,
+  ) {}
 
   get id(): WorkflowRunId {
     return this.workflowRun.id;
@@ -125,17 +117,17 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       return true;
     }
 
-    const component = this.registry.taskSource(work.definition.tasksFrom.uses);
-    if (!component) {
+    const source = this.registry.taskSource(work.definition.tasksFrom.uses);
+    if (!source) {
       this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is not registered`);
       return false;
     }
-    const result = await component.create({ run: this }).createTasks({
+    const result = await source.create({ run: this }).createTasks({
       run: this,
       stage: work.stage,
       definition: {
         uses: work.definition.tasksFrom.uses,
-        with: work.definition.tasksFrom.with ? { ...work.definition.tasksFrom.with } : undefined,
+        with: work.definition.tasksFrom.with,
       },
     });
     if (result.state === 'missing') {
@@ -151,8 +143,13 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   private async runTask(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task' }>): Promise<boolean> {
-    const result = await this.taskRunner.run(work);
-    if (!result) return false;
+    const handler = this.registry.task(work.task.uses);
+    if (!handler) return false;
+    const result = await handler.run({
+      id: work.task.id,
+      title: work.task.title,
+      with: work.task.with,
+    });
     if (result.status === 'completed') {
       this.workflowRun.completeTask();
       return true;
@@ -162,14 +159,20 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   private async runCheck(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'check' }>): Promise<boolean> {
-    const result = await this.checkRunner.run(work);
-    if (!result) return false;
+    const handler = this.registry.check(work.check.uses);
+    if (!handler) return false;
+    const result = await handler.run({
+      name: work.check.name,
+      title: work.check.title,
+      with: work.check.with,
+    });
+    const checkResult = { name: work.check.name, ...result };
     if (result.status === 'pass') {
-      this.workflowRun.passCheck(result);
+      this.workflowRun.passCheck(checkResult);
     } else if (result.status === 'pending') {
-      this.workflowRun.pendingCheck(result);
+      this.workflowRun.pendingCheck(checkResult);
     } else {
-      this.workflowRun.failCheck(result);
+      this.workflowRun.failCheck(checkResult);
     }
     return result.status === 'pass';
   }
@@ -180,5 +183,4 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.save();
     return true;
   }
-
 }

@@ -1,5 +1,5 @@
 import { WorkflowRun } from './model';
-import { WorkflowComponentRegistry } from './component-registry';
+import { Registry } from './registry';
 import { workflowDefinitionFromInput } from './workflow-definition-input';
 import { WorkflowRunner } from './workflow-runner';
 import type { CreateWorkflowsInput, Workflows, WorkflowCreateInput } from './workflow-types';
@@ -7,10 +7,7 @@ import type { CreateWorkflowsInput, Workflows, WorkflowCreateInput } from './wor
 export * from './workflow-types';
 
 export function createWorkflows(input: CreateWorkflowsInput): Workflows {
-  const registry = new WorkflowComponentRegistry();
-  for (const component of input.components ?? []) {
-    registry.register(component);
-  }
+  const registry = new Registry();
 
   return {
     async create(createInput: WorkflowCreateInput) {
@@ -24,9 +21,7 @@ export function createWorkflows(input: CreateWorkflowsInput): Workflows {
       if (!run) return null;
       return new WorkflowRunner(run, input.store, registry);
     },
-
-    register(component) {
-      registry.register(component);
-    },
   };
 }
+
+export { Registry } from './registry';

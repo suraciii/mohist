@@ -4,17 +4,7 @@ export type WorkflowRunStatus = 'pending' | 'running' | 'paused' | 'passed' | 'f
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed';
 export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type CheckRunStatus = 'pending' | 'passed' | 'failed';
-export type FailureReason =
-  | 'task-failed'
-  | 'check-unrepaired'
-  | 'approval-rejected';
-
-export interface CausedByMetadata {
-  type: 'check-failure' | 'task-failure' | 'branch-changed' | 'conflict' | 'retry' | 'user-action' | 'system-policy';
-  checkName?: string;
-  taskId?: string;
-  message?: string;
-}
+export type FailureReason = 'task-failed' | 'check-unrepaired' | 'approval-rejected';
 
 export interface FailureDetails {
   reason: FailureReason;
@@ -22,7 +12,10 @@ export interface FailureDetails {
   taskId?: string;
   checkName?: string;
   message?: string;
-  causedBy?: CausedByMetadata;
+}
+
+export interface ApprovalInput {
+  output?: unknown;
 }
 
 export interface MaterializedTaskInput {
@@ -32,36 +25,14 @@ export interface MaterializedTaskInput {
   with?: Record<string, unknown>;
 }
 
-export interface TaskResultInput {
-  status: 'completed' | 'failed';
-  reason?: string;
-  causedBy?: CausedByMetadata;
-}
-
-export interface CheckResultInput {
-  name: string;
-  status: 'pass' | 'fail' | 'error' | 'pending';
-  message?: string;
-  output?: unknown;
-}
-
-export interface ApprovalInput {
-  output?: unknown;
-}
-
 export type WorkflowWork =
   | { kind: 'stage-init'; stage: WorkflowStageId; definition: { tasksFrom?: { uses: string; with?: Record<string, unknown> } } }
   | { kind: 'task'; stage: WorkflowStageId; task: { id: string; title: string; uses?: string; with?: Record<string, unknown> } }
   | { kind: 'check'; stage: WorkflowStageId; check: { name: string; title: string; uses?: string; with?: Record<string, unknown> } }
   | { kind: 'await-approval'; stage: WorkflowStageId }
   | { kind: 'complete'; stage: WorkflowStageId }
-  | { kind: 'blocked'; stage: WorkflowStageId; reason: StageCompletionGuard }
+  | { kind: 'blocked'; stage: WorkflowStageId; reason: string }
   | { kind: 'failed'; reason: FailureDetails };
-
-export type StageCompletionGuard =
-  | { complete: false; reason: 'workflow-not-running'; stage: WorkflowStageId }
-  | { complete: false; reason: 'stage-failed'; stage: WorkflowStageId }
-  | { complete: false; reason: 'stage-not-running'; stage: WorkflowStageId };
 
 export interface TaskRunState {
   id: string;

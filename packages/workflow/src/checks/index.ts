@@ -6,12 +6,3 @@ export interface Check {
 }
 
 export { type CheckResult, type WorkflowContext as CheckContext } from '../runtime';
-
-export {
-  type CheckProvider,
-  type CheckProviderInput,
-  type CheckRegistry,
-  createCheckRegistry,
-  resolveCheck,
-  runCheck,
-} from './check-registry';

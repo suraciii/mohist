@@ -19,21 +19,14 @@ export interface WorkflowContext {
   eventBus: WorkflowEventBus;
 }
 
+export interface TaskResult {
+  status: 'completed' | 'failed';
+  reason?: string;
+}
+
 export interface CheckResult {
   name: string;
   status: 'pass' | 'fail' | 'error' | 'pending';
   message?: string;
   output?: unknown;
-}
-
-export interface StageTaskResult {
-  taskId: string;
-  title: string;
-  status: 'completed' | 'failed' | 'skipped';
-  artifacts: string[];
-  events?: string[];
-  output?: unknown;
-  attempts: number;
-  duration: number;
-  reason?: string;
 }
