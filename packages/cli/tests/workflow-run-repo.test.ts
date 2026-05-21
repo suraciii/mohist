@@ -7,7 +7,7 @@ import { initializeDatabase } from '../src/db/migrations';
 import { IssueRepo } from '../src/db/issue-repo';
 import { ProjectRepo } from '../src/db/project-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
-import { WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '../src/workflow/model';
+import { WorkflowRun, compileWorkflowDefinition, createWorkflowDefinitionSnapshot, type WorkflowDefinition } from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 import { Stage } from '../src/types';
 

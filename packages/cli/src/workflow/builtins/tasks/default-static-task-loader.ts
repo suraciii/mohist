@@ -5,8 +5,8 @@ import { workflowDefinitionSnapshotFromUnknown } from '../../projection/workflow
 import { Log } from '../../../util/log';
 import type { StageContext as MohistStageContext } from '../../stage-context';
 import type { StageContext } from '@mohist/workflow/runtime';
-import type { ExecutableTask } from '../../tasks/types';
-import type { TaskLoader } from '../../tasks/task-loader-registry';
+import type { ExecutableTask } from '@mohist/workflow/tasks/types';
+import type { TaskLoader } from '@mohist/workflow/tasks/task-loader-registry';
 
 const log = Log.create({ service: 'default-static-task-loader' });
 

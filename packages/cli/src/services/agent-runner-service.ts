@@ -27,7 +27,7 @@ import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { createTaskLoaderRegistry } from '../workflow/tasks';
+import { createTaskLoaderRegistry } from '@mohist/workflow/tasks';
 import { createOpenSpecTaskLoader, createDefaultStaticTaskLoader, createMohistBuiltinTaskDispatchRegistry } from '../workflow/builtins/tasks';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/builtins/workflows/mohist-default';
 import { createDefaultCheckRegistry } from '../workflow/builtins/checks';

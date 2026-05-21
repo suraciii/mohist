@@ -1,8 +1,8 @@
 import { Stage } from '../../types';
-import { getWorkflowUseDefinition } from '../uses-catalog';
-import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '../model';
-import { WorkflowRun } from '../model';
-import { compileRuntimeWorkflowDefinitionSnapshot, type RuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
+import { getWorkflowUseDefinition } from '@mohist/workflow/uses-catalog';
+import type { CompiledStageDefinition, WorkflowDefinitionSnapshot } from '@mohist/workflow/internal/model';
+import { WorkflowRun } from '@mohist/workflow/internal/model';
+import { compileRuntimeWorkflowDefinitionSnapshot, type RuntimeWorkflowDefinitionSnapshot } from '@mohist/workflow/runner/workflow-runtime-definition';
 import type {
   CausedByMetadata,
   CheckRunStatus,
@@ -13,7 +13,7 @@ import type {
   TaskRunStatus,
   WorkflowRunSnapshot,
   WorkSourceState,
-} from '../model';
+} from '@mohist/workflow/internal/model';
 
 function isCausedByMetadata(value: unknown): value is CausedByMetadata {
   return Boolean(value && typeof value === 'object' && 'type' in value && typeof (value as { type?: unknown }).type === 'string');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Stage } from '../src/types';
 import { commitPointFromStageSnapshot, hydrateWorkflowRun } from '../src/workflow/projection/workflow-run-snapshot';
-import type { StageDefinition, StageRunSnapshot, WorkflowRunSnapshot } from '../src/workflow/model';
+import type { StageDefinition, StageRunSnapshot, WorkflowRunSnapshot } from '@mohist/workflow/internal/model';
 
 describe('workflow run persistence helpers', () => {
   it('reconstructs Integrate commit point from service-call wrapped merge output', () => {

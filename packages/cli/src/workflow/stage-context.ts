@@ -11,7 +11,7 @@ import type { WorkflowRunService } from '../services/workflow-run-service';
 import type { WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import type { StageStateService } from '../services/stage-state-service';
 import type { WorkflowApplicationService } from '../services/workflow-application-service';
-import type { TaskRunSnapshot, WorkflowStageId, WorkflowWork } from './model';
+import type { TaskRunSnapshot, WorkflowStageId, WorkflowWork } from '@mohist/workflow/internal/model';
 
 export interface AgentSessionRegistry {
   getOrCreate(ref: string, factory: () => Promise<AgentSession>): Promise<AgentSession>;

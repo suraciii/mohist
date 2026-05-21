@@ -6,7 +6,7 @@ import { IssueRepo } from '../src/db/issue-repo';
 import { WorkflowRunRepo } from '../src/db/workflow-run-repo';
 import { Stage } from '../src/types';
 import { StageStateService, normalizeCheckStatus, normalizeTaskStatus } from '../src/services/stage-state-service';
-import { createWorkflowDefinitionSnapshot, WorkflowRun } from '../src/workflow/model';
+import { createWorkflowDefinitionSnapshot, WorkflowRun } from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 
 describe('StageStateService', () => {

@@ -1,7 +1,7 @@
 import { DatabaseManager } from '../db/database';
 import { WorkflowRunRepo, WorkflowRunWithStageRuns } from '../db/workflow-run-repo';
 import { Stage } from '../types';
-import type { WorkflowDefinitionSnapshot } from '../workflow/model';
+import type { WorkflowDefinitionSnapshot } from '@mohist/workflow/internal/model';
 import { WorkflowApplicationService } from './workflow-application-service';
 
 export class WorkflowRunService {

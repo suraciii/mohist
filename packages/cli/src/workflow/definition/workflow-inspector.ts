@@ -17,16 +17,16 @@ import {
   type WorkflowDefinitionSnapshot,
   type WorkflowStageId,
   type WorkflowTasksFromDefinition,
-} from '../model';
-import { compileRuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
+} from '@mohist/workflow/internal/model';
+import { compileRuntimeWorkflowDefinitionSnapshot } from '@mohist/workflow/runner/workflow-runtime-definition';
 import {
   parseWorkflowDefinitionSource,
   type WorkflowSourceDefinition,
-} from './workflow-definition-source';
+} from '@mohist/workflow/definition/workflow-definition-source';
 import {
   getWorkflowUseDefinition,
   isWorkflowUseAllowed,
-} from '../uses-catalog';
+} from '@mohist/workflow/uses-catalog';
 
 export type WorkflowDiagnosticSeverity = 'error' | 'warning';
 

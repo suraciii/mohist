@@ -1,4 +1,4 @@
-import type { Check, CheckContext, CheckResult } from '../../checks';
+import type { Check, CheckContext, CheckResult } from '@mohist/workflow/checks';
 
 export class MergeReadyCheck implements Check {
   public readonly name = 'merge-ready';

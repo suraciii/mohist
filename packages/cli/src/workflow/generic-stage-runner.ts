@@ -1,14 +1,14 @@
 import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from './stage-context';
 import type { StageRunner } from './stage-runner';
-import type { CheckContext } from './checks';
-import { resolveCheck } from './checks/check-registry';
-import type { ExecutableTask } from './tasks';
-import type { TaskLoaderRegistry } from './tasks/task-loader-registry';
-import type { TaskDispatchRegistry } from './tasks/task-dispatch-registry';
-import { createTaskDispatchRegistry } from './tasks/task-dispatch-registry';
-import type { CheckRegistry } from './checks/check-registry';
-import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
-import type { RuntimeStageDefinition, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';
+import type { CheckContext } from '@mohist/workflow/checks';
+import { resolveCheck } from '@mohist/workflow/checks/check-registry';
+import type { ExecutableTask } from '@mohist/workflow/tasks';
+import type { TaskLoaderRegistry } from '@mohist/workflow/tasks/task-loader-registry';
+import type { TaskDispatchRegistry } from '@mohist/workflow/tasks/task-dispatch-registry';
+import { createTaskDispatchRegistry } from '@mohist/workflow/tasks/task-dispatch-registry';
+import type { CheckRegistry } from '@mohist/workflow/checks/check-registry';
+import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from '@mohist/workflow/internal/model';
+import type { RuntimeStageDefinition, TaskExecutionPolicy, WorkSourceKind } from '@mohist/workflow/runner/workflow-runtime-definition';
 import type { StageContext as WorkflowStageContext } from '@mohist/workflow/runtime';
 import { Log } from '../util/log';
 import { detectOpenSpecChange } from '../openspec/detector';
@@ -348,7 +348,7 @@ export class GenericStageRunner implements StageRunner {
   private stageExecutionStatusAfterCheck(
     ctx: StageContext,
     result: CheckResult,
-    decision?: import('./model').WorkflowDecision,
+    decision?: import('@mohist/workflow/internal/model').WorkflowDecision,
   ): 'running' | 'awaiting-approval' | 'passed' | 'failed' {
     if (decision) {
       if (decision.nextWork.kind === 'task' || decision.nextWork.kind === 'check') return 'running';
@@ -671,12 +671,12 @@ export class GenericStageRunner implements StageRunner {
     });
   }
 
-  private sourceTaskDefinition(stageDefinition: RuntimeStageDefinition, taskId: string): import('./model').TaskDefinition | undefined {
+  private sourceTaskDefinition(stageDefinition: RuntimeStageDefinition, taskId: string): import('@mohist/workflow/internal/model').TaskDefinition | undefined {
     const baseTaskId = this.baseRuntimeTaskId(taskId);
     return stageDefinition.tasks.find(candidate => candidate.id === taskId || candidate.id === baseTaskId)
       ?? stageDefinition.checks
         .map(check => check.onFailure?.retry?.task)
-        .find((task): task is import('./model').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
+        .find((task): task is import('@mohist/workflow/internal/model').TaskDefinition => Boolean(task && (task.id === taskId || task.id === baseTaskId)));
   }
 
   private taskWorkSourceKind(ctx: StageContext, stageDefinition: RuntimeStageDefinition, taskId: string): WorkSourceKind | undefined {

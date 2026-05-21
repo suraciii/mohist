@@ -1,13 +1,13 @@
 import * as fs from 'fs';
-import type { Check, CheckContext, CheckResult } from '../../checks';
+import type { Check, CheckContext, CheckResult } from '@mohist/workflow/checks';
 import {
   buildStructuredResult,
   isParseError,
   markerContractForPath,
   validateMarkerFile,
   type ParseError,
-} from '../../result-contracts';
-import { getMarkerFormat } from '../../checks/marker-format-registry';
+} from '@mohist/workflow/result-contracts';
+import { getMarkerFormat } from '@mohist/workflow/checks/marker-format-registry';
 import type { StructuredWorkflowResult, WorkflowVerdict } from '../../../types/workflow-results';
 
 export interface ArtifactMarkerCheckOptions {

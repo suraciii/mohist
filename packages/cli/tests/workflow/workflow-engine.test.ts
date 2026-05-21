@@ -12,7 +12,7 @@ import type { StageRunner } from '../../src/workflow/stage-runner';
 import { EventBus } from '../../src/services/event-bus';
 import { WorkflowEngine } from '../../src/workflow/workflow-engine';
 import type { ConfigInfo } from '../../src/config/config-schema';
-import { WorkflowRun, type WorkflowWork } from '../../src/workflow/model';
+import { WorkflowRun, type WorkflowWork } from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../../src/workflow/builtins/workflows/mohist-default';
 
 class CapturingRunner implements StageRunner {

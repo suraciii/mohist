@@ -8,7 +8,7 @@ import {
   type WorkflowDefinitionSnapshot,
   type WorkflowRunSnapshot,
   WorkflowRun as DomainWorkflowRun,
-} from '../workflow/model';
+} from '@mohist/workflow/internal/model';
 import {
   commitPointFromStageSnapshot,
   hydrateWorkflowRun,

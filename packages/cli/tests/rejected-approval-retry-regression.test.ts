@@ -9,7 +9,7 @@ import { WorkflowRunService } from '../src/services/workflow-run-service';
 import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
-import { WorkflowRun } from '../src/workflow/model';
+import { WorkflowRun } from '@mohist/workflow/internal/model';
 import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 

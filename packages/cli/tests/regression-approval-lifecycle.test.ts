@@ -81,7 +81,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
   describe('AC-1: stale Plan approval at Check requests fresh approval', () => {
     it('Check stage with stale Plan approval does not pass UserApprovalCheck', async () => {
       const { UserApprovalCheck } = await import('../src/workflow/builtins/checks/user-approval-check');
-      const { CheckContext } = await import('../src/workflow/checks');
+      const { CheckContext } = await import('@mohist/workflow/checks');
 
       const issue = makeIssue({
         stage: Stage.Check,
@@ -118,7 +118,7 @@ describe('T-007 Regression: approval lifecycle + merge-gated completion', () => 
 
     it('Check stage with current Check approval passes UserApprovalCheck', async () => {
       const { UserApprovalCheck } = await import('../src/workflow/builtins/checks/user-approval-check');
-      const { CheckContext } = await import('../src/workflow/checks');
+      const { CheckContext } = await import('@mohist/workflow/checks');
 
       const issue = makeIssue({
         stage: Stage.Check,

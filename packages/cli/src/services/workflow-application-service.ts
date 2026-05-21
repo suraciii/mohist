@@ -12,7 +12,7 @@ import {
   type WorkflowRecoverySummary,
   type WorkflowDefinitionSnapshot,
   type WorkItemAttemptState,
-} from '../workflow/model';
+} from '@mohist/workflow/internal/model';
 import { WorkflowRunProjection } from './workflow-run-projection';
 import type { WorkflowAttemptEvidencePort, AttemptReconciliationResult } from './attempt-reconciliation-service';
 import { AttemptReconciliationService } from './attempt-reconciliation-service';
@@ -107,7 +107,7 @@ export class WorkflowApplicationService {
       return { reconciled: false, interruptedCount: 0, reasons: [], interruptedAttempts: [] };
     }
 
-    const runningAttempts: import('../workflow/model').WorkItemAttempt[] = [];
+    const runningAttempts: import('@mohist/workflow/internal/model').WorkItemAttempt[] = [];
     for (const task of stageRun.tasks) {
       if (task.latestAttempt?.state === 'running') {
         runningAttempts.push(task.latestAttempt);
@@ -187,7 +187,7 @@ export class WorkflowApplicationService {
     };
   }
 
-  private findCurrentWorkItem(stageRun: import('../workflow/model').StageRun): {
+  private findCurrentWorkItem(stageRun: import('@mohist/workflow/internal/model').StageRun): {
     type: 'task' | 'check';
     id: string;
     title: string;
@@ -228,7 +228,7 @@ export class WorkflowApplicationService {
     return null;
   }
 
-  private findBlockingAttemptWorkItem(stageRun: import('../workflow/model').StageRun): {
+  private findBlockingAttemptWorkItem(stageRun: import('@mohist/workflow/internal/model').StageRun): {
     type: 'task' | 'check';
     id: string;
     title: string;
@@ -350,13 +350,13 @@ export class WorkflowApplicationService {
     return this.updateActiveRun(input.issueId, input, run => run.completeTask(input.stage, input.taskId, input.result));
   }
 
-  startTaskAttempt(input: { issueId: string; stage: Stage; taskId: string; evidence?: Partial<Pick<import('../workflow/model').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
+  startTaskAttempt(input: { issueId: string; stage: Stage; taskId: string; evidence?: Partial<Pick<import('@mohist/workflow/internal/model').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
     const run = this.loadActive(input.issueId);
     run.startTaskAttempt(input.stage, input.taskId, new Date().toISOString(), input.evidence);
     this.repo.saveAggregate(run);
   }
 
-  startCheckAttempt(input: { issueId: string; stage: Stage; checkName: string; evidence?: Partial<Pick<import('../workflow/model').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
+  startCheckAttempt(input: { issueId: string; stage: Stage; checkName: string; evidence?: Partial<Pick<import('@mohist/workflow/internal/model').WorkItemAttempt, 'queueTaskId' | 'acpSessionId' | 'coderSessionId' | 'executionId' | 'processPid'>> }): void {
     const run = this.loadActive(input.issueId);
     run.startCheckAttempt(input.stage, input.checkName, new Date().toISOString(), input.evidence);
     this.repo.saveAggregate(run);
@@ -544,7 +544,7 @@ export class WorkflowApplicationService {
     run.status = 'running';
     run.failure = null;
     stageRun.reopenForRecovery();
-    const events: import('../workflow/model').WorkflowEvent[] = [
+    const events: import('@mohist/workflow/internal/model').WorkflowEvent[] = [
       { type: 'retry-task-scheduled', stage: input.stage, taskId: retryTask.id, causedBy },
     ];
     this.repo.saveAggregate(run, input.startedBy ?? null);

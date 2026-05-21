@@ -1,7 +1,7 @@
 import { DatabaseManager } from '../db/database';
 import { IssueTaskQueueRepo } from '../db/issue-task-queue-repo';
 import { CoderSessionRepo, type CoderSession } from '../db/coder-session-repo';
-import type { WorkItemAttempt } from '../workflow/model';
+import type { WorkItemAttempt } from '@mohist/workflow/internal/model';
 import { Log } from '../util/log';
 
 const log = Log.create({ service: 'attempt-reconciliation' });

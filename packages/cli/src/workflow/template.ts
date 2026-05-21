@@ -1,5 +1,5 @@
 import type { StageContext } from './stage-context';
-import type { WorkflowDefinitionSnapshot } from './model';
+import type { WorkflowDefinitionSnapshot } from '@mohist/workflow/internal/model';
 
 export interface WorkflowTemplateContext {
   issue: {

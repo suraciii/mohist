@@ -24,7 +24,7 @@ import {
 } from '../../../../src/workflow/builtins/workflows/mohist-default';
 import {
   type CompiledStageDefinition,
-} from '../../../../src/workflow/model';
+} from '@mohist/workflow/internal/model';
 import {
   createMohistBuiltinTaskDispatchRegistry,
   defaultServiceCallTaskHandler,
@@ -32,7 +32,7 @@ import {
   type AgentSessionTaskInput,
   type ServiceCallTaskInput,
 } from '../../../../src/workflow/builtins/tasks';
-import { createTaskLoaderRegistry, type ExecutableTask } from '../../../../src/workflow/tasks';
+import { createTaskLoaderRegistry, type ExecutableTask } from '@mohist/workflow/tasks';
 import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../../src/workflow/stage-context';
 import { MergeState, Stage, type Issue } from '../../../../src/types';
 

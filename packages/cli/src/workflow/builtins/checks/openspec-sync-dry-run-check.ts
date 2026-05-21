@@ -1,4 +1,4 @@
-import type { Check, CheckContext, CheckResult } from '../../checks';
+import type { Check, CheckContext, CheckResult } from '@mohist/workflow/checks';
 import { OpenSpecIntegrator } from '../../../openspec/open-spec-integrator';
 
 export class OpenSpecSyncDryRunCheck implements Check {
