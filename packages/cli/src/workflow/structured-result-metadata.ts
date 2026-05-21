@@ -1,10 +1,9 @@
-import type { WorkflowItem, WorkflowItemSeverity, WorkflowVerification } from '../../types/workflow-results';
-import { parseStructuredResult, isParseSuccess } from '../result-contracts';
-import type { ResultContract } from '../../types/workflow-results';
+import type { ResultContract, WorkflowItem, WorkflowItemSeverity, WorkflowVerification } from '../types/workflow-results';
+import { isParseSuccess, parseStructuredResult } from './result-contracts';
 
 const NON_BLOCKING_SEVERITIES: WorkflowItemSeverity[] = ['follow-up', 'info'];
 
-export interface SelfRepairResult {
+export interface StructuredResultMetadata {
   repairedItemIds: string[];
   repairedItems: WorkflowItem[];
   unresolvedItems: WorkflowItem[];
@@ -14,11 +13,11 @@ export interface SelfRepairResult {
   postRepairVerdict: 'PASS' | 'FAIL' | null;
 }
 
-export function extractRepairResultFromArtifact(
+export function extractStructuredResultMetadata(
   contract: ResultContract,
   artifactContent: string | null,
-): SelfRepairResult {
-  const empty: SelfRepairResult = {
+): StructuredResultMetadata {
+  const empty: StructuredResultMetadata = {
     repairedItemIds: [],
     repairedItems: [],
     unresolvedItems: [],
@@ -51,14 +50,14 @@ export function extractRepairResultFromArtifact(
     return true;
   });
 
-  const verificationLines = extractVerificationFromItems(repairedItems);
+  const verification = extractVerificationFromItems(repairedItems);
 
   return {
     repairedItemIds,
     repairedItems,
     unresolvedItems,
     allItems,
-    verification: verificationLines,
+    verification,
     hadRepairs: repairedItemIds.length > 0,
     postRepairVerdict: parsed.verdict,
   };

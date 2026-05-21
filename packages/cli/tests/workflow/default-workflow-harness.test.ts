@@ -73,7 +73,21 @@ describe('default workflow external-system harness', () => {
       status: 'completed',
       events: ['code.changed'],
     });
-    expect(checkRun.checks.find(check => check.checkName === 'review-passed')).toMatchObject({ status: 'passed' });
+    const reviewPassed = checkRun.checks.find(check => check.checkName === 'review-passed');
+    expect(reviewPassed).toMatchObject({ status: 'passed' });
+    expect(reviewPassed?.output).toMatchObject({
+      structuredResult: {
+        verdict: 'PASS',
+        repairedItemIds: ['F-001'],
+        verification: [
+          expect.objectContaining({
+            checkName: 'repair:F-001',
+            command: 'npm test -- tests/workflow/default-workflow-harness.test.ts',
+            status: 'pass',
+          }),
+        ],
+      },
+    });
 
     harness.approve(Stage.Check);
     expect((await harness.runUntilBoundary()).completed).toBe(true);

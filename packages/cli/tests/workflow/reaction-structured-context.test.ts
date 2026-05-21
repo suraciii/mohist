@@ -29,6 +29,11 @@ function writeArtifact(changeDir: string, filename: string, content: string) {
   fs.writeFileSync(path.join(changeDir, filename), content);
 }
 
+async function reviewMarkerCheck(changeDir: string) {
+  const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>');
+}
+
 describe('Reaction structured context: T-006', () => {
   let changeDir: string;
 
@@ -404,8 +409,7 @@ describe('Reaction structured context: T-006', () => {
   });
 
   describe('Check remains read-only', () => {
-    it('ReviewPassedCheck does not modify files', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
+    it('ArtifactMarkerCheck does not modify files', async () => {
 
       const reviewContent = [
         '<promise>FAIL</promise>',
@@ -421,7 +425,7 @@ describe('Reaction structured context: T-006', () => {
       writeArtifact(changeDir, 'review.md', reviewContent);
 
       const contentBefore = fs.readFileSync(path.join(changeDir, 'review.md'), 'utf-8');
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
       const contentAfter = fs.readFileSync(path.join(changeDir, 'review.md'), 'utf-8');
 

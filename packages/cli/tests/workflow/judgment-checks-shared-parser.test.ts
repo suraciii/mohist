@@ -30,6 +30,11 @@ function writeArtifact(changeDir: string, filename: string, content: string) {
   fs.writeFileSync(path.join(changeDir, filename), content);
 }
 
+async function reviewMarkerCheck(changeDir: string) {
+  const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+  return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>');
+}
+
 describe('judgment-checks: shared parser regression', () => {
   let changeDir: string;
 
@@ -41,12 +46,11 @@ describe('judgment-checks: shared parser regression', () => {
     fs.rmSync(changeDir, { recursive: true, force: true });
   });
 
-  describe('ReviewPassedCheck', () => {
+  describe('ArtifactMarkerCheck', () => {
     it('derives PASS from structured parser, not prose', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '## Findings\n\nNo findings.\n\n<promise>PASS</promise>\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('pass');
@@ -58,10 +62,9 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('derives FAIL from structured parser', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '<promise>FAIL</promise>\n\n- [ID: bug-1]\n  Severity: blocking\n  Evidence: Missing error handling\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');
@@ -71,76 +74,69 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('returns error when marker is missing', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '## Review\n\nEverything looks good but no verdict marker.\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
-      expect(result.status).toBe('error');
+      expect(result.status).toBe('fail');
       expect(result.message).toContain('No valid promise marker');
     });
 
     it('returns error when marker is malformed', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '<promise>PARTIAL</promise>\n\nSome text\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
-      expect(result.status).toBe('error');
+      expect(result.status).toBe('fail');
       expect(result.message).toContain('Malformed');
     });
 
     it('returns error for duplicate markers', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n\nThen later: <promise>FAIL</promise>\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
-      expect(result.status).toBe('error');
+      expect(result.status).toBe('fail');
       expect(result.message).toContain('Multiple promise markers');
     });
 
     it('returns error when file is missing', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
-      expect(result.status).toBe('error');
-      expect(result.message).toContain('review.md not found');
+      expect(result.status).toBe('fail');
+      expect(result.message).toContain('review.md not found or empty');
     });
 
     it('does not infer PASS from prose text', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '## Review\n\nAll checks passed. Everything looks great.\nVerdict: PASS\nNo issues found.\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
-      expect(result.status).toBe('error');
+      expect(result.status).toBe('fail');
       expect(result.message).toContain('No valid promise marker');
     });
 
     it('malformed marker does not become implicit FAIL', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '<promise>MAYBE</promise>\n\nSome text\n');
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
-      expect(result.status).not.toBe('fail');
-      expect(result.status).toBe('error');
+      expect(result.status).toBe('fail');
+      expect((result.output as any).error).toBe('malformed-marker');
     });
 
     it('remains read-only and does not modify files', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n');
       const beforeMtime = fs.statSync(path.join(changeDir, 'review.md')).mtimeMs;
 
       await new Promise(r => setTimeout(r, 10));
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       await check.run(makeCheckContext(changeDir));
 
       const afterMtime = fs.statSync(path.join(changeDir, 'review.md')).mtimeMs;
@@ -240,13 +236,12 @@ describe('judgment-checks: shared parser regression', () => {
 
   describe('shared parser behavior across checks', () => {
     it('review and self-review both parse PASS identically', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n');
 
-      const reviewResult = await new ReviewPassedCheck().run(makeCheckContext(changeDir));
+      const reviewResult = await (await reviewMarkerCheck(changeDir)).run(makeCheckContext(changeDir));
       const selfReviewResult = await new SelfReviewPassedCheck().run(makeCheckContext(changeDir));
 
       expect(reviewResult.status).toBe('pass');
@@ -257,14 +252,13 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('review and self-review both parse FAIL identically', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
 
       const failContent = '<promise>FAIL</promise>\n\n- [ID: test-1]\n  Severity: blocking\n  Evidence: test evidence\n';
       writeArtifact(changeDir, 'review.md', failContent);
       writeArtifact(changeDir, 'self-review.md', failContent);
 
-      const reviewResult = await new ReviewPassedCheck().run(makeCheckContext(changeDir));
+      const reviewResult = await (await reviewMarkerCheck(changeDir)).run(makeCheckContext(changeDir));
       const selfReviewResult = await new SelfReviewPassedCheck().run(makeCheckContext(changeDir));
 
       expect(reviewResult.status).toBe('fail');
@@ -276,46 +270,43 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('review and self-review both produce error for missing markers', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', 'No marker here');
       writeArtifact(changeDir, 'self-review.md', 'No marker here either');
 
-      const reviewResult = await new ReviewPassedCheck().run(makeCheckContext(changeDir));
+      const reviewResult = await (await reviewMarkerCheck(changeDir)).run(makeCheckContext(changeDir));
       const selfReviewResult = await new SelfReviewPassedCheck().run(makeCheckContext(changeDir));
 
-      expect(reviewResult.status).toBe('error');
+      expect(reviewResult.status).toBe('fail');
       expect(selfReviewResult.status).toBe('error');
       expect(reviewResult.message).toContain('No valid promise marker');
       expect(selfReviewResult.message).toContain('No valid promise marker');
     });
 
     it('review and self-review both produce error for duplicate markers', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise> and <promise>FAIL</promise>');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise> and <promise>FAIL</promise>');
 
-      const reviewResult = await new ReviewPassedCheck().run(makeCheckContext(changeDir));
+      const reviewResult = await (await reviewMarkerCheck(changeDir)).run(makeCheckContext(changeDir));
       const selfReviewResult = await new SelfReviewPassedCheck().run(makeCheckContext(changeDir));
 
-      expect(reviewResult.status).toBe('error');
+      expect(reviewResult.status).toBe('fail');
       expect(selfReviewResult.status).toBe('error');
     });
 
     it('review and self-review both produce error for malformed markers', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>MAYBE</promise>');
       writeArtifact(changeDir, 'self-review.md', '<promise>MAYBE</promise>');
 
-      const reviewResult = await new ReviewPassedCheck().run(makeCheckContext(changeDir));
+      const reviewResult = await (await reviewMarkerCheck(changeDir)).run(makeCheckContext(changeDir));
       const selfReviewResult = await new SelfReviewPassedCheck().run(makeCheckContext(changeDir));
 
-      expect(reviewResult.status).toBe('error');
+      expect(reviewResult.status).toBe('fail');
       expect(selfReviewResult.status).toBe('error');
     });
   });
@@ -373,7 +364,6 @@ describe('judgment-checks: shared parser regression', () => {
 
   describe('structured item policy validation', () => {
     it('extracts blocking items from FAIL output', async () => {
-      const { ReviewPassedCheck } = await import('../../src/workflow/checks/review-passed-check');
       writeArtifact(changeDir, 'review.md', [
         '<promise>FAIL</promise>',
         '',
@@ -388,7 +378,7 @@ describe('judgment-checks: shared parser regression', () => {
         '  Status: out-of-scope',
       ].join('\n'));
 
-      const check = new ReviewPassedCheck();
+      const check = await reviewMarkerCheck(changeDir);
       const result = await check.run(makeCheckContext(changeDir));
 
       expect(result.status).toBe('fail');

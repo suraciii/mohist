@@ -57,8 +57,3 @@ export {
 export {
   createDefaultStaticTaskLoader,
 } from './default-static-task-loader';
-
-export {
-  extractRepairResultFromArtifact,
-  type SelfRepairResult,
-} from './self-repair';
