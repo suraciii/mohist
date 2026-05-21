@@ -126,9 +126,9 @@ export interface WorkflowTaskSource {
 }
 
 export interface WorkflowTaskInput {
-  run: WorkflowExecutionContext;
-  stage: WorkflowStageId;
-  task: WorkflowTaskDefinitionContext;
+  id: string;
+  title: string;
+  with?: Record<string, unknown>;
 }
 
 export interface WorkflowCheckInput {
