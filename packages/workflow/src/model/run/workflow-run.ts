@@ -31,7 +31,6 @@ export class WorkflowRun {
       stage: stageRun.stage,
       status: stageRun.status,
       order: stageRun.order,
-      attemptSequence: stageRun.attemptSequence,
       tasks: stageRun.tasks.map(taskRun => ({
         id: taskRun.id,
         title: taskRun.title,
@@ -50,8 +49,6 @@ export class WorkflowRun {
       })),
       approval: stageRun.approval ? { ...stageRun.approval } : null,
       failure: stageRun.failure,
-      commitPoint: stageRun.commitPoint,
-      workSourceState: stageRun.workSourceState,
     }));
   }
 
@@ -109,13 +106,6 @@ export class WorkflowRun {
         },
       };
     }
-    if (stageRun.workSourceState.evaluated && 'missing' in stageRun.workSourceState) {
-      return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'dynamic-source-missing', stage: stageRun.stage } };
-    }
-    if (stageRun.workSourceState.evaluated && 'invalid' in stageRun.workSourceState) {
-      return { kind: 'blocked', stage: stageRun.stage, reason: { complete: false, reason: 'dynamic-source-invalid', stage: stageRun.stage } };
-    }
-
     const task = stageRun.currentTask;
     if (task) {
       return {
@@ -159,28 +149,21 @@ export class WorkflowRun {
     this.pauseRequested = false;
   }
 
-  initTasks(tasks: MaterializedTaskInput[] = [], workSourceState?: Exclude<StageRun['workSourceState'], { evaluated: false }>): void {
+  initTasks(tasks: MaterializedTaskInput[] = []): void {
+    this.currentStageRun().initTasks(tasks);
+  }
+
+  failStage(reason: string): void {
     const stageRun = this.currentStageRun();
-    stageRun.initTasks(
-      tasks,
-      workSourceState ?? (
-        tasks.length === 0
-          ? { evaluated: true, none: true }
-          : { evaluated: true, tasks }
-      ),
-    );
-  }
-
-  markTaskSourceMissing(): void {
-    this.currentStageRun().initTasks([], { evaluated: true, missing: true });
-  }
-
-  markTaskSourceInvalid(): void {
-    this.currentStageRun().initTasks([], { evaluated: true, invalid: true });
-  }
-
-  markTaskSourceEmpty(): void {
-    this.currentStageRun().initTasks([], { evaluated: true, empty: true });
+    const failure = {
+      reason: 'task-failed' as const,
+      stage: stageRun.stage,
+      message: reason,
+    };
+    stageRun.status = 'failed';
+    stageRun.failure = failure;
+    this.status = 'failed';
+    this.failure = failure;
   }
 
   completeTask(): void {
