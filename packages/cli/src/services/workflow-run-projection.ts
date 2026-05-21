@@ -164,9 +164,7 @@ export class WorkflowRunProjection {
       for (const task of stageRun.tasks) {
         if (task.status !== 'completed') continue;
         const taskDefinition = stageDefinition.tasks.find(candidate => candidate.id === task.id);
-        const policy = stageDefinition.taskExecutionPolicies?.find(candidate => candidate.taskId === task.id)
-          ?? stageDefinition.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-        const uses = taskDefinition?.uses ?? inferWorkflowTaskUse(task.id, policy?.kind);
+        const uses = taskDefinition?.uses ?? inferWorkflowTaskUse(task.id);
         const evidence = validateWorkflowUseEvidence(uses, task.output);
         if (!evidence.ok) return { ok: false, reason: `${task.id} ${evidence.field ?? 'delivery'} evidence is missing` };
       }

@@ -379,18 +379,14 @@ function isTaskAttemptForBase(taskId: string, baseTaskId: string): boolean {
 
 function approvalVerdictCheckName(stageDefinition?: CompiledStageDefinition): string {
   if (!stageDefinition) return '';
-  const policies = [
-    ...(stageDefinition.repairPolicies ?? []),
-    ...(stageDefinition.checkFailurePolicies ?? []),
-  ];
+  const policies = stageDefinition.checkFailurePolicies ?? [];
   return policies[0]?.checkName ?? '';
 }
 
 function approvalVerdictRepairPolicy(stageDefinition?: CompiledStageDefinition): { checkName: string; fixTaskId: string; maxAttempts: number } | null {
   const verdictCheckName = approvalVerdictCheckName(stageDefinition);
   if (!stageDefinition || !verdictCheckName) return null;
-  const policy = stageDefinition?.repairPolicies?.find(candidate => candidate.checkName === verdictCheckName)
-    ?? stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === verdictCheckName);
+  const policy = stageDefinition?.checkFailurePolicies?.find(candidate => candidate.checkName === verdictCheckName);
   if (!policy) return null;
   return {
     checkName: verdictCheckName,
@@ -983,9 +979,7 @@ export class StageStateService {
 
   private workflowTaskUse(stageDefinition: CompiledStageDefinition | undefined, taskId: string): string {
     const taskDefinition = stageDefinition?.tasks.find(candidate => candidate.id === taskId);
-    const policy = stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === taskId)
-      ?? stageDefinition?.taskExecutionPolicies?.find(candidate => candidate.taskId === '*');
-    return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId, policy?.kind);
+    return taskDefinition?.uses ?? inferWorkflowTaskUse(taskId);
   }
 
   private workflowCheckUse(stageDefinition: CompiledStageDefinition | undefined, checkName: string): string {

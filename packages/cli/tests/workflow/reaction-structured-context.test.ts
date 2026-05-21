@@ -382,11 +382,11 @@ describe('Reaction structured context: T-006', () => {
       const checkStage = DEFAULT_STAGE_DEFINITIONS.find(s => s.stage === 'check');
       expect(checkStage).toBeDefined();
 
-      const reviewRepairPolicy = checkStage!.repairPolicies?.find(
+      const reviewFailureTaskPolicy = checkStage!.checkFailurePolicies?.find(
         p => p.fixTaskId === 'fix-review-findings',
       );
-      expect(reviewRepairPolicy).toBeDefined();
-      expect(reviewRepairPolicy!.inputFrom).toBeUndefined();
+      expect(reviewFailureTaskPolicy).toBeDefined();
+      expect(reviewFailureTaskPolicy!.inputFrom).toBeUndefined();
 
       const reviewFailurePolicy = checkStage!.checkFailurePolicies?.find(
         p => p.checkName === 'review-passed',

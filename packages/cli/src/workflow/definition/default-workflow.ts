@@ -3,10 +3,14 @@ import { REVIEW_RESULT_CONTRACT, SELF_REVIEW_RESULT_CONTRACT } from '../checks/r
 import {
   compileWorkflowDefinition,
   createWorkflowDefinitionSnapshot,
-  type CompiledStageDefinition,
   type WorkflowDefinition,
-  type WorkflowDefinitionSnapshot,
 } from '../model';
+import {
+  compileRuntimeStageDefinitions,
+  compileRuntimeWorkflowDefinitionSnapshot,
+  type RuntimeStageDefinition,
+  type RuntimeWorkflowDefinitionSnapshot,
+} from '../runner/workflow-runtime-definition';
 import {
   parseWorkflowDefinitionSource,
   workflowDefinitionSourceToYaml,
@@ -289,12 +293,14 @@ export const MOHIST_DEFAULT_WORKFLOW_DEFINITION: WorkflowDefinition = parseWorkf
 
 export const MOHIST_DEFAULT_WORKFLOW_YAML = workflowDefinitionSourceToYaml(MOHIST_DEFAULT_WORKFLOW_SOURCE);
 
-export const DEFAULT_STAGE_DEFINITIONS: CompiledStageDefinition[] = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+export const DEFAULT_STAGE_DEFINITIONS: RuntimeStageDefinition[] = compileRuntimeStageDefinitions(
+  compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION),
+);
 
-export function createDefaultWorkflowDefinitionSnapshot(capturedAt?: string): WorkflowDefinitionSnapshot {
-  return createWorkflowDefinitionSnapshot({
+export function createDefaultWorkflowDefinitionSnapshot(capturedAt?: string): RuntimeWorkflowDefinitionSnapshot {
+  return compileRuntimeWorkflowDefinitionSnapshot(createWorkflowDefinitionSnapshot({
     definition: MOHIST_DEFAULT_WORKFLOW_DEFINITION,
     source: { type: 'builtin', id: MOHIST_DEFAULT_WORKFLOW_DEFINITION.id },
     capturedAt,
-  });
+  }));
 }

@@ -13,6 +13,7 @@ import {
   MOHIST_DEFAULT_WORKFLOW_SOURCE,
 } from '../src/workflow/definition/default-workflow';
 import { Stage } from '../src/types';
+import { compileRuntimeStageDefinitions } from '../src/workflow/runner/workflow-runtime-definition';
 
 function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): WorkflowRun {
   return WorkflowRun.startWorkflow({
@@ -92,7 +93,6 @@ describe('WorkflowRun domain aggregate', () => {
       'taskExecutionPolicies',
       'checkPolicies',
       'approvalPolicy',
-      'repairPolicies',
       'checkFailurePolicies',
       'invalidationPolicy',
     ];
@@ -106,9 +106,10 @@ describe('WorkflowRun domain aggregate', () => {
 
   it('derives the default runtime stage definitions from mohist/default WorkflowDefinition', () => {
     const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
+    const runtime = compileRuntimeStageDefinitions(compiled);
 
     expect(MOHIST_DEFAULT_WORKFLOW_DEFINITION.id).toBe('mohist/default');
-    expect(compiled).toEqual(DEFAULT_STAGE_DEFINITIONS);
+    expect(runtime).toEqual(DEFAULT_STAGE_DEFINITIONS);
     expect(compiled.map(definition => definition.stage)).toEqual([
       Stage.Plan,
       Stage.Build,
@@ -133,7 +134,10 @@ describe('WorkflowRun domain aggregate', () => {
       uses: 'mohist/agent',
       with: { prompt: { ref: 'mohist/check/ai-review' } },
     });
-    expect(plan.taskExecutionPolicies?.filter(policy => policy.kind === 'agent-session').map(policy => policy.taskId)).toEqual([
+    const runtimePlan = runtime.find(definition => definition.stage === Stage.Plan)!;
+    const runtimeCheck = runtime.find(definition => definition.stage === Stage.Check)!;
+    expect(compiled[0].taskExecutionPolicies).toBeUndefined();
+    expect(runtimePlan.taskExecutionPolicies?.filter(policy => policy.kind === 'agent-session').map(policy => policy.taskId)).toEqual([
       'proposal',
       'specs',
       'design',
@@ -141,28 +145,28 @@ describe('WorkflowRun domain aggregate', () => {
       'self-review',
       'fix-plan-review',
     ]);
-    expect(plan.taskExecutionPolicies?.find(policy => policy.taskId === 'proposal')).toMatchObject({
+    expect(runtimePlan.taskExecutionPolicies?.find(policy => policy.taskId === 'proposal')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'static',
       agentSessionRef: 'plan-artifacts',
     });
-    expect(plan.repairPolicies?.find(policy => policy.checkName === 'self-review-passed')).toMatchObject({
+    expect(plan.checkFailurePolicies?.find(policy => policy.checkName === 'self-review-passed')).toMatchObject({
       fixTaskId: 'fix-plan-review',
       maxAttempts: 1,
     });
-    expect(plan.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-plan-review')).toMatchObject({
+    expect(runtimePlan.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-plan-review')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'runtime',
     });
-    expect(check.repairPolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
+    expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'review-passed')).toMatchObject({
       fixTaskId: 'fix-review-findings',
       maxAttempts: 2,
     });
-    expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
+    expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'ai-review')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'static',
     });
-    expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
+    expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'runtime',
     });
@@ -206,12 +210,10 @@ describe('WorkflowRun domain aggregate', () => {
   it('compiles WorkflowDefinition defensively so callers cannot mutate the source definition', () => {
     const compiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
     compiled[0].tasks[0].title = 'Mutated title';
-    compiled[0].workSources?.[0].taskIds?.push('mutated-task');
 
     const recompiled = compileWorkflowDefinition(MOHIST_DEFAULT_WORKFLOW_DEFINITION);
 
     expect(recompiled[0].tasks[0].title).toBe('Generate proposal');
-    expect(recompiled[0].workSources?.[0].taskIds).not.toContain('mutated-task');
   });
 
   it('rejects invalid WorkflowDefinition shapes before they become runtime definitions', () => {
@@ -1777,7 +1779,7 @@ describe('WorkflowRun domain aggregate', () => {
         stage: Stage.Build,
         tasks: [],
         checks: [{ name: 'health-check', title: 'Health check' }],
-        repairPolicies: [
+        checkFailurePolicies: [
           { checkName: 'health-check', fixTaskId: 'fix-health', fixTaskTitle: 'Fix health', maxAttempts: 1 },
         ],
       },
