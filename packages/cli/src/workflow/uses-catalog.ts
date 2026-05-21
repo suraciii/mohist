@@ -2,7 +2,7 @@ export type WorkflowUsePlacement = 'task' | 'check' | 'both';
 export type WorkflowUseSideEffect = 'none' | 'worktree' | 'spec-state' | 'archive' | 'branch' | 'remote-pr' | 'merge';
 export type WorkflowUseIdempotency = 'idempotent' | 'checkpointed' | 'irreversible' | 'unknown';
 export type WorkflowDeliveryRole = 'none' | 'spec-sync' | 'archive' | 'local-merge' | 'remote-pr' | 'remote-merge';
-export type WorkflowTaskSourceKind = 'ralph';
+export type WorkflowTaskSourceKind = 'openspec';
 
 export interface WorkflowUseEvidenceRequirement {
   requiredFields?: string[];
@@ -117,16 +117,16 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
     outputContract: 'Mergeability snapshot and conflict metadata.',
   },
   {
-    name: 'mohist/ralph-tasks',
+    name: 'mohist/openspec-tasks',
     allowedPlacement: 'task',
     mutates: true,
     sideEffect: 'worktree',
     idempotency: 'checkpointed',
     deliveryRole: 'none',
-    sourceKind: 'ralph',
-    description: 'Executes generated OpenSpec tasks through Mohist task runtime.',
-    inputs: ['tasksPath'],
-    outputContract: 'Task completion evidence and artifacts.',
+    sourceKind: 'openspec',
+    description: 'Materializes OpenSpec tasks.json entries into workflow tasks.',
+    inputs: ['path', 'task'],
+    outputContract: 'Workflow task definitions materialized from tasks.json.',
   },
   {
     name: 'mohist/openspec-sync',

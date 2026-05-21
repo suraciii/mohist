@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -95,26 +95,6 @@ describe('RalphTaskLoader', () => {
       expect(result.tasks[1].totalTasks).toBe(2);
     });
 
-    it('materializes shared runtime executable tasks with ralph-task kind', () => {
-      writeTasks([
-        { id: 'T-001', order: 1, title: 'A', description: 'desc', attempts: 2 },
-      ]);
-      const loader = new RalphTaskLoader();
-      const result = loader.load(change);
-
-      expect(result.executableTasks).toHaveLength(1);
-      expect(result.executableTasks[0]).toMatchObject({
-        taskId: 'T-001',
-        title: 'A',
-        input: {
-          taskId: 'T-001',
-          title: 'A',
-          totalTasks: 1,
-          stage: 'build',
-          attempt: 3,
-        },
-      });
-    });
   });
 
   describe('missing dependency detection', () => {

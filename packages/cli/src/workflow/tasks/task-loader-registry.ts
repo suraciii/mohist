@@ -1,7 +1,7 @@
 import type { StageContext } from '../stage-context';
 import type { ExecutableTask } from './types';
 
-export type TaskLoaderKind = 'static' | 'ralph' | 'runtime';
+export type TaskLoaderKind = 'static' | 'openspec' | 'runtime';
 
 export interface TaskLoader {
   kind: TaskLoaderKind;

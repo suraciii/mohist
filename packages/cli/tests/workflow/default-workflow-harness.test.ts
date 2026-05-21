@@ -210,8 +210,8 @@ describe('default workflow external-system harness', () => {
     expect(planRun.approvalStatus).toBeNull();
   });
 
-  it('stops Build when a Ralph task fails and does not run downstream task or Build health check', async () => {
-    const harness = createHarness({ failRalphTasks: { 'T-001': 'Implementation failed' } });
+  it('stops Build when an OpenSpec materialized agent task fails and does not run downstream task or Build health check', async () => {
+    const harness = createHarness({ failAgentTasks: { 'T-001': 'Implementation failed' } });
 
     expect((await harness.runUntilBoundary()).stage).toBe(Stage.Plan);
     harness.approve(Stage.Plan);

@@ -2,10 +2,11 @@ import { getWorkflowUseDefinition } from '../uses-catalog';
 import type {
   CompiledStageDefinition,
   TaskDefinition,
+  WorkflowTasksFromSource,
   WorkflowDefinitionSnapshot,
 } from '../model/workflow-definition';
 
-export type WorkSourceKind = 'static' | 'ralph' | 'runtime';
+export type WorkSourceKind = 'static' | 'openspec' | 'runtime';
 
 export interface WorkSourceDefinition {
   kind: WorkSourceKind;
@@ -32,6 +33,7 @@ export function compileRuntimeStageDefinitions(stages: CompiledStageDefinition[]
     const runtime: RuntimeStageDefinition = {
       ...stage,
       tasks: stage.tasks.map(cloneTaskDefinition),
+      tasksFrom: cloneTasksFrom(stage.tasksFrom),
       checks: stage.checks.map(cloneCheckDefinition),
       on: cloneStageEvents(stage.on),
       workSources: compileWorkSources(stage),
@@ -60,6 +62,7 @@ export function cloneRuntimeStageDefinition(stage: RuntimeStageDefinition): Runt
   return {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
+    tasksFrom: cloneTasksFrom(stage.tasksFrom),
     checks: stage.checks.map(cloneCheckDefinition),
     on: cloneStageEvents(stage.on),
     workSources: stage.workSources?.map(source => ({
@@ -115,8 +118,17 @@ function cloneStageForRuntime(stage: WorkflowDefinitionSnapshot['resolvedDefinit
   return {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),
+    tasksFrom: cloneTasksFrom(stage.tasksFrom),
     checks: stage.checks.map(cloneCheckDefinition),
     on: cloneStageEvents(stage.on),
+  };
+}
+
+function cloneTasksFrom(tasksFrom: WorkflowTasksFromSource | undefined): WorkflowTasksFromSource | undefined {
+  if (!tasksFrom || typeof tasksFrom === 'string') return tasksFrom;
+  return {
+    uses: tasksFrom.uses,
+    with: tasksFrom.with ? { ...tasksFrom.with } : undefined,
   };
 }
 
@@ -136,7 +148,7 @@ function compileWorkSources(stage: CompiledStageDefinition, existingSources?: Wo
     workSources.push({ kind: 'static', taskIds: stage.tasks.map(task => task.id) });
   }
   if (stage.tasksFrom) {
-    const sourceKind = getWorkflowUseDefinition(stage.tasksFrom)?.sourceKind;
+    const sourceKind = getWorkflowUseDefinition(taskSourceUse(stage.tasksFrom))?.sourceKind;
     if (sourceKind) workSources.push({ kind: sourceKind });
   }
   for (const source of existingSources ?? []) {
@@ -147,6 +159,10 @@ function compileWorkSources(stage: CompiledStageDefinition, existingSources?: Wo
     });
   }
   return workSources.length > 0 ? workSources : undefined;
+}
+
+function taskSourceUse(tasksFrom: NonNullable<CompiledStageDefinition['tasksFrom']>): string {
+  return typeof tasksFrom === 'string' ? tasksFrom : tasksFrom.uses;
 }
 
 function taskWorkSourceKind(stage: CompiledStageDefinition, taskId: string, workSources: WorkSourceDefinition[] | undefined): WorkSourceKind | undefined {

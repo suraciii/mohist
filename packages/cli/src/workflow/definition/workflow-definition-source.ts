@@ -105,7 +105,7 @@ function parseStageSource(
   return {
     stage,
     tasks,
-    tasksFrom: source.tasksFrom,
+    tasksFrom: cloneTasksFrom(source.tasksFrom),
     checks,
     on: source.on ? Object.fromEntries(Object.entries(source.on).map(([event, policy]) => [event, {
       reset: {
@@ -116,6 +116,14 @@ function parseStageSource(
     }])) : undefined,
     requiresApproval: source.approval || undefined,
     approvalCheckName: source.approval ? 'user-approval' : undefined,
+  };
+}
+
+function cloneTasksFrom(tasksFrom: WorkflowTasksFromSource | undefined): WorkflowTasksFromSource | undefined {
+  if (!tasksFrom || typeof tasksFrom === 'string') return tasksFrom;
+  return {
+    uses: tasksFrom.uses,
+    with: tasksFrom.with ? { ...tasksFrom.with } : undefined,
   };
 }
 
