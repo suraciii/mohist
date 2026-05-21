@@ -1,6 +1,7 @@
 import type { WorkflowStageId } from '../model';
 import { WorkflowRun } from '../model';
 import type { WorkflowComponentRegistry } from './component-registry';
+import { CheckRunner } from './check-runner';
 import { TaskRunner } from './task-runner';
 import type {
   WorkflowRunId,
@@ -18,9 +19,11 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     private readonly store: WorkflowStore,
     private readonly registry: WorkflowComponentRegistry,
   ) {
+    this.checkRunner = new CheckRunner(registry);
     this.taskRunner = new TaskRunner(registry);
   }
 
+  private readonly checkRunner: CheckRunner;
   private readonly taskRunner: TaskRunner;
 
   get id(): WorkflowRunId {
@@ -159,19 +162,8 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   private async runCheck(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'check' }>): Promise<boolean> {
-    const component = this.registry.check(work.check.uses);
-    if (!component) return false;
-    const result = await component.create({ run: this }).run({
-      run: this,
-      stage: work.stage,
-      checkName: work.check.name,
-      definition: {
-        name: work.check.name,
-        title: work.check.title,
-        uses: work.check.uses,
-        with: work.check.with ? { ...work.check.with } : undefined,
-      },
-    });
+    const result = await this.checkRunner.run(work);
+    if (!result) return false;
     if (result.status === 'pass') {
       this.workflowRun.passCheck(result);
     } else if (result.status === 'pending') {

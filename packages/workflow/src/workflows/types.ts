@@ -104,7 +104,7 @@ export interface WorkflowTaskType {
 export interface WorkflowCheckType {
   readonly type: 'check';
   readonly uses: string;
-  create(context: WorkflowComponentContext): WorkflowCheck;
+  run(input: WorkflowCheckInput): Awaitable<WorkflowCheckResult>;
 }
 
 export interface WorkflowTaskSourceType {
@@ -132,10 +132,9 @@ export interface WorkflowTaskInput {
 }
 
 export interface WorkflowCheckInput {
-  run: WorkflowExecutionContext;
-  stage: WorkflowStageId;
-  checkName: string;
-  definition: WorkflowCheckDefinitionContext;
+  name: string;
+  title: string;
+  with?: Record<string, unknown>;
 }
 
 export interface WorkflowTaskSourceInput {
