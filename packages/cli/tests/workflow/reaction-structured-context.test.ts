@@ -189,7 +189,7 @@ describe('Reaction structured context: T-006', () => {
         };
       };
 
-      const { createRepairFixAdapter } = await import('../../src/workflow/task-runtime/repair-fix-adapter');
+      const { createRepairFixAdapter } = await import('../../src/workflow/tasks/repair-fix-adapter');
       const sut = createRepairFixAdapter({ agentSessionHandler: mockHandler as any });
 
       const failedCheck = {
@@ -251,7 +251,7 @@ describe('Reaction structured context: T-006', () => {
         };
       };
 
-      const { createRepairFixAdapter } = await import('../../src/workflow/task-runtime/repair-fix-adapter');
+      const { createRepairFixAdapter } = await import('../../src/workflow/tasks/repair-fix-adapter');
       const sut = createRepairFixAdapter({ agentSessionHandler: mockHandler as any });
 
       const failedCheck = {
@@ -300,7 +300,7 @@ describe('Reaction structured context: T-006', () => {
         };
       };
 
-      const { createRepairFixAdapter } = await import('../../src/workflow/task-runtime/repair-fix-adapter');
+      const { createRepairFixAdapter } = await import('../../src/workflow/tasks/repair-fix-adapter');
       const sut = createRepairFixAdapter({ agentSessionHandler: mockHandler as any });
 
       const failedCheck = {
@@ -470,7 +470,7 @@ describe('Reaction structured context: T-006', () => {
         };
       };
 
-      const { createRepairFixAdapter } = await import('../../src/workflow/task-runtime/repair-fix-adapter');
+      const { createRepairFixAdapter } = await import('../../src/workflow/tasks/repair-fix-adapter');
       const sut = createRepairFixAdapter({ agentSessionHandler: mockHandler as any });
 
       const mockCtx = {

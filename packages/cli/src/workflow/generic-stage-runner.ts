@@ -2,10 +2,10 @@ import type { StageContext, StageRunResult, StageTaskResult, CheckResult } from 
 import type { StageRunner } from './stage-runner';
 import type { CheckContext } from './checks';
 import { resolveCheck } from './checks/check-registry';
-import type { TaskHandlerRegistry, ExecutableTask, TaskKind } from './task-runtime';
-import type { TaskLoaderRegistry } from './task-runtime/task-loader-registry';
-import type { TaskDispatchFactoryRegistry, DispatchableTask } from './task-runtime/task-dispatch-factory-registry';
-import { createDefaultTaskDispatchFactoryRegistry } from './task-runtime/task-dispatch-factory-registry';
+import type { TaskHandlerRegistry, ExecutableTask, TaskKind } from './tasks';
+import type { TaskLoaderRegistry } from './tasks/task-loader-registry';
+import type { TaskDispatchFactoryRegistry, DispatchableTask } from './tasks/task-dispatch-factory-registry';
+import { createDefaultTaskDispatchFactoryRegistry } from './tasks/task-dispatch-factory-registry';
 import type { CheckRegistry } from './checks/check-registry';
 import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
 import type { RuntimeStageDefinition, TaskExecutionKind, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';

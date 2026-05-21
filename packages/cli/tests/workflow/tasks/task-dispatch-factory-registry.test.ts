@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
-import type { ExecutableTask } from '../../../src/workflow/task-runtime';
-import { createDefaultTaskDispatchFactoryRegistry } from '../../../src/workflow/task-runtime';
+import type { ExecutableTask } from '../../../src/workflow/tasks';
+import { createDefaultTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
 import type { TaskDefinition } from '../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {

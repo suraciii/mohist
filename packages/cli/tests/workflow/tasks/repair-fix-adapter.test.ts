@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
-import { createRepairFixAdapter, type RepairFixTaskId } from '../../../src/workflow/task-runtime/repair-fix-adapter';
+import { createRepairFixAdapter, type RepairFixTaskId } from '../../../src/workflow/tasks/repair-fix-adapter';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -484,13 +484,13 @@ describe('RepairFixAdapter', () => {
 
   describe('compatibility exports', () => {
     it('defaultRepairFixAdapter is available from the module', async () => {
-      const { defaultRepairFixAdapter } = await import('../../../src/workflow/task-runtime');
+      const { defaultRepairFixAdapter } = await import('../../../src/workflow/tasks');
       expect(defaultRepairFixAdapter).toBeDefined();
       expect(typeof defaultRepairFixAdapter.dispatch).toBe('function');
     });
 
     it('RepairFixTaskId type is exported', async () => {
-      const { RepairFixTaskId } = await import('../../../src/workflow/task-runtime');
+      const { RepairFixTaskId } = await import('../../../src/workflow/tasks');
       const taskId: RepairFixTaskId = 'fix-build-health';
       expect(taskId).toBe('fix-build-health');
     });

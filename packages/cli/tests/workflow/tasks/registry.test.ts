@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { createDefaultTaskHandlerRegistry } from '../../src/workflow/task-runtime';
-import type { StageContext } from '../../src/workflow/stage-context';
-import type { ExecutableTask, RalphTaskInput } from '../../src/workflow/task-runtime';
-import type { OpenSpecChange } from '../../src/openspec/detector';
+import { createDefaultTaskHandlerRegistry } from '../../../src/workflow/tasks';
+import type { StageContext } from '../../../src/workflow/stage-context';
+import type { ExecutableTask, RalphTaskInput } from '../../../src/workflow/tasks';
+import type { OpenSpecChange } from '../../../src/openspec/detector';
 
 let tempDir: string;
 
@@ -44,7 +44,7 @@ function createChange(): OpenSpecChange {
 
 describe('createDefaultTaskHandlerRegistry', () => {
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-task-runtime-registry-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-task-registry-'));
   });
 
   afterEach(() => {

@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext, AgentSessionRegistry } from '../../../src/workflow/stage-context';
 import { InMemoryAgentSessionRegistry } from '../../../src/workflow/stage-context';
-import type { AgentSessionTaskInput } from '../../../src/workflow/task-runtime/types';
-import { createAgentSessionTaskHandler } from '../../../src/workflow/task-runtime/agent-session-task-handler';
+import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
+import { createAgentSessionTaskHandler } from '../../../src/workflow/tasks/agent-session-task-handler';
 
 vi.mock('../../../src/agent-runtime', () => ({
   AgentSession: {

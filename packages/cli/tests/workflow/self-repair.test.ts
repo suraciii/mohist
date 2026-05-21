@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractRepairResultFromArtifact } from '../../src/workflow/task-runtime/self-repair';
+import { extractRepairResultFromArtifact } from '../../src/workflow/tasks/self-repair';
 import type { ResultContract } from '../../src/types/workflow-results';
 
 function makeContract(path = 'review.md'): ResultContract {

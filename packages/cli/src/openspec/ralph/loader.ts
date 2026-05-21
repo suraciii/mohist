@@ -2,7 +2,7 @@ import type { OpenSpecChange } from '../detector';
 import type { Task } from '../context-assembler';
 import { readTasks, sortTasksByOrder, validateTaskDependencies } from './task-utils';
 import { type DependencyValidationResult } from './types';
-import type { ExecutableTask, RalphTaskInput } from '../../workflow/task-runtime/types';
+import type { ExecutableTask, RalphTaskInput } from '../../workflow/tasks/types';
 
 export { type DependencyValidationResult } from './types';
 export { sortTasksByOrder, readTasks } from './task-utils';
