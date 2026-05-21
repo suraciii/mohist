@@ -3,7 +3,7 @@ import type {
   CompiledStageDefinition,
   TaskDefinition,
   WorkflowTasksFromSource,
-  WorkflowDefinitionSnapshot,
+  ResolvedWorkflowDefinition,
 } from '../model/workflow-definition';
 
 export type WorkSourceKind = 'static' | 'openspec' | 'runtime';
@@ -24,7 +24,7 @@ export type RuntimeStageDefinition = CompiledStageDefinition & {
   taskExecutionPolicies?: TaskExecutionPolicy[];
 };
 
-export interface RuntimeWorkflowDefinitionSnapshot extends WorkflowDefinitionSnapshot {
+export interface RuntimeResolvedWorkflowDefinition extends ResolvedWorkflowDefinition {
   compiledStageDefinitions: RuntimeStageDefinition[];
 }
 
@@ -44,7 +44,7 @@ export function compileRuntimeStageDefinitions(stages: CompiledStageDefinition[]
   });
 }
 
-export function compileRuntimeWorkflowDefinitionSnapshot(snapshot: WorkflowDefinitionSnapshot): RuntimeWorkflowDefinitionSnapshot {
+export function compileRuntimeResolvedWorkflowDefinition(snapshot: ResolvedWorkflowDefinition): RuntimeResolvedWorkflowDefinition {
   return {
     ...snapshot,
     source: { ...snapshot.source },
@@ -114,7 +114,7 @@ function cloneCheckDefinition(check: CompiledStageDefinition['checks'][number]):
   };
 }
 
-function cloneStageForRuntime(stage: WorkflowDefinitionSnapshot['resolvedDefinition']['stages'][number]): WorkflowDefinitionSnapshot['resolvedDefinition']['stages'][number] {
+function cloneStageForRuntime(stage: ResolvedWorkflowDefinition['resolvedDefinition']['stages'][number]): ResolvedWorkflowDefinition['resolvedDefinition']['stages'][number] {
   return {
     ...stage,
     tasks: stage.tasks.map(cloneTaskDefinition),

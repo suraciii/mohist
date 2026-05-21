@@ -1,4 +1,4 @@
-import type { TaskRunSnapshot, WorkflowStageId, WorkflowWork } from './model';
+import type { TaskRunState, WorkflowStageId, WorkflowWork } from './model';
 
 export interface WorkflowIssue {
   id: string;
@@ -30,7 +30,7 @@ export interface StageContext {
   eventBus: WorkflowEventBus;
   workflowRun?: object;
   requestedWork?: WorkflowWork;
-  requestedTask?: TaskRunSnapshot;
+  requestedTask?: TaskRunState;
   worktreeManager?: unknown;
   projectRepo?: unknown;
   checkpointManager?: unknown;

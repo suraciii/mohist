@@ -1,8 +1,8 @@
 import { WorkflowRun } from './model';
 import { WorkflowComponentRegistry } from './workflows/component-registry';
-import { workflowDefinitionSnapshotFromInput } from './workflows/definition-input';
+import { resolvedWorkflowDefinitionFromInput } from './workflows/definition-input';
 import { RunnableWorkflow } from './workflows/runnable-workflow';
-import { workflowRunFromState } from './workflows/workflow-state';
+import { runFromRecord } from './workflows/workflow-run-record';
 import type {
   CreateWorkflowsInput,
   Workflows,
@@ -18,21 +18,21 @@ export function createWorkflows(input: CreateWorkflowsInput): Workflows {
 
   return {
     async create(createInput) {
-      const definition = workflowDefinitionSnapshotFromInput(createInput.definition, createInput.now);
+      const definition = resolvedWorkflowDefinitionFromInput(createInput.definition, createInput.now);
       const { run } = WorkflowRun.startWorkflow({
         id: createInput.id,
         issueId: createInput.id,
         issueNumber: 0,
-        workflowDefinitionSnapshot: definition,
+        definition: definition,
         now: createInput.now,
       });
       return new RunnableWorkflow(run, input.store, registry, input.maxSteps);
     },
 
     async load(id) {
-      const state = await input.store.load(id);
-      if (!state) return null;
-      return new RunnableWorkflow(workflowRunFromState(state), input.store, registry, input.maxSteps);
+      const record = await input.store.load(id);
+      if (!record) return null;
+      return new RunnableWorkflow(runFromRecord(record), input.store, registry, input.maxSteps);
     },
 
     register(component) {

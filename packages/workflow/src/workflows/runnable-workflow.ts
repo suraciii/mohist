@@ -6,25 +6,27 @@ import {
   taskDefinition,
   taskSourceDefinition,
 } from './definition-context';
-import { stateFromRun } from './workflow-state';
+import { recordFromRun } from './workflow-run-record';
 import type {
-  Workflow,
   WorkflowCheckResult,
   WorkflowRunId,
   WorkflowRunResult,
+  WorkflowRun as PublicWorkflowRun,
   WorkflowStore,
   WorkflowTaskResult,
   WorkflowTaskSourceResult,
-  WorkflowState,
+  WorkflowRunStatus,
+  WorkflowStageState,
+  WorkflowFailure,
 } from './types';
 
 type NextExecution =
   | { type: 'task'; stage: WorkflowStageId; taskId: string }
   | { type: 'check'; stage: WorkflowStageId; checkName: string }
   | { type: 'task-source'; stage: WorkflowStageId }
-  | { type: 'terminal'; result: Omit<WorkflowRunResult, 'state'> };
+  | { type: 'terminal'; result: WorkflowRunResult };
 
-export class RunnableWorkflow implements Workflow {
+export class RunnableWorkflow implements PublicWorkflowRun {
   constructor(
     private readonly run: WorkflowRun,
     private readonly store: WorkflowStore,
@@ -36,8 +38,21 @@ export class RunnableWorkflow implements Workflow {
     return this.run.id;
   }
 
-  get state(): WorkflowState {
-    return stateFromRun(this.run);
+  get status(): WorkflowRunStatus {
+    const status = this.run.status;
+    return status === 'passed' ? 'completed' : status;
+  }
+
+  get currentStage(): WorkflowStageId {
+    return this.run.currentStage;
+  }
+
+  get stages(): WorkflowStageState[] {
+    return this.run.state().stageRuns;
+  }
+
+  get failure(): WorkflowFailure | null {
+    return this.run.failure;
   }
 
   async start(): Promise<WorkflowRunResult> {
@@ -103,18 +118,18 @@ export class RunnableWorkflow implements Workflow {
   }
 
   async persist(): Promise<void> {
-    await this.store.save(this.state);
+    await this.store.save(recordFromRun(this.run));
   }
 
   private async runTaskSource(stage: WorkflowStageId): Promise<WorkflowTaskSourceResult> {
-    const sourceDefinition = taskSourceDefinition(this.run.workflowDefinitionSnapshot, stage);
+    const sourceDefinition = taskSourceDefinition(this.run, stage);
     const component = this.registry.taskSource(sourceDefinition?.uses);
     if (!component || !sourceDefinition) {
       return { tasks: [], state: 'missing' };
     }
     try {
-      return await component.create({ state: this.state }).run({
-        state: this.state,
+      return await component.create({ run: this }).run({
+        run: this,
         stage,
         definition: sourceDefinition,
       });
@@ -124,7 +139,7 @@ export class RunnableWorkflow implements Workflow {
   }
 
   private async runTask(stage: WorkflowStageId, taskId: string): Promise<WorkflowTaskResult> {
-    const definition = taskDefinition(this.run.workflowDefinitionSnapshot, stage, taskId);
+    const definition = taskDefinition(this.run, stage, taskId);
     const component = this.registry.task(definition?.uses);
     if (!component || !definition) {
       return {
@@ -133,8 +148,8 @@ export class RunnableWorkflow implements Workflow {
       };
     }
     try {
-      return await component.create({ state: this.state }).run({
-        state: this.state,
+      return await component.create({ run: this }).run({
+        run: this,
         stage,
         taskId,
         definition,
@@ -148,7 +163,7 @@ export class RunnableWorkflow implements Workflow {
   }
 
   private async runCheck(stage: WorkflowStageId, checkName: string): Promise<WorkflowCheckResult> {
-    const definition = checkDefinition(this.run.workflowDefinitionSnapshot, stage, checkName);
+    const definition = checkDefinition(this.run, stage, checkName);
     const component = this.registry.check(definition?.uses);
     if (!component || !definition) {
       return {
@@ -158,8 +173,8 @@ export class RunnableWorkflow implements Workflow {
       };
     }
     try {
-      return await component.create({ state: this.state }).run({
-        state: this.state,
+      return await component.create({ run: this }).run({
+        run: this,
         stage,
         checkName,
         definition,
@@ -173,8 +188,8 @@ export class RunnableWorkflow implements Workflow {
     }
   }
 
-  private result(result: Omit<WorkflowRunResult, 'state'>): WorkflowRunResult {
-    return { ...result, state: this.state };
+  private result(result: WorkflowRunResult): WorkflowRunResult {
+    return result;
   }
 }
 
@@ -212,7 +227,7 @@ function selectNextExecution(run: WorkflowRun): NextExecution {
   return { type: 'check', stage: work.stage, checkName: work.checkName };
 }
 
-function statusResultFromRun(run: WorkflowRun): Omit<WorkflowRunResult, 'state'> {
+function statusResultFromRun(run: WorkflowRun): WorkflowRunResult {
   const work = run.nextWork();
   const next = selectNextExecution(run);
   return next.type === 'terminal'

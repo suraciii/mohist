@@ -1,12 +1,12 @@
 import type { Check, CheckContext, CheckResult } from './index';
-import type { CheckDefinition, WorkflowDefinitionSnapshot, WorkflowStageId } from '../model';
+import type { CheckDefinition, ResolvedWorkflowDefinition, WorkflowStageId } from '../model';
 
 export interface CheckProviderInput {
   ctx: CheckContext;
   stage: WorkflowStageId;
   check: CheckDefinition;
   worktreePath?: string;
-  workflowDefinitionSnapshot?: WorkflowDefinitionSnapshot;
+  definition?: ResolvedWorkflowDefinition;
 }
 
 export interface CheckProvider {
