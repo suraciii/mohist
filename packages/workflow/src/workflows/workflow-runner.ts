@@ -1,8 +1,7 @@
-import type { StageRun, WorkflowStageId } from '../model';
+import type { WorkflowStageId } from '../model';
 import { WorkflowRun } from '../model';
 import type { WorkflowComponentRegistry } from './component-registry';
 import type {
-  WorkflowCheckDefinitionContext,
   WorkflowRunId,
   WorkflowRunResult,
   WorkflowRunner as WorkflowRunnerContract,
@@ -10,7 +9,6 @@ import type {
   WorkflowRunStatus,
   WorkflowStageState,
   WorkflowFailure,
-  WorkflowTaskDefinitionContext,
 } from './types';
 
 export class WorkflowRunner implements WorkflowRunnerContract {
@@ -34,32 +32,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   get stages(): WorkflowStageState[] {
-    return this.workflowRun.stageRuns.map(stageRun => ({
-      stage: stageRun.stage,
-      status: stageRun.status,
-      order: stageRun.order,
-      attemptSequence: stageRun.attemptSequence,
-      tasks: stageRun.tasks.map((taskRun, index) => {
-        const task = stageRun.definition.tasks[index];
-        return {
-          id: task?.id ?? `task-${index}`,
-          title: task?.title ?? `Task ${index + 1}`,
-          uses: task?.uses,
-          status: taskRun.status,
-        };
-      }),
-      checks: stageRun.checks.map(check => ({
-        name: check.name,
-        title: check.title,
-        status: check.status,
-        message: check.message,
-        output: check.output,
-      })),
-      approval: stageRun.approval ? { ...stageRun.approval } : null,
-      failure: stageRun.failure,
-      commitPoint: stageRun.commitPoint,
-      workSourceState: stageRun.workSourceState,
-    }));
+    return this.workflowRun.stages;
   }
 
   get failure(): WorkflowFailure | null {
@@ -71,11 +44,11 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       this.workflowRun.start();
       await this.persist();
     }
-    return this.resume();
+    return this.run();
   }
 
   async resume(): Promise<WorkflowRunResult> {
-    return this.runUntilBlocked();
+    return this.run();
   }
 
   async run(): Promise<WorkflowRunResult> {
@@ -83,44 +56,31 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       this.workflowRun.start();
       await this.persist();
     }
-    return this.runUntilBlocked();
-  }
-
-  private async runUntilBlocked(): Promise<WorkflowRunResult> {
     while (true) {
       const work = this.workflowRun.next();
       if (work.kind === 'complete') {
-        const stageRun = this.currentStageRun();
-        if (!stageRun) break;
-        const completed = this.completeCurrentStage(stageRun);
+        const completed = this.workflowRun.passStage();
         await this.persist();
         if (!completed) break;
         continue;
       }
       if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
-      const stageRun = this.stageRun(work.stage);
-      if (!stageRun) break;
-
       if (work.kind === 'task-source') {
-        const continued = await this.runTaskSource(stageRun);
+        const continued = await this.runTaskSource(work.stage);
         await this.persist();
         if (!continued) break;
         continue;
       }
 
       if (work.kind === 'task') {
-        const taskDefinition = stageRun.definition.tasks.find(candidate => candidate.id === work.taskId);
-        if (!taskDefinition) break;
-        const continued = await this.runTask(stageRun, taskDefinition);
+        const continued = await this.runTask(work.stage, work.taskId);
         await this.persist();
         if (!continued) break;
         continue;
       }
 
-      const checkDefinition = stageRun.definition.checks.find(definition => definition.name === work.checkName);
-      if (!checkDefinition) break;
-      const continued = await this.runCheck(stageRun, checkDefinition);
+      const continued = await this.runCheck(work.stage, work.checkName);
       await this.persist();
       if (!continued) break;
     }
@@ -156,56 +116,44 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.store.save(this.workflowRun);
   }
 
-  private currentStageRun(): StageRun | null {
-    return this.workflowRun.stageRuns.find(candidate => candidate.stage === this.workflowRun.currentStage) ?? null;
-  }
-
-  private stageRun(stage: WorkflowStageId): StageRun | null {
-    return this.workflowRun.stageRuns.find(candidate => candidate.stage === stage) ?? null;
-  }
-
-  private async runTaskSource(stageRun: StageRun): Promise<boolean> {
-    const source = stageRun.definition.tasksFrom;
+  private async runTaskSource(stage: WorkflowStageId): Promise<boolean> {
+    const source = this.workflowRun.taskSourceDefinition(stage);
     const definition = typeof source === 'string'
       ? { uses: source }
       : source;
     const component = this.registry.taskSource(definition?.uses);
     if (!component || !definition) {
-      stageRun.workSourceState = { evaluated: true, missing: true };
+      this.workflowRun.missTaskSource(stage);
       return false;
     }
     const result = await component.create({ run: this }).run({
       run: this,
-      stage: stageRun.stage,
+      stage,
       definition: {
         uses: definition.uses,
         with: definition.with ? { ...definition.with } : undefined,
       },
     });
     if (result.state === 'missing') {
-      stageRun.workSourceState = { evaluated: true, missing: true };
+      this.workflowRun.missTaskSource(stage);
     } else if (result.state === 'invalid') {
-      stageRun.workSourceState = { evaluated: true, invalid: true };
+      this.workflowRun.failTaskSource(stage);
     } else if (result.state === 'empty') {
-      stageRun.workSourceState = { evaluated: true, empty: true };
-    } else if (result.tasks.length === 0) {
-      stageRun.workSourceState = { evaluated: true, empty: true };
+      this.workflowRun.emptyTaskSource(stage);
     } else {
-      stageRun.workSourceState = { evaluated: true, tasks: result.tasks };
-    }
-    for (const task of result.tasks) {
-      stageRun.addTask(task.id, task.title, task.uses);
+      this.workflowRun.completeTaskSource(stage, result.tasks);
     }
     return result.tasks.length > 0;
   }
 
-  private async runTask(stageRun: StageRun, definition: WorkflowTaskDefinitionContext): Promise<boolean> {
+  private async runTask(stage: WorkflowStageId, taskId: string): Promise<boolean> {
+    const definition = this.workflowRun.taskDefinition(stage, taskId);
+    if (!definition) return false;
     const component = this.registry.task(definition.uses);
     if (!component) return false;
-    stageRun.startTask();
     const result = await component.create({ run: this }).run({
       run: this,
-      stage: stageRun.stage,
+      stage,
       taskId: definition.id,
       definition: {
         id: definition.id,
@@ -215,71 +163,32 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       },
     });
     if (result.status === 'completed') {
-      stageRun.completeTask();
-      return true;
+      this.workflowRun.completeTask(stage, definition.id);
+    } else {
+      this.workflowRun.failTask(stage, definition.id, result);
     }
-    stageRun.failTask();
-    const failure = {
-      reason: 'task-failed' as const,
-      stage: stageRun.stage,
-      taskId: definition.id,
-      message: result.reason,
-      causedBy: result.causedBy,
-    };
-    stageRun.status = 'failed';
-    stageRun.failure = failure;
-    this.workflowRun.status = 'failed';
-    this.workflowRun.failure = failure;
-    return false;
+    return result.status === 'completed';
   }
 
-  private async runCheck(stageRun: StageRun, definition: WorkflowCheckDefinitionContext): Promise<boolean> {
+  private async runCheck(stage: WorkflowStageId, checkName: string): Promise<boolean> {
+    const definition = this.workflowRun.checkDefinition(stage, checkName);
+    if (!definition) return false;
     const component = this.registry.check(definition.uses);
     if (!component) return false;
     const result = await component.create({ run: this }).run({
       run: this,
-      stage: stageRun.stage,
+      stage,
       checkName: definition.name,
       definition,
     });
-    const check = stageRun.checks.find(candidate => candidate.name === definition.name);
-    if (!check) return false;
-    check.message = result.message ?? null;
-    check.output = result.output ?? null;
     if (result.status === 'pass') {
-      check.pass();
-      return true;
+      this.workflowRun.passCheck(stage, definition.name, result);
+    } else if (result.status === 'pending') {
+      this.workflowRun.resetCheck(stage, definition.name, result);
+    } else {
+      this.workflowRun.failCheck(stage, definition.name, result);
     }
-    if (result.status === 'pending') {
-      check.reset();
-      return false;
-    }
-    check.fail();
-    const failure = {
-      reason: 'check-unrepaired' as const,
-      stage: stageRun.stage,
-      checkName: definition.name,
-      message: result.message,
-    };
-    stageRun.status = 'failed';
-    stageRun.failure = failure;
-    this.workflowRun.status = 'failed';
-    this.workflowRun.failure = failure;
-    return false;
-  }
-
-  private completeCurrentStage(stageRun: StageRun): boolean {
-    if (stageRun.tasks.some(task => task.status !== 'completed')) return false;
-    if (stageRun.checks.some(check => check.status !== 'passed')) return false;
-    stageRun.status = 'passed';
-    const next = this.workflowRun.stageRuns[stageRun.order + 1];
-    if (!next) {
-      this.workflowRun.status = 'passed';
-      return true;
-    }
-    this.workflowRun.currentStage = next.stage;
-    next.start();
-    return true;
+    return result.status === 'pass';
   }
 
   private result(result: WorkflowRunResult): WorkflowRunResult {
