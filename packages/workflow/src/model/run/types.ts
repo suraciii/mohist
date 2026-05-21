@@ -100,9 +100,9 @@ export type WorkflowEvent =
   | { type: 'commit-point-created'; stage: WorkflowStageId; commitPoint: CommitPoint };
 
 export type WorkflowWork =
-  | { kind: 'task-source'; stage: WorkflowStageId }
-  | { kind: 'task'; stage: WorkflowStageId; taskId: string }
-  | { kind: 'check'; stage: WorkflowStageId; checkName: string }
+  | { kind: 'task-source'; stage: WorkflowStageId; definition: { uses: string; with?: Record<string, unknown> } }
+  | { kind: 'task'; stage: WorkflowStageId; task: { id: string; title: string; uses?: string; with?: Record<string, unknown> } }
+  | { kind: 'check'; stage: WorkflowStageId; check: { name: string; title: string; uses?: string; with?: Record<string, unknown> } }
   | { kind: 'await-approval'; stage: WorkflowStageId }
   | { kind: 'complete'; stage: WorkflowStageId }
   | { kind: 'blocked'; stage: WorkflowStageId; reason: StageCompletionGuard }
@@ -136,12 +136,15 @@ export interface TaskRunState {
   id: string;
   title: string;
   uses?: string;
+  with?: Record<string, unknown>;
   status: TaskRunStatus;
 }
 
 export interface CheckRunState {
   name: string;
   title: string;
+  uses?: string;
+  with?: Record<string, unknown>;
   status: CheckRunStatus;
   message: string | null;
   output: unknown | null;

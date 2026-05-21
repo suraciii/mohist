@@ -1,4 +1,4 @@
-import type { StageDefinition, TaskDefinition, WorkflowStageId } from '../workflow-definition';
+import type { StageDefinition, WorkflowStageId } from '../workflow-definition';
 import { StageCheck } from './stage-check';
 import { TaskRun } from './task-run';
 import { type ApprovalState, type CommitPoint, type FailureDetails, type StageRunStatus, type WorkSourceState } from './types';
@@ -18,7 +18,7 @@ export class StageRun {
     readonly order: number,
   ) {
     this.tasks = [];
-    this.checks = definition.checks.map(check => new StageCheck(check.name, check.title));
+    this.checks = [];
   }
 
   get stage(): WorkflowStageId {
@@ -27,22 +27,17 @@ export class StageRun {
 
   start(): void {
     this.status = 'running';
-    this.initializeTasks();
+    this.initialize();
   }
 
-  private initializeTasks(): void {
+  private initialize(): void {
     if (this.tasks.length > 0) return;
-    this.tasks.push(...this.definition.tasks.map(() => new TaskRun()));
+    this.tasks.push(...this.definition.tasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
+    this.checks.push(...this.definition.checks.map(check => new StageCheck(check.name, check.title, check.uses, check.with)));
   }
 
   get currentTask(): TaskRun | null {
     return this.tasks.find(task => task.status !== 'completed' && task.status !== 'failed') ?? null;
-  }
-
-  get currentTaskDefinition(): TaskDefinition | null {
-    const task = this.currentTask;
-    if (!task) return null;
-    return this.definition.tasks[this.tasks.indexOf(task)] ?? null;
   }
 
   startTask(): TaskRun | null {
@@ -68,7 +63,7 @@ export class StageRun {
 
   addTask(id: string, title: string, uses?: string): TaskRun {
     this.definition.tasks.push({ id, title, uses });
-    const task = new TaskRun();
+    const task = new TaskRun(id, title, uses);
     this.tasks.push(task);
     return task;
   }

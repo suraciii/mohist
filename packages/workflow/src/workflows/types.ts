@@ -84,13 +84,21 @@ export type WorkflowComponent =
   | WorkflowTaskSourceType;
 
 export interface WorkflowComponentContext {
-  run: WorkflowRunner;
+  run: WorkflowExecutionContext;
+}
+
+export interface WorkflowExecutionContext {
+  readonly id: WorkflowRunId;
+  readonly status: WorkflowRunStatus;
+  readonly currentStage: WorkflowStageId;
+  readonly stages: WorkflowStageState[];
+  readonly failure: WorkflowFailure | null;
 }
 
 export interface WorkflowTaskType {
   readonly type: 'task';
   readonly uses: string;
-  create(context: WorkflowComponentContext): WorkflowTask;
+  run(input: WorkflowTaskInput): Awaitable<WorkflowTaskResult>;
 }
 
 export interface WorkflowCheckType {
@@ -118,21 +126,20 @@ export interface WorkflowTaskSource {
 }
 
 export interface WorkflowTaskInput {
-  run: WorkflowRunner;
+  run: WorkflowExecutionContext;
   stage: WorkflowStageId;
-  taskId: string;
-  definition: WorkflowTaskDefinitionContext;
+  task: WorkflowTaskDefinitionContext;
 }
 
 export interface WorkflowCheckInput {
-  run: WorkflowRunner;
+  run: WorkflowExecutionContext;
   stage: WorkflowStageId;
   checkName: string;
   definition: WorkflowCheckDefinitionContext;
 }
 
 export interface WorkflowTaskSourceInput {
-  run: WorkflowRunner;
+  run: WorkflowExecutionContext;
   stage: WorkflowStageId;
   definition: WorkflowTasksFromDefinitionContext;
 }

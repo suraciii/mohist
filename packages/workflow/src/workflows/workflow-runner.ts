@@ -1,6 +1,7 @@
 import type { WorkflowStageId } from '../model';
 import { WorkflowRun } from '../model';
 import type { WorkflowComponentRegistry } from './component-registry';
+import { TaskRunner } from './task-runner';
 import type {
   WorkflowRunId,
   WorkflowRunResult,
@@ -16,7 +17,11 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     private readonly workflowRun: WorkflowRun,
     private readonly store: WorkflowStore,
     private readonly registry: WorkflowComponentRegistry,
-  ) {}
+  ) {
+    this.taskRunner = new TaskRunner(registry);
+  }
+
+  private readonly taskRunner: TaskRunner;
 
   get id(): WorkflowRunId {
     return this.workflowRun.id;
@@ -28,7 +33,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   get currentStage(): WorkflowStageId {
-    return this.workflowRun.currentStage;
+    return this.workflowRun.currentStage.stage;
   }
 
   get stages(): WorkflowStageState[] {
@@ -67,20 +72,20 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
       if (work.kind === 'task-source') {
-        const continued = await this.createTasksFromSource(work.stage);
+        const continued = await this.createTasksFromSource(work);
         await this.persist();
         if (!continued) break;
         continue;
       }
 
       if (work.kind === 'task') {
-        const continued = await this.runTask(work.stage, work.taskId);
+        const continued = await this.runTask(work);
         await this.persist();
         if (!continued) break;
         continue;
       }
 
-      const continued = await this.runCheck(work.stage, work.checkName);
+      const continued = await this.runCheck(work);
       await this.persist();
       if (!continued) break;
     }
@@ -93,7 +98,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.persist();
     return this.result({
       status: 'stopped',
-      stage: this.workflowRun.currentStage,
+      stage: this.workflowRun.currentStage.stage,
       message: reason ?? 'Workflow paused',
     });
   }
@@ -107,7 +112,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.persist();
     return this.result({
       status: 'stopped',
-      stage: this.workflowRun.currentStage,
+      stage: this.workflowRun.currentStage.stage,
       message: reason,
     });
   }
@@ -116,22 +121,18 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.store.save(this.workflowRun);
   }
 
-  private async createTasksFromSource(stage: WorkflowStageId): Promise<boolean> {
-    const source = this.workflowRun.taskSourceDefinition(stage);
-    const definition = typeof source === 'string'
-      ? { uses: source }
-      : source;
-    const component = this.registry.taskSource(definition?.uses);
-    if (!component || !definition) {
+  private async createTasksFromSource(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task-source' }>): Promise<boolean> {
+    const component = this.registry.taskSource(work.definition.uses);
+    if (!component) {
       this.workflowRun.markTaskSourceMissing();
       return false;
     }
     const result = await component.create({ run: this }).createTasks({
       run: this,
-      stage,
+      stage: work.stage,
       definition: {
-        uses: definition.uses,
-        with: definition.with ? { ...definition.with } : undefined,
+        uses: work.definition.uses,
+        with: work.definition.with ? { ...work.definition.with } : undefined,
       },
     });
     if (result.state === 'missing') {
@@ -146,40 +147,23 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     return result.tasks.length > 0;
   }
 
-  private async runTask(stage: WorkflowStageId, taskId: string): Promise<boolean> {
-    const definition = this.workflowRun.taskDefinition(stage, taskId);
-    if (!definition) return false;
-    const component = this.registry.task(definition.uses);
-    if (!component) return false;
-    const result = await component.create({ run: this }).run({
-      run: this,
-      stage,
-      taskId: definition.id,
-      definition: {
-        id: definition.id,
-        title: definition.title,
-        uses: definition.uses,
-        with: definition.with ? { ...definition.with } : undefined,
-      },
-    });
-    if (result.status === 'completed') {
-      this.workflowRun.completeTask();
-    } else {
-      this.workflowRun.failTask(result);
-    }
-    return result.status === 'completed';
+  private async runTask(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task' }>): Promise<boolean> {
+    return this.taskRunner.run(this.workflowRun, work, { run: this });
   }
 
-  private async runCheck(stage: WorkflowStageId, checkName: string): Promise<boolean> {
-    const definition = this.workflowRun.checkDefinition(stage, checkName);
-    if (!definition) return false;
-    const component = this.registry.check(definition.uses);
+  private async runCheck(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'check' }>): Promise<boolean> {
+    const component = this.registry.check(work.check.uses);
     if (!component) return false;
     const result = await component.create({ run: this }).run({
       run: this,
-      stage,
-      checkName: definition.name,
-      definition,
+      stage: work.stage,
+      checkName: work.check.name,
+      definition: {
+        name: work.check.name,
+        title: work.check.title,
+        uses: work.check.uses,
+        with: work.check.with ? { ...work.check.with } : undefined,
+      },
     });
     if (result.status === 'pass') {
       this.workflowRun.passCheck(result);
@@ -196,15 +180,15 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   private resultFromRun(): WorkflowRunResult {
-    if (this.workflowRun.status === 'passed') return { status: 'completed', stage: this.workflowRun.currentStage };
+    if (this.workflowRun.status === 'passed') return { status: 'completed', stage: this.workflowRun.currentStage.stage };
     if (this.workflowRun.status === 'failed') {
       return {
         status: 'failed',
-        stage: this.workflowRun.currentStage,
+        stage: this.workflowRun.currentStage.stage,
         message: this.workflowRun.failure?.message ?? this.workflowRun.failure?.reason,
       };
     }
-    if (this.workflowRun.status === 'cancelled') return { status: 'stopped', stage: this.workflowRun.currentStage };
-    return { status: 'running', stage: this.workflowRun.currentStage };
+    if (this.workflowRun.status === 'cancelled') return { status: 'stopped', stage: this.workflowRun.currentStage.stage };
+    return { status: 'running', stage: this.workflowRun.currentStage.stage };
   }
 }

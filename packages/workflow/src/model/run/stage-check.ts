@@ -9,6 +9,8 @@ export class StageCheck {
   constructor(
     readonly name: string,
     readonly title: string,
+    readonly uses?: string,
+    readonly withInput?: Record<string, unknown>,
   ) {}
 
   reset(): void {
