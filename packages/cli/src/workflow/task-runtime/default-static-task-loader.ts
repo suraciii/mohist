@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { DEFAULT_STAGE_DEFINITIONS } from '../definition/default-workflow';
-import type { RuntimeWorkflowDefinitionSnapshot } from '../runner/workflow-runtime-definition';
+import { workflowDefinitionSnapshotFromUnknown } from '../projection/workflow-run-snapshot';
 import { Log } from '../../util/log';
 import type { StageContext } from '../stage-context';
 import type { ExecutableTask, TaskKind } from './types';
@@ -13,9 +13,10 @@ export function createDefaultStaticTaskLoader(worktreePath: string): TaskLoader 
   return {
     kind: 'static',
     load(ctx: StageContext): ExecutableTask[] {
-      const definition = ctx.workflowRun?.workflowDefinition
-        ? (ctx.workflowRun.workflowDefinition as RuntimeWorkflowDefinitionSnapshot).compiledStageDefinitions.find(candidate => candidate.stage === ctx.issue.stage)
-        : DEFAULT_STAGE_DEFINITIONS.find(candidate => candidate.stage === ctx.issue.stage);
+      const definition = (ctx.workflowRun?.workflowDefinition
+        ? workflowDefinitionSnapshotFromUnknown(ctx.workflowRun.workflowDefinition)?.compiledStageDefinitions
+        : DEFAULT_STAGE_DEFINITIONS
+      )?.find(candidate => candidate.stage === ctx.issue.stage);
       if (!definition) return [];
 
       const allowedTaskIds = new Set(

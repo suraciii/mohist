@@ -46,6 +46,7 @@ import { UserApprovalCheck } from '../workflow/checks/user-approval-check';
 import { HealthGateCheck } from '../workflow/checks/health-gate-check';
 import { ArtifactExistsCheck, ArtifactMarkerCheck, ShellCommandCheck } from '../workflow/checks';
 import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/definition/workflow-inspector';
+import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
 
 export type TaskType = QueueTaskType;
 
@@ -1045,7 +1046,7 @@ export class AgentRunnerService {
       ]);
 
       const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-      const workflowDefinitionSnapshot = activeWorkflowRun?.workflowDefinition as import('../workflow/model').WorkflowDefinitionSnapshot | undefined;
+      const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(activeWorkflowRun?.workflowDefinition) ?? undefined;
       const checkRegistry = createDefaultCheckRegistry({ worktreePath, workflowDefinitionSnapshot });
 
       const unifiedRunner = new GenericStageRunner({
@@ -1054,7 +1055,7 @@ export class AgentRunnerService {
         checkRegistry,
         getStageDefinition: (stage) => {
           const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-          const snapshot = activeRun?.workflowDefinition as import('../workflow/model').WorkflowDefinitionSnapshot | undefined;
+          const snapshot = workflowDefinitionSnapshotFromUnknown(activeRun?.workflowDefinition);
           return snapshot?.compiledStageDefinitions.find(d => d.stage === stage)
             ?? DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage);
         },

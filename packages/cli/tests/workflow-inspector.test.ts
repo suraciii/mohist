@@ -467,6 +467,56 @@ workflow:
     }
   });
 
+  it('preserves onFailure retry for checks added by default workflow overrides', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-stage-check-retry-'));
+    fs.mkdirSync(path.join(tempDir, '.mohist'));
+    fs.writeFileSync(path.join(tempDir, '.mohist', 'workflow.yaml'), `
+extends: mohist/default
+stages:
+  check:
+    checks:
+      - id: custom-verdict
+        title: Custom verdict
+        uses: mohist/verdict
+        onFailure:
+          retry:
+            limit: 1
+            task:
+              id: fix-custom-verdict
+              title: Fix custom verdict
+              uses: mohist/agent
+              with:
+                prompt:
+                  inline: Fix the custom verdict failure.
+`, 'utf-8');
+
+    try {
+      const resolved = resolveWorkflowDefinition(tempDir);
+      const diagnostics = validateWorkflowDefinition(resolved);
+      const check = resolved.snapshot.compiledStageDefinitions.find(stage => stage.stage === Stage.Check)!;
+
+      expect(diagnostics).toEqual([]);
+      expect(check.checks.find(candidate => candidate.name === 'custom-verdict')?.onFailure?.retry).toMatchObject({
+        limit: 1,
+        task: {
+          id: 'fix-custom-verdict',
+          uses: 'mohist/agent',
+          with: { prompt: { inline: 'Fix the custom verdict failure.' } },
+        },
+      });
+      expect(check.checkFailurePolicies?.find(policy => policy.checkName === 'custom-verdict')).toMatchObject({
+        fixTaskId: 'fix-custom-verdict',
+        maxAttempts: 1,
+      });
+      expect(check.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-custom-verdict')).toMatchObject({
+        kind: 'agent-session',
+        workSourceKind: 'runtime',
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects legacy event reset shortcuts', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-workflow-legacy-reset-'));
     fs.mkdirSync(path.join(tempDir, '.mohist'));

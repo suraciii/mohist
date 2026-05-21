@@ -14,6 +14,7 @@ import {
 } from '../src/workflow/definition/default-workflow';
 import { Stage } from '../src/types';
 import { compileRuntimeStageDefinitions } from '../src/workflow/runner/workflow-runtime-definition';
+import { workflowDefinitionSnapshotFromUnknown } from '../src/workflow/projection/workflow-run-snapshot';
 
 function startRun(definitions: StageDefinition[] = DEFAULT_STAGE_DEFINITIONS): WorkflowRun {
   return WorkflowRun.startWorkflow({
@@ -167,6 +168,25 @@ describe('WorkflowRun domain aggregate', () => {
       workSourceKind: 'static',
     });
     expect(runtimeCheck.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
+      kind: 'agent-session',
+      workSourceKind: 'runtime',
+    });
+  });
+
+  it('recovers runtime execution projection from a pure workflow definition snapshot', () => {
+    const modelSnapshot = createWorkflowDefinitionSnapshot({
+      definition: MOHIST_DEFAULT_WORKFLOW_DEFINITION,
+      source: { type: 'builtin', id: MOHIST_DEFAULT_WORKFLOW_DEFINITION.id },
+      capturedAt: '2026-05-21T00:00:00.000Z',
+    });
+
+    expect(modelSnapshot.compiledStageDefinitions[0].taskExecutionPolicies).toBeUndefined();
+
+    const runtimeSnapshot = workflowDefinitionSnapshotFromUnknown(modelSnapshot);
+    const check = runtimeSnapshot?.compiledStageDefinitions.find(definition => definition.stage === Stage.Check);
+
+    expect(check?.workSources?.map(source => source.kind)).toContain('static');
+    expect(check?.taskExecutionPolicies?.find(policy => policy.taskId === 'fix-review-findings')).toMatchObject({
       kind: 'agent-session',
       workSourceKind: 'runtime',
     });
