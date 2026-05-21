@@ -249,6 +249,7 @@ function compileCustomTasks(
 
 function isExecutableCustomTaskUse(uses: string): boolean {
   return uses === 'mohist/agent'
+    || uses === 'mohist/check/ai-review'
     || uses === 'mohist/ralph-tasks'
     || uses === 'mohist/openspec-sync'
     || uses === 'mohist/archive-change'

@@ -40,7 +40,6 @@ export function createAgentSessionTaskHandler(deps?: AgentSessionTaskHandlerDeps
     );
 
     try {
-      await input.beforeRun?.(ctx);
       const worktreeBefore = await captureWorktreeChangeState(ctx, cwd);
       const observers = deps?.createObservers
         ? deps.createObservers(ctx, title, stage)

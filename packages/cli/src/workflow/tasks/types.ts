@@ -1,7 +1,7 @@
 import type { StageContext, StageTaskResult } from '../stage-context';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 
-export type TaskKind = 'agent-session' | 'service-call' | 'ralph-task';
+export type TaskKind = 'agent-session' | 'service-call' | 'ralph-task' | 'provider-task';
 export type TaskExecutionStatus = 'completed' | 'failed' | 'skipped';
 
 export interface TaskInputDefinition {
@@ -94,7 +94,6 @@ export interface AgentSessionTaskInput {
   artifactVerification?: (artifacts: string[]) => string[];
   retryPromptFactory?: (ctx: StageContext, attempt: number) => string | null;
   requiredMarkers?: RequiredMarkerDefinition[];
-  beforeRun?: (ctx: StageContext) => void | Promise<void>;
 }
 
 export interface ServiceCallTaskInput {
@@ -103,6 +102,14 @@ export interface ServiceCallTaskInput {
   serviceFn: (ctx: StageContext) => Promise<unknown>;
   stage: string;
   attempt: number;
+}
+
+export interface ProviderTaskInput {
+  taskId: string;
+  title: string;
+  stage: string;
+  attempt: number;
+  run: (ctx: StageContext) => Promise<StageTaskResult>;
 }
 
 export type TaskHandler = (
@@ -117,6 +124,11 @@ export type AgentSessionTaskHandler = (
 
 export type ServiceCallTaskHandler = (
   input: ServiceCallTaskInput,
+  ctx: StageContext,
+) => Promise<StageTaskResult>;
+
+export type ProviderTaskHandler = (
+  input: ProviderTaskInput,
   ctx: StageContext,
 ) => Promise<StageTaskResult>;
 

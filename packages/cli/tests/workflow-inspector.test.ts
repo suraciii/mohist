@@ -129,9 +129,9 @@ workflow:
     expect(explainWorkflowItem('ai-review')).toMatchObject({
       kind: 'task',
       stage: Stage.Check,
-      uses: 'mohist/agent',
+      uses: 'mohist/check/ai-review',
       source: 'builtin',
-      useDescription: expect.stringContaining('ACP session'),
+      useDescription: expect.stringContaining('ACP agent session'),
     });
     expect(explainWorkflowItem('merge-ready')).toMatchObject({
       kind: 'check',

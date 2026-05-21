@@ -11,6 +11,8 @@ export {
   type TaskOutputDefinition,
   type TaskProvider,
   type AgentSessionTaskInput,
+  type ProviderTaskInput,
+  type ProviderTaskHandler,
   type ServiceCallTaskInput,
   type RalphTaskInput,
   type RalphTaskHandler,

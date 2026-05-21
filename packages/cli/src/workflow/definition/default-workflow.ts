@@ -157,9 +157,8 @@ export const MOHIST_DEFAULT_WORKFLOW_SOURCE: WorkflowSourceDefinition = {
         {
           id: 'ai-review',
           title: 'AI review',
-          uses: 'mohist/agent',
+          uses: 'mohist/check/ai-review',
           with: {
-            prompt: { ref: 'mohist/check/ai-review' },
             requiredMarkers: [
               {
                 path: '{{ artifacts.openspecChange }}/review.md',
