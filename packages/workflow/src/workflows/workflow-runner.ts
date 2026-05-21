@@ -75,7 +75,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
       if (work.kind === 'task-source') {
-        const continued = await this.createTasksFromSource(work);
+        const continued = await this.initTasks(work);
         await this.persist();
         if (!continued) break;
         continue;
@@ -124,7 +124,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.store.save(this.workflowRun);
   }
 
-  private async createTasksFromSource(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task-source' }>): Promise<boolean> {
+  private async initTasks(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task-source' }>): Promise<boolean> {
     const component = this.registry.taskSource(work.definition.uses);
     if (!component) {
       this.workflowRun.markTaskSourceMissing();
