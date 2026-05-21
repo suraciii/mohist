@@ -1,6 +1,6 @@
 import type { WorkflowStageId } from '../workflow-definition';
 
-export type WorkflowRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled';
+export type WorkflowRunStatus = 'pending' | 'running' | 'paused' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
 export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed';
 export type CheckRunStatus = 'pending' | 'passed' | 'failed';
@@ -179,6 +179,7 @@ export interface WorkflowRunState {
   stageOrder: WorkflowStageId[];
   stageRuns: StageRunState[];
   failure: FailureDetails | null;
+  pauseRequested?: boolean;
 }
 
 export function baseRuntimeTaskId(taskId: string): string {

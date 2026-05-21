@@ -2,9 +2,9 @@ import YAML from 'yaml';
 import {
   createResolvedWorkflowDefinition,
   type ResolvedWorkflowDefinition,
-} from '../model';
-import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from '../definition/workflow-definition-source';
-import type { WorkflowDefinitionInput } from './types';
+} from './model';
+import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './definition/workflow-definition-source';
+import type { WorkflowDefinitionInput } from './workflow-types';
 
 export function resolvedWorkflowDefinitionFromInput(input: WorkflowDefinitionInput, capturedAt?: string): ResolvedWorkflowDefinition {
   if (isResolvedWorkflowDefinition(input)) return input;

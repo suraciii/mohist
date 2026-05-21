@@ -1,5 +1,5 @@
-import type { WorkflowStageId } from '../model';
-import { WorkflowRun } from '../model';
+import type { WorkflowStageId } from './model';
+import { WorkflowRun } from './model';
 import type { WorkflowComponentRegistry } from './component-registry';
 import { CheckRunner } from './check-runner';
 import { TaskRunner } from './task-runner';
@@ -10,7 +10,7 @@ import type {
   WorkflowRunStatus,
   WorkflowStageState,
   WorkflowFailure,
-} from './types';
+} from './workflow-types';
 
 export class WorkflowRunner implements WorkflowRunnerContract {
   constructor(
@@ -49,7 +49,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   async start(): Promise<void> {
     if (this.workflowRun.status === 'pending') {
       this.workflowRun.start();
-      await this.persist();
+      await this.save();
     }
     await this.run();
   }
@@ -59,15 +59,16 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   async run(): Promise<void> {
-    if (this.workflowRun.status === 'pending') {
+    if (this.workflowRun.status === 'pending' || this.workflowRun.status === 'paused') {
       this.workflowRun.start();
-      await this.persist();
+      await this.save();
     }
     while (true) {
       const work = this.workflowRun.next();
       if (work.kind === 'complete') {
         const completed = this.workflowRun.passStage();
-        await this.persist();
+        await this.save();
+        if (await this.pauseIfRequested()) break;
         if (!completed) break;
         continue;
       }
@@ -75,39 +76,46 @@ export class WorkflowRunner implements WorkflowRunnerContract {
 
       if (work.kind === 'stage-init') {
         const continued = await this.initTasks(work);
-        await this.persist();
+        await this.save();
+        if (await this.pauseIfRequested()) break;
         if (!continued) break;
         continue;
       }
 
       if (work.kind === 'task') {
         const continued = await this.runTask(work);
-        await this.persist();
+        await this.save();
+        if (await this.pauseIfRequested()) break;
         if (!continued) break;
         continue;
       }
 
       const continued = await this.runCheck(work);
-      await this.persist();
+      await this.save();
+      if (await this.pauseIfRequested()) break;
       if (!continued) break;
     }
 
-    await this.persist();
+    await this.save();
   }
 
   async pause(_reason?: string): Promise<void> {
-    await this.persist();
+    this.workflowRun.requestPause();
+    await this.save();
   }
 
   async approve(): Promise<void> {
-    await this.persist();
+    this.workflowRun.approve();
+    await this.save();
+    await this.run();
   }
 
-  async reject(_reason?: string): Promise<void> {
-    await this.persist();
+  async reject(reason?: string): Promise<void> {
+    this.workflowRun.reject({ output: reason });
+    await this.save();
   }
 
-  async persist(): Promise<void> {
+  async save(): Promise<void> {
     await this.store.save(this.workflowRun);
   }
 
@@ -159,11 +167,18 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     if (result.status === 'pass') {
       this.workflowRun.passCheck(result);
     } else if (result.status === 'pending') {
-      this.workflowRun.resetCheck(result);
+      this.workflowRun.pendingCheck(result);
     } else {
       this.workflowRun.failCheck(result);
     }
     return result.status === 'pass';
+  }
+
+  private async pauseIfRequested(): Promise<boolean> {
+    if (!this.workflowRun.pauseRequested) return false;
+    this.workflowRun.pause();
+    await this.save();
+    return true;
   }
 
 }

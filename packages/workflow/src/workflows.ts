@@ -1,13 +1,13 @@
 import { WorkflowRun } from './model';
-import { WorkflowComponentRegistry } from './workflows/component-registry';
-import { resolvedWorkflowDefinitionFromInput } from './workflows/definition-input';
-import { WorkflowRunner } from './workflows/workflow-runner';
+import { WorkflowComponentRegistry } from './component-registry';
+import { resolvedWorkflowDefinitionFromInput } from './workflow-definition-input';
+import { WorkflowRunner } from './workflow-runner';
 import type {
   CreateWorkflowsInput,
   Workflows,
-} from './workflows/types';
+} from './workflow-types';
 
-export * from './workflows/types';
+export * from './workflow-types';
 
 export function createWorkflows(input: CreateWorkflowsInput): Workflows {
   const registry = new WorkflowComponentRegistry();

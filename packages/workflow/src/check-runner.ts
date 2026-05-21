@@ -1,6 +1,6 @@
-import { WorkflowRun } from '../model';
+import { WorkflowRun } from './model';
 import type { WorkflowComponentRegistry } from './component-registry';
-import type { WorkflowCheckResult } from './types';
+import type { WorkflowCheckResult } from './workflow-types';
 
 type CheckWork = Extract<ReturnType<WorkflowRun['next']>, { kind: 'check' }>;
 

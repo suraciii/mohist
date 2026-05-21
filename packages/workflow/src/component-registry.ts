@@ -3,7 +3,7 @@ import type {
   WorkflowComponent,
   WorkflowTaskSourceType,
   WorkflowTask,
-} from './types';
+} from './workflow-types';
 
 export class WorkflowComponentRegistry {
   private readonly tasks = new Map<string, WorkflowTask>();
