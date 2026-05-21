@@ -1,4 +1,4 @@
-import type { CompiledStageDefinition, WorkflowStageId } from '../workflow-definition';
+import type { StageDefinition, TaskDefinition, WorkflowStageId } from '../workflow-definition';
 import { StageCheck } from './stage-check';
 import { TaskRun } from './task-run';
 import { type ApprovalState, type CommitPoint, type FailureDetails, type StageRunStatus, type WorkSourceState } from './types';
@@ -14,10 +14,10 @@ export class StageRun {
   workSourceState: WorkSourceState = { evaluated: false };
 
   constructor(
-    readonly definition: CompiledStageDefinition,
+    readonly definition: StageDefinition,
     readonly order: number,
   ) {
-    this.tasks = definition.tasks.map(task => new TaskRun(task.id, task.title, task.uses));
+    this.tasks = definition.tasks.map(() => new TaskRun());
     this.checks = definition.checks.map(check => new StageCheck(check.name, check.title));
   }
 
@@ -33,6 +33,12 @@ export class StageRun {
     return this.tasks.find(task => task.status !== 'completed' && task.status !== 'failed') ?? null;
   }
 
+  get currentTaskDefinition(): TaskDefinition | null {
+    const task = this.currentTask;
+    if (!task) return null;
+    return this.definition.tasks[this.tasks.indexOf(task)] ?? null;
+  }
+
   startTask(): TaskRun | null {
     const task = this.currentTask;
     if (!task) return null;
@@ -40,22 +46,23 @@ export class StageRun {
     return task;
   }
 
-  completeTask(result: { output?: unknown; events?: string[]; reason?: string } = {}): TaskRun | null {
+  completeTask(): TaskRun | null {
     const task = this.currentTask;
     if (!task) return null;
-    task.complete(result);
+    task.complete();
     return task;
   }
 
-  failTask(result: { output?: unknown; events?: string[]; reason?: string } = {}): TaskRun | null {
+  failTask(): TaskRun | null {
     const task = this.currentTask;
     if (!task) return null;
-    task.fail(result);
+    task.fail();
     return task;
   }
 
   addTask(id: string, title: string, uses?: string): TaskRun {
-    const task = new TaskRun(id, title, uses);
+    this.definition.tasks.push({ id, title, uses });
+    const task = new TaskRun();
     this.tasks.push(task);
     return task;
   }
@@ -71,13 +78,6 @@ export class StageRun {
     const check = this.checks.find(candidate => candidate.name === name);
     if (!check) return null;
     check.fail();
-    return check;
-  }
-
-  errorCheck(name: string): StageCheck | null {
-    const check = this.checks.find(candidate => candidate.name === name);
-    if (!check) return null;
-    check.error();
     return check;
   }
 

@@ -1,10 +1,9 @@
-import type { CheckFailurePolicy, CompiledStageDefinition, WorkflowStageId } from '../workflow-definition';
+import type { WorkflowStageId } from '../workflow-definition';
 
-export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
+export type WorkflowRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'cancelled';
 export type StageRunStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped';
 export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type CheckRunStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
-export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted';
+export type CheckRunStatus = 'pending' | 'passed' | 'failed';
 export type WorkflowRecoverySummary = 'running' | 'awaiting-approval' | 'waiting-for-recovery' | 'completed';
 export type FailureReason =
   | 'task-failed'
@@ -34,21 +33,6 @@ export interface FailureDetails {
   checkName?: string;
   message?: string;
   causedBy?: CausedByMetadata;
-}
-
-export interface WorkItemAttempt {
-  state: WorkItemAttemptState;
-  attemptNumber: number;
-  startedAt: string;
-  completedAt: string | null;
-  output: unknown | null;
-  error: string | null;
-  diagnostic: string | null;
-  queueTaskId: string | null;
-  acpSessionId: string | null;
-  coderSessionId: string | null;
-  executionId: string | null;
-  processPid: number | null;
 }
 
 export interface MaterializedTaskInput {
@@ -148,9 +132,6 @@ export interface TaskRunState {
   title: string;
   uses?: string;
   status: TaskRunStatus;
-  events: string[];
-  output: unknown | null;
-  reason: string | null;
 }
 
 export interface CheckRunState {
@@ -159,8 +140,6 @@ export interface CheckRunState {
   status: CheckRunStatus;
   message: string | null;
   output: unknown | null;
-  runCount: number;
-  latestAttempt: WorkItemAttempt | null;
 }
 
 export interface ApprovalState {
@@ -185,23 +164,11 @@ export interface StageRunState {
 
 export interface WorkflowRunState {
   id: string;
-  issueId: string;
-  issueNumber: number;
   status: WorkflowRunStatus;
   currentStage: WorkflowStageId;
   stageOrder: WorkflowStageId[];
   stageRuns: StageRunState[];
   failure: FailureDetails | null;
-}
-
-export function getCheckFailurePolicy(
-  stage: WorkflowStageId,
-  checkName: string,
-  definitions: CompiledStageDefinition[],
-): CheckFailurePolicy | null {
-  return definitions
-    .find(definition => definition.stage === stage)
-    ?.checkFailurePolicies?.find(policy => policy.checkName === checkName) ?? null;
 }
 
 export function baseRuntimeTaskId(taskId: string): string {

@@ -5,6 +5,7 @@ import type {
   StageRunState,
   TaskResultInput,
   WorkflowDefinition,
+  WorkflowRun as WorkflowRunModel,
   WorkflowRunStatus as DomainWorkflowRunStatus,
   ResolvedWorkflowDefinition,
   WorkflowStageId,
@@ -20,18 +21,6 @@ export type WorkflowRunStatus = DomainWorkflowRunStatus | 'completed';
 export type WorkflowStageState = StageRunState;
 
 export type WorkflowFailure = FailureDetails;
-
-export interface WorkflowRunRecord {
-  id: WorkflowRunId;
-  definition: ResolvedWorkflowDefinition;
-  run: {
-    status: WorkflowRunStatus;
-    currentStage: WorkflowStageId;
-    stageOrder: WorkflowStageId[];
-    stages: WorkflowStageState[];
-    failure: WorkflowFailure | null;
-  };
-}
 
 export type WorkflowStatus =
   | 'running'
@@ -58,8 +47,8 @@ export interface CreateWorkflowsInput {
 }
 
 export interface Workflows {
-  create(input: WorkflowCreateInput): Promise<WorkflowRun>;
-  load(id: WorkflowRunId): Promise<WorkflowRun | null>;
+  create(input: WorkflowCreateInput): Promise<WorkflowRunner>;
+  load(id: WorkflowRunId): Promise<WorkflowRunner | null>;
   register(component: WorkflowComponent): void;
 }
 
@@ -69,7 +58,7 @@ export interface WorkflowCreateInput {
   now?: string;
 }
 
-export interface WorkflowRun {
+export interface WorkflowRunner {
   readonly id: WorkflowRunId;
   readonly status: WorkflowRunStatus;
   readonly currentStage: WorkflowStageId;
@@ -85,8 +74,8 @@ export interface WorkflowRun {
 }
 
 export interface WorkflowStore {
-  load(id: WorkflowRunId): Awaitable<WorkflowRunRecord | null>;
-  save(record: WorkflowRunRecord): Awaitable<void>;
+  load(id: WorkflowRunId): Awaitable<WorkflowRunModel | null>;
+  save(run: WorkflowRunModel): Awaitable<void>;
 }
 
 export type WorkflowComponent =
@@ -95,7 +84,7 @@ export type WorkflowComponent =
   | WorkflowTaskSourceType;
 
 export interface WorkflowComponentContext {
-  run: WorkflowRun;
+  run: WorkflowRunner;
 }
 
 export interface WorkflowTaskType {
@@ -129,21 +118,21 @@ export interface WorkflowTaskSource {
 }
 
 export interface WorkflowTaskInput {
-  run: WorkflowRun;
+  run: WorkflowRunner;
   stage: WorkflowStageId;
   taskId: string;
   definition: WorkflowTaskDefinitionContext;
 }
 
 export interface WorkflowCheckInput {
-  run: WorkflowRun;
+  run: WorkflowRunner;
   stage: WorkflowStageId;
   checkName: string;
   definition: WorkflowCheckDefinitionContext;
 }
 
 export interface WorkflowTaskSourceInput {
-  run: WorkflowRun;
+  run: WorkflowRunner;
   stage: WorkflowStageId;
   definition: WorkflowTasksFromDefinitionContext;
 }
