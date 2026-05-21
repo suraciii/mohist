@@ -4,7 +4,7 @@ export class MergeReadinessCheck implements Check {
   public readonly name = 'merge-readiness';
 
   async run(ctx: CheckContext): Promise<CheckResult> {
-    if (!ctx.worktreeManager) {
+    if (!ctx.worktreeManager?.checkSquashMergeability) {
       return {
         name: this.name,
         status: 'error',
@@ -19,6 +19,7 @@ export class MergeReadinessCheck implements Check {
       };
     }
 
+    const checkSquashMergeability = ctx.worktreeManager.checkSquashMergeability;
     const project = ctx.projectRepo.findById(ctx.issue.projectId);
     if (!project) {
       return {
@@ -29,7 +30,7 @@ export class MergeReadinessCheck implements Check {
     }
 
     try {
-      const snapshot = await ctx.worktreeManager.checkSquashMergeability(
+      const snapshot = await checkSquashMergeability(
         project.path,
         project.name,
         ctx.issue.number,

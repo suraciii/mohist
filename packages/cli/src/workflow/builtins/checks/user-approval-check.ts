@@ -1,5 +1,6 @@
 import type { Check, CheckContext, CheckResult } from '../../checks';
 import { isCurrentStageApproval } from '../../issue-lifecycle';
+import type { Issue } from '../../../types';
 
 export class UserApprovalCheck implements Check {
   public readonly name = 'user-approval';
@@ -7,7 +8,7 @@ export class UserApprovalCheck implements Check {
   constructor(_escalateTarget?: unknown) {}
 
   async run(ctx: CheckContext): Promise<CheckResult> {
-    const issue = ctx.issue;
+    const issue = ctx.issue as Issue;
 
     if (!isCurrentStageApproval(issue, issue.stage, 'approved')) {
       if (isCurrentStageApproval(issue, issue.stage, 'rejected')) {

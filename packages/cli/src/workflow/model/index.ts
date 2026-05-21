@@ -1,3 +1,1 @@
-export * from './errors';
-export * from './workflow-definition';
-export * from './workflow-run';
+export * from '@mohist/workflow/model';

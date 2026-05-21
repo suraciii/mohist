@@ -9,21 +9,21 @@
     "mo-server": "./bin/mo-server"
   },
   "scripts": {
-    "build": "tsc && node scripts/build-info.js && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ 2>/dev/null || true && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ 2>/dev/null || true && mkdir -p dist/agent-skills/stubs && mkdir -p dist/agent-skills/skill-data && cp -r src/agent-skills/stubs/* dist/agent-skills/stubs/ && cp -r src/agent-skills/skill-data/* dist/agent-skills/skill-data/ && cp src/agent-skills/issue-templates.md dist/agent-skills/ && npm run build:web",
+    "build": "npm run build -w @mohist/workflow && tsc && node scripts/build-info.js && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ 2>/dev/null || true && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ 2>/dev/null || true && mkdir -p dist/agent-skills/stubs && mkdir -p dist/agent-skills/skill-data && cp -r src/agent-skills/stubs/* dist/agent-skills/stubs/ && cp -r src/agent-skills/skill-data/* dist/agent-skills/skill-data/ && cp src/agent-skills/issue-templates.md dist/agent-skills/ && npm run build:web",
     "build:web": "npm --prefix web install && npm --prefix web run build",
-    "build:backend": "tsc && node scripts/build-info.js && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ 2>/dev/null || true && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ 2>/dev/null || true && mkdir -p dist/agent-skills/stubs && mkdir -p dist/agent-skills/skill-data && cp -r src/agent-skills/stubs/* dist/agent-skills/stubs/ && cp -r src/agent-skills/skill-data/* dist/agent-skills/skill-data/ && cp src/agent-skills/issue-templates.md dist/agent-skills/",
+    "build:backend": "npm run build -w @mohist/workflow && tsc && node scripts/build-info.js && mkdir -p dist/agents/prompts/artifacts/templates && cp src/agents/prompts/*.yaml dist/agents/prompts/ 2>/dev/null || true && cp src/agents/prompts/*.md dist/agents/prompts/ && cp src/agents/prompts/artifacts/*.md dist/agents/prompts/artifacts/ && cp src/agents/prompts/artifacts/templates/*.tpl.md dist/agents/prompts/artifacts/templates/ 2>/dev/null || true && mkdir -p dist/agent-skills/stubs && mkdir -p dist/agent-skills/skill-data && cp -r src/agent-skills/stubs/* dist/agent-skills/stubs/ && cp -r src/agent-skills/skill-data/* dist/agent-skills/skill-data/ && cp src/agent-skills/issue-templates.md dist/agent-skills/",
     "generate:snapshot": "node script/build-models-snapshot.mjs",
     "dev": "tsc --watch",
     "start:server": "node bin/mo-server",
     "start:cli": "node bin/mo",
-    "test": "vitest run",
+    "test": "npm run build -w @mohist/workflow && vitest run",
     "test:stage-state": "vitest run tests/stage-state-service.test.ts tests/stage-state-regression.test.ts tests/api/stage-state-api.test.ts && npm --prefix web run test:run -- src/components/stage-state-consistency.test.tsx",
     "test:web": "npm --prefix web run test:run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
     "health:check": "npm run typecheck",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run typecheck -w @mohist/workflow && tsc --noEmit",
     "dev:web": "cd web && npm install && npm run dev"
   },
   "keywords": [
@@ -59,6 +59,7 @@
     "@ai-sdk/anthropic": "^3.0.64",
     "@ai-sdk/openai": "^3.0.48",
     "@hono/node-server": "^1.13.0",
+    "@mohist/workflow": "0.1.0",
     "ai": "^6.0.141",
     "better-sqlite3": "^12.8.0",
     "chalk": "^4.1.2",

@@ -3,7 +3,8 @@ import * as path from 'path';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflows/mohist-default';
 import { workflowDefinitionSnapshotFromUnknown } from '../../projection/workflow-run-snapshot';
 import { Log } from '../../../util/log';
-import type { StageContext } from '../../stage-context';
+import type { StageContext as MohistStageContext } from '../../stage-context';
+import type { StageContext } from '@mohist/workflow/runtime';
 import type { ExecutableTask } from '../../tasks/types';
 import type { TaskLoader } from '../../tasks/task-loader-registry';
 
@@ -13,10 +14,11 @@ export function createDefaultStaticTaskLoader(worktreePath: string): TaskLoader 
   return {
     kind: 'static',
     load(ctx: StageContext): ExecutableTask[] {
-      const definition = (ctx.workflowRun?.workflowDefinition
-        ? workflowDefinitionSnapshotFromUnknown(ctx.workflowRun.workflowDefinition)?.compiledStageDefinitions
+      const mohistCtx = ctx as unknown as MohistStageContext;
+      const definition = (mohistCtx.workflowRun?.workflowDefinition
+        ? workflowDefinitionSnapshotFromUnknown(mohistCtx.workflowRun.workflowDefinition)?.compiledStageDefinitions
         : DEFAULT_STAGE_DEFINITIONS
-      )?.find(candidate => candidate.stage === ctx.issue.stage);
+      )?.find(candidate => candidate.stage === mohistCtx.issue.stage);
       if (!definition) return [];
 
       const allowedTaskIds = new Set(

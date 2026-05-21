@@ -25,7 +25,7 @@ type AgentPromptSource =
   | { file: string }
   | { inline: string };
 
-export type BuiltinTaskDispatchInput = TaskDispatchInput;
+export type BuiltinTaskDispatchInput = TaskDispatchInput & { ctx: StageContext };
 export type { TaskDispatchProvider, TaskDispatchRegistry };
 
 export interface DefaultTaskDispatchProviderOverrides {
@@ -52,29 +52,33 @@ export function createMohistBuiltinTaskDispatchRegistry(options: MohistBuiltinTa
   return createBuiltinTaskDispatchRegistry([
     {
       id: 'mohist/agent',
-      run: input => runAgentSessionTask(input, agentSessionHandler, readFile),
+      run: input => runAgentSessionTask(asMohistDispatchInput(input), agentSessionHandler, readFile),
     },
     {
       id: 'mohist/check/ai-review',
-      run: input => createCheckAiReviewDispatchTask(input, agentSessionHandler),
+      run: input => createCheckAiReviewDispatchTask(asMohistDispatchInput(input), agentSessionHandler),
     },
     {
       id: 'mohist/rebase',
-      run: options.overrides?.rebase ?? createRebaseDispatchTask,
+      run: options.overrides?.rebase ?? (input => createRebaseDispatchTask(asMohistDispatchInput(input))),
     },
     {
       id: 'mohist/openspec-sync',
-      run: options.overrides?.openspecSync ?? (input => createServiceCallDispatchTask(input, integrator, 'mohist/openspec-sync') ?? Promise.resolve(null)),
+      run: options.overrides?.openspecSync ?? (input => createServiceCallDispatchTask(asMohistDispatchInput(input), integrator, 'mohist/openspec-sync') ?? Promise.resolve(null)),
     },
     {
       id: 'mohist/archive-change',
-      run: options.overrides?.archiveChange ?? (input => createServiceCallDispatchTask(input, integrator, 'mohist/archive-change') ?? Promise.resolve(null)),
+      run: options.overrides?.archiveChange ?? (input => createServiceCallDispatchTask(asMohistDispatchInput(input), integrator, 'mohist/archive-change') ?? Promise.resolve(null)),
     },
     {
       id: 'mohist/merge',
-      run: options.overrides?.merge ?? (input => createServiceCallDispatchTask(input, integrator, 'mohist/merge') ?? Promise.resolve(null)),
+      run: options.overrides?.merge ?? (input => createServiceCallDispatchTask(asMohistDispatchInput(input), integrator, 'mohist/merge') ?? Promise.resolve(null)),
     },
   ]);
+}
+
+function asMohistDispatchInput(input: TaskDispatchInput): BuiltinTaskDispatchInput {
+  return input as BuiltinTaskDispatchInput;
 }
 
 function createRebaseDispatchTask(input: BuiltinTaskDispatchInput): Promise<StageTaskResult> {

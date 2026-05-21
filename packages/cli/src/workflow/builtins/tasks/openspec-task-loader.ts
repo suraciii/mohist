@@ -1,4 +1,5 @@
-import type { StageContext } from '../../stage-context';
+import type { StageContext as MohistStageContext } from '../../stage-context';
+import type { StageContext } from '@mohist/workflow/runtime';
 import type { TaskLoader } from '../../tasks/task-loader-registry';
 import type { ExecutableTask } from '../../tasks/types';
 import * as path from 'path';
@@ -22,14 +23,15 @@ export function createOpenSpecTaskLoader(): TaskLoader {
   return {
     kind: 'openspec',
     load(ctx: StageContext): ExecutableTask[] {
-      const change = detectOpenSpecChange(ctx.acpOptions.cwd, ctx.issue);
+      const mohistCtx = ctx as unknown as MohistStageContext;
+      const change = detectOpenSpecChange(mohistCtx.acpOptions.cwd, mohistCtx.issue);
       if (!change) return [];
 
-      const tasksFrom = resolveOpenSpecTasksFrom(ctx);
+      const tasksFrom = resolveOpenSpecTasksFrom(mohistCtx);
       const templateContext = createWorkflowTemplateContext({
-        ctx,
-        worktreePath: ctx.acpOptions.cwd,
-        snapshot: workflowDefinitionSnapshotFromUnknown(ctx.workflowRun?.workflowDefinition),
+        ctx: mohistCtx,
+        worktreePath: mohistCtx.acpOptions.cwd,
+        snapshot: workflowDefinitionSnapshotFromUnknown(mohistCtx.workflowRun?.workflowDefinition),
       });
       const sourceConfig = openSpecTaskSourceConfig(tasksFrom);
       const tasksPath = resolveTasksPath(sourceConfig.path, change.tasksPath, templateContext);
@@ -51,7 +53,7 @@ export function createOpenSpecTaskLoader(): TaskLoader {
   };
 }
 
-function resolveOpenSpecTasksFrom(ctx: StageContext): WorkflowTasksFromDefinition | undefined {
+function resolveOpenSpecTasksFrom(ctx: MohistStageContext): WorkflowTasksFromDefinition | undefined {
   const snapshot = workflowDefinitionSnapshotFromUnknown(ctx.workflowRun?.workflowDefinition);
   const stageDefinition = (snapshot as { compiledStageDefinitions?: RuntimeStageDefinition[] } | null)?.compiledStageDefinitions
     ?.find(stage => stage.stage === ctx.issue.stage);
