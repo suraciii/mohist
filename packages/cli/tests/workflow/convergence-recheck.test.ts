@@ -11,7 +11,7 @@ import {
   buildVerificationPromptSuffix,
   computeConvergenceState,
   type VerificationContext,
-} from '../../src/workflow/repair/convergence';
+} from '../../src/workflow/reaction/convergence';
 import type { ReactionTaskOutput, WorkflowItem, WorkflowConvergenceState } from '../../src/types/workflow-results';
 import type { CheckResult, StageTaskResult } from '../../src/workflow/stage-context';
 

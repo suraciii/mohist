@@ -3,7 +3,7 @@ import type { StageContext, StageTaskResult } from '../stage-context';
 import type { AgentSessionTaskInput } from './types';
 import { emitStageTaskUpdate } from '../stage-context';
 import { AgentSession, createWorkflowSessionObservers, type AgentSessionOptions } from '../../agent-runtime';
-import { extractReactionOutput } from '../repair/convergence';
+import { extractReactionOutput } from '../reaction/convergence';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { isParseSuccess, validatePromiseMarkerFile } from '../result-contracts';
 

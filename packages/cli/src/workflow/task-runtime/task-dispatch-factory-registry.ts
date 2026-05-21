@@ -12,7 +12,7 @@ import { executeRebaseBranchTask } from './rebase-task-handler';
 import { createRepairFixAdapter, type RepairFixTaskId } from './repair-fix-adapter';
 import { buildArtifactPrompt, buildSelfReviewPrompt, buildReviewerPrompt } from '../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../openspec/open-spec-integrator';
-import { loadVerificationContext, buildVerificationPromptSuffix } from '../repair/convergence';
+import { loadVerificationContext, buildVerificationPromptSuffix } from '../reaction/convergence';
 import { inferWorkflowTaskUse } from '../uses-catalog';
 
 interface PlanTaskConfig {
