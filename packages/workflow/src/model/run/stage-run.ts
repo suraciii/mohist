@@ -1,7 +1,7 @@
 import type { StageDefinition, WorkflowStageId } from '../workflow-definition';
 import { StageCheck } from './stage-check';
 import { TaskRun } from './task-run';
-import { type ApprovalState, type CommitPoint, type FailureDetails, type StageRunStatus, type WorkSourceState } from './types';
+import { type ApprovalState, type CommitPoint, type FailureDetails, type MaterializedTaskInput, type StageRunStatus, type WorkSourceState } from './types';
 
 export class StageRun {
   readonly tasks: TaskRun[];
@@ -12,6 +12,7 @@ export class StageRun {
   failure: FailureDetails | null = null;
   commitPoint: CommitPoint | null = null;
   workSourceState: WorkSourceState = { evaluated: false };
+  initialized = false;
 
   constructor(
     readonly definition: StageDefinition,
@@ -27,13 +28,15 @@ export class StageRun {
 
   start(): void {
     this.status = 'running';
-    this.initialize();
   }
 
-  private initialize(): void {
-    if (this.tasks.length > 0) return;
+  initTasks(materializedTasks: MaterializedTaskInput[], workSourceState: WorkSourceState): void {
+    if (this.initialized) return;
     this.tasks.push(...this.definition.tasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
+    this.tasks.push(...materializedTasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
     this.checks.push(...this.definition.checks.map(check => new StageCheck(check.name, check.title, check.uses, check.with)));
+    this.workSourceState = workSourceState;
+    this.initialized = true;
   }
 
   get currentTask(): TaskRun | null {
@@ -58,13 +61,6 @@ export class StageRun {
     const task = this.currentTask;
     if (!task) return null;
     task.fail();
-    return task;
-  }
-
-  addTask(id: string, title: string, uses?: string): TaskRun {
-    this.definition.tasks.push({ id, title, uses });
-    const task = new TaskRun(id, title, uses);
-    this.tasks.push(task);
     return task;
   }
 

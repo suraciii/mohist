@@ -5,7 +5,6 @@ import { CheckRunner } from './check-runner';
 import { TaskRunner } from './task-runner';
 import type {
   WorkflowRunId,
-  WorkflowRunResult,
   WorkflowRunner as WorkflowRunnerContract,
   WorkflowStore,
   WorkflowRunStatus,
@@ -47,19 +46,19 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     return this.workflowRun.failure;
   }
 
-  async start(): Promise<WorkflowRunResult> {
+  async start(): Promise<void> {
     if (this.workflowRun.status === 'pending') {
       this.workflowRun.start();
       await this.persist();
     }
-    return this.run();
+    await this.run();
   }
 
-  async resume(): Promise<WorkflowRunResult> {
-    return this.run();
+  async resume(): Promise<void> {
+    await this.run();
   }
 
-  async run(): Promise<WorkflowRunResult> {
+  async run(): Promise<void> {
     if (this.workflowRun.status === 'pending') {
       this.workflowRun.start();
       await this.persist();
@@ -74,7 +73,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       }
       if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
-      if (work.kind === 'task-source') {
+      if (work.kind === 'stage-init') {
         const continued = await this.initTasks(work);
         await this.persist();
         if (!continued) break;
@@ -94,38 +93,31 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     }
 
     await this.persist();
-    return this.resultFromRun();
   }
 
-  async pause(reason?: string): Promise<WorkflowRunResult> {
+  async pause(_reason?: string): Promise<void> {
     await this.persist();
-    return this.result({
-      status: 'stopped',
-      stage: this.workflowRun.currentStage.stage,
-      message: reason ?? 'Workflow paused',
-    });
   }
 
-  async approve(): Promise<WorkflowRunResult> {
+  async approve(): Promise<void> {
     await this.persist();
-    return this.resultFromRun();
   }
 
-  async reject(reason?: string): Promise<WorkflowRunResult> {
+  async reject(_reason?: string): Promise<void> {
     await this.persist();
-    return this.result({
-      status: 'stopped',
-      stage: this.workflowRun.currentStage.stage,
-      message: reason,
-    });
   }
 
   async persist(): Promise<void> {
     await this.store.save(this.workflowRun);
   }
 
-  private async initTasks(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task-source' }>): Promise<boolean> {
-    const component = this.registry.taskSource(work.definition.uses);
+  private async initTasks(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'stage-init' }>): Promise<boolean> {
+    if (!work.definition.tasksFrom) {
+      this.workflowRun.initTasks();
+      return true;
+    }
+
+    const component = this.registry.taskSource(work.definition.tasksFrom.uses);
     if (!component) {
       this.workflowRun.markTaskSourceMissing();
       return false;
@@ -134,8 +126,8 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       run: this,
       stage: work.stage,
       definition: {
-        uses: work.definition.uses,
-        with: work.definition.with ? { ...work.definition.with } : undefined,
+        uses: work.definition.tasksFrom.uses,
+        with: work.definition.tasksFrom.with ? { ...work.definition.tasksFrom.with } : undefined,
       },
     });
     if (result.state === 'missing') {
@@ -145,9 +137,9 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     } else if (result.state === 'empty') {
       this.workflowRun.markTaskSourceEmpty();
     } else {
-      this.workflowRun.addTasks(result.tasks);
+      this.workflowRun.initTasks(result.tasks, result.tasks.length === 0 ? { evaluated: true, empty: true } : undefined);
     }
-    return result.tasks.length > 0;
+    return true;
   }
 
   private async runTask(work: Extract<ReturnType<WorkflowRun['next']>, { kind: 'task' }>): Promise<boolean> {
@@ -174,20 +166,4 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     return result.status === 'pass';
   }
 
-  private result(result: WorkflowRunResult): WorkflowRunResult {
-    return result;
-  }
-
-  private resultFromRun(): WorkflowRunResult {
-    if (this.workflowRun.status === 'passed') return { status: 'completed', stage: this.workflowRun.currentStage.stage };
-    if (this.workflowRun.status === 'failed') {
-      return {
-        status: 'failed',
-        stage: this.workflowRun.currentStage.stage,
-        message: this.workflowRun.failure?.message ?? this.workflowRun.failure?.reason,
-      };
-    }
-    if (this.workflowRun.status === 'cancelled') return { status: 'stopped', stage: this.workflowRun.currentStage.stage };
-    return { status: 'running', stage: this.workflowRun.currentStage.stage };
-  }
 }
