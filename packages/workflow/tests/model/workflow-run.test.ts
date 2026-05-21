@@ -3,7 +3,7 @@ import {
   WorkflowRun,
   createWorkflowDefinitionSnapshot,
   type WorkflowDefinition,
-} from '../../src';
+} from '../../src/model';
 
 function definition(): WorkflowDefinition {
   return {

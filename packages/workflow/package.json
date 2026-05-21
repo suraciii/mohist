@@ -10,15 +10,27 @@
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json",
-    "./*": {
-      "types": "./src/*.ts",
-      "default": "./dist/*.js"
+    "./runtime": {
+      "types": "./src/runtime.ts",
+      "default": "./dist/runtime.js"
     },
-    "./model": {
+    "./workflow-results": {
+      "types": "./src/workflow-results.ts",
+      "default": "./dist/workflow-results.js"
+    },
+    "./result-contracts": {
+      "types": "./src/result-contracts.ts",
+      "default": "./dist/result-contracts.js"
+    },
+    "./uses-catalog": {
+      "types": "./src/uses-catalog.ts",
+      "default": "./dist/uses-catalog.js"
+    },
+    "./internal/model": {
       "types": "./src/model/index.ts",
       "default": "./dist/model/index.js"
     },
-    "./model/*": {
+    "./internal/model/*": {
       "types": "./src/model/*.ts",
       "default": "./dist/model/*.js"
     },
@@ -53,16 +65,19 @@
   },
   "typesVersions": {
     "*": {
-      "model": ["src/model/index.ts"],
-      "model/*": ["src/model/*"],
       "definition/*": ["src/definition/*"],
       "runner/*": ["src/runner/*"],
       "reaction/*": ["src/reaction/*"],
+      "internal/model": ["src/model/index.ts"],
+      "internal/model/*": ["src/model/*"],
       "tasks": ["src/tasks/index.ts"],
       "tasks/*": ["src/tasks/*"],
       "checks": ["src/checks/index.ts"],
       "checks/*": ["src/checks/*"],
-      "*": ["src/*"]
+      "runtime": ["src/runtime.ts"],
+      "workflow-results": ["src/workflow-results.ts"],
+      "result-contracts": ["src/result-contracts.ts"],
+      "uses-catalog": ["src/uses-catalog.ts"]
     }
   },
   "scripts": {

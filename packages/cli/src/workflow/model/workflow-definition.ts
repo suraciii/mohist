@@ -1,1 +1,1 @@
-export * from '@mohist/workflow/model/workflow-definition';
+export * from '@mohist/workflow/internal/model/workflow-definition';
