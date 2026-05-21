@@ -1,5 +1,5 @@
 import type {
-  WorkflowCheckType,
+  WorkflowCheck,
   WorkflowComponent,
   WorkflowTaskSourceType,
   WorkflowTask,
@@ -7,7 +7,7 @@ import type {
 
 export class WorkflowComponentRegistry {
   private readonly tasks = new Map<string, WorkflowTask>();
-  private readonly checks = new Map<string, WorkflowCheckType>();
+  private readonly checks = new Map<string, WorkflowCheck>();
   private readonly taskSources = new Map<string, WorkflowTaskSourceType>();
 
   register(component: WorkflowComponent): void {
@@ -27,7 +27,7 @@ export class WorkflowComponentRegistry {
     return this.tasks.get(uses) ?? null;
   }
 
-  check(uses: string | undefined): WorkflowCheckType | null {
+  check(uses: string | undefined): WorkflowCheck | null {
     if (!uses) return null;
     return this.checks.get(uses) ?? null;
   }
