@@ -2,7 +2,7 @@ import type { Check, CheckContext, CheckResult } from './index';
 import { parseStructuredResult, buildStructuredResult, isParseError } from '../result-contracts';
 import { REVIEW_RESULT_CONTRACT } from './review-result-contracts';
 import { extractFixSuggestions, readReportFile } from '../utils';
-import { extractRepairResultFromArtifact } from '../task-runtime/self-repair';
+import { extractRepairResultFromArtifact } from '../tasks/self-repair';
 import { Log } from '../../util/log';
 import type { ResultContract } from '../../types/workflow-results';
 

@@ -4,8 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { Stage, IssueStatus } from '../../../src/types';
 import type { StageContext } from '../../../src/workflow/stage-context';
-import type { AgentSessionTaskInput } from '../../../src/workflow/task-runtime/types';
-import { createAgentSessionTaskHandler } from '../../../src/workflow/task-runtime/agent-session-task-handler';
+import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
+import { createAgentSessionTaskHandler } from '../../../src/workflow/tasks/agent-session-task-handler';
 
 const { executeMock, closeMock, createMock } = vi.hoisted(() => ({
   executeMock: vi.fn(),

@@ -34,7 +34,7 @@ import {
   type ExecutableTask,
   type TaskHandler,
   type ServiceCallTaskInput,
-} from '../../../src/workflow/task-runtime';
+} from '../../../src/workflow/tasks';
 import type { CheckFactory } from '../../../src/workflow/checks';
 import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
 import { Stage, type Issue } from '../../../src/types';

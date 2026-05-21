@@ -9,7 +9,7 @@ import {
   validatePromiseMarkerFile,
   type ParseError,
 } from '../result-contracts';
-import { extractRepairResultFromArtifact } from '../task-runtime/self-repair';
+import { extractRepairResultFromArtifact } from '../tasks/self-repair';
 
 const log = Log.create({ service: 'artifact-marker-check' });
 

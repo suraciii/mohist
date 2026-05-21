@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
-import type { TaskKind, TaskHandler, ExecutableTask } from '../../../src/workflow/task-runtime/types';
-import { createTaskHandlerRegistry } from '../../../src/workflow/task-runtime/types';
-import { createRalphTaskTaskHandler } from '../../../src/workflow/task-runtime';
+import type { TaskKind, TaskHandler, ExecutableTask } from '../../../src/workflow/tasks/types';
+import { createTaskHandlerRegistry } from '../../../src/workflow/tasks/types';
+import { createRalphTaskTaskHandler } from '../../../src/workflow/tasks';
 import { Stage, IssueStatus } from '../../../src/types';
 
 function makeContext(): StageContext {

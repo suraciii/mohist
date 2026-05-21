@@ -26,7 +26,7 @@ import {
   type RalphTaskHandlerDeps,
   type RalphTaskHandlerOptions,
 } from './ralph';
-import { createDefaultTaskHandlerRegistry } from '../workflow/task-runtime';
+import { createDefaultTaskHandlerRegistry } from '../workflow/tasks';
 
 const execFileAsync = promisify(execFile);
 
