@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import fs from 'node:fs';
+import fs from 'fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Stage, IssueStatus } from '../../../src/types';
@@ -232,5 +232,66 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
+  });
+
+  it('renders custom agent prompt files from inside the worktree', async () => {
+    const worktreePath = path.join(path.sep, 'fake', 'worktree');
+    const changeDir = path.join(worktreePath, 'openspec', 'changes', '159-test');
+    const promptPath = path.join(worktreePath, '.mohist', 'prompts', 'review.md');
+    const readFile = vi.fn((filePath: string, encoding: BufferEncoding) => {
+      expect(filePath).toBe(promptPath);
+      expect(encoding).toBe('utf-8');
+      return 'Review {{ issue.number }} in {{ openspec.changeDir }}.';
+    });
+
+    const agentSessionHandler = vi.fn(async (input: AgentSessionTaskInput): Promise<StageTaskResult> => ({
+      taskId: input.taskId,
+      title: input.title,
+      status: 'completed',
+      artifacts: [],
+      attempts: input.attempt,
+      duration: 1,
+      events: [],
+    }));
+    const registry = createDefaultTaskDispatchFactoryRegistry({ agentSessionHandler, readFile });
+    const task: ExecutableTask = { taskId: 'custom-review', title: 'Custom review' };
+    const result = await registry.run({
+      ctx: makeContext(changeDir),
+      task,
+      attempt: 1,
+      worktreePath,
+      sourceTask: {
+        id: 'custom-review',
+        title: 'Custom review',
+        uses: 'mohist/agent',
+        with: { prompt: { file: '.mohist/prompts/review.md' } },
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    expect(agentSessionHandler).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: `Review 159 in ${changeDir}.`,
+    }), expect.anything());
+    expect(readFile).toHaveBeenCalledWith(promptPath, 'utf-8');
+  });
+
+  it('rejects custom agent prompt files outside the worktree', async () => {
+    const worktreePath = path.join(path.sep, 'fake', 'worktree');
+    const changeDir = path.join(worktreePath, 'openspec', 'changes', '159-test');
+    const task: ExecutableTask = { taskId: 'custom-review', title: 'Custom review' };
+    const { registry } = createRegistryWithFakeAgentHandler();
+
+    expect(() => registry.run({
+      ctx: makeContext(changeDir),
+      task,
+      attempt: 1,
+      worktreePath,
+      sourceTask: {
+        id: 'custom-review',
+        title: 'Custom review',
+        uses: 'mohist/agent',
+        with: { prompt: { file: '../outside-prompt.md' } },
+      },
+    })).toThrow("Agent prompt file '../outside-prompt.md' is outside worktree");
   });
 });
