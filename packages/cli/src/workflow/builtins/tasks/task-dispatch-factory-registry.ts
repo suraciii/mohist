@@ -1,37 +1,32 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { MergeState } from '../../../types';
-import type { StageContext, CheckResult, StageTaskResult } from '../../stage-context';
+import type { StageContext, StageTaskResult } from '../../stage-context';
 import { emitStageTaskUpdate } from '../../stage-context';
-import type { AgentSessionTaskHandler, AgentSessionTaskInput, ExecutableTask } from '../../tasks/types';
+import type { ExecutableTask } from '../../tasks/types';
 import type { TaskDefinition } from '../../model';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { createAgentSessionTaskHandler } from './agent-session-task-handler';
 import { createServiceCallTaskHandler } from './service-call-task-handler';
+import type {
+  TaskDispatchInput,
+  TaskDispatchProvider,
+  TaskDispatchRegistry,
+} from '../../tasks/task-dispatch-registry';
+import { createTaskDispatchRegistry } from '../../tasks/task-dispatch-registry';
 import { workflowDefinitionSnapshotFromUnknown } from '../../projection/workflow-run-snapshot';
 import { createWorkflowTemplateContext, renderWorkflowTemplate } from '../../template';
 import { executeRebaseBranchTask } from './rebase-task-handler';
 import { buildReviewerPrompt } from '../../../agents/artifact-prompt';
 import { OpenSpecIntegrator } from '../../../openspec/open-spec-integrator';
+import type { AgentSessionTaskHandler, AgentSessionTaskInput } from './types';
 
 type AgentPromptSource =
   | { file: string }
   | { inline: string };
 
-export interface TaskDispatchFactoryInput {
-  ctx: StageContext;
-  task: ExecutableTask;
-  attempt: number;
-  failedCheck?: CheckResult;
-  worktreePath: string;
-  agentSessionRef?: string;
-  sourceTask?: TaskDefinition;
-}
-
-export interface TaskDispatchProvider {
-  id: string;
-  run(input: TaskDispatchFactoryInput): Promise<StageTaskResult | null>;
-}
+export type BuiltinTaskDispatchInput = TaskDispatchInput;
+export type { TaskDispatchProvider, TaskDispatchRegistry };
 
 export interface DefaultTaskDispatchProviderOverrides {
   rebase?: TaskDispatchProvider['run'];
@@ -40,43 +35,21 @@ export interface DefaultTaskDispatchProviderOverrides {
   merge?: TaskDispatchProvider['run'];
 }
 
-export interface DefaultTaskDispatchFactoryRegistryOptions {
+export interface MohistBuiltinTaskDispatchRegistryOptions {
   agentSessionHandler?: AgentSessionTaskHandler;
   overrides?: DefaultTaskDispatchProviderOverrides;
   readFile?: (path: string, encoding: BufferEncoding) => string;
 }
 
-export interface TaskDispatchFactoryRegistry {
-  run(input: TaskDispatchFactoryInput): Promise<StageTaskResult | null>;
-  get(id: string): TaskDispatchProvider | undefined;
-  register(provider: TaskDispatchProvider): void;
+export function createBuiltinTaskDispatchRegistry(providers: TaskDispatchProvider[]): TaskDispatchRegistry {
+  return createTaskDispatchRegistry(providers);
 }
 
-export function createTaskDispatchFactoryRegistry(providers: TaskDispatchProvider[]): TaskDispatchFactoryRegistry {
-  const map = new Map<string, TaskDispatchProvider>();
-  for (const provider of providers) {
-    map.set(provider.id, provider);
-  }
-
-  return {
-    run(input) {
-      const providerId = resolveTaskProviderId(input);
-      return map.get(providerId)?.run(input) ?? Promise.resolve(null);
-    },
-    get(id) {
-      return map.get(id);
-    },
-    register(provider) {
-      map.set(provider.id, provider);
-    },
-  };
-}
-
-export function createDefaultTaskDispatchFactoryRegistry(options: DefaultTaskDispatchFactoryRegistryOptions = {}): TaskDispatchFactoryRegistry {
+export function createMohistBuiltinTaskDispatchRegistry(options: MohistBuiltinTaskDispatchRegistryOptions = {}): TaskDispatchRegistry {
   const integrator = new OpenSpecIntegrator();
   const agentSessionHandler = options.agentSessionHandler ?? createAgentSessionTaskHandler();
   const readFile = options.readFile ?? ((filePath, encoding) => fs.readFileSync(filePath, encoding));
-  return createTaskDispatchFactoryRegistry([
+  return createBuiltinTaskDispatchRegistry([
     {
       id: 'mohist/agent',
       run: input => runAgentSessionTask(input, agentSessionHandler, readFile),
@@ -104,11 +77,7 @@ export function createDefaultTaskDispatchFactoryRegistry(options: DefaultTaskDis
   ]);
 }
 
-function resolveTaskProviderId(input: TaskDispatchFactoryInput): string {
-  return input.sourceTask?.uses ?? input.task.uses ?? '';
-}
-
-function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Promise<StageTaskResult> {
+function createRebaseDispatchTask(input: BuiltinTaskDispatchInput): Promise<StageTaskResult> {
   return createServiceCallTaskHandler()({
     taskId: input.task.taskId,
     title: input.task.title,
@@ -127,7 +96,7 @@ function createRebaseDispatchTask(input: TaskDispatchFactoryInput): Promise<Stag
   }, input.ctx);
 }
 
-function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrator: OpenSpecIntegrator, uses: string): Promise<StageTaskResult> | null {
+function createServiceCallDispatchTask(input: BuiltinTaskDispatchInput, integrator: OpenSpecIntegrator, uses: string): Promise<StageTaskResult> | null {
   const serviceFn = buildWorkflowServiceFn(uses, input, integrator);
   if (!serviceFn) return null;
 
@@ -141,7 +110,7 @@ function createServiceCallDispatchTask(input: TaskDispatchFactoryInput, integrat
 }
 
 function runAgentSessionTask(
-  input: TaskDispatchFactoryInput,
+  input: BuiltinTaskDispatchInput,
   agentSessionHandler: AgentSessionTaskHandler,
   readFile: (path: string, encoding: BufferEncoding) => string,
 ): Promise<StageTaskResult> {
@@ -153,7 +122,7 @@ function runAgentSessionTask(
 }
 
 function createAgentSessionTask(
-  input: TaskDispatchFactoryInput,
+  input: BuiltinTaskDispatchInput,
   readFile: (path: string, encoding: BufferEncoding) => string,
 ): AgentSessionTaskInput | null {
   const promptSource = agentPromptSource(input.sourceTask) ?? executableTaskPromptSource(input.task);
@@ -192,7 +161,7 @@ function executableTaskPromptSource(task: ExecutableTask): AgentPromptSource | n
 }
 
 function resolveCustomAgentPrompt(
-  input: TaskDispatchFactoryInput,
+  input: BuiltinTaskDispatchInput,
   source: AgentPromptSource,
   readFile: (path: string, encoding: BufferEncoding) => string,
 ): string {
@@ -213,11 +182,11 @@ function resolvePromptFilePath(worktreePath: string, promptFile: string): string
   return promptPath;
 }
 
-function renderPromptTemplate(input: TaskDispatchFactoryInput, template: string): string {
+function renderPromptTemplate(input: BuiltinTaskDispatchInput, template: string): string {
   return renderWorkflowTemplate(template, buildTaskTemplateContext(input));
 }
 
-function buildTaskTemplateContext(input: TaskDispatchFactoryInput) {
+function buildTaskTemplateContext(input: BuiltinTaskDispatchInput) {
   return createWorkflowTemplateContext({
     ctx: input.ctx,
     worktreePath: input.worktreePath,
@@ -225,7 +194,7 @@ function buildTaskTemplateContext(input: TaskDispatchFactoryInput) {
   });
 }
 
-function requiredMarkersForTask(input: TaskDispatchFactoryInput): RequiredMarkerDefinition[] | undefined {
+function requiredMarkersForTask(input: BuiltinTaskDispatchInput): RequiredMarkerDefinition[] | undefined {
   const markers = input.sourceTask?.with?.requiredMarkers ?? inputFromExecutableTask(input.task)?.requiredMarkers;
   if (!Array.isArray(markers)) return undefined;
   const rendered = markers
@@ -238,7 +207,7 @@ function requiredMarkersForTask(input: TaskDispatchFactoryInput): RequiredMarker
   return rendered.length > 0 ? rendered : undefined;
 }
 
-function createGenericAgentSessionInput(input: TaskDispatchFactoryInput, prompt: string): AgentSessionTaskInput {
+function createGenericAgentSessionInput(input: BuiltinTaskDispatchInput, prompt: string): AgentSessionTaskInput {
   const declaredArtifacts = renderDeclaredArtifacts(input);
   return {
     taskId: input.task.taskId,
@@ -253,7 +222,7 @@ function createGenericAgentSessionInput(input: TaskDispatchFactoryInput, prompt:
   } satisfies AgentSessionTaskInput;
 }
 
-function renderDeclaredArtifacts(input: TaskDispatchFactoryInput): string[] {
+function renderDeclaredArtifacts(input: BuiltinTaskDispatchInput): string[] {
   const rawInput = input.task.input as { artifacts?: unknown; outputs?: unknown } | undefined;
   const declaredArtifacts = extractStringArray(rawInput?.artifacts)
     ?? extractStringArray(rawInput?.outputs)
@@ -289,7 +258,7 @@ function extractStringArray(value: unknown): string[] | null {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
-function completedTaskResult(input: TaskDispatchFactoryInput, artifacts: string[], result: unknown): StageTaskResult {
+function completedTaskResult(input: BuiltinTaskDispatchInput, artifacts: string[], result: unknown): StageTaskResult {
   return {
     taskId: input.task.taskId,
     title: input.task.title,
@@ -302,15 +271,15 @@ function completedTaskResult(input: TaskDispatchFactoryInput, artifacts: string[
   };
 }
 
-function mayRestoreTaskFromPriorOutput(input: TaskDispatchFactoryInput): boolean {
+function mayRestoreTaskFromPriorOutput(input: BuiltinTaskDispatchInput): boolean {
   return !wasResetByWorkflowPolicy(input);
 }
 
-function wasResetByWorkflowPolicy(input: TaskDispatchFactoryInput): boolean {
+function wasResetByWorkflowPolicy(input: BuiltinTaskDispatchInput): boolean {
   return input.ctx.requestedTask?.resetBy?.type === 'workflow-policy';
 }
 
-async function createCheckAiReviewDispatchTask(input: TaskDispatchFactoryInput, agentSessionHandler: AgentSessionTaskHandler): Promise<StageTaskResult> {
+async function createCheckAiReviewDispatchTask(input: BuiltinTaskDispatchInput, agentSessionHandler: AgentSessionTaskHandler): Promise<StageTaskResult> {
   const changeDir = input.ctx.artifactManager.getChangeDir(input.ctx.issue.number)
     || input.ctx.artifactManager.createChangeDir(input.ctx.issue.number, input.ctx.issue.title);
   if (!changeDir) throw new Error(`Failed to get or create change directory for issue #${input.ctx.issue.number}`);
@@ -344,13 +313,13 @@ function removePriorReviewOutput(reviewOutputFullPath: string): void {
   fs.rmSync(reviewOutputFullPath, { force: true });
 }
 
-function buildCheckReviewPrompt(input: TaskDispatchFactoryInput, changeDir: string): string {
+function buildCheckReviewPrompt(input: BuiltinTaskDispatchInput, changeDir: string): string {
   return buildReviewerPrompt(input.ctx.issue, changeDir);
 }
 
 function buildWorkflowServiceFn(
   uses: string,
-  input: TaskDispatchFactoryInput,
+  input: BuiltinTaskDispatchInput,
   integrator: OpenSpecIntegrator,
 ): ((ctx: StageContext) => Promise<unknown>) | null {
   if (uses === 'mohist/openspec-sync') {

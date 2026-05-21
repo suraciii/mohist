@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'child_process';
-import { HealthGateCheck, type HealthGatePolicy } from '../../src/workflow/checks/health-gate-check';
+import { HealthGateCheck, type HealthGatePolicy } from '../../../../src/workflow/builtins/checks/health-gate-check';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();

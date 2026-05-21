@@ -1,6 +1,3 @@
-import type { StageContext, StageTaskResult } from '../stage-context';
-import type { RequiredMarkerDefinition } from './agent-required-markers';
-
 export type TaskExecutionStatus = 'completed' | 'failed' | 'skipped';
 
 export interface TaskInputDefinition {
@@ -68,59 +65,4 @@ export interface ExecutableTask {
   prompt?: string;
   input?: unknown;
   artifactVerification?: (artifacts: string[]) => string[];
-}
-
-export interface AgentSessionTaskInput {
-  taskId: string;
-  title: string;
-  prompt: string;
-  cwd: string;
-  stage: string;
-  attempt: number;
-  agentSessionRef?: string;
-  artifactVerification?: (artifacts: string[]) => string[];
-  retryPromptFactory?: (ctx: StageContext, attempt: number) => string | null;
-  requiredMarkers?: RequiredMarkerDefinition[];
-}
-
-export interface ServiceCallTaskInput {
-  taskId: string;
-  title: string;
-  serviceFn: (ctx: StageContext) => Promise<unknown>;
-  stage: string;
-  attempt: number;
-}
-
-export type TaskHandler = (
-  task: ExecutableTask,
-  ctx: StageContext,
-) => Promise<StageTaskResult>;
-
-export type AgentSessionTaskHandler = (
-  input: AgentSessionTaskInput,
-  ctx: StageContext,
-) => Promise<StageTaskResult>;
-
-export type ServiceCallTaskHandler = (
-  input: ServiceCallTaskInput,
-  ctx: StageContext,
-) => Promise<StageTaskResult>;
-
-export interface TaskHandlerRegistry {
-  get(kind: string): TaskHandler | undefined;
-  register(kind: string, handler: TaskHandler): void;
-}
-
-export function createTaskHandlerRegistry(
-  handlers: Record<string, TaskHandler>,
-): TaskHandlerRegistry {
-  const map = new Map<string, TaskHandler>(Object.entries(handlers));
-  return {
-    get(kind) {
-      return map.get(kind);
-    },
-    register(kind, handler) {
-      map.set(kind, handler);
-    },
-  };
 }

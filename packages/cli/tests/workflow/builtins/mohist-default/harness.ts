@@ -26,14 +26,13 @@ import {
   type CompiledStageDefinition,
 } from '../../../../src/workflow/model';
 import {
-  createDefaultTaskDispatchFactoryRegistry,
+  createMohistBuiltinTaskDispatchRegistry,
   defaultServiceCallTaskHandler,
   createDefaultStaticTaskLoader,
-  createTaskLoaderRegistry,
-  type ExecutableTask,
   type AgentSessionTaskInput,
   type ServiceCallTaskInput,
-} from '../../../../src/workflow/tasks';
+} from '../../../../src/workflow/builtins/tasks';
+import { createTaskLoaderRegistry, type ExecutableTask } from '../../../../src/workflow/tasks';
 import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../../src/workflow/stage-context';
 import { MergeState, Stage, type Issue } from '../../../../src/types';
 
@@ -412,7 +411,7 @@ export class DefaultWorkflowHarness {
       checkRegistry,
       getStageDefinition: stageDefinition,
       worktreePath: this.world.worktreePath,
-      taskDispatchFactoryRegistry: createDefaultTaskDispatchFactoryRegistry({
+      taskDispatchRegistry: createMohistBuiltinTaskDispatchRegistry({
         agentSessionHandler: async (input: AgentSessionTaskInput) => this.world.agentTask(input),
         overrides: {
           rebase: async input => this.world.serviceCall({

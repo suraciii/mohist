@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Stage, IssueStatus } from '../../../src/types';
-import type { StageContext, AgentSessionRegistry } from '../../../src/workflow/stage-context';
-import { InMemoryAgentSessionRegistry } from '../../../src/workflow/stage-context';
-import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
-import { createAgentSessionTaskHandler } from '../../../src/workflow/tasks/agent-session-task-handler';
+import { Stage, IssueStatus } from '../../../../src/types';
+import type { StageContext, AgentSessionRegistry } from '../../../../src/workflow/stage-context';
+import { InMemoryAgentSessionRegistry } from '../../../../src/workflow/stage-context';
+import type { AgentSessionTaskInput } from '../../../../src/workflow/builtins/tasks';
+import { createAgentSessionTaskHandler } from '../../../../src/workflow/builtins/tasks';
 
-vi.mock('../../../src/agent-runtime', () => ({
+vi.mock('../../../../src/agent-runtime', () => ({
   AgentSession: {
     create: vi.fn(),
   },
@@ -249,7 +249,7 @@ describe('T-006: Shared-session runtime regressions', () => {
         }),
       });
 
-      const skippedResult: import('../../../src/workflow/stage-context').StageTaskResult = {
+      const skippedResult: import('../../../../src/workflow/stage-context').StageTaskResult = {
         taskId: 'specs',
         title: 'Write specs',
         status: 'skipped',

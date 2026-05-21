@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { CheckContext } from '../../src/workflow/stage-context';
-import { registerMohistDefaultMarkerFormats } from '../../src/workflow/builtins/workflows/mohist-default';
+import type { CheckContext } from '../../../../src/workflow/stage-context';
+import { registerMohistDefaultMarkerFormats } from '../../../../src/workflow/builtins/workflows/mohist-default';
 
 registerMohistDefaultMarkerFormats();
 
@@ -34,7 +34,7 @@ function writeArtifact(changeDir: string, filename: string, content: string) {
 }
 
 async function reviewMarkerCheck(changeDir: string) {
-  const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+  const { ArtifactMarkerCheck } = await import('../../../../src/workflow/builtins/checks/artifact-marker-check');
   return new ArtifactMarkerCheck('review-passed', path.join(changeDir, 'review.md'), '<promise>PASS</promise>', {
     format: 'mohist/review',
     markers: ['<promise>PASS</promise>', '<promise>FAIL</promise>'],
@@ -156,7 +156,7 @@ describe('judgment-checks: shared parser regression', () => {
 
   describe('SelfReviewPassedCheck', () => {
     it('derives PASS from structured parser', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '## Self Review\n\n<promise>PASS</promise>\n\n### Quality: PASS\n');
 
       const check = new SelfReviewPassedCheck();
@@ -169,7 +169,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('derives FAIL from structured parser', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '<promise>FAIL</promise>\n\n- [ID: dim-1]\n  Severity: blocking\n  Evidence: Missing test coverage\n');
 
       const check = new SelfReviewPassedCheck();
@@ -181,7 +181,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('returns error when marker is missing', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '## Self Review\n\nLooks good but no marker.\n');
 
       const check = new SelfReviewPassedCheck();
@@ -192,7 +192,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('returns error when marker-like text is not allowed', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '<promise>PARTIAL</promise>\n\nSome text\n');
 
       const check = new SelfReviewPassedCheck();
@@ -203,7 +203,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('returns error for duplicate markers', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n\nLater: <promise>FAIL</promise>\n');
 
       const check = new SelfReviewPassedCheck();
@@ -214,7 +214,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('returns error when file is missing', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       const check = new SelfReviewPassedCheck();
       const result = await check.run(makeCheckContext(changeDir));
 
@@ -223,7 +223,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('does not infer PASS from prose text', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '## Self Review\n\nEverything passed.\nVerdict: PASS\nGreat job!\n');
 
       const check = new SelfReviewPassedCheck();
@@ -233,7 +233,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('unknown marker-like text does not become implicit FAIL', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
       writeArtifact(changeDir, 'self-review.md', '<promise>UNKNOWN</promise>\n\nText\n');
 
       const check = new SelfReviewPassedCheck();
@@ -246,7 +246,7 @@ describe('judgment-checks: shared parser regression', () => {
 
   describe('shared parser behavior across checks', () => {
     it('review and self-review both parse PASS identically', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n');
@@ -262,7 +262,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('review and self-review both parse FAIL identically', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
 
       const failContent = '<promise>FAIL</promise>\n\n- [ID: test-1]\n  Severity: blocking\n  Evidence: test evidence\n';
       writeArtifact(changeDir, 'review.md', failContent);
@@ -280,7 +280,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('review and self-review both produce error for missing markers', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', 'No marker here');
       writeArtifact(changeDir, 'self-review.md', 'No marker here either');
@@ -295,7 +295,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('review and self-review both produce error for duplicate markers', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise> and <promise>FAIL</promise>');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise> and <promise>FAIL</promise>');
@@ -308,7 +308,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('review and self-review both produce error for unknown marker-like text', async () => {
-      const { SelfReviewPassedCheck } = await import('../../src/workflow/checks/self-review-passed-check');
+      const { SelfReviewPassedCheck } = await import('../../../../src/workflow/builtins/checks/self-review-passed-check');
 
       writeArtifact(changeDir, 'review.md', '<promise>MAYBE</promise>');
       writeArtifact(changeDir, 'self-review.md', '<promise>MAYBE</promise>');
@@ -323,7 +323,7 @@ describe('judgment-checks: shared parser regression', () => {
 
   describe('ArtifactMarkerCheck', () => {
     it('uses the strict promise marker parser and preserves structured review output', async () => {
-      const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+      const { ArtifactMarkerCheck } = await import('../../../../src/workflow/builtins/checks/artifact-marker-check');
       const reviewPath = path.join(changeDir, 'review.md');
       writeArtifact(changeDir, 'review.md', [
         '<promise>FAIL</promise>',
@@ -352,7 +352,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('fails duplicate promise markers instead of passing on contains', async () => {
-      const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+      const { ArtifactMarkerCheck } = await import('../../../../src/workflow/builtins/checks/artifact-marker-check');
       const reviewPath = path.join(changeDir, 'review.md');
       writeArtifact(changeDir, 'review.md', '<promise>PASS</promise>\n<promise>FAIL</promise>\n');
 
@@ -371,7 +371,7 @@ describe('judgment-checks: shared parser regression', () => {
     });
 
     it('preserves self-review notes and dimensions for self-review marker checks', async () => {
-      const { ArtifactMarkerCheck } = await import('../../src/workflow/checks/artifact-marker-check');
+      const { ArtifactMarkerCheck } = await import('../../../../src/workflow/builtins/checks/artifact-marker-check');
       const reviewPath = path.join(changeDir, 'self-review.md');
       writeArtifact(changeDir, 'self-review.md', '<promise>PASS</promise>\n\n### Quality: PASS\n');
 

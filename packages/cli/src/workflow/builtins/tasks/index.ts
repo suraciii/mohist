@@ -1,3 +1,9 @@
+export {
+  type AgentSessionTaskHandler,
+  type AgentSessionTaskInput,
+  type ServiceCallTaskHandler,
+  type ServiceCallTaskInput,
+} from './types';
 export { type RequiredMarkerDefinition } from './agent-required-markers';
 export {
   type AgentSessionTaskHandlerDeps,
@@ -12,9 +18,10 @@ export {
   defaultServiceCallTaskHandler,
 } from './service-call-task-handler';
 export {
-  type TaskDispatchFactoryInput,
-  type TaskDispatchFactoryRegistry,
+  type BuiltinTaskDispatchInput,
+  type MohistBuiltinTaskDispatchRegistryOptions,
+  type TaskDispatchRegistry,
   type TaskDispatchProvider,
-  createDefaultTaskDispatchFactoryRegistry,
-  createTaskDispatchFactoryRegistry,
+  createBuiltinTaskDispatchRegistry,
+  createMohistBuiltinTaskDispatchRegistry,
 } from './task-dispatch-factory-registry';

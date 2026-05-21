@@ -1,7 +1,7 @@
 import type { StageContext, StageTaskResult } from '../../stage-context';
-import type { ServiceCallTaskInput } from '../../tasks/types';
 import { emitStageTaskUpdate } from '../../stage-context';
 import { Log } from '../../../util/log';
+import type { ServiceCallTaskInput } from './types';
 
 const log = Log.create({ service: 'service-call-task-handler' });
 
