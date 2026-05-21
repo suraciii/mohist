@@ -4,8 +4,8 @@ import {
   isParseError,
   isParseSuccess,
   parseStructuredResult,
-} from '../../src/workflow/result-contracts';
-import type { ResultContract } from '../../src/types/workflow-results';
+  type ResultContract,
+} from '../src';
 
 function makeContract(path = 'result.txt'): ResultContract {
   return {
@@ -20,7 +20,7 @@ function makeContract(path = 'result.txt'): ResultContract {
   };
 }
 
-describe('result-contracts: marker parsing', () => {
+describe('result contracts', () => {
   it('parses the single declared success marker', () => {
     const result = parseStructuredResult(makeContract(), 'done\n<ok/>\n');
 

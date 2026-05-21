@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build": "npm run build -w packages/cli",
-    "test": "npm run test -w packages/cli",
+    "test": "npm run test -w @mohist/workflow && npm run test -w packages/cli",
     "lint": "npm run lint -w packages/cli",
     "typecheck": "npm run typecheck -w packages/cli",
     "dev": "npm run build && concurrently -n server,web -c blue,green \"npm run start:server -w packages/cli\" \"npm run dev:web -w packages/cli\""
