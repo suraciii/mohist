@@ -65,6 +65,7 @@ export interface WorkflowRunner {
   readonly stages: WorkflowStageState[];
   readonly failure: WorkflowFailure | null;
 
+  run(): Promise<WorkflowRunResult>;
   start(): Promise<WorkflowRunResult>;
   resume(): Promise<WorkflowRunResult>;
   pause(reason?: string): Promise<WorkflowRunResult>;
