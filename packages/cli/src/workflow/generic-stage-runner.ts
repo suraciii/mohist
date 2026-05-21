@@ -4,8 +4,8 @@ import type { CheckContext } from './checks';
 import { resolveCheck } from './checks/check-registry';
 import type { ExecutableTask } from './tasks';
 import type { TaskLoaderRegistry } from './tasks/task-loader-registry';
-import type { TaskDispatchFactoryRegistry } from './tasks/task-dispatch-factory-registry';
-import { createDefaultTaskDispatchFactoryRegistry } from './tasks/task-dispatch-factory-registry';
+import type { TaskDispatchRegistry } from './tasks/task-dispatch-registry';
+import { createTaskDispatchRegistry } from './tasks/task-dispatch-registry';
 import type { CheckRegistry } from './checks/check-registry';
 import type { CheckRunStatus, TaskDefinition, TaskRunStatus, WorkflowDecision, WorkflowRun, WorkflowStageId } from './model';
 import type { RuntimeStageDefinition, TaskExecutionPolicy, WorkSourceKind } from './runner/workflow-runtime-definition';
@@ -27,7 +27,7 @@ type PersistedCheckResult = {
 export interface GenericStageRunnerOptions {
   taskLoaderRegistry: TaskLoaderRegistry;
   checkRegistry: CheckRegistry;
-  taskDispatchFactoryRegistry?: TaskDispatchFactoryRegistry;
+  taskDispatchRegistry?: TaskDispatchRegistry;
   getStageDefinition(stage: WorkflowStageId): RuntimeStageDefinition | undefined;
   worktreePath: string;
   enabledStages?: WorkflowStageId[];
@@ -35,7 +35,7 @@ export interface GenericStageRunnerOptions {
 
 export class GenericStageRunner implements StageRunner {
   private taskLoaderRegistry: TaskLoaderRegistry;
-  private taskDispatchFactoryRegistry: TaskDispatchFactoryRegistry;
+  private taskDispatchRegistry: TaskDispatchRegistry;
   private checkRegistry: CheckRegistry;
   private getStageDefinition: (stage: WorkflowStageId) => RuntimeStageDefinition | undefined;
   private worktreePath: string;
@@ -45,7 +45,7 @@ export class GenericStageRunner implements StageRunner {
 
   constructor(options: GenericStageRunnerOptions) {
     this.taskLoaderRegistry = options.taskLoaderRegistry;
-    this.taskDispatchFactoryRegistry = options.taskDispatchFactoryRegistry ?? createDefaultTaskDispatchFactoryRegistry();
+    this.taskDispatchRegistry = options.taskDispatchRegistry ?? createTaskDispatchRegistry();
     this.checkRegistry = options.checkRegistry;
     this.getStageDefinition = options.getStageDefinition;
     this.worktreePath = options.worktreePath;
@@ -653,7 +653,7 @@ export class GenericStageRunner implements StageRunner {
     const policy = this.resolveTaskExecutionPolicy(stageDefinition, task.taskId, workSourceKind)
       ?? (baseTaskId !== task.taskId ? this.resolveTaskExecutionPolicy(stageDefinition, baseTaskId, workSourceKind) : undefined);
 
-    return this.taskDispatchFactoryRegistry.run({
+    return this.taskDispatchRegistry.run({
       ctx,
       task,
       attempt,

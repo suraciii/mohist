@@ -27,10 +27,11 @@ import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { createTaskLoaderRegistry, createOpenSpecTaskLoader, createDefaultStaticTaskLoader } from '../workflow/tasks';
+import { createTaskLoaderRegistry } from '../workflow/tasks';
+import { createOpenSpecTaskLoader, createDefaultStaticTaskLoader, createMohistBuiltinTaskDispatchRegistry } from '../workflow/builtins/tasks';
 import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/builtins/workflows/mohist-default';
-import { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
-export { createDefaultCheckRegistry } from '../workflow/checks/default-check-registry';
+import { createDefaultCheckRegistry } from '../workflow/builtins/checks';
+export { createDefaultCheckRegistry } from '../workflow/builtins/checks';
 import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/definition/workflow-inspector';
 import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
 
@@ -963,6 +964,7 @@ export class AgentRunnerService {
       const unifiedRunner = new GenericStageRunner({
         taskLoaderRegistry,
         checkRegistry,
+        taskDispatchRegistry: createMohistBuiltinTaskDispatchRegistry(),
         getStageDefinition: (stage) => {
           const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
           const snapshot = workflowDefinitionSnapshotFromUnknown(activeRun?.workflowDefinition);

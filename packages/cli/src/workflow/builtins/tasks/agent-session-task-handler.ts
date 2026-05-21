@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import type { StageContext, StageTaskResult } from '../../stage-context';
-import type { AgentSessionTaskInput } from '../../tasks/types';
 import { emitStageTaskUpdate } from '../../stage-context';
 import { AgentSession, createWorkflowSessionObservers, type AgentSessionOptions } from '../../../agent-runtime';
 import { extractReactionOutput } from '../../reaction/convergence';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
 import { isParseSuccess, validateMarkerFile } from '../../result-contracts';
+import type { AgentSessionTaskInput } from './types';
 
 export interface AgentSessionTaskHandlerDeps {
   createSession?: (options: AgentSessionOptions) => Promise<AgentSession>;

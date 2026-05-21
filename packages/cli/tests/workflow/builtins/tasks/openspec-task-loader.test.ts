@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Stage, IssueStatus } from '../../../src/types';
-import { createOpenSpecTaskLoader } from '../../../src/workflow/tasks';
-import type { StageContext } from '../../../src/workflow/stage-context';
-import { createWorkflowDefinitionSnapshot } from '../../../src/workflow/model';
+import { Stage, IssueStatus } from '../../../../src/types';
+import { createOpenSpecTaskLoader } from '../../../../src/workflow/builtins/tasks';
+import type { StageContext } from '../../../../src/workflow/stage-context';
+import { createWorkflowDefinitionSnapshot } from '../../../../src/workflow/model';
 
 function makeContext(worktreePath: string, changeDir: string): StageContext {
   const workflowDefinition = createWorkflowDefinitionSnapshot({

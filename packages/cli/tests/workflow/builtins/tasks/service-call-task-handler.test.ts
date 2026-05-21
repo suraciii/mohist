@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Stage, IssueStatus } from '../../../src/types';
-import type { StageContext } from '../../../src/workflow/stage-context';
-import type { ServiceCallTaskInput } from '../../../src/workflow/tasks/types';
-import { createServiceCallTaskHandler } from '../../../src/workflow/tasks/service-call-task-handler';
+import { Stage, IssueStatus } from '../../../../src/types';
+import type { StageContext } from '../../../../src/workflow/stage-context';
+import type { ServiceCallTaskInput } from '../../../../src/workflow/builtins/tasks';
+import { createServiceCallTaskHandler } from '../../../../src/workflow/builtins/tasks';
 
 function makeContext(): StageContext {
   return {

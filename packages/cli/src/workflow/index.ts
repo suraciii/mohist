@@ -34,39 +34,6 @@ export {
 } from './checks';
 
 export {
-  AiReviewCheck,
-  type AiReviewCheckOptions,
-} from './checks/ai-review-check';
-
-export {
-  ProposalCompleteCheck,
-} from './checks/proposal-complete-check';
-
-export {
-  SpecsCompleteCheck,
-} from './checks/specs-complete-check';
-
-export {
-  DesignCompleteCheck,
-} from './checks/design-complete-check';
-
-export {
-  TasksValidCheck,
-} from './checks/tasks-valid-check';
-
-export {
-  SelfReviewPassedCheck,
-} from './checks/self-review-passed-check';
-
-export {
-  UserApprovalCheck,
-} from './checks/user-approval-check';
-
-export {
-  AllTasksCompleteCheck,
-} from './checks/all-tasks-complete-check';
-
-export {
   CheckpointManager,
   createCheckpointManager,
 } from './checkpoint-manager';

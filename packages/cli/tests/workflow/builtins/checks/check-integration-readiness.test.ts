@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { OpenSpecSyncDryRunCheck } from '../../src/workflow/checks/openspec-sync-dry-run-check';
-import { MergeReadinessCheck } from '../../src/workflow/checks/merge-readiness-check';
-import { Stage } from '../../src/types';
+import { OpenSpecSyncDryRunCheck } from '../../../../src/workflow/builtins/checks/openspec-sync-dry-run-check';
+import { MergeReadinessCheck } from '../../../../src/workflow/builtins/checks/merge-readiness-check';
+import { Stage } from '../../../../src/types';
 
 function makeCheckContext(overrides?: Partial<{
   changeDir: string;
@@ -311,7 +311,7 @@ Content.`, 'utf-8');
   });
 
   it('default Check stage definition contains review and merge checks without openspec sync dry-run', async () => {
-    const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/builtins/workflows/mohist-default');
+    const { DEFAULT_STAGE_DEFINITIONS } = await import('../../../../src/workflow/builtins/workflows/mohist-default');
     const checkDefinition = DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check)!;
     const checkNames = checkDefinition.checks.map(check => check.name);
 

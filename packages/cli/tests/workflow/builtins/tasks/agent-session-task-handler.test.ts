@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { Stage, IssueStatus } from '../../../src/types';
-import type { StageContext } from '../../../src/workflow/stage-context';
-import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
-import { createAgentSessionTaskHandler } from '../../../src/workflow/tasks/agent-session-task-handler';
+import { Stage, IssueStatus } from '../../../../src/types';
+import type { StageContext } from '../../../../src/workflow/stage-context';
+import type { AgentSessionTaskInput } from '../../../../src/workflow/builtins/tasks';
+import { createAgentSessionTaskHandler } from '../../../../src/workflow/builtins/tasks';
 
 const { executeMock, closeMock, createMock } = vi.hoisted(() => ({
   executeMock: vi.fn(),
@@ -13,7 +13,7 @@ const { executeMock, closeMock, createMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
 }));
 
-vi.mock('../../../src/agent-runtime', () => ({
+vi.mock('../../../../src/agent-runtime', () => ({
   AgentSession: {
     create: createMock,
   },

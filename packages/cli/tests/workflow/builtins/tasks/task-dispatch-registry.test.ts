@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Stage, IssueStatus } from '../../../src/types';
-import type { StageContext } from '../../../src/workflow/stage-context';
-import type { ExecutableTask, StageTaskResult } from '../../../src/workflow/tasks';
-import { createDefaultTaskDispatchFactoryRegistry, createTaskDispatchFactoryRegistry } from '../../../src/workflow/tasks';
-import type { AgentSessionTaskInput } from '../../../src/workflow/tasks/types';
-import type { TaskDefinition } from '../../../src/workflow/model';
+import { Stage, IssueStatus } from '../../../../src/types';
+import type { StageContext } from '../../../../src/workflow/stage-context';
+import type { ExecutableTask } from '../../../../src/workflow/tasks';
+import type { StageTaskResult } from '../../../../src/workflow/stage-context';
+import { createBuiltinTaskDispatchRegistry, createMohistBuiltinTaskDispatchRegistry } from '../../../../src/workflow/builtins/tasks';
+import type { AgentSessionTaskInput } from '../../../../src/workflow/builtins/tasks';
+import type { TaskDefinition } from '../../../../src/workflow/model';
 
 function makeContext(changeDir: string, requestedTask?: StageContext['requestedTask']): StageContext {
   return {
@@ -93,12 +94,12 @@ function createRegistryWithFakeAgentHandler() {
     events: [],
   }));
   return {
-    registry: createDefaultTaskDispatchFactoryRegistry({ agentSessionHandler }),
+    registry: createMohistBuiltinTaskDispatchRegistry({ agentSessionHandler }),
     agentSessionHandler,
   };
 }
 
-describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
+describe('Mohist builtin task dispatch registry restore behavior', () => {
   it('dispatches custom task uses through a registered provider', async () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mohist-dispatch-provider-'));
     const changeDir = path.join(tmpRoot, 'openspec', 'changes', '159-test');
@@ -119,7 +120,7 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
         })),
       };
       const task: ExecutableTask = { taskId: 'custom', title: 'Custom task' };
-      const result = await createTaskDispatchFactoryRegistry([provider]).run({
+      const result = await createBuiltinTaskDispatchRegistry([provider]).run({
         ctx: makeContext(changeDir),
         task,
         attempt: 2,
@@ -253,7 +254,7 @@ describe('DefaultTaskDispatchFactoryRegistry restore behavior', () => {
       duration: 1,
       events: [],
     }));
-    const registry = createDefaultTaskDispatchFactoryRegistry({ agentSessionHandler, readFile });
+    const registry = createMohistBuiltinTaskDispatchRegistry({ agentSessionHandler, readFile });
     const task: ExecutableTask = { taskId: 'custom-review', title: 'Custom review' };
     const result = await registry.run({
       ctx: makeContext(changeDir),
