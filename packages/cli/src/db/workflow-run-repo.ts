@@ -15,7 +15,7 @@ import {
   repairWorkflowRunSnapshot,
   workflowDefinitionSnapshotFromUnknown,
 } from '../workflow/projection/workflow-run-snapshot';
-import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/definition/default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS, createDefaultWorkflowDefinitionSnapshot } from '../workflow/builtins/workflows/mohist-default';
 import { Stage } from '../types';
 
 export type WorkflowRunStatus = 'running' | 'passed' | 'failed' | 'cancelled';

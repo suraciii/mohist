@@ -311,7 +311,7 @@ Content.`, 'utf-8');
   });
 
   it('default Check stage definition contains review and merge checks without openspec sync dry-run', async () => {
-    const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/definition/default-workflow');
+    const { DEFAULT_STAGE_DEFINITIONS } = await import('../../src/workflow/builtins/workflows/mohist-default');
     const checkDefinition = DEFAULT_STAGE_DEFINITIONS.find(definition => definition.stage === Stage.Check)!;
     const checkNames = checkDefinition.checks.map(check => check.name);
 

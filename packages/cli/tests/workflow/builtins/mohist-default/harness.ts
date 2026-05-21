@@ -3,28 +3,28 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { DatabaseManager } from '../../../src/db/database';
-import { initializeDatabase } from '../../../src/db/migrations';
-import { IssueRepo } from '../../../src/db/issue-repo';
-import { ProjectRepo } from '../../../src/db/project-repo';
-import { WorkflowRunRepo } from '../../../src/db/workflow-run-repo';
-import { WorkflowRunService } from '../../../src/services/workflow-run-service';
-import { WorkflowApplicationService } from '../../../src/services/workflow-application-service';
-import { StageStateService } from '../../../src/services/stage-state-service';
-import { StageExecutionRepo } from '../../../src/db/stage-execution-repo';
-import { PipelineCheckpointRepo } from '../../../src/db/pipeline-checkpoint-repo';
-import { createDefaultCheckRegistry } from '../../../src/services/agent-runner-service';
-import { CheckpointManager } from '../../../src/workflow/checkpoint-manager';
-import { EventBus } from '../../../src/services/event-bus';
-import { GenericStageRunner } from '../../../src/workflow/generic-stage-runner';
-import { WorkflowEngine } from '../../../src/workflow/workflow-engine';
+import { DatabaseManager } from '../../../../src/db/database';
+import { initializeDatabase } from '../../../../src/db/migrations';
+import { IssueRepo } from '../../../../src/db/issue-repo';
+import { ProjectRepo } from '../../../../src/db/project-repo';
+import { WorkflowRunRepo } from '../../../../src/db/workflow-run-repo';
+import { WorkflowRunService } from '../../../../src/services/workflow-run-service';
+import { WorkflowApplicationService } from '../../../../src/services/workflow-application-service';
+import { StageStateService } from '../../../../src/services/stage-state-service';
+import { StageExecutionRepo } from '../../../../src/db/stage-execution-repo';
+import { PipelineCheckpointRepo } from '../../../../src/db/pipeline-checkpoint-repo';
+import { createDefaultCheckRegistry } from '../../../../src/services/agent-runner-service';
+import { CheckpointManager } from '../../../../src/workflow/checkpoint-manager';
+import { EventBus } from '../../../../src/services/event-bus';
+import { GenericStageRunner } from '../../../../src/workflow/generic-stage-runner';
+import { WorkflowEngine } from '../../../../src/workflow/workflow-engine';
 import {
   createDefaultWorkflowDefinitionSnapshot,
   DEFAULT_STAGE_DEFINITIONS,
-} from '../../../src/workflow/definition/default-workflow';
+} from '../../../../src/workflow/builtins/workflows/mohist-default';
 import {
   type CompiledStageDefinition,
-} from '../../../src/workflow/model';
+} from '../../../../src/workflow/model';
 import {
   createDefaultTaskDispatchFactoryRegistry,
   defaultServiceCallTaskHandler,
@@ -33,9 +33,9 @@ import {
   type ExecutableTask,
   type AgentSessionTaskInput,
   type ServiceCallTaskInput,
-} from '../../../src/workflow/tasks';
-import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../src/workflow/stage-context';
-import { MergeState, Stage, type Issue } from '../../../src/types';
+} from '../../../../src/workflow/tasks';
+import type { CheckContext, CheckResult, StageContext, StageTaskResult } from '../../../../src/workflow/stage-context';
+import { MergeState, Stage, type Issue } from '../../../../src/types';
 
 export type DefaultWorkflowScenario = {
   reviewFailuresBeforePass?: number;
@@ -286,7 +286,7 @@ export class DefaultWorkflowExternalWorld {
           '- [ID: F-001]',
           '  Severity: high',
           '  Evidence: Blocking finding from fake review',
-          '  Verification: npm test -- tests/workflow/default-workflow-harness.test.ts',
+          '  Verification: npm test -- tests/workflow/builtins/workflows/mohist-default/default-workflow-harness.test.ts',
           '  Status: resolved',
           '',
         ].join('\n')

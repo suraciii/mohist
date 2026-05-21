@@ -11,7 +11,7 @@ import {
   DEFAULT_STAGE_DEFINITIONS,
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
   MOHIST_DEFAULT_WORKFLOW_SOURCE,
-} from '../src/workflow/definition/default-workflow';
+} from '../src/workflow/builtins/workflows/mohist-default';
 import { Stage } from '../src/types';
 import { compileRuntimeStageDefinitions } from '../src/workflow/runner/workflow-runtime-definition';
 import { workflowDefinitionSnapshotFromUnknown } from '../src/workflow/projection/workflow-run-snapshot';

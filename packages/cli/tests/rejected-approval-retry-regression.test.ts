@@ -10,7 +10,7 @@ import { AgentRunnerService } from '../src/services/agent-runner-service';
 import { EventBus } from '../src/services/event-bus';
 import { IssueService } from '../src/services/issue-service';
 import { WorkflowRun } from '../src/workflow/model';
-import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/definition/default-workflow';
+import { DEFAULT_STAGE_DEFINITIONS } from '../src/workflow/builtins/workflows/mohist-default';
 import { WorkflowApplicationService } from '../src/services/workflow-application-service';
 
 let projectCounter = 0;

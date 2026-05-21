@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { CheckContext } from '../../src/workflow/stage-context';
+import { registerMohistDefaultMarkerFormats } from '../../src/workflow/builtins/workflows/mohist-default';
+
+registerMohistDefaultMarkerFormats();
 
 function makeIssue() {
   return {
