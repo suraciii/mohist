@@ -1,6 +1,4 @@
-using Mohist.Server.Issue.Domain;
 using Mohist.Server.Storage;
-using Mohist.Server.Workflow.Handlers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,7 +10,6 @@ builder.Host.UseOrleans(silo =>
     });
 });
 
-builder.Services.AddSingleton<IHandlerRegistry, HandlerRegistry>();
 builder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
 
 var app = builder.Build();
