@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -11,6 +12,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task RejectAsync(string? reason = null);
     Task RetryAsync();
     Task RerunAsync();
+    Task ReportResultAsync(string workId, WorkDispatchResult result);
 }
 
 public sealed record WorkflowDefinitionInput(

@@ -10,7 +10,6 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task ReportAsync(string workId, WorkDispatchResult result);
     Task<bool> IsAvailableAsync();
     Task DispatchAsync(WorkDispatch work);
-    Task<WorkDispatchResult?> TryGetResultAsync(string workId);
     Task ReleaseAsync();
 }
 
