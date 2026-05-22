@@ -9,7 +9,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
-    private string? _stageRunnerId;
+    private string? _runnerId;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
@@ -29,6 +29,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         if (_run is null)
             throw new InvalidOperationException("Cannot start: no workflow definition provided");
+
+        if (_runnerId is null)
+        {
+            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
+            _runnerId = await registry.FindIdleRunnerAsync(null);
+        }
+
+        if (_runnerId is null)
+            throw new InvalidOperationException("No idle runner available");
+
+        _log.LogInformation("Workflow {Id} assigned to runner {RunnerId}", GrainKey, _runnerId);
 
         _run.Start();
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
@@ -94,7 +105,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             if (_run.PauseRequested)
             {
                 _run.Pause();
-                await ReleaseStageRunnerAsync();
                 _log.LogInformation("Workflow {Id} paused", GrainKey);
                 break;
             }
@@ -104,17 +114,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             switch (work)
             {
                 case WorkflowWork.Complete:
-                    await ReleaseStageRunnerAsync();
+                    await ReleaseRunnerAsync();
                     _log.LogInformation("Workflow {Id} completed at stage={Stage}", GrainKey, work.Stage);
                     return;
 
                 case WorkflowWork.Failed f:
-                    await ReleaseStageRunnerAsync();
+                    await ReleaseRunnerAsync();
                     _log.LogWarning("Workflow {Id} failed: {Reason}", GrainKey, f.Reason.Message);
                     return;
 
                 case WorkflowWork.Blocked b:
-                    await ReleaseStageRunnerAsync();
+                    await ReleaseRunnerAsync();
                     _log.LogWarning("Workflow {Id} blocked at stage={Stage}: {Reason}", GrainKey, b.Stage, b.Reason);
                     return;
 
@@ -124,17 +134,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
                 case WorkflowWork.StageInit si:
                     await HandleStageInit(si);
-                    if (_run.PauseRequested) { _run.Pause(); await ReleaseStageRunnerAsync(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
                     continue;
 
                 case WorkflowWork.Task t:
                     await HandleTask(t);
-                    if (_run.PauseRequested) { _run.Pause(); await ReleaseStageRunnerAsync(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
                     continue;
 
                 case WorkflowWork.Check c:
                     await HandleCheck(c);
-                    if (_run.PauseRequested) { _run.Pause(); await ReleaseStageRunnerAsync(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
                     continue;
             }
         }
@@ -142,13 +152,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task HandleStageInit(WorkflowWork.StageInit work)
     {
-        await AssignStageRunnerAsync();
-        if (_stageRunnerId is null)
-        {
-            _run.FailStage("No idle runner available");
-            return;
-        }
-
         if (work.TasksFrom is null)
         {
             _run.InitTasks();
@@ -161,8 +164,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         switch (result.Status)
         {
             case "completed":
-                _run.InitTasks();
-                break;
             case "loaded":
                 _run.InitTasks();
                 break;
@@ -174,12 +175,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task HandleTask(WorkflowWork.Task work)
     {
-        if (_stageRunnerId is null)
-        {
-            _run.FailTask("No runner assigned to stage");
-            return;
-        }
-
         var result = await DispatchAndWaitAsync(new WorkDispatch(
             GrainKey, work.Stage, work.Id, "task", work.Uses, work.With));
 
@@ -191,12 +186,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task HandleCheck(WorkflowWork.Check work)
     {
-        if (_stageRunnerId is null)
-        {
-            _run.FailCheck(new CheckResult(work.Name, "fail", "No runner assigned to stage"));
-            return;
-        }
-
         var result = await DispatchAndWaitAsync(new WorkDispatch(
             GrainKey, work.Stage, work.Name, "check", work.Uses, work.With));
 
@@ -225,33 +214,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
-    private async Task AssignStageRunnerAsync()
+    private async Task ReleaseRunnerAsync()
     {
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
-        _stageRunnerId = await registry.FindIdleRunnerAsync(null);
+        if (_runnerId is null) return;
 
-        if (_stageRunnerId is not null)
-            _log.LogInformation("Stage runner assigned: {RunnerId}", _stageRunnerId);
-        else
-            _log.LogWarning("No idle runner available for stage assignment");
-    }
-
-    private async Task ReleaseStageRunnerAsync()
-    {
-        if (_stageRunnerId is null) return;
-
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(_stageRunnerId);
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId);
         await runner.ReleaseAsync();
-        _log.LogInformation("Stage runner {RunnerId} released", _stageRunnerId);
-        _stageRunnerId = null;
+        _log.LogInformation("Runner {RunnerId} released", _runnerId);
+        _runnerId = null;
     }
 
     private async Task<WorkDispatchResult> DispatchAndWaitAsync(WorkDispatch work)
     {
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(_stageRunnerId!);
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId!);
 
         await runner.DispatchAsync(work);
-        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", work.WorkType, work.WorkId, _stageRunnerId);
+        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", work.WorkType, work.WorkId, _runnerId);
 
         while (true)
         {
