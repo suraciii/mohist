@@ -6,7 +6,7 @@ import type {
   WorkflowRunStatus as DomainWorkflowRunStatus,
   WorkflowStageId,
 } from './model';
-import type { TaskHandler, CheckHandler, TaskSourceHandler } from './registry';
+import type { TaskHandler, CheckHandler, TaskLoader } from './registry';
 import type { WorkflowSourceDefinition } from './definition/workflow-definition-source';
 import type { WorkflowDefinition } from './model/workflow-definition';
 
@@ -25,7 +25,7 @@ export interface CreateWorkflowRuntimeInput {
   store: WorkflowStore;
   tasks?: Record<string, TaskHandler>;
   checks?: Record<string, CheckHandler>;
-  taskSources?: Record<string, TaskSourceHandler>;
+  taskLoaders?: Record<string, TaskLoader>;
 }
 
 export interface WorkflowRuntime {
@@ -70,7 +70,8 @@ export interface WorkflowCheckInput {
   with?: Record<string, unknown>;
 }
 
-export interface WorkflowTaskSourceResult {
-  tasks: MaterializedTaskInput[];
-  state?: 'missing' | 'invalid' | 'empty';
-}
+export type TaskLoadResult =
+  | { state: 'loaded'; tasks: MaterializedTaskInput[] }
+  | { state: 'empty' }
+  | { state: 'missing'; message?: string }
+  | { state: 'invalid'; message?: string };
