@@ -1,25 +1,22 @@
 import { WorkflowRun } from './model';
-import { Registry } from './registry';
 import { workflowDefinitionFromInput } from './workflow-definition-input';
 import { WorkflowRunner } from './workflow-runner';
-import type { CreateWorkflowsInput, Workflows, WorkflowCreateInput } from './workflow-types';
+import type { CreateWorkflowRuntimeInput, WorkflowCreateInput, WorkflowRuntime } from './workflow-types';
 
 export * from './workflow-types';
 
-export function createWorkflows(input: CreateWorkflowsInput): Workflows {
-  const registry = new Registry();
-
+export function createWorkflowRuntime(input: CreateWorkflowRuntimeInput): WorkflowRuntime {
   return {
     async create(createInput: WorkflowCreateInput) {
       const definition = workflowDefinitionFromInput(createInput.definition);
       const run = new WorkflowRun(createInput.id, definition.stages);
-      return new WorkflowRunner(run, input.store, registry);
+      return new WorkflowRunner(run, input.store, input.registry);
     },
 
     async load(id) {
       const run = await input.store.load(id);
       if (!run) return null;
-      return new WorkflowRunner(run, input.store, registry);
+      return new WorkflowRunner(run, input.store, input.registry);
     },
   };
 }

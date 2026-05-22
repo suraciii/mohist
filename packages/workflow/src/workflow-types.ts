@@ -6,7 +6,7 @@ import type {
   WorkflowRunStatus as DomainWorkflowRunStatus,
   WorkflowStageId,
 } from './model';
-import type { TaskResult, CheckResult } from './runtime';
+import type { Registry } from './registry';
 import type { WorkflowSourceDefinition } from './definition/workflow-definition-source';
 import type { WorkflowDefinition } from './model/workflow-definition';
 
@@ -15,19 +15,18 @@ export type WorkflowRunId = string;
 export type WorkflowRunStatus = DomainWorkflowRunStatus | 'completed';
 export type WorkflowStageState = StageRunState;
 export type WorkflowFailure = FailureDetails;
-export type WorkflowTaskResult = TaskResult;
-export type WorkflowCheckResult = CheckResult;
 
 export type WorkflowDefinitionInput =
   | WorkflowDefinition
   | WorkflowSourceDefinition
   | { yaml: string };
 
-export interface CreateWorkflowsInput {
+export interface CreateWorkflowRuntimeInput {
   store: WorkflowStore;
+  registry: Registry;
 }
 
-export interface Workflows {
+export interface WorkflowRuntime {
   create(input: WorkflowCreateInput): Promise<WorkflowRunner>;
   load(id: WorkflowRunId): Promise<WorkflowRunner | null>;
 }
@@ -44,7 +43,6 @@ export interface WorkflowRunner {
   readonly stages: WorkflowStageState[];
   readonly failure: WorkflowFailure | null;
 
-  run(): Promise<void>;
   start(): Promise<void>;
   resume(): Promise<void>;
   pause(reason?: string): Promise<void>;

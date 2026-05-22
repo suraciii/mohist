@@ -1,5 +1,5 @@
 import type { Check } from './index';
-import type { WorkflowContext, CheckResult } from '../runtime';
+import type { WorkflowContext } from '../runtime';
 import type { CheckDefinition, WorkflowStageId } from '../model';
 
 export interface CheckProviderInput {
@@ -61,13 +61,4 @@ export async function resolveCheck(
     throw new Error(`Check "${input.check.name}" uses "${input.check.uses ?? '<none>'}" is not registered`);
   }
   return check;
-}
-
-export async function runCheck(
-  registry: CheckRegistry,
-  ctx: WorkflowContext,
-  input: Omit<CheckProviderInput, 'ctx'>,
-): Promise<CheckResult> {
-  const check = await resolveCheck(registry, ctx, input);
-  return check.run(ctx);
 }

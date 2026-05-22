@@ -114,7 +114,6 @@ function parseStageSource(
       },
     }])) : undefined,
     requiresApproval: source.approval || undefined,
-    approvalCheckName: source.approval ? 'user-approval' : undefined,
   };
 }
 
