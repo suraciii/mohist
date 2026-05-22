@@ -59,9 +59,10 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
         var workflowId = id ?? $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
 
-        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await runner.AssignWorkflowAsync(workflowId);
+        await workflow.AssignRunnerAsync(runnerId);
         await workflow.StartAsync(definition);
         return workflow;
     }
