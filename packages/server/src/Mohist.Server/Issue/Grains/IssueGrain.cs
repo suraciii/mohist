@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
 
@@ -33,6 +34,15 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(MohistPipeline.Definition);
+
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        var runnerId = await registry.FindRunnerAsync([]);
+        if (runnerId is not null)
+        {
+            var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
+            await runner.AssignWorkflowAsync(wrId);
+            await wfGrain.AssignRunnerAsync(runnerId);
+        }
 
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;

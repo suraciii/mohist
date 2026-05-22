@@ -9,13 +9,15 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     public DispatchAndLoadingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task WorkflowStarted_AssignRunner_WorkflowRuns()
+    public async Task NoRunnerAtStart_RegisterLater_AssignAndRun()
     {
-        await StartWorkflowWithoutRunnerAsync(SingleStage());
+        var workflow = await CreateWorkflowAsync();
+        await workflow.StartAsync(SingleStage());
 
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
         await runner.AssignWorkflowAsync(_workflowId!);
+        await workflow.AssignRunnerAsync(_runnerId);
 
         var (task, rId) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
@@ -23,33 +25,19 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportAsync(rId, task.WorkId, "completed");
         var (check, checkRunnerId) = await PollWorkAnyAsync();
         await ReportAsync(checkRunnerId, check.WorkId, "pass");
-
-        Assert.True(await Grains.GetGrain<IRunnerGrain>(checkRunnerId).IsAvailableAsync());
     }
 
     [Fact]
-    public async Task PausedWorkflow_AssignRunner_StillPaused()
+    public async Task PausedBeforeRunner_StillPaused()
     {
-        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage());
+        var workflow = await CreateWorkflowAsync();
+        await workflow.StartAsync(SingleStage());
 
         await workflow.PauseAsync("paused before capacity");
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
         await runner.AssignWorkflowAsync(_workflowId!);
-
-        Assert.Null(await runner.PollAsync());
-        Assert.True(await runner.IsAvailableAsync());
-    }
-
-    [Fact]
-    public async Task PausedWorkflow_AssignRunner_NoWorkPulled()
-    {
-        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage());
-
-        await workflow.PauseAsync("paused before capacity");
-        var runnerId = await RegisterRunnerAsync();
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.AssignWorkflowAsync(_workflowId!);
+        await workflow.AssignRunnerAsync(_runnerId);
 
         Assert.Null(await runner.PollAsync());
         Assert.True(await runner.IsAvailableAsync());

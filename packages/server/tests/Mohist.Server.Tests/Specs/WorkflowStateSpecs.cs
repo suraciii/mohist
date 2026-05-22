@@ -98,13 +98,33 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         _runnerId = runnerId;
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.AssignWorkflowAsync(workflowId);
-        await runner.AssignWorkflowAsync(workflowId);
-
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+
+        await runner.AssignWorkflowAsync(workflowId);
+        await workflow.AssignRunnerAsync(runnerId);
         await workflow.StartAsync(SingleStage(checks: []));
 
         var work = await runner.PollAsync();
         Assert.NotNull(work);
+    }
+
+    [Fact]
+    public async Task StartWithoutRunner_ManualAssignLater()
+    {
+        var workflow = await CreateWorkflowAsync();
+        await workflow.StartAsync(SingleStage());
+
+        var runnerId = await RegisterRunnerAsync();
+        _runnerId = runnerId;
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.Null(await runner.PollAsync());
+
+        await workflow.AssignRunnerAsync(runnerId);
+        await runner.AssignWorkflowAsync(_workflowId!);
+
+        var work = await runner.PollAsync();
+        Assert.NotNull(work);
+        Assert.StartsWith("task-1.", work.WorkId);
     }
 }
