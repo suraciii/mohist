@@ -15,14 +15,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private string? _pendingWorkType;
     private PendingDispatch? _pendingDispatch;
     private IDisposable? _runnerWaitTimer;
-    private readonly IRunnerRegistry _registry;
     private readonly ILogger<WorkflowGrain> _log;
 
     private static readonly TimeSpan RunnerCheckInterval = TimeSpan.FromSeconds(1);
 
-    public WorkflowGrain(IRunnerRegistry registry, ILogger<WorkflowGrain> log)
+    public WorkflowGrain(ILogger<WorkflowGrain> log)
     {
-        _registry = registry;
         _log = log;
     }
 
@@ -194,11 +192,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task DispatchOrDeferAsync(string stage, string workId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
     {
-        _runnerId ??= await _registry.FindIdleRunnerAsync(GrainFactory, null);
+        var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        _runnerId ??= await registry.FindIdleRunnerAsync([]);
 
         if (_runnerId is null)
         {
-            _pendingDispatch = new PendingDispatch(stage, workId, workType, uses, with);
+            _pendingDispatch = new PendingDispatch(stage, workId, workType, uses, withStr);
             _runnerWaitTimer ??= this.RegisterGrainTimer(
                 _ => OnRunnerAvailableAsync(),
                 RunnerCheckInterval,
@@ -207,7 +207,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             return;
         }
 
-        await DoDispatchAsync(stage, workId, workType, uses, with);
+        await DoDispatchAsync(stage, workId, workType, uses, withStr);
     }
 
     private async Task OnRunnerAvailableAsync()
@@ -215,7 +215,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_pendingDispatch is null) return;
         if (_run?.PauseRequested == true) return;
 
-        _runnerId = await _registry.FindIdleRunnerAsync(GrainFactory, null);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        _runnerId = await registry.FindIdleRunnerAsync([]);
         if (_runnerId is null) return;
 
         _runnerWaitTimer?.Dispose();
@@ -227,7 +228,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await DoDispatchAsync(p.Stage, p.WorkId, p.WorkType, p.Uses, p.With);
     }
 
-    private async Task DoDispatchAsync(string stage, string workId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
+    private async Task DoDispatchAsync(string stage, string workId, string workType, string? uses, string? with)
     {
         _pendingWorkId = workId;
         _pendingWorkType = workType;
@@ -252,7 +253,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var pendingCheck = work.Checks.FirstOrDefault(c => c.Status == CheckRunStatus.Pending);
         var checkName = pendingCheck?.Name ?? "";
 
-        var checkResult = new CheckResult(checkName, result.Status, result.Message, result.Output);
+        var output = result.Output is not null
+            ? JsonSerializer.Deserialize<JsonElement>(result.Output)
+            : (JsonElement?)null;
+        var checkResult = new CheckResult(checkName, result.Status, result.Message, output);
 
         switch (result.Status)
         {
@@ -321,11 +325,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (retryCount >= retry.Limit) return false;
 
         var resultJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
+        var retryWith = retry.Task.With is not null
+            ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
+            : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
         _run.InjectRetryTask(checkName, new LoadedTaskInput(
             $"{retry.Task.Id}:{retryCount + 1}",
             retry.Task.Title,
             retry.Task.Uses,
-            MergeWith(retry.Task.With, new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson })));
+            retryWith));
 
         return true;
     }
@@ -336,28 +343,21 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
     }
 
+    private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
+        with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
+
     private static List<StageDefinition> MapStageDefinitions(WorkflowDefinitionInput input) =>
         input.Stages.Select(s => new StageDefinition(
             s.Stage,
-            s.Tasks.Select(t => new TaskDefinition(t.Id, t.Title, t.Uses, t.With)).ToList(),
-            s.Checks.Select(c => new CheckDefinition(c.Name, c.Title, c.Uses, c.With,
+            s.Tasks.Select(t => new TaskDefinition(t.Id, t.Title, t.Uses, ParseWith(t.With))).ToList(),
+            s.Checks.Select(c => new CheckDefinition(c.Name, c.Title, c.Uses, ParseWith(c.With),
                 c.RetryLimit > 0 && c.RetryTask is not null
-                    ? new CheckFailureAction(new CheckFailureRetry(c.RetryLimit, new TaskDefinition(c.RetryTask.Id, c.RetryTask.Title, c.RetryTask.Uses, c.RetryTask.With)))
+                    ? new CheckFailureAction(new CheckFailureRetry(c.RetryLimit, new TaskDefinition(c.RetryTask.Id, c.RetryTask.Title, c.RetryTask.Uses, ParseWith(c.RetryTask.With))))
                     : null
             )).ToList(),
-            s.TasksFromUses is not null ? new WorkflowTasksFromDefinition(s.TasksFromUses, s.TasksFromWith) : null,
+            s.TasksFromUses is not null ? new WorkflowTasksFromDefinition(s.TasksFromUses, ParseWith(s.TasksFromWith)) : null,
             s.RequiresApproval
         )).ToList();
 
-    private static Dictionary<string, JsonElement?>? MergeWith(
-        Dictionary<string, JsonElement?>? baseDict,
-        Dictionary<string, JsonElement?> extra)
-    {
-        if (baseDict is null) return extra;
-        var merged = new Dictionary<string, JsonElement?>(baseDict);
-        foreach (var kv in extra) merged[kv.Key] = kv.Value;
-        return merged;
-    }
-
-    private record PendingDispatch(string Stage, string WorkId, string WorkType, string? Uses, Dictionary<string, JsonElement?>? With);
+    private record PendingDispatch(string Stage, string WorkId, string WorkType, string? Uses, string? With);
 }

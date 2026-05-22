@@ -10,22 +10,19 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task ApprovalStage_TasksAndChecksPass_WorkflowAwaitsApproval()
     {
-        var runnerId = await RegisterRunnerAsync();
+        await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(ApprovalStage());
 
-        var init = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, init.WorkId, "completed");
+        var (task, r1) = await PollWorkAnyAsync();
+        Assert.Equal("draft", task.WorkId);
+        await ReportAsync(r1, task.WorkId, "completed");
 
-        var task = await PollWorkAsync(runnerId);
-        Assert.Equal("plan", task.Stage);
-        await ReportAsync(runnerId, task.WorkId, "completed");
+        var (check, r2) = await PollWorkAnyAsync();
+        Assert.Equal("check", check.WorkType);
+        await ReportAsync(r2, check.WorkId, "pass");
 
-        var check = await PollWorkAsync(runnerId);
-        Assert.Equal("plan-ok", check.WorkType);
-        await ReportAsync(runnerId, check.WorkId, "pass");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runner = Grains.GetGrain<IRunnerGrain>(r2);
         var poll = await runner.PollAsync();
         Assert.Null(poll);
     }
@@ -33,58 +30,46 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task AwaitingApproval_UserApproves_WorkflowContinuesToNextStage()
     {
-        var runnerId = await RegisterRunnerAsync();
+        await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(ApprovalStage());
 
-        // plan: init → task → check
-        var init = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, init.WorkId, "completed");
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
 
-        var task = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, task.WorkId, "completed");
-
-        var check = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, check.WorkId, "pass");
+        var (check, r2) = await PollWorkAnyAsync();
+        await ReportAsync(r2, check.WorkId, "pass");
 
         await workflow.ApproveAsync();
 
-        // build: init → task → check → complete
-        var init2 = await PollWorkAsync(runnerId);
-        Assert.Equal("build", init2.Stage);
-        await ReportAsync(runnerId, init2.WorkId, "completed");
-
-        var task2 = await PollWorkAsync(runnerId);
+        var (task2, r3) = await PollWorkAnyAsync();
         Assert.Equal("compile", task2.WorkId);
-        await ReportAsync(runnerId, task2.WorkId, "completed");
+        await ReportAsync(r3, task2.WorkId, "completed");
 
-        var check2 = await PollWorkAsync(runnerId);
-        Assert.Equal("build-ok", check2.WorkType);
-        await ReportAsync(runnerId, check2.WorkId, "pass");
+        var (check2, r4) = await PollWorkAnyAsync();
+        Assert.Equal("check", check2.WorkType);
+        await ReportAsync(r4, check2.WorkId, "pass");
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]
     public async Task AwaitingApproval_UserRejects_WorkflowFails()
     {
-        var runnerId = await RegisterRunnerAsync();
+        await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(ApprovalStage());
 
-        var init = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, init.WorkId, "completed");
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
 
-        var task = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, task.WorkId, "completed");
-
-        var check = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, check.WorkId, "pass");
+        var (check, r2) = await PollWorkAnyAsync();
+        await ReportAsync(r2, check.WorkId, "pass");
 
         await workflow.RejectAsync("not good enough");
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.True(await runner.IsAvailableAsync());
     }
 }

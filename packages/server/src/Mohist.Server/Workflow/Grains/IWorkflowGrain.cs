@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -24,7 +23,7 @@ public sealed record StageDefinitionInput(
     List<TaskDefinitionInput> Tasks,
     List<CheckDefinitionInput> Checks,
     string? TasksFromUses = null,
-    Dictionary<string, JsonElement?>? TasksFromWith = null,
+    string? TasksFromWith = null,
     bool RequiresApproval = false);
 
 [GenerateSerializer]
@@ -32,13 +31,13 @@ public sealed record TaskDefinitionInput(
     string Id,
     string Title,
     string? Uses = null,
-    Dictionary<string, JsonElement?>? With = null);
+    string? With = null);
 
 [GenerateSerializer]
 public sealed record CheckDefinitionInput(
     string Name,
     string Title,
     string? Uses = null,
-    Dictionary<string, JsonElement?>? With = null,
+    string? With = null,
     int RetryLimit = 0,
     TaskDefinitionInput? RetryTask = null);

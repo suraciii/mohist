@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
@@ -14,13 +13,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public Task InitializeAsync()
     {
         var builder = new InProcessTestClusterBuilder();
-        builder.ConfigureSilo((options, siloBuilder) =>
-        {
-            siloBuilder.ConfigureServices(services =>
-            {
-                services.AddSingleton<IRunnerRegistry, RunnerRegistry>();
-            });
-        });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
     }
@@ -30,11 +22,13 @@ public class WorkflowGrainFixture : IAsyncLifetime
         Cluster?.Dispose();
         return Task.CompletedTask;
     }
+
 }
 
 public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
 {
     private readonly WorkflowGrainFixture _fixture;
+    private string? _workflowId;
 
     protected WorkflowGrainSpecs(WorkflowGrainFixture fixture)
     {
@@ -54,15 +48,26 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
     protected async Task<IWorkflowGrain> CreateWorkflowAsync(string? id = null)
     {
         id ??= $"wf-{Guid.NewGuid():N}";
+        _workflowId = id;
         return Grains.GetGrain<IWorkflowGrain>(id);
     }
 
-    protected async Task<WorkDispatch> PollWorkAsync(string runnerId)
+    protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()
     {
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var work = await runner.PollAsync();
-        Assert.NotNull(work);
-        return work;
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        foreach (var runnerId in await registry.ListRunnerIdsAsync())
+        {
+            var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+            var assigned = await runner.PeekAsync();
+            if (assigned?.RunId != _workflowId) continue;
+
+            var work = await runner.PollAsync();
+            Assert.NotNull(work);
+            return (work, runnerId);
+        }
+
+        Assert.Fail($"No runner has work available for workflow '{_workflowId}'");
+        return default;
     }
 
     protected async Task ReportAsync(string runnerId, string workId, string status, string? message = null)

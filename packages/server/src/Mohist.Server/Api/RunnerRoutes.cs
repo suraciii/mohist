@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 
@@ -10,19 +9,15 @@ public static class RunnerRoutes
     {
         var group = app.MapGroup("/api/runner/{runnerId}");
 
-        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains, IRunnerRegistry registry) =>
+        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {
-            registry.Register(runnerId, req.Capabilities);
-
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName));
             return Results.Ok();
         });
 
-        group.MapPost("/unregister", async (string runnerId, IGrainFactory grains, IRunnerRegistry registry) =>
+        group.MapPost("/unregister", async (string runnerId, IGrainFactory grains) =>
         {
-            registry.Unregister(runnerId);
-
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.UnregisterAsync();
             return Results.Ok();
@@ -63,4 +58,4 @@ public static class RunnerRoutes
 }
 
 public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null);
-public record RunnerReportRequest(string WorkId, string Status, string? Message = null, JsonElement? Output = null, int? ExitCode = null);
+public record RunnerReportRequest(string WorkId, string Status, string? Message = null, string? Output = null, int? ExitCode = null);

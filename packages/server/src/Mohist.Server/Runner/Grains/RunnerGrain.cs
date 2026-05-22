@@ -11,15 +11,13 @@ public class RunnerGrain : Grain, IRunnerGrain
     private bool _polled;
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
-    private readonly IRunnerRegistry _registry;
     private readonly ILogger<RunnerGrain> _log;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
 
-    public RunnerGrain(IRunnerRegistry registry, ILogger<RunnerGrain> log)
+    public RunnerGrain(ILogger<RunnerGrain> log)
     {
-        _registry = registry;
         _log = log;
     }
 
@@ -27,10 +25,6 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public override Task OnActivateAsync(CancellationToken ct)
     {
-        _heartbeatTimer = this.RegisterGrainTimer(
-            _ => CheckHeartbeatAsync(),
-            HeartbeatCheckInterval,
-            HeartbeatCheckInterval);
         return Task.CompletedTask;
     }
 
@@ -41,24 +35,28 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.CompletedTask;
     }
 
-    public Task RegisterAsync(RunnerInfo info)
+    public async Task RegisterAsync(RunnerInfo info)
     {
         _info = info;
         _status = RunnerStatus.Idle;
         _lastHeartbeat = DateTime.UtcNow;
-        _registry.Register(RunnerId, info.Capabilities);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        await registry.RegisterAsync(RunnerId, info.Capabilities);
+        _heartbeatTimer ??= this.RegisterGrainTimer(
+            _ => CheckHeartbeatAsync(),
+            HeartbeatCheckInterval,
+            HeartbeatCheckInterval);
         _log.LogInformation("Runner {Id} registered from {Host}", info.RunnerId, info.Hostname);
-        return Task.CompletedTask;
     }
 
-    public Task UnregisterAsync()
+    public async Task UnregisterAsync()
     {
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
         _status = RunnerStatus.Offline;
         _info = null;
         _work = null;
-        _registry.Unregister(RunnerId);
-        return Task.CompletedTask;
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        await registry.UnregisterAsync(RunnerId);
     }
 
     public Task HeartbeatAsync()
@@ -94,6 +92,15 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         _polled = true;
         return Task.FromResult<WorkDispatch?>(_work);
+    }
+
+    public Task<WorkDispatch?> PeekAsync()
+    {
+        if (_status == RunnerStatus.Offline)
+            throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
+
+        _lastHeartbeat = DateTime.UtcNow;
+        return Task.FromResult(_work);
     }
 
     public Task<string?> ReportAsync(string workId, WorkDispatchResult result)
@@ -141,7 +148,8 @@ public class RunnerGrain : Grain, IRunnerGrain
         var timedOutWork = _work;
         _work = null;
         _status = RunnerStatus.Offline;
-        _registry.Unregister(RunnerId);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        await registry.UnregisterAsync(RunnerId);
 
         if (timedOutWork is not null)
         {
