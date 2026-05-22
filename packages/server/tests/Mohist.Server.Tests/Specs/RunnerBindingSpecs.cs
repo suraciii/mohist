@@ -9,7 +9,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     public RunnerBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task OneRunner_TwoWorkflows_RunnerPullsWorkFromBoth()
+    public async Task OneRunner_TwoWorkflows_BothGetWork()
     {
         var runnerId = await RegisterRunnerAsync("shared-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -34,7 +34,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task WorkflowAfterFirstGetWork_ContinuesOnSameRunner()
+    public async Task TaskCompletes_NextTaskOnSameRunner()
     {
         var runnerId = await RegisterRunnerAsync("sticky-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -63,7 +63,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task TwoWorkflows_ReportAffectsCorrectWorkflow()
+    public async Task TwoWorkflows_CompletingOneDoesNotAffectOther()
     {
         var runnerId = await RegisterRunnerAsync("report-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);

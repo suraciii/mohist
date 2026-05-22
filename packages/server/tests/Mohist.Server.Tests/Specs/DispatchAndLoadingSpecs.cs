@@ -9,7 +9,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     public DispatchAndLoadingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task WorkflowStarted_AssignRunner_RunnerPullsWork()
+    public async Task WorkflowStarted_AssignRunner_WorkflowRuns()
     {
         await StartWorkflowWithoutRunnerAsync(SingleStage());
 
@@ -25,6 +25,20 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportAsync(checkRunnerId, check.WorkId, "pass");
 
         Assert.True(await Grains.GetGrain<IRunnerGrain>(checkRunnerId).IsAvailableAsync());
+    }
+
+    [Fact]
+    public async Task PausedWorkflow_AssignRunner_StillPaused()
+    {
+        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage());
+
+        await workflow.PauseAsync("paused before capacity");
+        _runnerId = await RegisterRunnerAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
+        await runner.AssignWorkflowAsync(_workflowId!);
+
+        Assert.Null(await runner.PollAsync());
+        Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]

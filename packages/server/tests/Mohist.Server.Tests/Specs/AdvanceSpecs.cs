@@ -9,7 +9,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     public AdvanceSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task StageRequiringApproval_CompletesWork_WaitsWithoutDispatchingNextStage()
+    public async Task ApprovalStage_CompletesWork_WaitsForApproval()
     {
         await StartWorkflowAsync(new WorkflowDefinitionInput(
         [
@@ -35,7 +35,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StageWithoutApproval_CompletesWork_AdvancesToNextStage()
+    public async Task NonApprovalStage_CompletesWork_AutoAdvancesToNextStage()
     {
         await StartWorkflowAsync(new WorkflowDefinitionInput(
         [
@@ -63,7 +63,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task EmptyStageWithoutApproval_StartsWorkflow_AdvancesToNextStage()
+    public async Task EmptyStage_SkipsToNextStage()
     {
         await StartWorkflowAsync(new WorkflowDefinitionInput(
         [
@@ -81,7 +81,7 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task EmptyStageRequiringApproval_UserApproves_AdvancesToNextStage()
+    public async Task EmptyApprovalStage_UserApproves_AdvancesToNextStage()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
         [

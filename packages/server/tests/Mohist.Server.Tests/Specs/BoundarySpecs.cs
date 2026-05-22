@@ -22,7 +22,7 @@ public class BoundarySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunningCheck_ReportsPending_CheckRunsAgain()
+    public async Task CheckReportsPending_CheckRunsAgain()
     {
         await StartWorkflowAsync(SingleStage());
 
@@ -42,7 +42,7 @@ public class BoundarySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task UnknownWorkReport_Ignored_CurrentWorkStillCompletes()
+    public async Task UnknownWorkReport_Ignored_CurrentWorkContinues()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
