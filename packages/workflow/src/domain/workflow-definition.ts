@@ -5,7 +5,6 @@ export type WorkflowStageId = string;
 export interface TaskDefinition {
   id: string;
   title: string;
-  source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
   onSuccess?: {
@@ -17,7 +16,6 @@ export interface TaskDefinition {
 export interface CheckDefinition {
   name: string;
   title: string;
-  source?: 'builtin' | 'project';
   uses?: string;
   with?: Record<string, unknown>;
   onFailure?: CheckFailureAction;
