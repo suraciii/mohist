@@ -52,6 +52,14 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
         return Grains.GetGrain<IWorkflowGrain>(id);
     }
 
+    protected async Task<IWorkflowGrain> StartWorkflowAsync(WorkflowDefinitionInput definition, string? id = null)
+    {
+        await RegisterRunnerAsync();
+        var workflow = await CreateWorkflowAsync(id);
+        await workflow.StartAsync(definition);
+        return workflow;
+    }
+
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()
     {
         var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
