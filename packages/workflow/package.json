@@ -25,10 +25,6 @@
     "./handlers": {
       "types": "./src/handlers/index.ts",
       "default": "./dist/handlers/index.js"
-    },
-    "./catalog": {
-      "types": "./src/catalog/index.ts",
-      "default": "./dist/catalog/index.js"
     }
   },
   "typesVersions": {
@@ -36,8 +32,7 @@
       "domain": ["src/domain/index.ts"],
       "definition": ["src/definition/index.ts"],
       "runtime": ["src/runtime/index.ts"],
-      "handlers": ["src/handlers/index.ts"],
-      "catalog": ["src/catalog/index.ts"]
+      "handlers": ["src/handlers/index.ts"]
     }
   },
   "scripts": {
