@@ -8,8 +8,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
-    private WorkDispatch? _pending;
-    private WorkDispatch? _current;
+    private WorkDispatch? _work;
+    private bool _polled;
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
     private readonly IRunnerRegistry _registry;
@@ -58,6 +58,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
         _status = RunnerStatus.Offline;
         _info = null;
+        _work = null;
         _registry.Unregister(RunnerId);
         return Task.CompletedTask;
     }
@@ -76,7 +77,8 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (_status != RunnerStatus.Idle)
             throw new InvalidOperationException($"Runner '{RunnerId}' is {_status}, cannot dispatch");
 
-        _pending = work;
+        _work = work;
+        _polled = false;
         _status = RunnerStatus.Busy;
         _log.LogInformation("Work {WorkId} dispatched to runner {Id}", work.WorkId, RunnerId);
         return Task.CompletedTask;
@@ -88,10 +90,12 @@ public class RunnerGrain : Grain, IRunnerGrain
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
         _lastHeartbeat = DateTime.UtcNow;
-        var work = _pending;
-        _pending = null;
-        _current = work;
-        return Task.FromResult(work);
+
+        if (_polled || _work is null)
+            return Task.FromResult<WorkDispatch?>(null);
+
+        _polled = true;
+        return Task.FromResult<WorkDispatch?>(_work);
     }
 
     public async Task ReportAsync(string workId, WorkDispatchResult result)
@@ -101,10 +105,12 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         _log.LogInformation("Runner {Id} reported work {WorkId}: {Status}", RunnerId, workId, result.Status);
 
-        if (_current?.RunId is string runId)
+        var runId = _work?.RunId;
+        _work = null;
+
+        if (runId is not null)
         {
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(runId);
-            _current = null;
             await workflowGrain.ReportResultAsync(workId, result);
         }
     }
@@ -116,8 +122,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public Task ReleaseAsync()
     {
-        _pending = null;
-        _current = null;
+        _work = null;
         _status = RunnerStatus.Idle;
         _log.LogInformation("Runner {Id} released", RunnerId);
         return Task.CompletedTask;
@@ -137,9 +142,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task HandleTimeoutAsync()
     {
-        var timedOutWork = _current;
-        _current = null;
-        _pending = null;
+        var timedOutWork = _work;
+        _work = null;
         _status = RunnerStatus.Offline;
         _registry.Unregister(RunnerId);
 
