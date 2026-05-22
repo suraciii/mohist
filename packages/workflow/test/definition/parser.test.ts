@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { WorkflowDefinitionParser } from '../../src';
+import { parseYaml, toYaml } from '../../src';
 
-describe('workflow definition parser', () => {
+describe('workflow parser', () => {
   it('parses workflow YAML with source-friendly ids into domain definitions', () => {
-    const parser = new WorkflowDefinitionParser();
-    const parsed = parser.parseYaml(`
+    const parsed = parseYaml(`
 workflow:
   id: project/custom
   artifacts:
@@ -58,8 +57,7 @@ workflow:
   });
 
   it('writes workflow source objects back to parseable YAML', () => {
-    const parser = new WorkflowDefinitionParser();
-    const yamlText = parser.toYaml({
+    const yamlText = toYaml({
       id: 'project/custom',
       stages: [
         {
@@ -97,7 +95,7 @@ workflow:
       ],
     });
 
-    expect(parser.parseYaml(yamlText).id).toBe('project/custom');
+    expect(parseYaml(yamlText).id).toBe('project/custom');
     expect(yamlText).toContain('workflow:');
     expect(yamlText).toContain('onFailure:');
   });
