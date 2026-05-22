@@ -58,11 +58,8 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     while (true) {
       const work = this.workflowRun.next();
       if (work.kind === 'complete') {
-        const completed = this.workflowRun.passStage();
         await this.save();
-        if (await this.pauseIfRequested()) break;
-        if (!completed) break;
-        continue;
+        break;
       }
       if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
 
