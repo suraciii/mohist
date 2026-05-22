@@ -1,4 +1,3 @@
-import type { Check } from './checks';
 import type { WorkflowTaskSourceResult, WorkflowTaskInput, WorkflowCheckInput } from './workflow-types';
 
 export interface TaskHandler {
@@ -19,19 +18,32 @@ export interface TaskSourceHandler {
   };
 }
 
-export class Registry {
+export interface HandlerRegistry {
+  task(uses: string | undefined): TaskHandler | null;
+  check(uses: string | undefined): CheckHandler | null;
+  taskSource(uses: string | undefined): TaskSourceHandler | null;
+}
+
+export class Registry implements HandlerRegistry {
   private readonly tasks = new Map<string, TaskHandler>();
   private readonly checks = new Map<string, CheckHandler>();
   private readonly taskSources = new Map<string, TaskSourceHandler>();
-  private readonly checkProviders = new Map<string, { build: (input: unknown) => Promise<Check | null> }>();
+
+  registerTask(uses: string, handler: TaskHandler): void {
+    this.tasks.set(uses, handler);
+  }
+
+  registerCheck(uses: string, handler: CheckHandler): void {
+    this.checks.set(uses, handler);
+  }
+
+  registerTaskSource(uses: string, handler: TaskSourceHandler): void {
+    this.taskSources.set(uses, handler);
+  }
 
   task(uses: string | undefined): TaskHandler | null {
     if (!uses) return null;
     return this.tasks.get(uses) ?? null;
-  }
-
-  registerTask(uses: string, handler: TaskHandler): void {
-    this.tasks.set(uses, handler);
   }
 
   check(uses: string | undefined): CheckHandler | null {
@@ -39,20 +51,8 @@ export class Registry {
     return this.checks.get(uses) ?? null;
   }
 
-  registerCheck(uses: string, handler: CheckHandler): void {
-    this.checks.set(uses, handler);
-  }
-
   taskSource(uses: string | undefined): TaskSourceHandler | null {
     if (!uses) return null;
     return this.taskSources.get(uses) ?? null;
-  }
-
-  registerTaskSource(uses: string, handler: TaskSourceHandler): void {
-    this.taskSources.set(uses, handler);
-  }
-
-  registerCheckProvider(id: string, provider: { build: (input: unknown) => Promise<Check | null> }): void {
-    this.checkProviders.set(id, provider);
   }
 }

@@ -6,7 +6,7 @@ import type {
   WorkflowRunStatus as DomainWorkflowRunStatus,
   WorkflowStageId,
 } from './model';
-import type { Registry } from './registry';
+import type { TaskHandler, CheckHandler, TaskSourceHandler } from './registry';
 import type { WorkflowSourceDefinition } from './definition/workflow-definition-source';
 import type { WorkflowDefinition } from './model/workflow-definition';
 
@@ -23,7 +23,9 @@ export type WorkflowDefinitionInput =
 
 export interface CreateWorkflowRuntimeInput {
   store: WorkflowStore;
-  registry: Registry;
+  tasks?: Record<string, TaskHandler>;
+  checks?: Record<string, CheckHandler>;
+  taskSources?: Record<string, TaskSourceHandler>;
 }
 
 export interface WorkflowRuntime {
