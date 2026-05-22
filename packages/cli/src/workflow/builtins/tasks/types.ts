@@ -1,6 +1,8 @@
 import type { AgentSession, AgentSessionOptions } from '../../../agent-runtime';
-import type { StageContext, StageTaskResult } from '../../stage-context';
 import type { RequiredMarkerDefinition } from './agent-required-markers';
+
+type StageContext = any;
+type StageTaskResult = any;
 
 export interface AgentSessionTaskInput {
   taskId: string;

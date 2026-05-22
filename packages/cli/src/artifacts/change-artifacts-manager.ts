@@ -3,8 +3,9 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { slugify } from '../utils/slugify';
-import type { StageStateService } from '../services/stage-state-service';
 import type { Stage } from '../types';
+
+type StageStateService = { upsertTask: (...args: any[]) => void };
 
 const execFileAsync = promisify(execFile);
 

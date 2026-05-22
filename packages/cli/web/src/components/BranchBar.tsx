@@ -23,7 +23,6 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'worktree-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })

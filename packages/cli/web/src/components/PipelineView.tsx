@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useIssueStageState, useWorkflowRun, useIssueExecutions } from '../hooks/useQueries'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
-import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy, CheckRepairState, CheckRepairStatus, WorkflowDefinitionMetadata, WorkItemOrigin, WorkflowTaskStatus, WorkflowCheckStatus } from '../lib/types'
-import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
+import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, OpenSpecSyncOutput, MergeReadinessOutput, IntegrationHealthGatePolicy, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../lib/types'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -60,12 +58,6 @@ function getStageDuration(stage: PipelineStage, stageStateMap: Map<string, Stage
   if (!stageState || stageState.tasks.length === 0) return null
   const total = stageState.tasks.reduce((sum, t) => sum + (t.duration || 0), 0)
   return total > 0 ? total : null
-}
-
-function currentCheckRepair(stageStateMap: Map<string, StageStateRead>, issue: Issue): CheckRepairState | null {
-  return stageStateMap.get(issue.stage)?.checkRepair
-    ?? [...stageStateMap.values()].find(stage => stage.checkRepair)?.checkRepair
-    ?? null
 }
 
 function CheckmarkIcon({ className = 'h-5 w-5 text-green-500' }: { className?: string }) {
@@ -413,29 +405,6 @@ function formatOriginTitle(origin?: WorkItemOrigin | null): string | undefined {
   return `${origin.source} workflow item using ${origin.uses}`
 }
 
-function formatWorkflowDefinitionSource(source: WorkflowDefinitionMetadata['source']): string {
-  if (source.type === 'builtin') return source.id
-  if (source.type === 'project') return source.path
-  return source.id
-}
-
-function WorkflowDefinitionSummary({ definition }: { definition?: WorkflowDefinitionMetadata | null }) {
-  if (!definition) return null
-  const source = definition.source.type === 'builtin' ? 'built-in' : definition.source.type
-  const capturedAt = new Date(definition.capturedAt)
-  const capturedLabel = Number.isNaN(capturedAt.getTime()) ? definition.capturedAt : capturedAt.toLocaleString()
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-      <span className="font-medium text-gray-700">Workflow</span>
-      <span className="font-mono text-gray-700">{definition.workflowId}</span>
-      <span>{source}</span>
-      <span className="font-mono">{formatWorkflowDefinitionSource(definition.source)}</span>
-      <span>captured {capturedLabel}</span>
-    </div>
-  )
-}
-
 function InlineApproval({
   issueNumber,
   stage,
@@ -472,8 +441,6 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
     },
   })
 
@@ -483,8 +450,6 @@ function InlineApproval({
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
       setFeedback('')
     },
   })
@@ -956,90 +921,6 @@ function SpecialStatePanel({
 return null
 }
 
-function sha(value: string | null | undefined): string {
-  return value ? value.slice(0, 7) : 'unknown'
-}
-
-function WorkflowRunDeliveryEvidencePanel({ stageStateMap }: { stageStateMap: Map<string, StageStateRead> }) {
-  const deliveryStages = Array.from(stageStateMap.values()).filter(stage => stage.deliveryMetadata)
-  if (deliveryStages.length === 0) return null
-
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-      <h3 className="text-sm font-semibold text-gray-700">Delivery Evidence</h3>
-      <div className="space-y-3">
-        {deliveryStages.map(stage => (
-          <WorkflowRunStageDeliveryEvidence key={stage.stage} stage={stage} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function WorkflowRunStageDeliveryEvidence({ stage }: { stage: StageStateRead }) {
-  const delivery = stage.deliveryMetadata
-  if (!delivery) return null
-  const archiveOutput = delivery.archive?.output as { archivePath?: string } | null | undefined
-
-  return (
-    <div className="rounded-md bg-gray-50 border border-gray-100 p-3 space-y-2">
-      <div className="text-xs font-semibold text-gray-700 capitalize">{stage.stage}</div>
-      {delivery.specSync && (
-        <WorkflowRunDeliveryRow label="Spec Sync" status={delivery.specSync.status} />
-      )}
-      {delivery.archive && (
-        <WorkflowRunDeliveryRow label="Archive OpenSpec Change" status={delivery.archive.status}>
-          {archiveOutput?.archivePath && <div className="text-xs text-gray-600 ml-7 font-mono">{archiveOutput.archivePath}</div>}
-        </WorkflowRunDeliveryRow>
-      )}
-      {delivery.merge && (
-        <WorkflowRunDeliveryRow label="Merge to Target Branch" status={delivery.merge.status}>
-          <div className="text-xs text-gray-600 ml-7 font-mono">
-            {`${delivery.merge.targetBranch ?? 'target'}: ${sha(delivery.merge.baseSha)} -> ${sha(delivery.merge.candidateHeadSha)} -> ${sha(delivery.merge.landedSha)}`}
-          </div>
-        </WorkflowRunDeliveryRow>
-      )}
-      {delivery.remotePr && (
-        <WorkflowRunDeliveryRow label="Pull Request" status={delivery.remotePr.status}>
-          {delivery.remotePr.prUrl && <div className="text-xs text-gray-600 ml-7 font-mono">{delivery.remotePr.prUrl}</div>}
-        </WorkflowRunDeliveryRow>
-      )}
-      {delivery.remoteMerge && (
-        <WorkflowRunDeliveryRow label="Remote Merge" status={delivery.remoteMerge.status}>
-          <div className="text-xs text-gray-600 ml-7 font-mono">merged: {sha(delivery.remoteMerge.mergedSha)}</div>
-        </WorkflowRunDeliveryRow>
-      )}
-      {delivery.health && (
-        <WorkflowRunDeliveryRow label="Delivery health check" status={delivery.health.status} message={delivery.health.message} />
-      )}
-    </div>
-  )
-}
-
-function WorkflowRunDeliveryRow({
-  label,
-  status,
-  message,
-  children,
-}: {
-  label: string
-  status: WorkflowTaskStatus | WorkflowCheckStatus
-  message?: string | null
-  children?: React.ReactNode
-}) {
-  const failed = status === 'failed' || status === 'error'
-  return (
-    <div className={`rounded-md border p-3 space-y-1.5 ${failed ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
-      <div className="flex items-center gap-2">
-        <StageStatusIcon status={status === 'completed' || status === 'passed' ? 'completed' : status} />
-        <span className="text-xs font-medium text-gray-800">{label}</span>
-      </div>
-      {message && <div className="text-xs text-red-600 ml-7">{message}</div>}
-      {children}
-    </div>
-  )
-}
-
 function DoneEvidencePanel({ executions }: { executions: StageExecution[] }) {
   const integrateExecution = executions.filter(e => e.stage === Stage.Integrate).at(-1)
   const checkExecution = executions.filter(e => e.stage === Stage.Check).at(-1)
@@ -1363,31 +1244,15 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 }
 
 export function PipelineView({ issue }: { issue: Issue }) {
-  const { data: workflowRun } = useWorkflowRun(issue.number)
-  const { data: stageStateData } = useIssueStageState(issue.number)
-  const { data: executions = [] } = useIssueExecutions(issue.number)
-
   const stageStateMap = useMemo(() => {
-    if (workflowRun?.stageRuns) {
-      return workflowRunToStageStateMap(workflowRun)
-    }
-    const map = new Map<string, StageStateRead>()
-    if (stageStateData?.stages) {
-      for (const ss of stageStateData.stages) {
-        map.set(ss.stage, ss)
-      }
-    }
-    return map
-  }, [workflowRun, stageStateData])
+    return new Map<string, StageStateRead>()
+  }, [])
+  const executions: StageExecution[] = []
 
   const isClosed = issue.status === IssueStatus.Closed
   const isCompleted = issue.status === IssueStatus.Completed
   const isBacklog = issue.stage === Stage.Backlog
-  const hasDeliveryMetadata = Array.from(stageStateMap.values()).some(stage => Boolean(stage.deliveryMetadata))
-  const showWorkflowRunDeliveryEvidence = isCompleted || (
-    (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted)
-    && hasDeliveryMetadata
-  )
+  const hasDeliveryMetadata = false
   const readOnly = isClosed
 
   const getDefaultStage = useCallback((): PipelineStage => {
@@ -1486,8 +1351,6 @@ export function PipelineView({ issue }: { issue: Issue }) {
 
   return (
     <div className="space-y-4">
-      <WorkflowDefinitionSummary definition={workflowRun?.workflowDefinition} />
-
       <StageBar
         stageStateMap={stageStateMap}
         issue={issue}
@@ -1511,10 +1374,6 @@ export function PipelineView({ issue }: { issue: Issue }) {
         />
       )}
 
-      {showWorkflowRunDeliveryEvidence && (
-        <WorkflowRunDeliveryEvidencePanel stageStateMap={stageStateMap} />
-      )}
-
       {isCompleted && !hasDeliveryMetadata && (
         <DoneEvidencePanel executions={executions} />
       )}
@@ -1523,9 +1382,6 @@ export function PipelineView({ issue }: { issue: Issue }) {
         <IntegrateFailurePanel issue={issue} />
       )}
 
-      {issue.status === IssueStatus.Blocked && currentCheckRepair(stageStateMap, issue) && (
-        <CheckRepairPanel checkRepair={currentCheckRepair(stageStateMap, issue)!} />
-      )}
     </div>
   )
 }

@@ -11,11 +11,19 @@ import type {
 } from './types';
 
 export class WorkflowRunner implements WorkflowRunnerContract {
+  private signal?: AbortSignal;
+
   constructor(
     private readonly workflowRun: WorkflowRun,
     private readonly store: WorkflowStore,
     private readonly registry: HandlerRegistry,
+    private readonly definitionStages: import('../domain/workflow-definition').StageDefinition[] = [],
   ) {}
+
+  withSignal(signal: AbortSignal): this {
+    this.signal = signal;
+    return this;
+  }
 
   get id(): WorkflowRunId {
     return this.workflowRun.id;
@@ -56,6 +64,13 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       await this.save();
     }
     while (true) {
+      if (this.signal?.aborted) {
+        this.workflowRun.requestPause();
+        this.workflowRun.pause();
+        await this.save();
+        break;
+      }
+
       const work = this.workflowRun.next();
       if (work.kind === 'complete') {
         await this.save();
@@ -167,9 +182,32 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     } else if (result.status === 'pending') {
       this.workflowRun.pendingCheck(checkResult);
     } else {
-      this.workflowRun.failCheck(checkResult);
+      const retryInjected = this.tryInjectRetryTask(work.stage, work.check.name, result);
+      if (retryInjected) {
+        this.workflowRun.resetCheck(checkResult);
+        this.workflowRun.clearStageFailure();
+      } else {
+        this.workflowRun.failCheck(checkResult);
+      }
     }
     return result.status === 'pass';
+  }
+
+  private tryInjectRetryTask(stage: string, checkName: string, result: import('../domain/run/types').CheckResult): boolean {
+    const stageDef = this.definitionStages.find(def => def.stage === stage);
+    if (!stageDef) return false;
+    const checkDef = stageDef.checks.find(c => c.name === checkName);
+    if (!checkDef?.onFailure?.retry) return false;
+    const { limit, task } = checkDef.onFailure.retry;
+    const retryCount = this.workflowRun.retryCountForCheck(checkName);
+    if (retryCount >= limit) return false;
+    this.workflowRun.injectRetryTask(checkName, {
+      id: `${task.id}:${retryCount + 1}`,
+      title: task.title,
+      uses: task.uses,
+      with: { ...task.with, failedCheckResult: result },
+    });
+    return true;
   }
 
   private async pauseIfRequested(): Promise<boolean> {

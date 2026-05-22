@@ -1,75 +1,59 @@
+// New workflow runtime integration (replaces old WorkflowEngine)
 export {
-  WorkflowEngine,
-  type WorkflowEngineOptions,
-  type PipelineResult,
-} from './workflow-engine';
-
-export {
-  type StageRunner,
-} from './stage-runner';
+  WorkflowRuntime,
+  WorkflowRunner,
+} from '@mohist/workflow';
 
 export {
-  type StageContext,
-  type StageRunResult,
-  type CheckResult,
-  type CheckContext,
-  type CheckFailurePolicy,
-  type StageTaskResult,
-  type ChangeArtifactsManager,
-  type IssueRepo,
-  type WorktreeManager,
-  type ProjectRepo,
-  type CheckSuiteRepo,
-  type AuthoritativeAiReviewResult,
-  type AuthoritativeAiReviewOptions,
-  getLatestCheckResult,
-  replaceCurrentAiReviewTruth,
-  buildAuthoritativeAiReviewResult,
-} from './stage-context';
-
-export {
-  type Check,
-  type CheckResult as CheckTypeCheckResult,
-  type CheckContext as CheckTypeCheckContext,
-} from '@mohist/workflow/checks';
-
-export {
-  CheckpointManager,
-  createCheckpointManager,
-} from './checkpoint-manager';
-
-export { GitCommitter } from './git-committer';
-
-export {
-  parseVerdict,
-  parseResult,
-  extractFixSuggestions,
-  type ParsedDimension,
-  parseDimensions,
-  readReportFile,
-  cleanChangeDir,
-} from './utils';
-
-export { type PlanResult, type ReviewResult } from '../types/workflow-results';
-
-export {
-  GenericStageRunner,
-  type GenericStageRunnerOptions,
-  GENERIC_STAGE_RUNNER_REQUIRES_WORK_MESSAGE,
-} from './generic-stage-runner';
+  WorkflowStoreAdapter,
+} from './runtime/store';
 
 export {
   MOHIST_DEFAULT_WORKFLOW_DEFINITION,
-  DEFAULT_STAGE_DEFINITIONS,
-} from './builtins/workflows/mohist-default';
+} from './runtime/definition';
 
 export {
-  compileWorkflowDefinition,
-  type WorkflowDefinition,
-  type StageDefinition,
-  type ReactionInputSelector,
-} from '@mohist/workflow/internal/model';
+  createMohistTaskHandlers,
+  createMohistCheckHandlers,
+  createMohistTaskLoaders,
+} from './runtime/handlers';
+
+// Re-export types from new workflow package
+export type {
+  WorkflowRuntimeOptions,
+  WorkflowCreateInput,
+  WorkflowRunId,
+  WorkflowRunStatus,
+  WorkflowStageState,
+  WorkflowFailure,
+  WorkflowStore,
+  TaskHandler,
+  CheckHandler,
+  TaskLoader,
+  WorkflowTaskInput,
+  WorkflowCheckInput,
+  TaskLoadInput,
+  TaskLoadResult,
+  TaskResult,
+  CheckResult,
+} from '@mohist/workflow';
+
+// Legacy exports kept for compatibility (TODO: migrate all usages, then delete)
+export {
+  Stage,
+  STAGE_TRANSITIONS,
+  isValidTransition,
+} from '../types';
 
 export {
-  buildFailedCheckContext,
-} from '@mohist/workflow/reaction/reaction-context';
+  IssueStatus,
+  type Issue,
+  type Priority,
+  normalizePriority,
+} from '../types';
+
+export {
+  isCurrentStageApproval,
+  classifyMergeDelivery,
+  type MergeDeliveryStatus,
+} from './issue-lifecycle';

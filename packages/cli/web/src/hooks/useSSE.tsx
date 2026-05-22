@@ -175,7 +175,6 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'rebase_completed': {
             setRebaseConflict(null)
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            queryClient.invalidateQueries({ queryKey: ['issues', 'workflow-run'] })
             break
           }
           case 'rebase_conflict': {
@@ -189,7 +188,6 @@ function useSSEInner(projectId: string | null): LiveTaskState {
               toast.error(`Rebase conflict on Issue #${d.issueNumber}`)
             }
             queryClient.invalidateQueries({ queryKey: ['issues'] })
-            queryClient.invalidateQueries({ queryKey: ['issues', 'workflow-run'] })
             break
           }
           case 'agent_conflict_resolution_started': {
@@ -229,18 +227,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             break
           }
           case 'stage_task_update': {
-            const d = parsed as AgentDetailEventMap['stage_task_update']
-            const matches = queryClient.getQueriesData<Issue[]>({ queryKey: ['issues'] })
-            for (const [, data] of matches) {
-              if (Array.isArray(data)) {
-                const found = data.find((i) => i.id === d.issueId)
-                if (found) {
-                  queryClient.invalidateQueries({ queryKey: ['issues', found.number, 'executions'] })
-                  queryClient.invalidateQueries({ queryKey: ['issues', found.number, 'workflow-run'] })
-                  break
-                }
-              }
-            }
+            queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
           case 'base_drift_detected':
@@ -249,7 +236,6 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             if ('issueNumber' in d && d.issueNumber) {
               queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber] })
-              queryClient.invalidateQueries({ queryKey: ['issues', d.issueNumber, 'stage-state'] })
             }
             if (eventName === 'base_drift_detected') {
               const driftEvt = d as EventMap['base_drift_detected']

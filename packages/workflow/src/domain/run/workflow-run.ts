@@ -162,6 +162,18 @@ export class WorkflowRun {
     this.currentStage.failCheck(result);
   }
 
+  clearStageFailure(): void {
+    this.currentStage.failure = null;
+  }
+
+  injectRetryTask(checkName: string, task: LoadedTaskInput): void {
+    this.currentStage.injectRetryTask(checkName, task);
+  }
+
+  retryCountForCheck(checkName: string): number {
+    return this.currentStage.retryCountForCheck(checkName);
+  }
+
   approve(input: ApprovalInput = {}): void {
     this.currentStage.approve(input);
   }

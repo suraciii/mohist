@@ -43,11 +43,27 @@ export function resetAcpSessionRunner(): void {
   _acpSessionRunner = withSession;
 }
 import type { EventBus } from '../services/event-bus';
-import type { StageTaskResult } from '../workflow/stage-context';
 import type { StageExecutionRepo } from '../db/stage-execution-repo';
 import type { SessionObserver } from '../agent-runtime/session-observer';
 import { createWorkflowSessionObservers } from '../agent-runtime';
-import type { WorkflowApplicationRuntime } from '../workflow/stage-context';
+
+type StageTaskResult = {
+  taskId: string;
+  title: string;
+  status: 'completed' | 'failed' | 'skipped';
+  artifacts: string[];
+  events?: string[];
+  output?: unknown;
+  attemptEvidence?: { executionId?: string; acpSessionId?: string; coderSessionId?: string; processPid?: number };
+  attempts: number;
+  duration: number;
+  reason?: string;
+  causedBy?: { type: string; checkName?: string; taskId?: string; message?: string };
+  alreadyReported?: boolean;
+  failureCategory?: string;
+};
+
+type WorkflowApplicationRuntime = Pick<any, 'completeTask' | 'startTaskAttempt'>;
 import { Stage } from '../types';
 
 export {

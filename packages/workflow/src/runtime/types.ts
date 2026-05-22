@@ -33,6 +33,7 @@ export interface WorkflowRunner {
   readonly stages: WorkflowStageState[];
   readonly failure: WorkflowFailure | null;
 
+  withSignal(signal: AbortSignal): this;
   start(): Promise<void>;
   resume(): Promise<void>;
   pause(reason?: string): Promise<void>;

@@ -5,9 +5,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Stage, IssueStatus, type RecoveryProjection } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession, useIssueStageState, useWorkflowRun } from '../hooks/useQueries'
-import type { CheckRepairState } from '../lib/types'
-import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
+import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
 import { EditIssueDialog } from './EditIssueDialog'
 import { WorkflowConvergencePanel } from './WorkflowConvergencePanel'
 import { NotFoundPage } from './NotFoundPage'
@@ -114,19 +112,7 @@ export function IssueDetailPage() {
   useDocumentTitle(`Issue #${issueNumber} — Mohist`, isAgentRunningOnThis)
 
   const { data: commitsData } = useIssueCommits(issueNumber)
-  const { data: stageStateData } = useIssueStageState(issueNumber)
-  const { data: workflowRun } = useWorkflowRun(issueNumber)
-
-  const currentIssueStage = issue?.stage
-  const workflowRunCheckRepair = workflowRun && currentIssueStage ? workflowRunToStageStateMap(workflowRun).get(currentIssueStage)?.checkRepair : undefined
-  const stageStateCheckRepair = currentIssueStage ? stageStateData?.stages.find(s => s.stage === currentIssueStage)?.checkRepair : undefined
-  const checkRepair: CheckRepairState | undefined = workflowRunCheckRepair ?? stageStateCheckRepair
-  const checkRepairActionLabel = checkRepair?.fixTaskId === 'fix-review-findings'
-    ? 'Fix review findings'
-    : checkRepair?.fixTaskId
-      ? `Run ${checkRepair.fixTaskId}`
-      : 'Run repair'
-  const showCheckRepairActions = Boolean(checkRepair)
+  const showCheckRepairActions = false
 
   const startMutation = useMutation({
     mutationFn: () => api.startIssue(issueNumber),
@@ -193,8 +179,6 @@ export function IssueDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
     },
   })
 
@@ -202,41 +186,6 @@ export function IssueDetailPage() {
     mutationFn: () => api.rerunIssue(issueNumber),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
-    },
-  })
-
-  const retryCheckpointMutation = useMutation({
-    mutationFn: () => api.retryCheckpoint(issueNumber, issue?.stage ?? Stage.Check),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
-  const rerunReviewMutation = useMutation({
-    mutationFn: () => api.rerunStage(issueNumber, issue?.stage ?? Stage.Check),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    },
-  })
-
-  const approvalVerdictRepairMutation = useMutation({
-    mutationFn: () => api.runApprovalVerdictRepair(issueNumber, issue?.stage ?? Stage.Check),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'stage-state'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'workflow-run'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
     },
   })
@@ -836,37 +785,7 @@ export function IssueDetailPage() {
                             Execution was interrupted. This is not a failed result — the work item can be resumed or rerun.
                           </div>
                         )}
-                        {showProjectedCheckRepairActions ? (
-                          <>
-                            {canRetry && checkRepair!.repairAvailable && (
-                              <button
-                                onClick={() => approvalVerdictRepairMutation.mutate()}
-                                disabled={approvalVerdictRepairMutation.isPending}
-                                className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                              >
-                                {approvalVerdictRepairMutation.isPending ? 'Repairing...' : checkRepairActionLabel}
-                              </button>
-                            )}
-                            {canRetry && (
-                              <button
-                                onClick={() => retryCheckpointMutation.mutate()}
-                                disabled={retryCheckpointMutation.isPending}
-                                className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                              >
-                                {retryCheckpointMutation.isPending ? 'Retrying...' : 'Retry checkpoint'}
-                              </button>
-                            )}
-                            {canRerun && (
-                              <button
-                                onClick={() => rerunReviewMutation.mutate()}
-                                disabled={rerunReviewMutation.isPending}
-                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                              >
-                                {rerunReviewMutation.isPending ? 'Rerunning...' : 'Rerun stage'}
-                              </button>
-                            )}
-                          </>
-                        ) : (
+                        {showProjectedCheckRepairActions ? null : (
                           <>
                             {canRetry && (
                               <button
@@ -945,7 +864,6 @@ export function IssueDetailPage() {
               </div>
 
               <MergeStatePanel
-                issueNumber={issue.number}
                 mergeState={issue.mergeState}
                 stage={issue.stage}
                 status={issue.status}

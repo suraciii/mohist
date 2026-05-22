@@ -3,10 +3,31 @@ import * as path from 'path';
 import type { OpenSpecChange } from '../detector';
 import type { Task } from '../context-assembler';
 import { buildTaskContext, loadLearningsFromDir } from '../context-assembler';
-import type { StageContext, StageTaskResult } from '../../workflow/stage-context';
 import { FAILURE_CATEGORY_CONFIGS, type FailureCategory } from './types';
 import { categorizeFailure, readTasks } from './task-utils';
 import type { RalphLoadedTask } from './loader';
+
+type StageContext = {
+  issue: { id: string; number: number; title: string; body: string; projectId: string };
+  acpOptions: any;
+  worktreeManager: any;
+};
+
+type StageTaskResult = {
+  taskId: string;
+  title: string;
+  status: 'completed' | 'failed' | 'skipped';
+  artifacts: string[];
+  events?: string[];
+  output?: unknown;
+  attemptEvidence?: { executionId?: string; acpSessionId?: string; coderSessionId?: string; processPid?: number };
+  attempts: number;
+  duration: number;
+  reason?: string;
+  causedBy?: { type: string; checkName?: string; taskId?: string; message?: string };
+  alreadyReported?: boolean;
+  failureCategory?: string;
+};
 import type { AgentSessionOptions, AcpSessionResult } from '../../agent-runtime/agent-session';
 import type { WorktreeManager } from '../../git/worktree-manager';
 import type { SessionObserver } from '../../agent-runtime/session-observer';
