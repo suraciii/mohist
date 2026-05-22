@@ -1,5 +1,5 @@
 import { WorkflowRun } from '../domain';
-import { workflowDefinitionFromInput } from '../definition/input';
+import { parseWorkflowDefinition } from '../definition';
 import { Registry } from './registry';
 import { WorkflowRunner } from './runner';
 import type { WorkflowCreateInput, WorkflowRunId, WorkflowRuntimeOptions, WorkflowStore } from './types';
@@ -20,7 +20,7 @@ export class WorkflowRuntime {
   }
 
   async create(input: WorkflowCreateInput): Promise<WorkflowRunner> {
-    const definition = workflowDefinitionFromInput(input.definition);
+    const definition = parseWorkflowDefinition(input.definition);
     const run = new WorkflowRun(input.id, definition.stages);
     return new WorkflowRunner(run, this.store, this.registry);
   }

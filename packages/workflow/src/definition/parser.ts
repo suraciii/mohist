@@ -1,60 +1,79 @@
+import YAML from 'yaml';
 import type {
   CheckDefinition,
   StageDefinition,
+  StageEventPolicy,
   TaskDefinition,
   WorkflowDefinition,
-  WorkflowTasksFromSource,
-  StageEventPolicy,
   WorkflowStageId,
+  WorkflowTasksFromSource,
 } from '../domain';
+import { validateWorkflowDefinition } from '../domain';
 
-export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, never>;
+export type WorkflowDefinitionInput = WorkflowDefinition | WorkflowDefinitionSource | { yaml: string };
 
-export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'name'> & {
+export type WorkflowTaskSource = Omit<TaskDefinition, never>;
+
+export type WorkflowCheckSource = Omit<CheckDefinition, 'name'> & {
   id?: string;
   name?: string;
 };
 
-export interface WorkflowStageSourceDefinition {
+export interface WorkflowStageSource {
   id?: WorkflowStageId;
   stage?: WorkflowStageId;
-  tasks?: WorkflowTaskSourceDefinition[];
+  tasks?: WorkflowTaskSource[];
   tasksFrom?: WorkflowTasksFromSource;
-  checks?: WorkflowCheckSourceDefinition[];
+  checks?: WorkflowCheckSource[];
   on?: Record<string, StageEventPolicy>;
   approval?: boolean;
 }
 
-export interface WorkflowSourceDefinition {
+export interface WorkflowDefinitionSource {
   id: string;
   name?: string;
   artifacts?: Record<string, string>;
   defaults?: Record<string, unknown>;
-  stages: WorkflowStageSourceDefinition[];
+  stages: WorkflowStageSource[];
 }
 
-export function parseWorkflowDefinitionSource(
-  source: WorkflowSourceDefinition,
-): WorkflowDefinition {
-  return {
-    id: source.id,
-    name: source.name,
-    artifacts: source.artifacts ? { ...source.artifacts } : undefined,
-    defaults: source.defaults ? { ...source.defaults } : undefined,
-    stages: source.stages.map(stage => parseStageSource(stage)),
-  };
+export class WorkflowDefinitionParser {
+  parse(input: WorkflowDefinitionInput): WorkflowDefinition {
+    const definition = isWorkflowDefinition(input)
+      ? input
+      : this.parseSource(input);
+    validateWorkflowDefinition(definition);
+    return definition;
+  }
+
+  parseYaml(yaml: string): WorkflowDefinition {
+    return this.parseSource(normalizeWorkflowSource(YAML.parse(yaml)));
+  }
+
+  toYaml(source: WorkflowDefinitionSource): string {
+    return `workflow:\n${yamlValue(source, 1)}`;
+  }
+
+  private parseSource(input: WorkflowDefinitionSource | { yaml: string }): WorkflowDefinition {
+    if (isYamlWorkflowInput(input)) return this.parseYaml(input.yaml);
+    return {
+      id: input.id,
+      name: input.name,
+      artifacts: input.artifacts ? { ...input.artifacts } : undefined,
+      defaults: input.defaults ? { ...input.defaults } : undefined,
+      stages: input.stages.map(stage => parseStageSource(stage)),
+    };
+  }
 }
 
-export function workflowDefinitionSourceToYaml(source: WorkflowSourceDefinition): string {
-  return `workflow:\n${yamlValue(source, 1)}`;
+export function parseWorkflowDefinition(input: WorkflowDefinitionInput): WorkflowDefinition {
+  return new WorkflowDefinitionParser().parse(input);
 }
 
-function parseStageSource(
-  source: WorkflowStageSourceDefinition,
-): StageDefinition {
+function parseStageSource(source: WorkflowStageSource): StageDefinition {
   const stage = source.stage ?? source.id;
   if (!stage) {
-    throw new Error(`Workflow stage requires id`);
+    throw new Error('Workflow stage requires id');
   }
 
   const tasks = (source.tasks ?? []).map(task => ({
@@ -101,6 +120,37 @@ function cloneTasksFrom(tasksFrom: WorkflowTasksFromSource | undefined): Workflo
     uses: tasksFrom.uses,
     with: tasksFrom.with ? { ...tasksFrom.with } : undefined,
   };
+}
+
+function normalizeWorkflowSource(value: unknown): WorkflowDefinitionSource {
+  const source = isPlainObject(value) && isPlainObject(value.workflow)
+    ? value.workflow
+    : value;
+  if (!isWorkflowDefinitionSource(source)) {
+    throw new Error('Workflow YAML must define workflow id and stages');
+  }
+  return source;
+}
+
+function isWorkflowDefinition(value: unknown): value is WorkflowDefinition {
+  return Boolean(
+    isPlainObject(value)
+      && typeof value.id === 'string'
+      && Array.isArray(value.stages)
+      && value.stages.every(stage => isPlainObject(stage) && typeof stage.stage === 'string'),
+  );
+}
+
+function isYamlWorkflowInput(value: unknown): value is { yaml: string } {
+  return Boolean(value && typeof value === 'object' && 'yaml' in value && typeof value.yaml === 'string');
+}
+
+function isWorkflowDefinitionSource(value: unknown): value is WorkflowDefinitionSource {
+  return Boolean(
+    isPlainObject(value)
+      && typeof value.id === 'string'
+      && Array.isArray(value.stages),
+  );
 }
 
 function yamlValue(value: unknown, indentLevel: number): string {
