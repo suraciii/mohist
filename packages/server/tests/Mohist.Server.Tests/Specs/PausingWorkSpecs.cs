@@ -8,7 +8,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     public PausingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task RunningWorkflow_PauseRequested_WorkflowPausesBeforeNextTask()
+    public async Task RunningWorkflow_Pause_StopsAfterCurrentTask()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks:
@@ -32,7 +32,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task PausedWorkflow_Resumed_WorkflowContinuesFromPendingWork()
+    public async Task PausedWorkflow_Resume_ContinuesWithNextTask()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks:

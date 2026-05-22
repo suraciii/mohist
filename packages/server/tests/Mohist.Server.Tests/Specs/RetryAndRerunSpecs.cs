@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Errors;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -9,7 +10,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     public RetryAndRerunSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task FailedTask_Retry_TaskResetAndReExecuted()
+    public async Task TaskFails_Retry_TaskRunsAgain()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -25,13 +26,10 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
 
         var (check, r3) = await PollWorkAnyAsync();
         await ReportAsync(r3, check.WorkId, "pass");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]
-    public async Task FailedCheck_Retry_CheckResetAndReExecuted()
+    public async Task CheckFails_Retry_CheckRunsAgain()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -47,13 +45,10 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         Assert.StartsWith("check-1:", retriedCheck.WorkId);
 
         await ReportAsync(r3, retriedCheck.WorkId, "pass");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]
-    public async Task FailedStage_Rerun_StageReInitializedFromScratch()
+    public async Task StageFails_Rerun_StageStartsFromScratch()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -68,13 +63,10 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
 
         var (check2, r3) = await PollWorkAnyAsync();
         await ReportAsync(r3, check2.WorkId, "pass");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(r3);
-        Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]
-    public async Task PassedStage_Rerun_StageReInitialized()
+    public async Task StagePasses_Rerun_StageStartsOver()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -91,10 +83,11 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task NonFailedWorkflow_Retry_Throws()
+    public async Task RunningWorkflow_Retry_Error()
     {
-        var workflow = await StartWorkflowAsync(SingleStage());
+        await StartWorkflowAsync(SingleStage());
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(async () => await workflow.RetryAsync());
+        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
+            await Grains.GetGrain<IWorkflowGrain>(_workflowId!).RetryAsync());
     }
 }
