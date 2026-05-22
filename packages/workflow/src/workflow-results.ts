@@ -44,13 +44,6 @@ export interface StructuredWorkflowResult {
   facts?: Record<string, unknown>;
 }
 
-export interface ReactionTaskOutput extends StructuredWorkflowResult {
-  attemptedItemIds: string[];
-  resolvedItemIds: string[];
-  unresolvedItemIds: string[];
-  newItemIds?: string[];
-}
-
 export interface ResultContract {
   kind: 'marker';
   required: boolean;

@@ -1,31 +1,20 @@
-export type WorkflowUsePlacement = 'task' | 'check' | 'both';
-export type WorkflowUseSideEffect = 'none' | 'worktree' | 'spec-state' | 'archive' | 'branch' | 'remote-pr' | 'merge';
-export type WorkflowUseIdempotency = 'idempotent' | 'checkpointed' | 'irreversible' | 'unknown';
-export type WorkflowDeliveryRole = 'none' | 'spec-sync' | 'archive' | 'local-merge' | 'remote-pr' | 'remote-merge';
-export type WorkflowTaskSourceKind = 'openspec';
-
-export interface WorkflowUseEvidenceRequirement {
-  requiredFields?: string[];
-  anyOfFields?: string[];
-}
-
-export interface WorkflowUseDefinition {
+interface WorkflowUseDefinition {
   name: string;
-  allowedPlacement: WorkflowUsePlacement;
+  allowedPlacement: 'task' | 'check' | 'both';
   mutates: boolean;
-  sideEffect: WorkflowUseSideEffect;
-  idempotency: WorkflowUseIdempotency;
-  deliveryRole: WorkflowDeliveryRole;
+  sideEffect: 'none' | 'worktree' | 'spec-state' | 'archive' | 'branch' | 'remote-pr' | 'merge';
+  idempotency: 'idempotent' | 'checkpointed' | 'irreversible' | 'unknown';
+  deliveryRole: 'none' | 'spec-sync' | 'archive' | 'local-merge' | 'remote-pr' | 'remote-merge';
   createsCommitPoint?: boolean;
-  sourceKind?: WorkflowTaskSourceKind;
+  sourceKind?: 'openspec';
   raises?: string[];
-  evidence?: WorkflowUseEvidenceRequirement;
+  evidence?: { requiredFields?: string[]; anyOfFields?: string[] };
   description: string;
   inputs: string[];
   outputContract: string;
 }
 
-export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
+const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
   {
     name: 'mohist/agent',
     allowedPlacement: 'task',
@@ -228,12 +217,6 @@ export const BUILTIN_WORKFLOW_USES: WorkflowUseDefinition[] = [
 export function getWorkflowUseDefinition(name: string | undefined): WorkflowUseDefinition | undefined {
   if (!name) return undefined;
   return BUILTIN_WORKFLOW_USES.find(use => use.name === name);
-}
-
-export function workflowUsesThatRaise(eventName: string): string[] {
-  return BUILTIN_WORKFLOW_USES
-    .filter(use => use.allowedPlacement !== 'check' && use.raises?.includes(eventName))
-    .map(use => use.name);
 }
 
 export function isWorkflowUseAllowed(name: string, placement: 'task' | 'check'): boolean {

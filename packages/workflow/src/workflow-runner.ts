@@ -43,14 +43,14 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       this.workflowRun.start();
       await this.save();
     }
-    await this.run();
+    await this.executeLoop();
   }
 
   async resume(): Promise<void> {
-    await this.run();
+    await this.executeLoop();
   }
 
-  async run(): Promise<void> {
+  private async executeLoop(): Promise<void> {
     if (this.workflowRun.status === 'pending' || this.workflowRun.status === 'paused') {
       this.workflowRun.start();
       await this.save();
@@ -99,7 +99,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   async approve(): Promise<void> {
     this.workflowRun.approve();
     await this.save();
-    await this.run();
+    await this.executeLoop();
   }
 
   async reject(reason?: string): Promise<void> {
@@ -107,7 +107,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
     await this.save();
   }
 
-  async save(): Promise<void> {
+  private async save(): Promise<void> {
     await this.store.save(this.workflowRun);
   }
 

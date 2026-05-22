@@ -25,6 +25,14 @@ export interface MaterializedTaskInput {
   with?: Record<string, unknown>;
 }
 
+export type StageWork =
+  | { kind: 'stage-init'; definition: { tasksFrom?: { uses: string; with?: Record<string, unknown> } } }
+  | { kind: 'task'; task: { id: string; title: string; uses?: string; with?: Record<string, unknown> } }
+  | { kind: 'check'; check: { name: string; title: string; uses?: string; with?: Record<string, unknown> } }
+  | { kind: 'await-approval' }
+  | { kind: 'complete' }
+  | { kind: 'blocked'; reason: string };
+
 export type WorkflowWork =
   | { kind: 'stage-init'; stage: WorkflowStageId; definition: { tasksFrom?: { uses: string; with?: Record<string, unknown> } } }
   | { kind: 'task'; stage: WorkflowStageId; task: { id: string; title: string; uses?: string; with?: Record<string, unknown> } }
@@ -67,14 +75,4 @@ export interface StageRunState {
   checks: CheckRunState[];
   approval: ApprovalState | null;
   failure: FailureDetails | null;
-}
-
-export interface WorkflowRunState {
-  id: string;
-  status: WorkflowRunStatus;
-  currentStage: WorkflowStageId;
-  stageOrder: WorkflowStageId[];
-  stageRuns: StageRunState[];
-  failure: FailureDetails | null;
-  pauseRequested?: boolean;
 }

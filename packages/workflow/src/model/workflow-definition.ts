@@ -56,7 +56,6 @@ export interface StageDefinition {
   checks: CheckDefinition[];
   on?: Record<string, StageEventPolicy>;
   requiresApproval?: boolean;
-  approvalCheckName?: string;
 }
 
 export interface WorkflowDefinition {
@@ -98,8 +97,5 @@ export function validateWorkflowDefinition(definition: WorkflowDefinition): void
       checkNames.add(check.name);
     }
 
-    if (stage.approvalCheckName && stage.approvalCheckName !== 'user-approval' && !checkNames.has(stage.approvalCheckName)) {
-      throw new WorkflowDomainError(`WorkflowDefinition ${definition.id} approval references unknown check ${stage.stage}:${stage.approvalCheckName}`);
-    }
   }
 }
