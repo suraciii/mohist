@@ -7,7 +7,7 @@ public class FailureSpecs : WorkflowGrainSpecs
     public FailureSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task Given_Running_Task_When_Runner_Reports_Failure_Then_Workflow_Fails()
+    public async Task RunningTask_ReportsFailure_WorkflowFails()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -24,7 +24,7 @@ public class FailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Running_Check_When_Runner_Reports_Fail_Then_Workflow_Fails()
+    public async Task RunningCheck_ReportsFail_WorkflowFails()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
