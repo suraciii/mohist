@@ -18,7 +18,7 @@ export interface ApprovalInput {
   output?: unknown;
 }
 
-export interface MaterializedTaskInput {
+export interface LoadedTaskInput {
   id: string;
   title: string;
   uses?: string;

@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { type TaskHandler, type TaskLoadResult, type TaskLoader, WorkflowRuntime } from '../../src';
 import { completedTask, memoryStore, passingCheck } from '../support/workflow';
 
-describe('materializing work', () => {
-  it('given a tasksFrom source, when started, then loader materializes tasks before checks', async () => {
+describe('loading tasks', () => {
+  it('given a tasksFrom source, when started, then loader adds tasks before checks', async () => {
     const store = memoryStore();
     const loader: TaskLoader = {
       load: vi.fn(async input => {

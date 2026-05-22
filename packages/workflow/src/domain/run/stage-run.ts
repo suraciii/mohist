@@ -2,7 +2,7 @@ import type { WorkflowTasksFromSource } from '../workflow-definition';
 import { WorkflowDomainError } from '../errors';
 import { StageCheck } from './stage-check';
 import { TaskRun } from './task-run';
-import type { ApprovalInput, FailureDetails, MaterializedTaskInput, StageRunStatus, StageWork } from './types';
+import type { ApprovalInput, FailureDetails, LoadedTaskInput, StageRunStatus, StageWork } from './types';
 
 export class StageRun {
   readonly tasks: TaskRun[] = [];
@@ -51,10 +51,10 @@ export class StageRun {
     this._started = true;
   }
 
-  initTasks(materializedTasks: MaterializedTaskInput[]): void {
+  initTasks(loadedTasks: LoadedTaskInput[]): void {
     if (this._initialized) return;
     this.tasks.push(...this.staticTasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
-    this.tasks.push(...materializedTasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
+    this.tasks.push(...loadedTasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
     this.checks.push(...this.staticChecks.map(check => new StageCheck(check.name, check.title, check.uses, check.with)));
     this._initialized = true;
   }
