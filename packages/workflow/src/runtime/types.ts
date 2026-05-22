@@ -14,16 +14,11 @@ export type WorkflowRunStatus = DomainWorkflowRunStatus | 'completed';
 export type WorkflowStageState = StageRunState;
 export type WorkflowFailure = FailureDetails;
 
-export interface CreateWorkflowRuntimeInput {
+export interface WorkflowRuntimeOptions {
   store: WorkflowStore;
   tasks?: Record<string, TaskHandler>;
   checks?: Record<string, CheckHandler>;
   taskLoaders?: Record<string, TaskLoader>;
-}
-
-export interface WorkflowRuntime {
-  create(input: WorkflowCreateInput): Promise<WorkflowRunner>;
-  load(id: WorkflowRunId): Promise<WorkflowRunner | null>;
 }
 
 export interface WorkflowCreateInput {

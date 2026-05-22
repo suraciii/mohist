@@ -1,3 +1,3 @@
 export * from './types';
-export { createWorkflowRuntime } from './create-runtime';
+export { WorkflowRuntime } from './runtime';
 export { WorkflowRunner } from './runner';
