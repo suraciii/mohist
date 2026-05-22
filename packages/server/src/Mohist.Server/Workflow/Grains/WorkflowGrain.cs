@@ -5,7 +5,6 @@ using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
-[Reentrant]
 public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
@@ -13,8 +12,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private string? _runnerId;
     private string? _pendingWorkId;
     private string? _pendingWorkType;
+    private PendingDispatch? _pendingDispatch;
+    private IDisposable? _runnerWaitTimer;
     private readonly IRunnerRegistry _registry;
     private readonly ILogger<WorkflowGrain> _log;
+
+    private static readonly TimeSpan RunnerCheckInterval = TimeSpan.FromSeconds(1);
 
     public WorkflowGrain(IRunnerRegistry registry, ILogger<WorkflowGrain> log)
     {
@@ -34,14 +37,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         if (_run is null)
             throw new InvalidOperationException("Cannot start: no workflow definition provided");
-
-        if (_runnerId is null)
-            _runnerId = await _registry.FindIdleRunnerAsync(GrainFactory, null);
-
-        if (_runnerId is null)
-            throw new InvalidOperationException("No idle runner available");
-
-        _log.LogInformation("Workflow {Id} assigned to runner {RunnerId}", GrainKey, _runnerId);
 
         _run.Start();
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
@@ -134,6 +129,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             if (_run.PauseRequested)
             {
                 _run.Pause();
+                CancelPendingDispatch();
                 await ReleaseRunnerAsync();
                 _log.LogInformation("Workflow {Id} paused", GrainKey);
                 return;
@@ -144,36 +140,40 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             switch (work)
             {
                 case WorkflowWork.Complete:
+                    CancelPendingDispatch();
                     await ReleaseRunnerAsync();
                     _log.LogInformation("Workflow {Id} completed at stage={Stage}", GrainKey, work.Stage);
                     return;
 
                 case WorkflowWork.Failed f:
+                    CancelPendingDispatch();
                     await ReleaseRunnerAsync();
                     _log.LogWarning("Workflow {Id} failed: {Reason}", GrainKey, f.Reason.Message);
                     return;
 
                 case WorkflowWork.Blocked b:
+                    CancelPendingDispatch();
                     await ReleaseRunnerAsync();
                     _log.LogWarning("Workflow {Id} blocked at stage={Stage}: {Reason}", GrainKey, b.Stage, b.Reason);
                     return;
 
                 case WorkflowWork.AwaitApproval a:
+                    CancelPendingDispatch();
                     _log.LogInformation("Workflow {Id} awaiting approval at stage={Stage}", GrainKey, a.Stage);
                     return;
 
                 case WorkflowWork.StageInit si:
                     if (await HandleStageInitAsync(si))
                         return;
-                    if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); CancelPendingDispatch(); await ReleaseRunnerAsync(); return; }
                     continue;
 
                 case WorkflowWork.Task t:
-                    await DispatchAsync(work.Id, "task", work.Stage, work.Uses, work.With);
+                    await DispatchOrDeferAsync(work.Stage, t.Id, "task", t.Uses, t.With);
                     return;
 
                 case WorkflowWork.Check c:
-                    await DispatchAsync(work.Name, "check", work.Stage, work.Uses, work.With);
+                    await DispatchOrDeferAsync(work.Stage, c.Name, "check", c.Uses, c.With);
                     return;
             }
         }
@@ -187,8 +187,51 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             return false;
         }
 
-        await DispatchAsync($"load-{work.Stage}", "load", work.Stage, work.TasksFrom.Uses, work.TasksFrom.With);
+        await DispatchOrDeferAsync(work.Stage, $"load-{work.Stage}", "load", work.TasksFrom.Uses, work.TasksFrom.With);
         return true;
+    }
+
+    private async Task DispatchOrDeferAsync(string stage, string workId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
+    {
+        _runnerId ??= await _registry.FindIdleRunnerAsync(GrainFactory, null);
+
+        if (_runnerId is null)
+        {
+            _pendingDispatch = new PendingDispatch(stage, workId, workType, uses, with);
+            _runnerWaitTimer ??= RegisterTimer(OnRunnerAvailableAsync, null, RunnerCheckInterval, RunnerCheckInterval);
+            _log.LogInformation("No runner available, deferring {WorkType} {WorkId}", workType, workId);
+            return;
+        }
+
+        await DoDispatchAsync(stage, workId, workType, uses, with);
+    }
+
+    private async Task OnRunnerAvailableAsync(object? _)
+    {
+        if (_pendingDispatch is null) return;
+        if (_run?.PauseRequested == true) return;
+
+        _runnerId = await _registry.FindIdleRunnerAsync(GrainFactory, null);
+        if (_runnerId is null) return;
+
+        _runnerWaitTimer?.Dispose();
+        _runnerWaitTimer = null;
+
+        var p = _pendingDispatch;
+        _pendingDispatch = null;
+        _log.LogInformation("Runner {RunnerId} now available, dispatching deferred {WorkType}", _runnerId, p.WorkType);
+        await DoDispatchAsync(p.Stage, p.WorkId, p.WorkType, p.Uses, p.With);
+    }
+
+    private async Task DoDispatchAsync(string stage, string workId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
+    {
+        _pendingWorkId = workId;
+        _pendingWorkType = workType;
+
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId!);
+        await runner.DispatchAsync(new WorkDispatch(GrainKey, stage, workId, workType, uses, with));
+
+        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", workType, workId, _runnerId);
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)
@@ -244,25 +287,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
-    private async Task DispatchAsync(string workId, string workType, string stage, string? uses, Dictionary<string, JsonElement?>? with)
-    {
-        _pendingWorkId = workId;
-        _pendingWorkType = workType;
-
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId!);
-        await runner.DispatchAsync(new WorkDispatch(GrainKey, stage, workId, workType, uses, with));
-
-        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", workType, workId, _runnerId);
-    }
-
     private async Task ReleaseRunnerAsync()
     {
         if (_runnerId is null) return;
 
         var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId);
-        await runner.ReleaseAsync();
-        _log.LogInformation("Runner {RunnerId} released", _runnerId);
+        var id = _runnerId;
         _runnerId = null;
+        await runner.ReleaseAsync();
+        _log.LogInformation("Runner {RunnerId} released", id);
+    }
+
+    private void CancelPendingDispatch()
+    {
+        _runnerWaitTimer?.Dispose();
+        _runnerWaitTimer = null;
+        _pendingDispatch = null;
     }
 
     private bool TryInjectRetryTask(string stage, string checkName, CheckResult result)
@@ -314,4 +354,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         foreach (var kv in extra) merged[kv.Key] = kv.Value;
         return merged;
     }
+
+    private record PendingDispatch(string Stage, string WorkId, string WorkType, string? Uses, Dictionary<string, JsonElement?>? With);
 }

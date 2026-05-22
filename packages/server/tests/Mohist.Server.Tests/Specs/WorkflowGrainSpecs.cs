@@ -76,7 +76,14 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
     protected async Task ReportAsync(string runnerId, string workId, string status, string? message = null)
     {
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportAsync(workId, new WorkDispatchResult(status, message));
+        var result = new WorkDispatchResult(status, message);
+        var runId = await runner.ReportAsync(workId, result);
+
+        if (runId is not null)
+        {
+            var workflow = Grains.GetGrain<IWorkflowGrain>(runId);
+            await workflow.ReportResultAsync(workId, result);
+        }
     }
 
     protected static WorkflowDefinitionInput SingleStage(
@@ -121,19 +128,3 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
         ]);
     }
 }
-
-public record WorkflowDefinitionInput(List<StageDefinitionInput> Stages);
-
-public record StageDefinitionInput(
-    string Stage,
-    List<TaskDefinitionInput> Tasks,
-    List<CheckDefinitionInput> Checks,
-    string? TasksFromUses = null,
-    Dictionary<string, System.Text.Json.JsonElement?>? TasksFromWith = null,
-    bool RequiresApproval = false,
-    int RetryLimit = 0,
-    TaskDefinitionInput? RetryTask = null);
-
-public record TaskDefinitionInput(string Id, string Title, string? Uses = null, Dictionary<string, System.Text.Json.JsonElement?>? With = null);
-
-public record CheckDefinitionInput(string Name, string Title, string? Uses = null, Dictionary<string, System.Text.Json.JsonElement?>? With = null, int RetryLimit = 0, TaskDefinitionInput? RetryTask = null);

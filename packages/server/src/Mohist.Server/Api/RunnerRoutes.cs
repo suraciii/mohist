@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -42,9 +44,17 @@ public static class RunnerRoutes
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
         {
+            var result = new WorkDispatchResult(req.Status, req.Message, req.Output, req.ExitCode);
+
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.ReportAsync(req.WorkId, new WorkDispatchResult(
-                req.Status, req.Message, req.Output, req.ExitCode));
+            var runId = await runner.ReportAsync(req.WorkId, result);
+
+            if (runId is not null)
+            {
+                var workflow = grains.GetGrain<IWorkflowGrain>(runId);
+                await workflow.ReportResultAsync(req.WorkId, result);
+            }
+
             return Results.Ok();
         });
 
