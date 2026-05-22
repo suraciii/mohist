@@ -1,3 +1,4 @@
+using Mohist.Server.Runner.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -21,7 +22,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, task.WorkId, "completed");
 
         var check = await PollWorkAsync(runnerId);
-        Assert.Equal("plan-ok", check.Name);
+        Assert.Equal("plan-ok", check.WorkType);
         await ReportAsync(runnerId, check.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -54,11 +55,11 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, init2.WorkId, "completed");
 
         var task2 = await PollWorkAsync(runnerId);
-        Assert.Equal("compile", task2.Id);
+        Assert.Equal("compile", task2.WorkId);
         await ReportAsync(runnerId, task2.WorkId, "completed");
 
         var check2 = await PollWorkAsync(runnerId);
-        Assert.Equal("build-ok", check2.Name);
+        Assert.Equal("build-ok", check2.WorkType);
         await ReportAsync(runnerId, check2.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);

@@ -1,3 +1,4 @@
+using Mohist.Server.Runner.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -26,7 +27,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, init.WorkId, "completed");
 
         var task1 = await PollWorkAsync(runnerId);
-        Assert.Equal("task-1", task1.Id);
+        Assert.Equal("task-1", task1.WorkId);
         await ReportAsync(runnerId, task1.WorkId, "completed");
 
         await workflow.PauseAsync("user requested");
@@ -63,7 +64,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await workflow.ResumeAsync();
 
         var task2 = await PollWorkAsync(runnerId2);
-        Assert.Equal("task-2", task2.Id);
+        Assert.Equal("task-2", task2.WorkId);
         await ReportAsync(runnerId2, task2.WorkId, "completed");
 
         var check = await PollWorkAsync(runnerId2);

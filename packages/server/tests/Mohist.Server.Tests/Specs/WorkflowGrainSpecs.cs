@@ -1,36 +1,28 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Orleans.TestingHost;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Workflow.Domain.Definition;
-using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
-public class TestSiloConfigurator : ISiloBuilderConfigurator
-{
-    public void Configure(ISiloHostBuilder builder)
-    {
-        builder.ConfigureServices(services =>
-        {
-            services.AddSingleton<IRunnerRegistry, RunnerRegistry>();
-        });
-    }
-}
-
 public class WorkflowGrainFixture : IAsyncLifetime
 {
-    public TestCluster Cluster { get; private set; } = null!;
-    public IGrainFactory Grains => Cluster.GrainFactory;
+    public InProcessTestCluster Cluster { get; private set; } = null!;
+    public IGrainFactory Grains => Cluster.Client;
 
     public Task InitializeAsync()
     {
-        var builder = new TestClusterBuilder();
-        builder.AddSiloBuilderConfigurator<TestSiloConfigurator>();
+        var builder = new InProcessTestClusterBuilder();
+        builder.ConfigureSilo((options, siloBuilder) =>
+        {
+            siloBuilder.ConfigureServices(services =>
+            {
+                services.AddSingleton<IRunnerRegistry, RunnerRegistry>();
+            });
+        });
         Cluster = builder.Build();
-        Cluster.Deploy();
-        return Task.CompletedTask;
+        return Cluster.DeployAsync();
     }
 
     public Task DisposeAsync()
