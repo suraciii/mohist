@@ -1,6 +1,6 @@
 import type { WorkflowStageId } from './model';
 import { WorkflowRun } from './model';
-import type { Registry } from './registry';
+import type { HandlerRegistry } from './registry';
 import type {
   WorkflowRunId,
   WorkflowRunner as WorkflowRunnerContract,
@@ -14,7 +14,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   constructor(
     private readonly workflowRun: WorkflowRun,
     private readonly store: WorkflowStore,
-    private readonly registry: Registry,
+    private readonly registry: HandlerRegistry,
   ) {}
 
   get id(): WorkflowRunId {
