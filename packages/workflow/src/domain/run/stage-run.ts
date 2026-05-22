@@ -195,6 +195,33 @@ export class StageRun {
     ).length;
   }
 
+  retry(): void {
+    if (!this.failure) throw new WorkflowDomainError(`Stage ${this.stage} is not failed`);
+
+    const failedTask = this.tasks.find(t => t.status === 'failed');
+    if (failedTask) {
+      failedTask.reset();
+      this.failure = null;
+      return;
+    }
+
+    for (const check of this.checks) {
+      if (check.status === 'failed') {
+        check.reset();
+      }
+    }
+
+    this.failure = null;
+  }
+
+  reset(): void {
+    this.tasks.length = 0;
+    this.checks.length = 0;
+    this.failure = null;
+    this.approval = null;
+    this._initialized = false;
+  }
+
   private get pendingCheck(): StageCheck | null {
     return this.checks.find(candidate => candidate.status === 'pending') ?? null;
   }

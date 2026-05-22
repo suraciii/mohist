@@ -35,11 +35,14 @@ export interface WorkflowRunner {
 
   withSignal(signal: AbortSignal): this;
   start(): Promise<void>;
+  run(): Promise<void>;
   resume(): Promise<void>;
   pause(reason?: string): Promise<void>;
 
   approve(): Promise<void>;
   reject(reason?: string): Promise<void>;
+  retry(): Promise<void>;
+  rerun(): Promise<void>;
 }
 
 export interface WorkflowStore {

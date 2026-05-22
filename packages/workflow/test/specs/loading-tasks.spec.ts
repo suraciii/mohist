@@ -44,7 +44,7 @@ describe('loading tasks', () => {
       },
     });
 
-    await runner.start();
+    await runner.run();
 
     expect(runner.status).toBe('completed');
     expect(loader.load).toHaveBeenCalledTimes(1);

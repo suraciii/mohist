@@ -10,8 +10,78 @@ import type {
   WorkflowFailure,
 } from './types';
 
+class Mutex {
+  private queue: Promise<void> = Promise.resolve();
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.queue;
+    let release!: () => void;
+    this.queue = new Promise(r => { release = r; });
+    return prev.then(() => fn().finally(release));
+  }
+
+  idle(): Promise<void> {
+    return this.queue;
+  }
+}
+
+class LoopController {
+  private loop: Promise<void> | null = null;
+  private wakeResolve: (() => void) | null = null;
+  private idlePromise: Promise<void> | null = null;
+  private idleResolve: (() => void) | null = null;
+
+  start(run: () => Promise<void>): void {
+    if (this.loop) return;
+    this.markActive();
+    const loop = run().finally(() => {
+      if (this.loop === loop) {
+        this.loop = null;
+        this.wakeResolve = null;
+        this.markIdle();
+      }
+    });
+    this.loop = loop;
+  }
+
+  wake(): void {
+    const resolve = this.wakeResolve;
+    this.wakeResolve = null;
+    if (resolve) {
+      this.markActive();
+      resolve();
+    }
+  }
+
+  async wait(): Promise<void> {
+    this.markIdle();
+    await new Promise<void>(resolve => {
+      this.wakeResolve = resolve;
+    });
+  }
+
+  async nextYield(): Promise<void> {
+    await this.idlePromise;
+  }
+
+  private markActive(): void {
+    if (this.idlePromise) return;
+    this.idlePromise = new Promise(resolve => {
+      this.idleResolve = resolve;
+    });
+  }
+
+  private markIdle(): void {
+    this.idleResolve?.();
+    this.idlePromise = null;
+    this.idleResolve = null;
+  }
+}
+
 export class WorkflowRunner implements WorkflowRunnerContract {
   private signal?: AbortSignal;
+  private readonly lock = new Mutex();
+  private readonly loop = new LoopController();
 
   constructor(
     private readonly workflowRun: WorkflowRun,
@@ -47,40 +117,82 @@ export class WorkflowRunner implements WorkflowRunnerContract {
   }
 
   async start(): Promise<void> {
-    if (this.workflowRun.status === 'pending') {
-      this.workflowRun.start();
-      await this.save();
-    }
-    await this.executeLoop();
+    await this.lock.run(async () => {
+      if (this.workflowRun.status === 'pending') {
+        this.workflowRun.start();
+        await this.save();
+      }
+    });
+    this.ensureLoop();
+  }
+
+  async run(): Promise<void> {
+    await this.lock.run(async () => {
+      if (this.workflowRun.status === 'pending') {
+        this.workflowRun.start();
+        await this.save();
+      }
+    });
+    await this.runLoop();
+  }
+
+  async nextYield(): Promise<void> {
+    await this.loop.nextYield();
   }
 
   async resume(): Promise<void> {
-    await this.executeLoop();
+    await this.lock.run(async () => {
+      if (this.workflowRun.status === 'paused') {
+        this.workflowRun.start();
+        await this.save();
+      }
+    });
+    this.wake();
+  }
+
+  private async runLoop(): Promise<void> {
+    this.ensureLoop();
+    await this.nextYield();
+  }
+
+  private ensureLoop(): void {
+    this.loop.start(() => this.executeLoop());
+  }
+
+  private wake(): void {
+    this.loop.wake();
+    this.ensureLoop();
+  }
+
+  private async waitForWake(): Promise<void> {
+    await this.loop.wait();
   }
 
   private async executeLoop(): Promise<void> {
-    if (this.workflowRun.status === 'pending' || this.workflowRun.status === 'paused') {
-      this.workflowRun.start();
-      await this.save();
-    }
     while (true) {
       if (this.signal?.aborted) {
-        this.workflowRun.requestPause();
-        this.workflowRun.pause();
-        await this.save();
+        await this.lock.run(async () => {
+          this.workflowRun.requestPause();
+          this.workflowRun.pause();
+          await this.save();
+        });
         break;
       }
 
       const work = this.workflowRun.next();
       if (work.kind === 'complete') {
-        await this.save();
+        await this.lock.run(() => this.save());
         break;
       }
-      if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') break;
+      if (work.kind === 'failed' || work.kind === 'blocked' || work.kind === 'await-approval') {
+        await this.lock.run(() => this.save());
+        await this.waitForWake();
+        continue;
+      }
 
       if (work.kind === 'stage-init') {
         const continued = await this.initTasks(work);
-        await this.save();
+        await this.lock.run(() => this.save());
         if (await this.pauseIfRequested()) break;
         if (!continued) break;
         continue;
@@ -88,35 +200,55 @@ export class WorkflowRunner implements WorkflowRunnerContract {
 
       if (work.kind === 'task') {
         const continued = await this.runTask(work);
-        await this.save();
+        await this.lock.run(() => this.save());
         if (await this.pauseIfRequested()) break;
         if (!continued) break;
         continue;
       }
 
       const continued = await this.runCheck(work);
-      await this.save();
+      await this.lock.run(() => this.save());
       if (await this.pauseIfRequested()) break;
       if (!continued) break;
     }
-
-    await this.save();
   }
 
   async pause(_reason?: string): Promise<void> {
-    this.workflowRun.requestPause();
-    await this.save();
+    await this.lock.run(async () => {
+      this.workflowRun.requestPause();
+      await this.save();
+    });
   }
 
   async approve(): Promise<void> {
-    this.workflowRun.approve();
-    await this.save();
-    await this.executeLoop();
+    await this.lock.run(async () => {
+      this.workflowRun.approve();
+      await this.save();
+    });
+    this.wake();
   }
 
   async reject(reason?: string): Promise<void> {
-    this.workflowRun.reject({ output: reason });
-    await this.save();
+    await this.lock.run(async () => {
+      this.workflowRun.reject({ output: reason });
+      await this.save();
+    });
+  }
+
+  async retry(): Promise<void> {
+    await this.lock.run(async () => {
+      this.workflowRun.retry();
+      await this.save();
+    });
+    this.wake();
+  }
+
+  async rerun(): Promise<void> {
+    await this.lock.run(async () => {
+      this.workflowRun.rerun();
+      await this.save();
+    });
+    this.wake();
   }
 
   private async save(): Promise<void> {

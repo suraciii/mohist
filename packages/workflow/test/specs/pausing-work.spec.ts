@@ -42,7 +42,7 @@ describe('pausing work', () => {
       },
     });
 
-    const start = runner.start();
+    const start = runner.run();
     await taskStarted.promise;
     await runner.pause('user requested pause');
     finishTask.resolve({ status: 'completed' });
@@ -101,7 +101,7 @@ describe('pausing work', () => {
         ],
       },
     });
-    const start = runner.start();
+    const start = runner.run();
     await taskStarted.promise;
     await runner.pause('user requested pause');
     finishTask.resolve({ status: 'completed' });
@@ -110,6 +110,7 @@ describe('pausing work', () => {
     const loaded = await runtime.load('resume-run');
     expect(loaded).not.toBeNull();
     await loaded?.resume();
+    await loaded?.nextYield();
 
     expect(loaded?.status).toBe('completed');
     expect(slowTask.run).toHaveBeenCalledTimes(1);
