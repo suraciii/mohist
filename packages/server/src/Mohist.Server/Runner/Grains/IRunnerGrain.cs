@@ -9,7 +9,9 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<WorkDispatch?> PollAsync();
     Task ReportAsync(string workId, WorkDispatchResult result);
     Task<bool> IsAvailableAsync();
-    Task<bool> TryDispatchAsync(WorkDispatch work);
+    Task DispatchAsync(WorkDispatch work);
+    Task<WorkDispatchResult?> TryGetResultAsync(string workId);
+    Task ReleaseAsync();
 }
 
 public record RunnerInfo(
