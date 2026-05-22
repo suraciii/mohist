@@ -10,37 +10,31 @@ public class FailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunningTask_ReportsFailure_WorkflowFails()
     {
-        var runnerId = await RegisterRunnerAsync();
+        await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(SingleStage());
 
-        var init = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, init.WorkId, "completed");
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "failed", "compile error");
 
-        var task = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, task.WorkId, "failed", "compile error");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runner = Grains.GetGrain<IRunnerGrain>(r1);
         Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]
     public async Task RunningCheck_ReportsFail_WorkflowFails()
     {
-        var runnerId = await RegisterRunnerAsync();
+        await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(SingleStage());
 
-        var init = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, init.WorkId, "completed");
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
 
-        var task = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, task.WorkId, "completed");
+        var (check, r2) = await PollWorkAnyAsync();
+        await ReportAsync(r2, check.WorkId, "fail", "typecheck errors");
 
-        var check = await PollWorkAsync(runnerId);
-        await ReportAsync(runnerId, check.WorkId, "fail", "typecheck errors");
-
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.True(await runner.IsAvailableAsync());
     }
 }

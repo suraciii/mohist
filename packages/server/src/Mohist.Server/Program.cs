@@ -13,7 +13,6 @@ builder.Host.UseOrleans(silo =>
 });
 
 builder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
-builder.Services.AddSingleton<IRunnerRegistry, RunnerRegistry>();
 
 var app = builder.Build();
 
