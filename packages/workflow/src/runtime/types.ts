@@ -6,7 +6,7 @@ import type {
 import type { WorkflowRun as WorkflowRunModel } from '../domain/run/workflow-run';
 import type { WorkflowStageId } from '../domain/workflow-definition';
 import type { TaskHandler, CheckHandler, TaskLoader } from '../handlers';
-import type { WorkflowDefinitionInput } from '../definition';
+import type { WorkflowInput } from '../parser';
 
 export type Awaitable<T> = T | Promise<T>;
 export type WorkflowRunId = string;
@@ -23,7 +23,7 @@ export interface WorkflowRuntimeOptions {
 
 export interface WorkflowCreateInput {
   id: WorkflowRunId;
-  definition: WorkflowDefinitionInput;
+  definition: WorkflowInput;
 }
 
 export interface WorkflowRunner {

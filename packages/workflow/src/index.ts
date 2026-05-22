@@ -1,4 +1,4 @@
 export * from './domain';
-export * from './definition';
+export * from './parser';
 export * from './runtime';
 export * from './handlers';
