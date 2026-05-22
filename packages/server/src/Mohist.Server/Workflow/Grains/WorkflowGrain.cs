@@ -27,7 +27,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.CompletedTask;
     }
 
-    public async Task StartAsync(WorkflowDefinitionInput? definition = null)
+    public Task StartAsync(WorkflowDefinitionInput? definition = null)
     {
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
@@ -40,8 +40,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-
-        await EnsureRunnerAsync();
+        return Task.CompletedTask;
     }
 
     public Task ResumeAsync()
@@ -104,22 +103,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _assignedRunnerId = runnerId;
         _log.LogInformation("Workflow {Id} assigned runner {RunnerId}", GrainKey, runnerId);
         return Task.CompletedTask;
-    }
-
-    private async Task EnsureRunnerAsync()
-    {
-        if (_assignedRunnerId is not null) return;
-
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
-        var runnerId = await registry.FindRunnerAsync([]);
-        if (runnerId is null)
-        {
-            _log.LogWarning("Workflow {Id} no runner available, waiting for manual assign", GrainKey);
-            return;
-        }
-
-        _assignedRunnerId = runnerId;
-        _log.LogInformation("Workflow {Id} auto-assigned runner {RunnerId}", GrainKey, runnerId);
     }
 
     public Task<WorkDispatch?> GetWorkAsync()
