@@ -8,14 +8,11 @@ import type {
   WorkflowStageId,
 } from '../domain';
 
-export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
-  source?: TaskDefinition['source'];
-};
+export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, never>;
 
-export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'source' | 'name'> & {
+export type WorkflowCheckSourceDefinition = Omit<CheckDefinition, 'name'> & {
   id?: string;
   name?: string;
-  source?: CheckDefinition['source'];
 };
 
 export interface WorkflowStageSourceDefinition {
@@ -36,21 +33,15 @@ export interface WorkflowSourceDefinition {
   stages: WorkflowStageSourceDefinition[];
 }
 
-export interface ParseWorkflowDefinitionOptions {
-  taskSource?: TaskDefinition['source'];
-  checkSource?: CheckDefinition['source'];
-}
-
 export function parseWorkflowDefinitionSource(
   source: WorkflowSourceDefinition,
-  options: ParseWorkflowDefinitionOptions = {},
 ): WorkflowDefinition {
   return {
     id: source.id,
     name: source.name,
     artifacts: source.artifacts ? { ...source.artifacts } : undefined,
     defaults: source.defaults ? { ...source.defaults } : undefined,
-    stages: source.stages.map(stage => parseStageSource(stage, options)),
+    stages: source.stages.map(stage => parseStageSource(stage)),
   };
 }
 
@@ -60,7 +51,6 @@ export function workflowDefinitionSourceToYaml(source: WorkflowSourceDefinition)
 
 function parseStageSource(
   source: WorkflowStageSourceDefinition,
-  options: ParseWorkflowDefinitionOptions,
 ): StageDefinition {
   const stage = source.stage ?? source.id;
   if (!stage) {
@@ -69,7 +59,6 @@ function parseStageSource(
 
   const tasks = (source.tasks ?? []).map(task => ({
     ...task,
-    source: task.source ?? options.taskSource,
     with: task.with ? { ...task.with } : undefined,
     onSuccess: task.onSuccess ? {
       emit: task.onSuccess.emit ? [...task.onSuccess.emit] : undefined,
@@ -86,7 +75,6 @@ function parseStageSource(
       ...check,
       name,
       id: undefined,
-      source: check.source ?? options.checkSource,
       with: check.with ? { ...check.with } : undefined,
     };
   });
