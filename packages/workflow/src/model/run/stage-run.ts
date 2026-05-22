@@ -1,7 +1,7 @@
-import type { StageDefinition, WorkflowStageId } from '../workflow-definition';
+import type { WorkflowStageId, WorkflowTasksFromSource } from '../workflow-definition';
 import { StageCheck } from './stage-check';
 import { TaskRun } from './task-run';
-import { type ApprovalState, type FailureDetails, type MaterializedTaskInput, type StageRunStatus } from './types';
+import type { ApprovalState, FailureDetails, MaterializedTaskInput, StageRunStatus } from './types';
 
 export class StageRun {
   readonly tasks: TaskRun[];
@@ -12,15 +12,16 @@ export class StageRun {
   initialized = false;
 
   constructor(
-    readonly definition: StageDefinition,
+    readonly stage: WorkflowStageId,
     readonly order: number,
+    private readonly staticTasks: { id: string; title: string; uses?: string; with?: Record<string, unknown> }[],
+    private readonly staticChecks: { name: string; title: string; uses?: string; with?: Record<string, unknown> }[],
+    readonly tasksFrom?: WorkflowTasksFromSource,
+    readonly requiresApproval?: boolean,
+    readonly approvalCheckName?: string,
   ) {
     this.tasks = [];
     this.checks = [];
-  }
-
-  get stage(): WorkflowStageId {
-    return this.definition.stage;
   }
 
   start(): void {
@@ -29,9 +30,9 @@ export class StageRun {
 
   initTasks(materializedTasks: MaterializedTaskInput[]): void {
     if (this.initialized) return;
-    this.tasks.push(...this.definition.tasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
+    this.tasks.push(...this.staticTasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
     this.tasks.push(...materializedTasks.map(task => new TaskRun(task.id, task.title, task.uses, task.with)));
-    this.checks.push(...this.definition.checks.map(check => new StageCheck(check.name, check.title, check.uses, check.with)));
+    this.checks.push(...this.staticChecks.map(check => new StageCheck(check.name, check.title, check.uses, check.with)));
     this.initialized = true;
   }
 

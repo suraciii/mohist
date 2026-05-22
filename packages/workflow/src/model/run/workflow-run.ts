@@ -18,7 +18,15 @@ export class WorkflowRun {
     if (definitionStages.length === 0) {
       throw new WorkflowDomainError('WorkflowRun requires at least one stage definition');
     }
-    this.stageRuns = definitionStages.map((definition, index) => new StageRun(definition, index));
+    this.stageRuns = definitionStages.map((def, index) => new StageRun(
+      def.stage,
+      index,
+      def.tasks,
+      def.checks,
+      def.tasksFrom,
+      def.requiresApproval,
+      def.approvalCheckName,
+    ));
     this.currentStage = this.stageRuns[0];
   }
 
@@ -90,9 +98,9 @@ export class WorkflowRun {
     if (stageRun.status !== 'running') return { kind: 'blocked', stage: stageRun.stage, reason: 'stage-not-running' };
 
     if (!stageRun.initialized) {
-      const source = typeof stageRun.definition.tasksFrom === 'string'
-        ? { uses: stageRun.definition.tasksFrom }
-        : stageRun.definition.tasksFrom;
+      const source = typeof stageRun.tasksFrom === 'string'
+        ? { uses: stageRun.tasksFrom }
+        : stageRun.tasksFrom;
       return {
         kind: 'stage-init',
         stage: stageRun.stage,
@@ -318,7 +326,7 @@ export class WorkflowRun {
 
   private requireApprovalCheck() {
     const stageRun = this.currentStageRun();
-    const approvalCheckName = stageRun.definition.approvalCheckName ?? 'user-approval';
+    const approvalCheckName = stageRun.approvalCheckName ?? 'user-approval';
     const check = stageRun.checks.find(candidate => candidate.name === approvalCheckName);
     if (!check) throw new WorkflowDomainError(`No approval check in stage ${stageRun.stage}`);
     return check;
@@ -327,8 +335,8 @@ export class WorkflowRun {
   private isCurrentCheckApproval(): boolean {
     const stageRun = this.currentStageRun();
     const check = stageRun.checks.find(candidate => candidate.status === 'pending');
-    if (!check || !stageRun.definition.requiresApproval) return false;
-    return check.name === (stageRun.definition.approvalCheckName ?? 'user-approval');
+    if (!check || !stageRun.requiresApproval) return false;
+    return check.name === (stageRun.approvalCheckName ?? 'user-approval');
   }
 
   private currentStageRun(): StageRun {
