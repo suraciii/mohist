@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type TaskHandler, type TaskLoadResult, type TaskLoader, WorkflowRuntime } from '../../src';
-import { completedTask, memoryStore, passingCheck } from '../support/workflow';
+import { completedTask, memoryStore, passingCheck } from '../utils';
 
 describe('loading tasks', () => {
   it('given a tasksFrom source, when started, then loader adds tasks before checks', async () => {
