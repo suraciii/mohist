@@ -5,7 +5,7 @@ import { WorkflowRunner } from './workflow-runner';
 import type { CreateWorkflowRuntimeInput, WorkflowCreateInput, WorkflowRuntime } from './workflow-types';
 
 export * from './workflow-types';
-export type { TaskHandler, CheckHandler, TaskSourceHandler } from './registry';
+export type { TaskHandler, CheckHandler, TaskLoader } from './registry';
 
 export function createWorkflowRuntime(input: CreateWorkflowRuntimeInput): WorkflowRuntime {
   const registry = new Registry();
@@ -16,8 +16,8 @@ export function createWorkflowRuntime(input: CreateWorkflowRuntimeInput): Workfl
   for (const [uses, handler] of Object.entries(input.checks ?? {})) {
     registry.registerCheck(uses, handler);
   }
-  for (const [uses, handler] of Object.entries(input.taskSources ?? {})) {
-    registry.registerTaskSource(uses, handler);
+  for (const [uses, loader] of Object.entries(input.taskLoaders ?? {})) {
+    registry.registerTaskLoader(uses, loader);
   }
 
   return {

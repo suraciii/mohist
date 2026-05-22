@@ -1,4 +1,4 @@
-import type { WorkflowTaskSourceResult, WorkflowTaskInput, WorkflowCheckInput } from './workflow-types';
+import type { TaskLoadResult, WorkflowTaskInput, WorkflowCheckInput } from './workflow-types';
 
 export interface TaskHandler {
   run(input: WorkflowTaskInput): Promise<{ status: 'completed' | 'failed'; reason?: string }>;
@@ -8,26 +8,24 @@ export interface CheckHandler {
   run(input: WorkflowCheckInput): Promise<{ status: 'pass' | 'fail' | 'error' | 'pending'; message?: string; output?: unknown }>;
 }
 
-export interface TaskSourceHandler {
-  create(context: { run: unknown }): {
-    createTasks(input: {
-      run: unknown;
-      stage: string;
-      definition: { uses: string; with?: Record<string, unknown> };
-    }): Promise<WorkflowTaskSourceResult>;
-  };
+export interface TaskLoader {
+  load(input: {
+    run: unknown;
+    stage: string;
+    definition: { uses: string; with?: Record<string, unknown> };
+  }): Promise<TaskLoadResult>;
 }
 
 export interface HandlerRegistry {
   task(uses: string | undefined): TaskHandler | null;
   check(uses: string | undefined): CheckHandler | null;
-  taskSource(uses: string | undefined): TaskSourceHandler | null;
+  taskLoader(uses: string | undefined): TaskLoader | null;
 }
 
 export class Registry implements HandlerRegistry {
   private readonly tasks = new Map<string, TaskHandler>();
   private readonly checks = new Map<string, CheckHandler>();
-  private readonly taskSources = new Map<string, TaskSourceHandler>();
+  private readonly taskLoaders = new Map<string, TaskLoader>();
 
   registerTask(uses: string, handler: TaskHandler): void {
     this.tasks.set(uses, handler);
@@ -37,8 +35,8 @@ export class Registry implements HandlerRegistry {
     this.checks.set(uses, handler);
   }
 
-  registerTaskSource(uses: string, handler: TaskSourceHandler): void {
-    this.taskSources.set(uses, handler);
+  registerTaskLoader(uses: string, loader: TaskLoader): void {
+    this.taskLoaders.set(uses, loader);
   }
 
   task(uses: string | undefined): TaskHandler | null {
@@ -51,8 +49,8 @@ export class Registry implements HandlerRegistry {
     return this.checks.get(uses) ?? null;
   }
 
-  taskSource(uses: string | undefined): TaskSourceHandler | null {
+  taskLoader(uses: string | undefined): TaskLoader | null {
     if (!uses) return null;
-    return this.taskSources.get(uses) ?? null;
+    return this.taskLoaders.get(uses) ?? null;
   }
 }

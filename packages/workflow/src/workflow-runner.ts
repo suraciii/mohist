@@ -117,12 +117,12 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       return true;
     }
 
-    const source = this.registry.taskSource(work.definition.tasksFrom.uses);
-    if (!source) {
-      this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is not registered`);
+    const loader = this.registry.taskLoader(work.definition.tasksFrom.uses);
+    if (!loader) {
+      this.workflowRun.failStage(`Task loader ${work.definition.tasksFrom.uses} is not registered`);
       return false;
     }
-    const result = await source.create({ run: this }).createTasks({
+    const result = await loader.load({
       run: this,
       stage: work.stage,
       definition: {
@@ -130,14 +130,12 @@ export class WorkflowRunner implements WorkflowRunnerContract {
         with: work.definition.tasksFrom.with,
       },
     });
-    if (result.state === 'missing') {
-      this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is missing`);
-    } else if (result.state === 'invalid') {
-      this.workflowRun.failStage(`Task source ${work.definition.tasksFrom.uses} is invalid`);
-    } else if (result.state === 'empty') {
-      this.workflowRun.initTasks();
-    } else {
+    if (result.state === 'missing' || result.state === 'invalid') {
+      this.workflowRun.failStage(result.message ?? `Task loader ${work.definition.tasksFrom.uses}: ${result.state}`);
+    } else if (result.state === 'loaded') {
       this.workflowRun.initTasks(result.tasks);
+    } else {
+      this.workflowRun.initTasks();
     }
     return true;
   }
