@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -26,9 +27,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public override Task OnActivateAsync(CancellationToken ct)
     {
-        _heartbeatTimer = RegisterTimer(
-            CheckHeartbeatAsync,
-            null,
+        _heartbeatTimer = this.RegisterGrainTimer(
+            _ => CheckHeartbeatAsync(),
             HeartbeatCheckInterval,
             HeartbeatCheckInterval);
         return Task.CompletedTask;
@@ -123,7 +123,8 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.CompletedTask;
     }
 
-    private async Task CheckHeartbeatAsync(object? _)
+#pragma warning disable CS8602
+    private async Task CheckHeartbeatAsync()
     {
         if (_status == RunnerStatus.Offline) return;
 
@@ -151,4 +152,5 @@ public class RunnerGrain : Grain, IRunnerGrain
             await workflowGrain.ReportResultAsync(timedOutWork.WorkId, result);
         }
     }
+#pragma warning restore CS8602
 }

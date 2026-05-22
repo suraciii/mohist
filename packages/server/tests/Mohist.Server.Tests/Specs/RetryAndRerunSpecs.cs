@@ -1,3 +1,4 @@
+using Mohist.Server.Runner.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -22,7 +23,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await workflow.RetryAsync();
 
         var retriedTask = await PollWorkAsync(runnerId);
-        Assert.Equal("task-1", retriedTask.Id);
+        Assert.Equal("task-1", retriedTask.WorkId);
         Assert.Equal("task", retriedTask.WorkType);
 
         await ReportAsync(runnerId, retriedTask.WorkId, "completed");
@@ -53,7 +54,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await workflow.RetryAsync();
 
         var retriedCheck = await PollWorkAsync(runnerId);
-        Assert.Equal("check-1", retriedCheck.Name);
+        Assert.Equal("check-1", retriedCheck.WorkType);
         Assert.Equal("check", retriedCheck.WorkType);
 
         await ReportAsync(runnerId, retriedCheck.WorkId, "pass");
