@@ -182,6 +182,19 @@ export class WorkflowRun {
     this.currentStage.reject(input);
   }
 
+  retry(): void {
+    if (this.status !== 'failed') {
+      throw new WorkflowDomainError(`WorkflowRun is ${this.status}, retry requires failed`);
+    }
+    this.currentStage.retry();
+    this._paused = false;
+  }
+
+  rerun(): void {
+    this.currentStage.reset();
+    this._paused = false;
+  }
+
   passStage(): boolean {
     if (!this.currentStage.isComplete) return false;
     if (this.currentStage.requiresApproval && this.currentStage.approval?.status !== 'approved') return false;

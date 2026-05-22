@@ -34,7 +34,7 @@ describe('approval gates', () => {
       },
     });
 
-    await runner.start();
+    await runner.run();
 
     expect(runner.status).toBe('running');
     expect(runner.currentStage).toBe('plan');
@@ -89,11 +89,12 @@ describe('approval gates', () => {
         ],
       },
     });
-    await runner.start();
+    await runner.run();
 
     const loaded = await runtime.load('approve-run');
     expect(loaded).not.toBeNull();
     await loaded?.approve();
+    await loaded?.nextYield();
 
     expect(loaded?.status).toBe('completed');
     expect(loaded?.currentStage).toBe('build');
