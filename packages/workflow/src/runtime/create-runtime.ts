@@ -1,11 +1,8 @@
-import { WorkflowRun } from './model';
+import { WorkflowRun } from '../domain';
 import { Registry } from './registry';
-import { workflowDefinitionFromInput } from './workflow-definition-input';
-import { WorkflowRunner } from './workflow-runner';
-import type { CreateWorkflowRuntimeInput, WorkflowCreateInput, WorkflowRuntime } from './workflow-types';
-
-export * from './workflow-types';
-export type { TaskHandler, CheckHandler, TaskLoader } from './registry';
+import { WorkflowRunner } from './runner';
+import { workflowDefinitionFromInput } from '../definition/input';
+import type { CreateWorkflowRuntimeInput, WorkflowCreateInput, WorkflowRuntime } from './types';
 
 export function createWorkflowRuntime(input: CreateWorkflowRuntimeInput): WorkflowRuntime {
   const registry = new Registry();

@@ -25,6 +25,18 @@ export interface MaterializedTaskInput {
   with?: Record<string, unknown>;
 }
 
+export interface TaskResult {
+  status: 'completed' | 'failed';
+  reason?: string;
+}
+
+export interface CheckResult {
+  name: string;
+  status: 'pass' | 'fail' | 'error' | 'pending';
+  message?: string;
+  output?: unknown;
+}
+
 export type StageWork =
   | { kind: 'stage-init'; definition: { tasksFrom?: { uses: string; with?: Record<string, unknown> } } }
   | { kind: 'task'; task: { id: string; title: string; uses?: string; with?: Record<string, unknown> } }

@@ -6,7 +6,7 @@ import type {
   WorkflowTasksFromSource,
   StageEventPolicy,
   WorkflowStageId,
-} from '../model';
+} from '../domain';
 
 export type WorkflowTaskSourceDefinition = Omit<TaskDefinition, 'source'> & {
   source?: TaskDefinition['source'];
@@ -90,16 +90,6 @@ function parseStageSource(
       with: check.with ? { ...check.with } : undefined,
     };
   });
-  if (source.approval && !checks.some(check => check.name === 'user-approval')) {
-    checks.push({
-      name: 'user-approval',
-      id: undefined,
-      title: 'User approval',
-      source: options.checkSource,
-      uses: 'mohist/approval',
-      with: undefined,
-    });
-  }
 
   return {
     stage,

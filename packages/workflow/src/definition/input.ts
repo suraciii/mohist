@@ -1,7 +1,11 @@
 import YAML from 'yaml';
-import { validateWorkflowDefinition, type WorkflowDefinition } from './model';
-import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './definition/workflow-definition-source';
-import type { WorkflowDefinitionInput } from './workflow-types';
+import { validateWorkflowDefinition, type WorkflowDefinition } from '../domain';
+import { parseWorkflowDefinitionSource, type WorkflowSourceDefinition } from './source';
+
+export type WorkflowDefinitionInput =
+  | WorkflowDefinition
+  | WorkflowSourceDefinition
+  | { yaml: string };
 
 export function workflowDefinitionFromInput(input: WorkflowDefinitionInput): WorkflowDefinition {
   if (isWorkflowDefinition(input)) {

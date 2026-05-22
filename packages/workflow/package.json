@@ -10,79 +10,34 @@
       "default": "./dist/index.js"
     },
     "./package.json": "./package.json",
+    "./domain": {
+      "types": "./src/domain/index.ts",
+      "default": "./dist/domain/index.js"
+    },
+    "./definition": {
+      "types": "./src/definition/index.ts",
+      "default": "./dist/definition/index.js"
+    },
     "./runtime": {
-      "types": "./src/runtime.ts",
-      "default": "./dist/runtime.js"
+      "types": "./src/runtime/index.ts",
+      "default": "./dist/runtime/index.js"
     },
-    "./workflows": {
-      "types": "./src/workflows.ts",
-      "default": "./dist/workflows.js"
+    "./handlers": {
+      "types": "./src/handlers/index.ts",
+      "default": "./dist/handlers/index.js"
     },
-    "./workflow-results": {
-      "types": "./src/workflow-results.ts",
-      "default": "./dist/workflow-results.js"
-    },
-    "./result-contracts": {
-      "types": "./src/result-contracts.ts",
-      "default": "./dist/result-contracts.js"
-    },
-    "./uses-catalog": {
-      "types": "./src/uses-catalog.ts",
-      "default": "./dist/uses-catalog.js"
-    },
-    "./internal/model": {
-      "types": "./src/model/index.ts",
-      "default": "./dist/model/index.js"
-    },
-    "./internal/model/*": {
-      "types": "./src/model/*.ts",
-      "default": "./dist/model/*.js"
-    },
-    "./definition/*": {
-      "types": "./src/definition/*.ts",
-      "default": "./dist/definition/*.js"
-    },
-    "./runner/*": {
-      "types": "./src/runner/*.ts",
-      "default": "./dist/runner/*.js"
-    },
-    "./reaction/*": {
-      "types": "./src/reaction/*.ts",
-      "default": "./dist/reaction/*.js"
-    },
-    "./tasks": {
-      "types": "./src/tasks/index.ts",
-      "default": "./dist/tasks/index.js"
-    },
-    "./tasks/*": {
-      "types": "./src/tasks/*.ts",
-      "default": "./dist/tasks/*.js"
-    },
-    "./checks": {
-      "types": "./src/checks/index.ts",
-      "default": "./dist/checks/index.js"
-    },
-    "./checks/*": {
-      "types": "./src/checks/*.ts",
-      "default": "./dist/checks/*.js"
+    "./catalog": {
+      "types": "./src/catalog/index.ts",
+      "default": "./dist/catalog/index.js"
     }
   },
   "typesVersions": {
     "*": {
-      "definition/*": ["src/definition/*"],
-      "runner/*": ["src/runner/*"],
-      "reaction/*": ["src/reaction/*"],
-      "internal/model": ["src/model/index.ts"],
-      "internal/model/*": ["src/model/*"],
-      "tasks": ["src/tasks/index.ts"],
-      "tasks/*": ["src/tasks/*"],
-      "checks": ["src/checks/index.ts"],
-      "checks/*": ["src/checks/*"],
-      "workflows": ["src/workflows.ts"],
-      "runtime": ["src/runtime.ts"],
-      "workflow-results": ["src/workflow-results.ts"],
-      "result-contracts": ["src/result-contracts.ts"],
-      "uses-catalog": ["src/uses-catalog.ts"]
+      "domain": ["src/domain/index.ts"],
+      "definition": ["src/definition/index.ts"],
+      "runtime": ["src/runtime/index.ts"],
+      "handlers": ["src/handlers/index.ts"],
+      "catalog": ["src/catalog/index.ts"]
     }
   },
   "scripts": {
