@@ -7,7 +7,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
     public HappyPathSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task Given_Single_Stage_With_Task_And_Check_When_Both_Pass_Then_Workflow_Completes()
+    public async Task SingleStageTaskAndCheck_BothPass_WorkflowCompletes()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -28,12 +28,11 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, checkWork.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var available = await runner.IsAvailableAsync();
-        Assert.True(available);
+        Assert.True(await runner.IsAvailableAsync());
     }
 
     [Fact]
-    public async Task Given_Two_Stages_When_All_Tasks_And_Checks_Pass_Then_Workflow_Completes()
+    public async Task TwoStages_AllTasksAndChecksPass_WorkflowCompletes()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -69,7 +68,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Multi_Task_Stage_When_All_Pass_Then_Checks_Run()
+    public async Task MultiTaskStage_AllTasksPass_CheckRunsAndCompletes()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();

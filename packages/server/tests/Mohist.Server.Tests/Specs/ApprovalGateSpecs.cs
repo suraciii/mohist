@@ -7,7 +7,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     public ApprovalGateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task Given_Approval_Stage_When_Tasks_And_Checks_Pass_Then_Workflow_Awaits_Approval()
+    public async Task ApprovalStage_TasksAndChecksPass_WorkflowAwaitsApproval()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -30,13 +30,13 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Awaiting_Approval_When_Approved_Then_Workflow_Continues_To_Next_Stage()
+    public async Task AwaitingApproval_UserApproves_WorkflowContinuesToNextStage()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(ApprovalStage());
 
-        // plan: init → task → check → await approval
+        // plan: init → task → check
         var init = await PollWorkAsync(runnerId);
         await ReportAsync(runnerId, init.WorkId, "completed");
 
@@ -66,7 +66,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Awaiting_Approval_When_Rejected_Then_Workflow_Fails()
+    public async Task AwaitingApproval_UserRejects_WorkflowFails()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();

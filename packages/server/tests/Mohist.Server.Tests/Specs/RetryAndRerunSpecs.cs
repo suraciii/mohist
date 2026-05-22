@@ -7,7 +7,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     public RetryAndRerunSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task Given_Failed_Task_When_Retry_Then_Failed_Task_Is_Reset_And_Re_Executed()
+    public async Task FailedTask_Retry_TaskResetAndReExecuted()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -35,7 +35,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Failed_Check_When_Retry_Then_Failed_Checks_Are_Reset_And_Re_Executed()
+    public async Task FailedCheck_Retry_CheckResetAndReExecuted()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -63,7 +63,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Failed_Stage_When_Rerun_Then_Stage_Is_Re_Initialized_From_Scratch()
+    public async Task FailedStage_Rerun_StageReInitializedFromScratch()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -92,7 +92,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Passed_Stage_When_Rerun_Then_Stage_Is_Re_Initialized()
+    public async Task PassedStage_Rerun_StageReInitialized()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
@@ -114,7 +114,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task Given_Non_Failed_Workflow_When_Retry_Then_Throws()
+    public async Task NonFailedWorkflow_Retry_Throws()
     {
         var runnerId = await RegisterRunnerAsync();
         var workflow = await CreateWorkflowAsync();
