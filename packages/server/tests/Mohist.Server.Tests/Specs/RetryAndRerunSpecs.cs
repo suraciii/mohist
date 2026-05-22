@@ -11,9 +11,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task FailedTask_Retry_TaskResetAndReExecuted()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "failed", "flaky");
@@ -36,9 +34,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task FailedCheck_Retry_CheckResetAndReExecuted()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
@@ -60,9 +56,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task FailedStage_Rerun_StageReInitializedFromScratch()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "failed", "boom");
@@ -84,9 +78,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task PassedStage_Rerun_StageReInitialized()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
@@ -103,9 +95,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task NonFailedWorkflow_Retry_Throws()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        var workflow = await StartWorkflowAsync(SingleStage());
 
         await Assert.ThrowsAsync<WorkflowDomainException>(async () => await workflow.RetryAsync());
     }

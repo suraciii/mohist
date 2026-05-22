@@ -10,9 +10,7 @@ public class FailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunningTask_ReportsFailure_WorkflowFails()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "failed", "compile error");
@@ -24,9 +22,7 @@ public class FailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunningCheck_ReportsFail_WorkflowFails()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");

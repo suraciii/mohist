@@ -10,9 +10,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task ApprovalStage_TasksAndChecksPass_WorkflowAwaitsApproval()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(ApprovalStage());
+        await StartWorkflowAsync(ApprovalStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         Assert.Equal("draft", task.WorkId);
@@ -30,9 +28,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task AwaitingApproval_UserApproves_WorkflowContinuesToNextStage()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(ApprovalStage());
+        var workflow = await StartWorkflowAsync(ApprovalStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
@@ -57,9 +53,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task AwaitingApproval_UserRejects_WorkflowFails()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(ApprovalStage());
+        var workflow = await StartWorkflowAsync(ApprovalStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");

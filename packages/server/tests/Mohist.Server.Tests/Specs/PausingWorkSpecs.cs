@@ -10,9 +10,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task RunningWorkflow_PauseRequested_WorkflowPausesBeforeNextTask()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage(
+        var workflow = await StartWorkflowAsync(SingleStage(
             tasks:
             [
                 new("task-1", "Task 1", "spec/task"),
@@ -35,9 +33,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task PausedWorkflow_Resumed_WorkflowContinuesFromPendingWork()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage(
+        var workflow = await StartWorkflowAsync(SingleStage(
             tasks:
             [
                 new("task-1", "Task 1", "spec/task"),

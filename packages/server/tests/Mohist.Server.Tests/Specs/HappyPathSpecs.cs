@@ -10,9 +10,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task SingleStageTaskAndCheck_BothPass_WorkflowCompletes()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        await StartWorkflowAsync(SingleStage());
 
         var (taskWork, runnerId) = await PollWorkAnyAsync();
         Assert.Equal("task", taskWork.WorkType);
@@ -30,9 +28,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task TwoStages_AllTasksAndChecksPass_WorkflowCompletes()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(TwoStages());
+        await StartWorkflowAsync(TwoStages());
 
         var (task1, r1) = await PollWorkAnyAsync();
         Assert.Equal("draft", task1.WorkId);
@@ -57,9 +53,7 @@ public class HappyPathSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MultiTaskStage_AllTasksPass_CheckRunsAndCompletes()
     {
-        await RegisterRunnerAsync();
-        var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage(
+        await StartWorkflowAsync(SingleStage(
             tasks:
             [
                 new("task-1", "Task 1", "spec/task"),
