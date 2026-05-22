@@ -1,13 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import * as yaml from 'yaml';
-import {
-  parseWorkflowDefinitionSource,
-  workflowDefinitionSourceToYaml,
-} from '../../src';
+import { WorkflowDefinitionParser } from '../../src';
 
-describe('workflow definition source parser', () => {
-  it('parses complete workflow YAML with arbitrary stage ids', () => {
-    const source = yaml.parse(`
+describe('workflow definition parser', () => {
+  it('parses workflow YAML with source-friendly ids into domain definitions', () => {
+    const parser = new WorkflowDefinitionParser();
+    const parsed = parser.parseYaml(`
 workflow:
   id: project/custom
   artifacts:
@@ -27,8 +24,7 @@ workflow:
           uses: custom/artifact-exists
           with:
             path: "{{ artifacts.change }}/summary.md"
-`).workflow;
-    const parsed = parseWorkflowDefinitionSource(source);
+`);
 
     expect(parsed.id).toBe('project/custom');
     expect(parsed.artifacts).toEqual({ change: '{{ openspec.changeDir }}' });
@@ -61,8 +57,9 @@ workflow:
     ]);
   });
 
-  it('round-trips semantic workflow source back to YAML', () => {
-    const yamlText = workflowDefinitionSourceToYaml({
+  it('writes workflow source objects back to parseable YAML', () => {
+    const parser = new WorkflowDefinitionParser();
+    const yamlText = parser.toYaml({
       id: 'project/custom',
       stages: [
         {
@@ -100,7 +97,7 @@ workflow:
       ],
     });
 
-    expect(parseWorkflowDefinitionSource(yaml.parse(yamlText).workflow).id).toBe('project/custom');
+    expect(parser.parseYaml(yamlText).id).toBe('project/custom');
     expect(yamlText).toContain('workflow:');
     expect(yamlText).toContain('onFailure:');
   });
