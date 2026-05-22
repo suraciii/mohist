@@ -1,8 +1,7 @@
 import type { StageDefinition, WorkflowStageId } from '../workflow-definition';
 import { WorkflowDomainError } from '../errors';
 import { StageRun } from './stage-run';
-import type { ApprovalInput, FailureDetails, MaterializedTaskInput, StageRunState, WorkflowRunStatus, WorkflowWork } from './types';
-import type { CheckResult, TaskResult } from '../../runtime';
+import type { ApprovalInput, CheckResult, FailureDetails, MaterializedTaskInput, StageRunState, TaskResult, WorkflowRunStatus, WorkflowWork } from './types';
 
 export class WorkflowRun {
   readonly stageRuns: StageRun[];

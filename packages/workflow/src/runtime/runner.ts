@@ -1,5 +1,5 @@
-import type { WorkflowStageId } from './model';
-import { WorkflowRun } from './model';
+import type { WorkflowStageId } from '../domain';
+import { WorkflowRun } from '../domain';
 import type { HandlerRegistry } from './registry';
 import type {
   WorkflowRunId,
@@ -8,7 +8,7 @@ import type {
   WorkflowRunStatus,
   WorkflowStageState,
   WorkflowFailure,
-} from './workflow-types';
+} from './types';
 
 export class WorkflowRunner implements WorkflowRunnerContract {
   constructor(
@@ -164,7 +164,7 @@ export class WorkflowRunner implements WorkflowRunnerContract {
       title: work.check.title,
       with: work.check.with,
     });
-    const checkResult = { name: work.check.name, ...result };
+    const checkResult = { ...result, name: work.check.name };
     if (result.status === 'pass') {
       this.workflowRun.passCheck(checkResult);
     } else if (result.status === 'pending') {

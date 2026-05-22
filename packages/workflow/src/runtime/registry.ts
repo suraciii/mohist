@@ -1,20 +1,4 @@
-import type { TaskLoadResult, WorkflowTaskInput, WorkflowCheckInput } from './workflow-types';
-
-export interface TaskHandler {
-  run(input: WorkflowTaskInput): Promise<{ status: 'completed' | 'failed'; reason?: string }>;
-}
-
-export interface CheckHandler {
-  run(input: WorkflowCheckInput): Promise<{ status: 'pass' | 'fail' | 'error' | 'pending'; message?: string; output?: unknown }>;
-}
-
-export interface TaskLoader {
-  load(input: {
-    run: unknown;
-    stage: string;
-    definition: { uses: string; with?: Record<string, unknown> };
-  }): Promise<TaskLoadResult>;
-}
+import type { TaskHandler, CheckHandler, TaskLoader } from '../handlers';
 
 export interface HandlerRegistry {
   task(uses: string | undefined): TaskHandler | null;

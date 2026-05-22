@@ -1,25 +1,18 @@
 import type {
   FailureDetails,
-  MaterializedTaskInput,
   StageRunState,
-  WorkflowRun as WorkflowRunModel,
   WorkflowRunStatus as DomainWorkflowRunStatus,
-  WorkflowStageId,
-} from './model';
-import type { TaskHandler, CheckHandler, TaskLoader } from './registry';
-import type { WorkflowSourceDefinition } from './definition/workflow-definition-source';
-import type { WorkflowDefinition } from './model/workflow-definition';
+} from '../domain/run/types';
+import type { WorkflowRun as WorkflowRunModel } from '../domain/run/workflow-run';
+import type { WorkflowStageId } from '../domain/workflow-definition';
+import type { TaskHandler, CheckHandler, TaskLoader } from '../handlers';
+import type { WorkflowDefinitionInput } from '../definition';
 
 export type Awaitable<T> = T | Promise<T>;
 export type WorkflowRunId = string;
 export type WorkflowRunStatus = DomainWorkflowRunStatus | 'completed';
 export type WorkflowStageState = StageRunState;
 export type WorkflowFailure = FailureDetails;
-
-export type WorkflowDefinitionInput =
-  | WorkflowDefinition
-  | WorkflowSourceDefinition
-  | { yaml: string };
 
 export interface CreateWorkflowRuntimeInput {
   store: WorkflowStore;
@@ -57,21 +50,3 @@ export interface WorkflowStore {
   load(id: WorkflowRunId): Awaitable<WorkflowRunModel | null>;
   save(run: WorkflowRunModel): Awaitable<void>;
 }
-
-export interface WorkflowTaskInput {
-  id: string;
-  title: string;
-  with?: Record<string, unknown>;
-}
-
-export interface WorkflowCheckInput {
-  name: string;
-  title: string;
-  with?: Record<string, unknown>;
-}
-
-export type TaskLoadResult =
-  | { state: 'loaded'; tasks: MaterializedTaskInput[] }
-  | { state: 'empty' }
-  | { state: 'missing'; message?: string }
-  | { state: 'invalid'; message?: string };
