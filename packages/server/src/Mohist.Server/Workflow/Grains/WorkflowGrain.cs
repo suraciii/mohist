@@ -13,10 +13,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private string? _runnerId;
     private string? _pendingWorkId;
     private string? _pendingWorkType;
+    private readonly IRunnerRegistry _registry;
     private readonly ILogger<WorkflowGrain> _log;
 
-    public WorkflowGrain(ILogger<WorkflowGrain> log)
+    public WorkflowGrain(IRunnerRegistry registry, ILogger<WorkflowGrain> log)
     {
+        _registry = registry;
         _log = log;
     }
 
@@ -34,10 +36,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException("Cannot start: no workflow definition provided");
 
         if (_runnerId is null)
-        {
-            var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
-            _runnerId = await registry.FindIdleRunnerAsync(null);
-        }
+            _runnerId = await _registry.FindIdleRunnerAsync(GrainFactory, null);
 
         if (_runnerId is null)
             throw new InvalidOperationException("No idle runner available");

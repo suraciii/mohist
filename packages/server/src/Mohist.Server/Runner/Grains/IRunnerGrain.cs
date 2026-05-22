@@ -6,6 +6,7 @@ public interface IRunnerGrain : IGrainWithStringKey
 {
     Task RegisterAsync(RunnerInfo info);
     Task UnregisterAsync();
+    Task HeartbeatAsync();
     Task<WorkDispatch?> PollAsync();
     Task ReportAsync(string workId, WorkDispatchResult result);
     Task<bool> IsAvailableAsync();

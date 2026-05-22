@@ -8,20 +8,18 @@ public static class RunnerRoutes
     {
         var group = app.MapGroup("/api/runner/{runnerId}");
 
-        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
+        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains, IRunnerRegistry registry) =>
         {
-            var registry = grains.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
-            await registry.RegisterAsync(runnerId, req.Capabilities);
+            registry.Register(runnerId, req.Capabilities);
 
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName));
             return Results.Ok();
         });
 
-        group.MapPost("/unregister", async (string runnerId, IGrainFactory grains) =>
+        group.MapPost("/unregister", async (string runnerId, IGrainFactory grains, IRunnerRegistry registry) =>
         {
-            var registry = grains.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
-            await registry.UnregisterAsync(runnerId);
+            registry.Unregister(runnerId);
 
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.UnregisterAsync();
@@ -30,8 +28,8 @@ public static class RunnerRoutes
 
         group.MapPost("/heartbeat", async (string runnerId, IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
-            await registry.HeartbeatAsync(runnerId);
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            await runner.HeartbeatAsync();
             return Results.Ok();
         });
 
