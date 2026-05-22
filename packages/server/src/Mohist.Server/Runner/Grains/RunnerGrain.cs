@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -8,7 +9,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private WorkDispatch? _pending;
-    private readonly Dictionary<string, WorkDispatchResult> _results = new();
+    private WorkDispatch? _current;
     private readonly ILogger<RunnerGrain> _log;
 
     public RunnerGrain(ILogger<RunnerGrain> log)
@@ -52,23 +53,27 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         var work = _pending;
         _pending = null;
+        _current = work;
         return Task.FromResult(work);
     }
 
-    public Task ReportAsync(string workId, WorkDispatchResult result)
+    public async Task ReportAsync(string workId, WorkDispatchResult result)
     {
-        _results[workId] = result;
         _status = RunnerStatus.Idle;
+
         _log.LogInformation("Runner {Id} reported work {WorkId}: {Status}", RunnerId, workId, result.Status);
-        return Task.CompletedTask;
+
+        if (_current?.RunId is string runId)
+        {
+            var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(runId);
+            _current = null;
+            await workflowGrain.ReportResultAsync(workId, result);
+        }
     }
 
     public Task<WorkDispatchResult?> TryGetResultAsync(string workId)
     {
-        _results.TryGetValue(workId, out var result);
-        if (result is not null)
-            _results.Remove(workId);
-        return Task.FromResult(result);
+        return Task.FromResult<WorkDispatchResult?>(null);
     }
 
     public Task<bool> IsAvailableAsync()
@@ -79,6 +84,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     public Task ReleaseAsync()
     {
         _pending = null;
+        _current = null;
         _status = RunnerStatus.Idle;
         _log.LogInformation("Runner {Id} released", RunnerId);
         return Task.CompletedTask;

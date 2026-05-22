@@ -5,11 +5,14 @@ using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
+[Reentrant]
 public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
     private string? _runnerId;
+    private string? _pendingWorkId;
+    private string? _pendingWorkType;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
@@ -55,11 +58,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await RunLoop();
     }
 
-    public async Task PauseAsync(string? reason = null)
+    public Task PauseAsync(string? reason = null)
     {
         EnsureRun();
         _run.RequestPause();
         _log.LogInformation("Workflow {Id} pause requested: {Reason}", GrainKey, reason);
+        return Task.CompletedTask;
     }
 
     public async Task ApproveAsync()
@@ -67,7 +71,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        _ = Task.Run(() => RunLoop());
+        await RunLoop();
     }
 
     public async Task RejectAsync(string? reason = null)
@@ -96,6 +100,32 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await RunLoop();
     }
 
+    public async Task ReportResultAsync(string workId, WorkDispatchResult result)
+    {
+        if (workId != _pendingWorkId) return;
+
+        _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
+
+        _pendingWorkId = null;
+        var workType = _pendingWorkType;
+        _pendingWorkType = null;
+
+        switch (workType)
+        {
+            case "task":
+                ProcessTaskResult(result);
+                break;
+            case "check":
+                ProcessCheckResult(result);
+                break;
+            case "load":
+                ProcessLoadResult(result);
+                break;
+        }
+
+        await RunLoop();
+    }
+
     private async Task RunLoop()
     {
         EnsureRun();
@@ -105,8 +135,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             if (_run.PauseRequested)
             {
                 _run.Pause();
+                await ReleaseRunnerAsync();
                 _log.LogInformation("Workflow {Id} paused", GrainKey);
-                break;
+                return;
             }
 
             var work = _run.Next();
@@ -133,63 +164,49 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     return;
 
                 case WorkflowWork.StageInit si:
-                    await HandleStageInit(si);
+                    if (await HandleStageInitAsync(si))
+                        return;
                     if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
                     continue;
 
                 case WorkflowWork.Task t:
-                    await HandleTask(t);
-                    if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
-                    continue;
+                    await DispatchAsync(work.Id, "task", work.Stage, work.Uses, work.With);
+                    return;
 
                 case WorkflowWork.Check c:
-                    await HandleCheck(c);
-                    if (_run.PauseRequested) { _run.Pause(); await ReleaseRunnerAsync(); return; }
-                    continue;
+                    await DispatchAsync(work.Name, "check", work.Stage, work.Uses, work.With);
+                    return;
             }
         }
     }
 
-    private async Task HandleStageInit(WorkflowWork.StageInit work)
+    private async Task<bool> HandleStageInitAsync(WorkflowWork.StageInit work)
     {
         if (work.TasksFrom is null)
         {
             _run.InitTasks();
-            return;
+            return false;
         }
 
-        var result = await DispatchAndWaitAsync(new WorkDispatch(
-            GrainKey, work.Stage, $"load-{work.Stage}", "load", work.TasksFrom.Uses, work.TasksFrom.With));
-
-        switch (result.Status)
-        {
-            case "completed":
-            case "loaded":
-                _run.InitTasks();
-                break;
-            default:
-                _run.FailStage(result.Message ?? "Task loading failed");
-                break;
-        }
+        await DispatchAsync($"load-{work.Stage}", "load", work.Stage, work.TasksFrom.Uses, work.TasksFrom.With);
+        return true;
     }
 
-    private async Task HandleTask(WorkflowWork.Task work)
+    private void ProcessTaskResult(WorkDispatchResult result)
     {
-        var result = await DispatchAndWaitAsync(new WorkDispatch(
-            GrainKey, work.Stage, work.Id, "task", work.Uses, work.With));
-
         if (result.Status == "completed")
             _run.CompleteTask();
         else
             _run.FailTask(new TaskResult("failed", result.Message));
     }
 
-    private async Task HandleCheck(WorkflowWork.Check work)
+    private void ProcessCheckResult(WorkDispatchResult result)
     {
-        var result = await DispatchAndWaitAsync(new WorkDispatch(
-            GrainKey, work.Stage, work.Name, "check", work.Uses, work.With));
+        var work = _run.CurrentStage;
+        var pendingCheck = work.Checks.FirstOrDefault(c => c.Status == CheckRunStatus.Pending);
+        var checkName = pendingCheck?.Name ?? "";
 
-        var checkResult = new CheckResult(work.Name, result.Status, result.Message, result.Output);
+        var checkResult = new CheckResult(checkName, result.Status, result.Message, result.Output);
 
         switch (result.Status)
         {
@@ -200,7 +217,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 _run.PendingCheck(checkResult);
                 break;
             default:
-                var injected = TryInjectRetryTask(work.Stage, work.Name, checkResult);
+                var injected = TryInjectRetryTask(work.Stage, checkName, checkResult);
                 if (injected)
                 {
                     _run.ResetCheck(checkResult);
@@ -214,6 +231,31 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
+    private void ProcessLoadResult(WorkDispatchResult result)
+    {
+        switch (result.Status)
+        {
+            case "completed":
+            case "loaded":
+                _run.InitTasks();
+                break;
+            default:
+                _run.FailStage(result.Message ?? "Task loading failed");
+                break;
+        }
+    }
+
+    private async Task DispatchAsync(string workId, string workType, string stage, string? uses, Dictionary<string, JsonElement?>? with)
+    {
+        _pendingWorkId = workId;
+        _pendingWorkType = workType;
+
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId!);
+        await runner.DispatchAsync(new WorkDispatch(GrainKey, stage, workId, workType, uses, with));
+
+        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", workType, workId, _runnerId);
+    }
+
     private async Task ReleaseRunnerAsync()
     {
         if (_runnerId is null) return;
@@ -222,23 +264,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await runner.ReleaseAsync();
         _log.LogInformation("Runner {RunnerId} released", _runnerId);
         _runnerId = null;
-    }
-
-    private async Task<WorkDispatchResult> DispatchAndWaitAsync(WorkDispatch work)
-    {
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId!);
-
-        await runner.DispatchAsync(work);
-        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", work.WorkType, work.WorkId, _runnerId);
-
-        while (true)
-        {
-            var result = await runner.TryGetResultAsync(work.WorkId);
-            if (result is not null)
-                return result;
-
-            await Task.Delay(500);
-        }
     }
 
     private bool TryInjectRetryTask(string stage, string checkName, CheckResult result)
