@@ -18,5 +18,6 @@ builder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>
 var app = builder.Build();
 
 app.MapIssueRoutes();
+app.MapRunnerRoutes();
 
 app.Run();
