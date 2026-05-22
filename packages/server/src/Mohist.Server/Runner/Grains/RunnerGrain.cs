@@ -2,12 +2,13 @@ using System.Text.Json;
 
 namespace Mohist.Server.Runner.Grains;
 
+[Reentrant]
 public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private WorkDispatch? _pending;
-    private WorkDispatchResult? _result;
+    private readonly Dictionary<string, WorkDispatchResult> _results = new();
     private readonly ILogger<RunnerGrain> _log;
 
     public RunnerGrain(ILogger<RunnerGrain> log)
@@ -33,27 +34,41 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.CompletedTask;
     }
 
+    public Task DispatchAsync(WorkDispatch work)
+    {
+        if (_status != RunnerStatus.Idle)
+            throw new InvalidOperationException($"Runner '{RunnerId}' is {_status}, cannot dispatch");
+
+        _pending = work;
+        _status = RunnerStatus.Busy;
+        _log.LogInformation("Work {WorkId} dispatched to runner {Id}", work.WorkId, RunnerId);
+        return Task.CompletedTask;
+    }
+
     public Task<WorkDispatch?> PollAsync()
     {
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
         var work = _pending;
-        if (work is not null)
-        {
-            _status = RunnerStatus.Busy;
-            _pending = null;
-            _log.LogInformation("Runner {Id} picked up work {WorkId}", RunnerId, work.WorkId);
-        }
+        _pending = null;
         return Task.FromResult(work);
     }
 
     public Task ReportAsync(string workId, WorkDispatchResult result)
     {
-        _result = result;
+        _results[workId] = result;
         _status = RunnerStatus.Idle;
         _log.LogInformation("Runner {Id} reported work {WorkId}: {Status}", RunnerId, workId, result.Status);
         return Task.CompletedTask;
+    }
+
+    public Task<WorkDispatchResult?> TryGetResultAsync(string workId)
+    {
+        _results.TryGetValue(workId, out var result);
+        if (result is not null)
+            _results.Remove(workId);
+        return Task.FromResult(result);
     }
 
     public Task<bool> IsAvailableAsync()
@@ -61,13 +76,11 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.FromResult(_status == RunnerStatus.Idle);
     }
 
-    public Task<bool> TryDispatchAsync(WorkDispatch work)
+    public Task ReleaseAsync()
     {
-        if (_status != RunnerStatus.Idle)
-            return Task.FromResult(false);
-
-        _pending = work;
-        _log.LogInformation("Work {WorkId} dispatched to runner {Id}", work.WorkId, RunnerId);
-        return Task.FromResult(true);
+        _pending = null;
+        _status = RunnerStatus.Idle;
+        _log.LogInformation("Runner {Id} released", RunnerId);
+        return Task.CompletedTask;
     }
 }

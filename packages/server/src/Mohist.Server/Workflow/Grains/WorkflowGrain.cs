@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 
@@ -8,6 +9,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
+    private string? _stageRunnerId;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
@@ -16,19 +18,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
-    private IWorkGrain WorkGrain => GrainFactory.GetGrain<IWorkGrain>(GrainKey);
 
     public async Task StartAsync(WorkflowDefinitionInput? definition = null)
     {
         if (definition is not null)
-        {
             _stageDefinitions = MapStageDefinitions(definition);
-        }
 
         if (_run is null && _stageDefinitions is not null)
-        {
             _run = new WorkflowRun(GrainKey, _stageDefinitions);
-        }
 
         if (_run is null)
             throw new InvalidOperationException("Cannot start: no workflow definition provided");
@@ -97,6 +94,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             if (_run.PauseRequested)
             {
                 _run.Pause();
+                await ReleaseStageRunnerAsync();
                 _log.LogInformation("Workflow {Id} paused", GrainKey);
                 break;
             }
@@ -106,14 +104,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             switch (work)
             {
                 case WorkflowWork.Complete:
+                    await ReleaseStageRunnerAsync();
                     _log.LogInformation("Workflow {Id} completed at stage={Stage}", GrainKey, work.Stage);
                     return;
 
                 case WorkflowWork.Failed f:
+                    await ReleaseStageRunnerAsync();
                     _log.LogWarning("Workflow {Id} failed: {Reason}", GrainKey, f.Reason.Message);
                     return;
 
                 case WorkflowWork.Blocked b:
+                    await ReleaseStageRunnerAsync();
                     _log.LogWarning("Workflow {Id} blocked at stage={Stage}: {Reason}", GrainKey, b.Stage, b.Reason);
                     return;
 
@@ -123,17 +124,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
                 case WorkflowWork.StageInit si:
                     await HandleStageInit(si);
-                    if (_run.PauseRequested) { _run.Pause(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); await ReleaseStageRunnerAsync(); return; }
                     continue;
 
                 case WorkflowWork.Task t:
                     await HandleTask(t);
-                    if (_run.PauseRequested) { _run.Pause(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); await ReleaseStageRunnerAsync(); return; }
                     continue;
 
                 case WorkflowWork.Check c:
                     await HandleCheck(c);
-                    if (_run.PauseRequested) { _run.Pause(); return; }
+                    if (_run.PauseRequested) { _run.Pause(); await ReleaseStageRunnerAsync(); return; }
                     continue;
             }
         }
@@ -141,70 +142,75 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task HandleStageInit(WorkflowWork.StageInit work)
     {
+        await AssignStageRunnerAsync();
+        if (_stageRunnerId is null)
+        {
+            _run.FailStage("No idle runner available");
+            return;
+        }
+
         if (work.TasksFrom is null)
         {
             _run.InitTasks();
             return;
         }
 
-        var result = await WorkGrain.LoadTasksAsync(new TaskLoadWorkItem(
-            work.Stage,
-            work.TasksFrom.Uses,
-            work.TasksFrom.With));
+        var result = await DispatchAndWaitAsync(new WorkDispatch(
+            GrainKey, work.Stage, $"load-{work.Stage}", "load", work.TasksFrom.Uses, work.TasksFrom.With));
 
-        switch (result)
+        switch (result.Status)
         {
-            case TaskLoadWorkResult.Loaded l:
-                _run.InitTasks(l.Tasks.Select(t => new LoadedTaskInput(t.Id, t.Title, t.Uses, t.With)).ToList());
-                break;
-            case TaskLoadWorkResult.Empty:
+            case "completed":
                 _run.InitTasks();
                 break;
-            case TaskLoadWorkResult.Failed f:
-                _run.FailStage(f.Message);
+            case "loaded":
+                _run.InitTasks();
+                break;
+            default:
+                _run.FailStage(result.Message ?? "Task loading failed");
                 break;
         }
     }
 
     private async Task HandleTask(WorkflowWork.Task work)
     {
-        var result = await WorkGrain.ExecuteTaskAsync(new TaskWorkItem(
-            work.Id,
-            work.Title,
-            work.Uses,
-            work.With));
-
-        switch (result)
+        if (_stageRunnerId is null)
         {
-            case WorkResult.TaskCompleted:
-                _run.CompleteTask();
-                break;
-            case WorkResult.TaskFailed f:
-                _run.FailTask(new TaskResult("failed", f.Reason));
-                break;
+            _run.FailTask("No runner assigned to stage");
+            return;
         }
+
+        var result = await DispatchAndWaitAsync(new WorkDispatch(
+            GrainKey, work.Stage, work.Id, "task", work.Uses, work.With));
+
+        if (result.Status == "completed")
+            _run.CompleteTask();
+        else
+            _run.FailTask(new TaskResult("failed", result.Message));
     }
 
     private async Task HandleCheck(WorkflowWork.Check work)
     {
-        var result = await WorkGrain.ExecuteCheckAsync(new CheckWorkItem(
-            work.Name,
-            work.Title,
-            work.Uses,
-            work.With));
-
-        switch (result)
+        if (_stageRunnerId is null)
         {
-            case WorkResult.CheckPassed p:
-                _run.PassCheck(new CheckResult(work.Name, "pass", p.Message, p.Output));
-                break;
+            _run.FailCheck(new CheckResult(work.Name, "fail", "No runner assigned to stage"));
+            return;
+        }
 
-            case WorkResult.CheckPending p:
-                _run.PendingCheck(new CheckResult(work.Name, "pending", p.Message, p.Output));
-                break;
+        var result = await DispatchAndWaitAsync(new WorkDispatch(
+            GrainKey, work.Stage, work.Name, "check", work.Uses, work.With));
 
-            case WorkResult.CheckFailed f:
-                var checkResult = new CheckResult(work.Name, "fail", f.Message, f.Output);
+        var checkResult = new CheckResult(work.Name, result.Status, result.Message, result.Output);
+
+        switch (result.Status)
+        {
+            case "pass":
+                _run.PassCheck(checkResult);
+                break;
+            case "pending":
+                _run.PendingCheck(checkResult);
+                break;
+            default:
                 var injected = TryInjectRetryTask(work.Stage, work.Name, checkResult);
                 if (injected)
                 {
@@ -219,6 +225,44 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
+    private async Task AssignStageRunnerAsync()
+    {
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(Guid.Empty);
+        _stageRunnerId = await registry.FindIdleRunnerAsync(null);
+
+        if (_stageRunnerId is not null)
+            _log.LogInformation("Stage runner assigned: {RunnerId}", _stageRunnerId);
+        else
+            _log.LogWarning("No idle runner available for stage assignment");
+    }
+
+    private async Task ReleaseStageRunnerAsync()
+    {
+        if (_stageRunnerId is null) return;
+
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(_stageRunnerId);
+        await runner.ReleaseAsync();
+        _log.LogInformation("Stage runner {RunnerId} released", _stageRunnerId);
+        _stageRunnerId = null;
+    }
+
+    private async Task<WorkDispatchResult> DispatchAndWaitAsync(WorkDispatch work)
+    {
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(_stageRunnerId!);
+
+        await runner.DispatchAsync(work);
+        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", work.WorkType, work.WorkId, _stageRunnerId);
+
+        while (true)
+        {
+            var result = await runner.TryGetResultAsync(work.WorkId);
+            if (result is not null)
+                return result;
+
+            await Task.Delay(500);
+        }
+    }
+
     private bool TryInjectRetryTask(string stage, string checkName, CheckResult result)
     {
         var stageDef = _stageDefinitions?.Find(s => s.Stage == stage);
@@ -227,7 +271,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var checkDef = stageDef.Checks.Find(c => c.Name == checkName);
         if (checkDef?.OnFailure?.Retry is not { } retry) return false;
 
-        var retryCount = _run.RetryCountForCheck(checkName);
+        var retryCount = _run!.RetryCountForCheck(checkName);
         if (retryCount >= retry.Limit) return false;
 
         var resultJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
