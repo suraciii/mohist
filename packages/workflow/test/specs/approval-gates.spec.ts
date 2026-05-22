@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type TaskHandler, WorkflowRuntime } from '../../src';
-import { completedTask, memoryStore, passingCheck } from '../support/workflow';
+import { completedTask, memoryStore, passingCheck } from '../utils';
 
 describe('approval gates', () => {
   it('given a workflow with an approval gate, when started, then it runs to awaiting approval', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { type TaskHandler, WorkflowRuntime } from '../../src';
-import { completedTask, deferred, memoryStore, passingCheck } from '../support/workflow';
+import { completedTask, deferred, memoryStore, passingCheck } from '../utils';
 
 describe('pausing work', () => {
   it('given a running task, when pause is requested, then the workflow pauses before the next task', async () => {
