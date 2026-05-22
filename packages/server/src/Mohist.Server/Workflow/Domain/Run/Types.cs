@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum WorkflowRunStatus { Pending, Running, Paused, Passed, Failed, Cancelled }
+public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Passed, Failed, Cancelled }
 public enum StageRunStatus { Pending, Running, AwaitingApproval, Passed, Failed }
 public enum TaskRunStatus { Pending, Running, Completed, Failed }
 public enum CheckRunStatus { Pending, Passed, Failed }
@@ -36,8 +36,7 @@ public sealed record CheckResult(
 
 public abstract record StageWork
 {
-    public sealed record StageInit(
-        WorkflowTasksFromDefinition? TasksFrom) : StageWork;
+    public sealed record StageInit() : StageWork;
 
     public sealed record Task(
         string Id,
@@ -50,17 +49,11 @@ public abstract record StageWork
         string Title,
         string? Uses = null,
         Dictionary<string, JsonElement?>? With = null) : StageWork;
-
-    public sealed record AwaitApproval() : StageWork;
-    public sealed record Complete() : StageWork;
-    public sealed record Blocked(string Reason) : StageWork;
 }
 
 public abstract record WorkflowWork
 {
-    public sealed record StageInit(
-        string Stage,
-        WorkflowTasksFromDefinition? TasksFrom) : WorkflowWork;
+    public sealed record StageInit(string Stage) : WorkflowWork;
 
     public sealed record Task(
         string Stage,
@@ -76,10 +69,6 @@ public abstract record WorkflowWork
         string? Uses = null,
         Dictionary<string, JsonElement?>? With = null) : WorkflowWork;
 
-    public sealed record AwaitApproval(string Stage) : WorkflowWork;
-    public sealed record Complete(string Stage) : WorkflowWork;
-    public sealed record Blocked(string Stage, string Reason) : WorkflowWork;
-    public sealed record Failed(FailureDetails Reason) : WorkflowWork;
 }
 
 public sealed record TaskRunState(

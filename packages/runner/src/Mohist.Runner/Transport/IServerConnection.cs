@@ -6,14 +6,12 @@ public interface IServerConnection
 {
     Task ConnectAsync(CancellationToken ct);
     Task<WorkItem?> PollAsync(CancellationToken ct);
-    Task ReportAsync(string workId, WorkItemResult result, CancellationToken ct);
+    Task ReportAsync(WorkItem workItem, WorkItemResult result, CancellationToken ct);
 }
 
 public record WorkItem(
-    string RunId,
-    string Stage,
+    string WorkflowRunId,
     string WorkId,
-    string WorkType,
     string? Uses,
     Dictionary<string, JsonElement?>? With);
 

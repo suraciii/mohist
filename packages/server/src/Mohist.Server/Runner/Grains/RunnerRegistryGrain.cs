@@ -28,8 +28,16 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
         return Task.FromResult<IReadOnlyList<string>>(_runners.Keys.ToList());
     }
 
-    public async Task<string?> FindIdleRunnerAsync(string[] capabilities)
+    public async Task<string?> FindRunnerAsync(string[] capabilities, string? preferredRunnerId = null)
     {
+        if (preferredRunnerId is not null
+            && _runners.TryGetValue(preferredRunnerId, out var preferredCaps)
+            && CanRun(preferredCaps, capabilities)
+            && await GrainFactory.GetGrain<IRunnerGrain>(preferredRunnerId).IsAvailableAsync())
+        {
+            return preferredRunnerId;
+        }
+
         foreach (var (id, caps) in _runners)
         {
             if (!CanRun(caps, capabilities))

@@ -145,6 +145,13 @@ node bin/mo issue start 1
 
 ## 后端重构：ASP.NET Core / Orleans
 
+### 测试分层约定
+
+- `Specs/` 下的 spec 测试应尽可能集成、尽可能完整，表达用户可观察的产品形态和端到端行为。
+- Workflow 相关 spec 优先通过 `WorkflowGrain`、Runner、API 编排等产品路径验证，不直接针对 `WorkflowRun` / `StageRun` 等领域模型写 spec。
+- 领域模型、技术组件、工具函数可以做普通单元测试；这些测试用于验证局部规则，不承担产品 spec 叙事。
+- 私有方法不直接测试；通过 public API 和产品路径观察其效果。
+
 ### 重构目标
 
 将 mohist 后端从 TypeScript/Node.js 单体逐步迁移到 **ASP.NET Core + Orleans** 方案，提升分布式能力、可靠性和可维护性。

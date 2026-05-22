@@ -22,13 +22,13 @@ public class WorkflowGrainFixture : IAsyncLifetime
         Cluster?.Dispose();
         return Task.CompletedTask;
     }
-
 }
 
 public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
 {
-    private readonly WorkflowGrainFixture _fixture;
-    private string? _workflowId;
+    protected readonly WorkflowGrainFixture _fixture;
+    protected string? _workflowId;
+    protected string? _runnerId;
 
     protected WorkflowGrainSpecs(WorkflowGrainFixture fixture)
     {
@@ -54,7 +54,20 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
 
     protected async Task<IWorkflowGrain> StartWorkflowAsync(WorkflowDefinitionInput definition, string? id = null)
     {
-        await RegisterRunnerAsync();
+        var runnerId = await RegisterRunnerAsync();
+        _runnerId = runnerId;
+        var workflowId = id ?? $"wf-{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.AssignWorkflowAsync(workflowId);
+        await workflow.StartAsync(definition);
+        return workflow;
+    }
+
+    protected async Task<IWorkflowGrain> StartWorkflowWithoutRunnerAsync(WorkflowDefinitionInput definition, string? id = null)
+    {
         var workflow = await CreateWorkflowAsync(id);
         await workflow.StartAsync(definition);
         return workflow;
@@ -62,33 +75,39 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()
     {
-        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
-        foreach (var runnerId in await registry.ListRunnerIdsAsync())
+        for (var attempt = 0; attempt < 100; attempt++)
         {
-            var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-            var assigned = await runner.PeekAsync();
-            if (assigned?.RunId != _workflowId) continue;
-
+            var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
             var work = await runner.PollAsync();
-            Assert.NotNull(work);
-            return (work, runnerId);
+            if (work is not null)
+                return (work, _runnerId!);
+
+            await Task.Delay(20);
         }
 
-        Assert.Fail($"No runner has work available for workflow '{_workflowId}'");
+        Assert.Fail($"Runner '{_runnerId}' has no work for workflow '{_workflowId}'");
         return default;
     }
 
     protected async Task ReportAsync(string runnerId, string workId, string status, string? message = null)
     {
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        var result = new WorkDispatchResult(status, message);
-        var runId = await runner.ReportAsync(workId, result);
+        await ReportAsync(runnerId, workId, new WorkDispatchResult(status, message));
+    }
 
-        if (runId is not null)
-        {
-            var workflow = Grains.GetGrain<IWorkflowGrain>(runId);
-            await workflow.ReportResultAsync(workId, result);
-        }
+    protected async Task ReportAsync(string runnerId, string workId, WorkDispatchResult result)
+    {
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.ReportAsync(workId, result);
+    }
+
+    protected async Task ReportAsync(string runnerId, WorkDispatch work, string status, string? message = null)
+    {
+        await ReportAsync(runnerId, work, new WorkDispatchResult(status, message));
+    }
+
+    protected async Task ReportAsync(string runnerId, WorkDispatch work, WorkDispatchResult result)
+    {
+        await ReportAsync(runnerId, work.WorkId, result);
     }
 
     protected static WorkflowDefinitionInput SingleStage(

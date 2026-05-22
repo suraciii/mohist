@@ -19,8 +19,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await workflow.RetryAsync();
 
         var (retriedTask, r2) = await PollWorkAnyAsync();
-        Assert.Equal("task-1", retriedTask.WorkId);
-        Assert.Equal("task", retriedTask.WorkType);
+        Assert.StartsWith("task-1.", retriedTask.WorkId);
 
         await ReportAsync(r2, retriedTask.WorkId, "completed");
 
@@ -45,7 +44,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await workflow.RetryAsync();
 
         var (retriedCheck, r3) = await PollWorkAnyAsync();
-        Assert.Equal("check", retriedCheck.WorkType);
+        Assert.StartsWith("check-1:", retriedCheck.WorkId);
 
         await ReportAsync(r3, retriedCheck.WorkId, "pass");
 
@@ -64,8 +63,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await workflow.RerunAsync();
 
         var (task2, r2) = await PollWorkAnyAsync();
-        Assert.Equal("task", task2.WorkType);
-        Assert.Equal("task-1", task2.WorkId);
+        Assert.StartsWith("task-1.", task2.WorkId);
         await ReportAsync(r2, task2.WorkId, "completed");
 
         var (check2, r3) = await PollWorkAnyAsync();
@@ -89,7 +87,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await workflow.RerunAsync();
 
         var (task2, _) = await PollWorkAnyAsync();
-        Assert.Equal("task", task2.WorkType);
+        Assert.StartsWith("task-1.", task2.WorkId);
     }
 
     [Fact]

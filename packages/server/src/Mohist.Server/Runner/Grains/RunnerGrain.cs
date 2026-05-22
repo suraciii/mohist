@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Runner.Grains;
@@ -7,8 +6,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
-    private WorkDispatch? _work;
-    private bool _polled;
+    private readonly HashSet<string> _assignedWorkflows = [];
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
     private readonly ILogger<RunnerGrain> _log;
@@ -38,7 +36,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task RegisterAsync(RunnerInfo info)
     {
         _info = info;
-        _status = RunnerStatus.Idle;
+        _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.RegisterAsync(RunnerId, info.Capabilities);
@@ -54,7 +52,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
         _status = RunnerStatus.Offline;
         _info = null;
-        _work = null;
+        _assignedWorkflows.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
     }
@@ -68,69 +66,71 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.CompletedTask;
     }
 
-    public Task DispatchAsync(WorkDispatch work)
-    {
-        if (_status != RunnerStatus.Idle)
-            throw new InvalidOperationException($"Runner '{RunnerId}' is {_status}, cannot dispatch");
-
-        _work = work;
-        _polled = false;
-        _status = RunnerStatus.Busy;
-        _log.LogInformation("Work {WorkId} dispatched to runner {Id}", work.WorkId, RunnerId);
-        return Task.CompletedTask;
-    }
-
-    public Task<WorkDispatch?> PollAsync()
+    public async Task<WorkDispatch?> PollAsync()
     {
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
         _lastHeartbeat = DateTime.UtcNow;
 
-        if (_polled || _work is null)
-            return Task.FromResult<WorkDispatch?>(null);
+        foreach (var wfId in _assignedWorkflows)
+        {
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
+            var work = await workflow.GetWorkAsync();
+            if (work is not null)
+                return work;
+        }
 
-        _polled = true;
-        return Task.FromResult<WorkDispatch?>(_work);
+        return null;
     }
 
     public Task<WorkDispatch?> PeekAsync()
     {
-        if (_status == RunnerStatus.Offline)
-            throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
-
-        _lastHeartbeat = DateTime.UtcNow;
-        return Task.FromResult(_work);
+        return PollAsync();
     }
 
-    public Task<string?> ReportAsync(string workId, WorkDispatchResult result)
+    public Task<IReadOnlyList<WorkDispatch>> PeekAllAsync()
     {
-        var runId = _work?.RunId;
-        _work = null;
-        _status = RunnerStatus.Idle;
-        _lastHeartbeat = DateTime.UtcNow;
-        _polled = false;
-
-        _log.LogInformation("Runner {Id} reported work {WorkId}: {Status}", RunnerId, workId, result.Status);
-
-        return Task.FromResult(runId);
-    }
-
-    public Task<bool> IsAvailableAsync()
-    {
-        return Task.FromResult(_status == RunnerStatus.Idle);
-    }
-
-    public Task ReleaseAsync()
-    {
-        _work = null;
-        _polled = false;
-        _status = RunnerStatus.Idle;
-        _log.LogInformation("Runner {Id} released", RunnerId);
-        return Task.CompletedTask;
+        return Task.FromResult<IReadOnlyList<WorkDispatch>>([]);
     }
 
 #pragma warning disable CS8602
+    public async Task<string?> ReportAsync(string workId, WorkDispatchResult result)
+    {
+        foreach (var wfId in _assignedWorkflows)
+        {
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
+            await workflow.ReportResultAsync(workId, result);
+            return wfId;
+        }
+
+        return null;
+    }
+#pragma warning restore CS8602
+
+    public Task<bool> IsAvailableAsync()
+    {
+        return Task.FromResult(_status == RunnerStatus.Online);
+    }
+
+    public Task AssignWorkflowAsync(string workflowRunId)
+    {
+        _assignedWorkflows.Add(workflowRunId);
+        _log.LogInformation("Runner {Id} assigned to workflow {WorkflowId}", RunnerId, workflowRunId);
+        return Task.CompletedTask;
+    }
+
+    public Task ReleaseAsync(string? workflowRunId = null)
+    {
+        if (workflowRunId is not null)
+            _assignedWorkflows.Remove(workflowRunId);
+        else
+            _assignedWorkflows.Clear();
+
+        _log.LogInformation("Runner {Id} released workflow {WorkflowId}", RunnerId, workflowRunId ?? "*");
+        return Task.CompletedTask;
+    }
+
     private async Task CheckHeartbeatAsync()
     {
         if (_status == RunnerStatus.Offline) return;
@@ -143,21 +143,21 @@ public class RunnerGrain : Grain, IRunnerGrain
         }
     }
 
+#pragma warning disable CS8602
     private async Task HandleTimeoutAsync()
     {
-        var timedOutWork = _work;
-        _work = null;
+        var timedOutWorkflows = _assignedWorkflows.ToList();
+        _assignedWorkflows.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
 
-        if (timedOutWork is not null)
+        foreach (var wfId in timedOutWorkflows)
         {
-            _log.LogWarning("Runner {Id} timed out during work {WorkId}, reporting failure", RunnerId, timedOutWork.WorkId);
-
+            _log.LogWarning("Runner {Id} timed out, reporting failure for workflow {WorkflowId}", RunnerId, wfId);
             var result = new WorkDispatchResult("failed", $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
-            var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(timedOutWork.RunId);
-            await workflowGrain.ReportResultAsync(timedOutWork.WorkId, result);
+            var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
+            await workflowGrain.ReportResultAsync("", result);
         }
     }
 #pragma warning restore CS8602

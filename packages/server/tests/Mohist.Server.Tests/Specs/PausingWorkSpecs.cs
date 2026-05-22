@@ -22,11 +22,12 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
             ]));
 
         var (task1, r1) = await PollWorkAnyAsync();
-        Assert.Equal("task-1", task1.WorkId);
+        Assert.StartsWith("task-1.", task1.WorkId);
         await workflow.PauseAsync("user requested");
         await ReportAsync(r1, task1.WorkId, "completed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r1);
+        Assert.Null(await runner.PollAsync());
         Assert.True(await runner.IsAvailableAsync());
     }
 
@@ -48,11 +49,10 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await workflow.PauseAsync("pause");
         await ReportAsync(r1, task1.WorkId, "completed");
 
-        var runnerId2 = await RegisterRunnerAsync();
         await workflow.ResumeAsync();
 
         var (task2, r2) = await PollWorkAnyAsync();
-        Assert.Equal("task-2", task2.WorkId);
+        Assert.StartsWith("task-2.", task2.WorkId);
         await ReportAsync(r2, task2.WorkId, "completed");
 
         var (check, r3) = await PollWorkAnyAsync();

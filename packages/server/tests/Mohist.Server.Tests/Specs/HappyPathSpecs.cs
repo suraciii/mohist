@@ -13,12 +13,11 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await StartWorkflowAsync(SingleStage());
 
         var (taskWork, runnerId) = await PollWorkAnyAsync();
-        Assert.Equal("task", taskWork.WorkType);
-        Assert.Equal("task-1", taskWork.WorkId);
+        Assert.StartsWith("task-1.", taskWork.WorkId);
         await ReportAsync(runnerId, taskWork.WorkId, "completed");
 
         var (checkWork, rid2) = await PollWorkAnyAsync();
-        Assert.Equal("check", checkWork.WorkType);
+        Assert.StartsWith("check-1:", checkWork.WorkId);
         await ReportAsync(rid2, checkWork.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(rid2);
@@ -31,19 +30,19 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await StartWorkflowAsync(TwoStages());
 
         var (task1, r1) = await PollWorkAnyAsync();
-        Assert.Equal("draft", task1.WorkId);
+        Assert.StartsWith("draft.", task1.WorkId);
         await ReportAsync(r1, task1.WorkId, "completed");
 
         var (check1, r2) = await PollWorkAnyAsync();
-        Assert.Equal("check", check1.WorkType);
+        Assert.StartsWith("plan-ok:", check1.WorkId);
         await ReportAsync(r2, check1.WorkId, "pass");
 
         var (task2, r3) = await PollWorkAnyAsync();
-        Assert.Equal("compile", task2.WorkId);
+        Assert.StartsWith("compile.", task2.WorkId);
         await ReportAsync(r3, task2.WorkId, "completed");
 
         var (check2, r4) = await PollWorkAnyAsync();
-        Assert.Equal("check", check2.WorkType);
+        Assert.StartsWith("build-ok:", check2.WorkId);
         await ReportAsync(r4, check2.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
@@ -66,19 +65,19 @@ public class HappyPathSpecs : WorkflowGrainSpecs
             ]));
 
         var (t1, r1) = await PollWorkAnyAsync();
-        Assert.Equal("task-1", t1.WorkId);
+        Assert.StartsWith("task-1.", t1.WorkId);
         await ReportAsync(r1, t1.WorkId, "completed");
 
         var (t2, r2) = await PollWorkAnyAsync();
-        Assert.Equal("task-2", t2.WorkId);
+        Assert.StartsWith("task-2.", t2.WorkId);
         await ReportAsync(r2, t2.WorkId, "completed");
 
         var (t3, r3) = await PollWorkAnyAsync();
-        Assert.Equal("task-3", t3.WorkId);
+        Assert.StartsWith("task-3.", t3.WorkId);
         await ReportAsync(r3, t3.WorkId, "completed");
 
         var (c1, r4) = await PollWorkAnyAsync();
-        Assert.Equal("check", c1.WorkType);
+        Assert.StartsWith("check-1:", c1.WorkId);
         await ReportAsync(r4, c1.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
