@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  createWorkflowRuntime,
   type CheckHandler,
   type TaskHandler,
   type TaskLoader,
   type WorkflowRun,
   type WorkflowRunId,
+  WorkflowRuntime,
   type WorkflowStore,
 } from '../../src';
 
@@ -37,7 +37,7 @@ describe('workflow runtime', () => {
         output: { checked: input.name },
       })),
     };
-    const runtime = createWorkflowRuntime({
+    const runtime = new WorkflowRuntime({
       store,
       tasks: { 'test/task': taskHandler },
       checks: { 'test/check': checkHandler },
@@ -116,7 +116,7 @@ describe('workflow runtime', () => {
     const checkHandler: CheckHandler = {
       run: vi.fn(async input => ({ name: input.name, status: 'pass' })),
     };
-    const runtime = createWorkflowRuntime({
+    const runtime = new WorkflowRuntime({
       store,
       taskLoaders: { 'test/load-tasks': loader },
       tasks: { 'test/task': taskHandler },
