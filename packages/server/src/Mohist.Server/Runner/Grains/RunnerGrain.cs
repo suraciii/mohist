@@ -1,9 +1,7 @@
 using System.Text.Json;
-using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Runner.Grains;
 
-[Reentrant]
 public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
@@ -98,21 +96,17 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.FromResult<WorkDispatch?>(_work);
     }
 
-    public async Task ReportAsync(string workId, WorkDispatchResult result)
+    public Task<string?> ReportAsync(string workId, WorkDispatchResult result)
     {
+        var runId = _work?.RunId;
+        _work = null;
         _status = RunnerStatus.Idle;
         _lastHeartbeat = DateTime.UtcNow;
+        _polled = false;
 
         _log.LogInformation("Runner {Id} reported work {WorkId}: {Status}", RunnerId, workId, result.Status);
 
-        var runId = _work?.RunId;
-        _work = null;
-
-        if (runId is not null)
-        {
-            var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(runId);
-            await workflowGrain.ReportResultAsync(workId, result);
-        }
+        return Task.FromResult(runId);
     }
 
     public Task<bool> IsAvailableAsync()
@@ -123,6 +117,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     public Task ReleaseAsync()
     {
         _work = null;
+        _polled = false;
         _status = RunnerStatus.Idle;
         _log.LogInformation("Runner {Id} released", RunnerId);
         return Task.CompletedTask;

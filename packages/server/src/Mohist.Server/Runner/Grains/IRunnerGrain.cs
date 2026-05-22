@@ -8,7 +8,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task UnregisterAsync();
     Task HeartbeatAsync();
     Task<WorkDispatch?> PollAsync();
-    Task ReportAsync(string workId, WorkDispatchResult result);
+    Task<string?> ReportAsync(string workId, WorkDispatchResult result);
     Task<bool> IsAvailableAsync();
     Task DispatchAsync(WorkDispatch work);
     Task ReleaseAsync();
