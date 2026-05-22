@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
-import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, IssueStageStateResponse, StageExecution, SystemInfo } from '../lib/types'
+import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 import { useProject } from '../context/ProjectContext'
 
@@ -48,24 +48,6 @@ export function useIssueDiff(number: number) {
     queryKey: ['issues', number, 'diff'],
     queryFn: () => api.getIssueDiff(number),
     enabled: number > 0,
-  })
-}
-
-export function useTasks(number: number) {
-  return useQuery({
-    queryKey: ['issues', number, 'tasks'],
-    queryFn: () => api.getTasks(number),
-    enabled: number > 0,
-    refetchInterval: 5000,
-  })
-}
-
-export function useBuildStatus(number: number) {
-  return useQuery({
-    queryKey: ['issues', number, 'build-status'],
-    queryFn: () => api.getBuildStatus(number),
-    enabled: number > 0,
-    refetchInterval: 5000,
   })
 }
 
@@ -564,32 +546,6 @@ export function useSystemInfo() {
   return useQuery<SystemInfo>({
     queryKey: ['system-info'],
     queryFn: () => api.getSystemInfo(),
-  })
-}
-
-export function useIssueExecutions(number: number) {
-  return useQuery<StageExecution[]>({
-    queryKey: ['issues', number, 'executions'],
-    queryFn: () => api.getIssueExecutions(number),
-    enabled: number > 0,
-  })
-}
-
-export function useIssueStageState(number: number) {
-  return useQuery<IssueStageStateResponse>({
-    queryKey: ['issues', number, 'stage-state'],
-    queryFn: () => api.getIssueStageState(number),
-    enabled: number > 0,
-    refetchInterval: 5000,
-  })
-}
-
-export function useWorkflowRun(number: number) {
-  return useQuery<import('../lib/types').WorkflowRun>({
-    queryKey: ['issues', number, 'workflow-run'],
-    queryFn: () => api.getWorkflowRun(number),
-    enabled: number > 0,
-    refetchInterval: 5000,
   })
 }
 

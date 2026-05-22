@@ -3,6 +3,7 @@ import { StateManager } from './state-manager';
 import { DatabaseManager } from '../db';
 import { createProjectRoutes } from '../api/projects';
 import { createIssueRoutes } from '../api/issues';
+import { createWorkflowRoutes } from '../api/issues/workflow-routes';
 import { createEpicRoutes } from '../api/epics';
 import { createProposeRoutes } from '../api/propose';
 import { createConfigRoutes } from '../api/config';
@@ -19,7 +20,7 @@ import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, StageStateService, WorkflowRunService, IssuePrerequisiteService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, WorkflowRunService, IssuePrerequisiteService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
@@ -124,7 +125,7 @@ async function main(): Promise<void> {
 
   const coderSessionRepo = stateManager.getCoderSessionRepo();
 
-  const stageStateService = new StageStateService(db);
+  const stageStateService: any = null;
   const workflowRunService = new WorkflowRunService(db);
 
   const issuePrerequisiteService = new IssuePrerequisiteService(
@@ -167,6 +168,7 @@ async function main(): Promise<void> {
   server.addRouter('/api/projects', createProjectRoutes(projectService));
   server.addRouter('/api/epics', createEpicRoutes(epicService, projectService));
   server.addRouter('/api/issues', createIssueRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), stageStateService, workflowRunService, issuePrerequisiteService, epicService));
+  server.addRouter('/api/issues', createWorkflowRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, workflowLogRepo, sessionStreamLogRepo, stateManager.getCoderSessionRepo(), opencodeBinPath, stateManager.getPipelineCheckpointRepo(), undefined, stateManager.getCheckSuiteRepo(), stateManager.getStageExecutionRepo(), stageStateService, workflowRunService, issuePrerequisiteService, epicService));
   server.addRouter('/api/propose', createProposeRoutes(issueService, projectService, stateManager, worktreeManager, fileConfig, agentRunner, opencodeBinPath));
   server.addRouter('/api/questions', createQuestionRoutes(stateManager.getQuestionRepo(), stateManager.getIssueRepo(), eventBus));
   server.addRouter('/api/labels', createLabelRoutes(projectService));

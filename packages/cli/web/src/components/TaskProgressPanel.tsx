@@ -1,7 +1,4 @@
 import { useState } from 'react'
-import { useWorkflowRun, useIssueStageState } from '../hooks/useQueries'
-import { useTaskProgress } from '../hooks/useTaskProgress'
-import { workflowRunToStageStateMap } from '../lib/workflow-run-utils'
 import type { StageTaskState, Stage } from '../lib/types'
 import { Stage as StageEnum } from '../lib/types'
 
@@ -100,27 +97,13 @@ function ProgressBar({ completed, failed, total }: { completed: number; failed: 
 }
 
 export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }: TaskProgressPanelProps) {
-  useTaskProgress(issueNumber)
-
-  const { data: workflowRun } = useWorkflowRun(issueNumber)
-  const { data: stageStateData, isLoading: stageStateLoading } = useIssueStageState(issueNumber)
+  void issueNumber
 
   const isBacklog = currentStage === StageEnum.Backlog
 
   if (isBacklog) return null
 
-  const workflowStageState = workflowRun ? workflowRunToStageStateMap(workflowRun).get(currentStage) : undefined
-  const fallbackStageState = stageStateData?.stages?.find(s => s.stage === currentStage)
-  const tasks: StageTaskState[] = workflowStageState?.tasks ?? fallbackStageState?.tasks ?? []
-
-  if (stageStateLoading && !workflowRun) {
-    return (
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">Task Progress</h2>
-        <div className="text-sm text-gray-400">Loading progress...</div>
-      </div>
-    )
-  }
+  const tasks: StageTaskState[] = []
 
   if (tasks.length === 0) {
     return (

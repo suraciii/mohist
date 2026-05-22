@@ -185,6 +185,16 @@ export class StageRun {
     };
   }
 
+  injectRetryTask(_checkName: string, task: LoadedTaskInput): void {
+    this.tasks.push(new TaskRun(task.id, task.title, task.uses, task.with));
+  }
+
+  retryCountForCheck(checkName: string): number {
+    return this.tasks.filter(
+      task => task.id.startsWith(checkName) || task.id.includes(`:${checkName}`)
+    ).length;
+  }
+
   private get pendingCheck(): StageCheck | null {
     return this.checks.find(candidate => candidate.status === 'pending') ?? null;
   }

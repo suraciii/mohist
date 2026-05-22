@@ -246,12 +246,6 @@ export const api = {
   forceStopIssue: (number: number) =>
     request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/force-stop`, { method: 'POST' }),
 
-  getBuildStatus: (number: number) =>
-    request<import('./types').BuildStatus>(`/issues/${number}/build-status`),
-
-  getTasks: (number: number) =>
-    request<{ version: number; tasks: import('./types').Task[] }>(`/issues/${number}/tasks`),
-
   getConfig: () => request<import('./types').GeneralConfig>('/config'),
 
   updateConfig: (key: string, value: number) =>
@@ -279,9 +273,6 @@ export const api = {
       rebaseInProgress?: boolean
       conflictingFiles?: string[]
     }>(`/issues/${number}/worktree-status`),
-
-  getIssueExecutions: (number: number) =>
-    request<import('./types').StageExecution[]>(`/issues/${number}/executions`),
 
   archiveIssue: (number: number) =>
     request<{ issue: import('./types').Issue; message: string; warning?: string }>(`/issues/${number}/archive`, { method: 'POST' }),
@@ -351,21 +342,6 @@ export const api = {
 
   getSystemInfo: () =>
     request<import('./types').SystemInfo>('/system/info'),
-
-  getIssueStageState: (number: number) =>
-    request<import('./types').IssueStageStateResponse>(`/issues/${number}/stage-state`),
-
-  getWorkflowRun: (number: number) =>
-    request<import('./types').WorkflowRun>(`/issues/${number}/workflow-run`),
-
-  retryCheckpoint: (number: number, stage: string) =>
-    request<{ message: string }>(`/issues/${number}/stages/${stage}/retry-checkpoint`, { method: 'POST' }),
-
-  rerunStage: (number: number, stage: string) =>
-    request<{ issue: import('./types').Issue; taskId: string; status: string; queuePosition: number; message: string }>(`/issues/${number}/stages/${stage}/rerun`, { method: 'POST' }),
-
-  runApprovalVerdictRepair: (number: number, stage: string) =>
-    request<{ repairTaskId: string | null; message: string }>(`/issues/${number}/stages/${stage}/approval-verdict-repair`, { method: 'POST' }),
 
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),

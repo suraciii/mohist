@@ -10,7 +10,6 @@ import { setupProvidersCommands } from './commands/providers';
 import { setupProposeCommands } from './commands/propose';
 import { setupSkillsCommands } from './commands/skills';
 import { setupInstructionsCommand } from './commands/instructions';
-import { setupWorkflowCommands } from './commands/workflow';
 import { getVersionInfo } from '../version';
 export { requireServer, formatError } from './server-check';
 
@@ -94,6 +93,5 @@ setupProvidersCommands(program);
 setupProposeCommands(program);
 setupSkillsCommands(program);
 setupInstructionsCommand(program);
-setupWorkflowCommands(program);
 
 program.parse();

@@ -22,7 +22,7 @@ export class WorkflowRuntime {
   async create(input: WorkflowCreateInput): Promise<WorkflowRunner> {
     const definition = parseWorkflow(input.definition);
     const run = new WorkflowRun(input.id, definition.stages);
-    return new WorkflowRunner(run, this.store, this.registry);
+    return new WorkflowRunner(run, this.store, this.registry, definition.stages);
   }
 
   async load(id: WorkflowRunId): Promise<WorkflowRunner | null> {

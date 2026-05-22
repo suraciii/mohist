@@ -1,13 +1,12 @@
 import { IssueStatus, Stage, type Issue } from '../lib/types'
 
 interface MergeStatePanelProps {
-  issueNumber: number
   mergeState: Issue['mergeState']
   stage: Stage
   status: IssueStatus
 }
 
-export function MergeStatePanel({ issueNumber, mergeState, stage, status }: MergeStatePanelProps) {
+export function MergeStatePanel({ mergeState, stage, status }: MergeStatePanelProps) {
   const recoveryText = stage === Stage.Integrate
     ? 'Use the workflow recovery actions for this issue to rerun the stage or resume execution.'
     : 'Move the issue through the workflow again so the configured delivery task can run.'

@@ -6,34 +6,22 @@ import type { WorkflowLogRepo } from '../db/workflow-log-repo';
 import type { LlmConfig } from '../agent-runtime';
 import type { AgentSessionOptions } from '../agent-runtime/agent-session';
 import type { IssueTaskQueueRepo, IssueTaskQueueRecord, TaskType as QueueTaskType } from '../db/issue-task-queue-repo';
-import {
-  WorkflowEngine,
-  type PipelineResult,
-  GenericStageRunner,
-} from '../workflow';
-import { createCheckpointManager } from '../workflow/checkpoint-manager';
-import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { IssueStatus, type Issue } from '../types';
 import { EventBus } from './event-bus';
 import { Stage, STAGE_TRANSITIONS } from '../types';
-import { load } from '../config/config-loader';
 import { maskSensitiveData } from '../utils/sensitive-data';
+import { load } from '../config/config-loader';
 import { Log } from '../util/log';
 import { PipelineCheckpointRepo } from '../db/pipeline-checkpoint-repo';
 import { StageExecutionRepo } from '../db/stage-execution-repo';
-import type { StageStateService } from './stage-state-service';
 import type { WorkflowRunService } from './workflow-run-service';
-import { WorkflowApplicationService } from './workflow-application-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { createTaskLoaderRegistry } from '@mohist/workflow/tasks';
-import { createOpenSpecTaskLoader, createDefaultStaticTaskLoader, createMohistBuiltinTaskDispatchRegistry } from '../workflow/builtins/tasks';
-import { DEFAULT_STAGE_DEFINITIONS } from '../workflow/builtins/workflows/mohist-default';
-import { createDefaultCheckRegistry } from '../workflow/builtins/checks';
-export { createDefaultCheckRegistry } from '../workflow/builtins/checks';
-import { resolveWorkflowDefinition, validateWorkflowDefinition } from '../workflow/definition/workflow-inspector';
-import { workflowDefinitionSnapshotFromUnknown } from '../workflow/projection/workflow-run-snapshot';
+import { WorkflowRuntime } from '@mohist/workflow';
+import { WorkflowStoreAdapter } from '../workflow/runtime/store';
+import { createMohistTaskHandlers, createMohistCheckHandlers, createMohistTaskLoaders } from '../workflow/runtime/handlers';
+import { MOHIST_DEFAULT_WORKFLOW_DEFINITION } from '../workflow/runtime/definition';
 
 export type TaskType = QueueTaskType;
 
@@ -89,8 +77,6 @@ export interface WaitingQuestion {
   question: string;
 }
 
-const PIPELINE_TIMEOUT_MS = 90 * 60 * 1000;
-
 const log = Log.create({ service: 'agent-runner' });
 
 export function isCurrentStageAwaitingApproval(issue: Issue | null | undefined): boolean {
@@ -117,18 +103,18 @@ export class AgentRunnerService {
 
   constructor(
     private readonly eventBus: EventBus,
-    private readonly workflowLogRepo?: WorkflowLogRepo,
+    _workflowLogRepo?: WorkflowLogRepo,
     private readonly issueRepo?: IssueRepo,
     maxConcurrentAgents: number = 8,
     private readonly coderSessionRepo?: CoderSessionRepo,
-    private readonly checkpointRepo?: PipelineCheckpointRepo,
+    _checkpointRepo?: PipelineCheckpointRepo,
     private readonly projectRepo?: ProjectRepo,
     private readonly worktreeManager?: WorktreeManager,
     private readonly taskQueueRepo?: IssueTaskQueueRepo,
     _conflictResolutionDeps?: unknown,
-    private readonly sessionStreamLogRepo?: SessionStreamLogRepo,
-    private readonly stageExecutionRepo?: StageExecutionRepo,
-    private readonly stageStateService?: StageStateService,
+    _sessionStreamLogRepo?: SessionStreamLogRepo,
+    _stageExecutionRepo?: StageExecutionRepo,
+    _stageStateService?: unknown,
     private readonly workflowRunService?: WorkflowRunService,
     private readonly issuePrerequisiteService?: IssuePrerequisiteService,
   ) {
@@ -208,8 +194,8 @@ export class AgentRunnerService {
 
     if (this.workflowRunService) {
       try {
-        const was = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager());
-        was.interruptRunningWorkAttempts({ issueId, reason: 'Agent stopped by user', diagnostic: 'force_stop' });
+        // TODO: Implement interrupt via new WorkflowRuntime
+        log.info('Force stop: workflow interrupt not yet implemented in new runtime', { issueId });
       } catch (e) {
         log.warn('Failed to interrupt work attempts during force stop', {
           issueId,
@@ -389,23 +375,8 @@ export class AgentRunnerService {
   private recoverSingleIssue(issue: Issue): void {
     if (!this.issueRepo) return;
     try {
-      const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-      if (activeRun) {
-        if (issue.stage !== activeRun.currentStage) {
-          this.issueRepo.updateStage(issue.id, activeRun.currentStage);
-        }
-        if (issue.status !== IssueStatus.Active) {
-          this.issueRepo.updateStatus(issue.id, IssueStatus.Active);
-        }
-        this.issueRepo.updateBlockedReason(issue.id, null);
-        log.info('Recovered issue from active WorkflowRun aggregate state', {
-          issueNumber: issue.number,
-          stage: activeRun.currentStage,
-          action: 'stage/status projected from WorkflowRun, task/check state preserved',
-        });
-        return;
-      }
-
+      // TODO: Recovery logic using new WorkflowStoreAdapter will be implemented later
+      // For now, skip active run check and preserve existing issue state
       if (issue.status === IssueStatus.Completed || issue.stage === Stage.Done) {
         log.info('Completed issue needs no recovery action', {
           issueNumber: issue.number,
@@ -818,20 +789,7 @@ export class AgentRunnerService {
     }
 
     if (this.workflowRunService) {
-      try {
-        const resolvedWorkflow = resolveWorkflowDefinition(worktreePath);
-        const diagnostics = validateWorkflowDefinition(resolvedWorkflow);
-        const blockingDiagnostics = diagnostics.filter(diagnostic => diagnostic.severity === 'error');
-        if (blockingDiagnostics.length > 0) {
-          const message = blockingDiagnostics.map(diagnostic => `${diagnostic.path}: ${diagnostic.message}`).join('; ');
-          this.completeTask(task.id, 'failed', `Workflow definition is invalid: ${message}`);
-          return;
-        }
-        this.workflowRunService.startRun(issue.id, issue.number, 'start-pipeline', resolvedWorkflow.snapshot);
-        log.info('WorkflowRun started for issue', { issueNumber: issue.number });
-      } catch (err) {
-        log.warn('Failed to start WorkflowRun', { issueNumber: issue.number, error: err instanceof Error ? err.message : String(err) });
-      }
+      log.info('Using MOHIST_DEFAULT_WORKFLOW_DEFINITION for issue', { issueNumber: issue.number });
     }
 
     const acpOptions: AgentSessionOptions = { cwd: worktreePath };
@@ -890,36 +848,14 @@ export class AgentRunnerService {
 
   private canResumeBlockedIssue(issue: Issue): boolean {
     if (issue.status !== IssueStatus.Blocked) return false;
-    if (!this.workflowRunService) return false;
-    try {
-      const recovery = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).getRecoveryProjection(issue.id);
-      return recovery?.latestAttemptState === 'interrupted' && recovery.allowedActions.includes('resume');
-    } catch (error) {
-      log.warn('Failed to evaluate blocked issue recovery projection', {
-        issueNumber: issue.number,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
+    // TODO: Implement recovery projection via new WorkflowRuntime
+    return false;
   }
 
   private canRetryBlockedIssue(issue: Issue): boolean {
     if (issue.status !== IssueStatus.Blocked) return false;
-    if (!this.workflowRunService) return false;
-
-    try {
-      const availability = new WorkflowApplicationService(this.workflowRunService.getDatabaseManager()).checkRetryAvailability({
-        issueId: issue.id,
-        stage: issue.stage,
-      });
-      return availability.available;
-    } catch (error) {
-      log.warn('Failed to evaluate blocked issue retry availability', {
-        issueNumber: issue.number,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
+    // TODO: Implement retry availability check via new WorkflowRuntime
+    return false;
   }
 
   private async runPipelineToCompletion(
@@ -928,10 +864,10 @@ export class AgentRunnerService {
     projectId: string,
     issueRepo: IssueRepo,
     worktreePath: string,
-    acpOptions: AgentSessionOptions,
+    _acpOptions: AgentSessionOptions,
   ): Promise<void> {
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
-    log.info('Pipeline started via task queue', { issueNumber: issue.number, taskType: task.taskType, taskId: task.id });
+    log.info('Pipeline started via new workflow runtime', { issueNumber: issue.number, taskType: task.taskType, taskId: task.id });
 
     const abortController = new AbortController();
     this.abortControllers.set(issue.id, abortController);
@@ -947,86 +883,64 @@ export class AgentRunnerService {
         });
       }
 
-      const artifactManager = new ChangeArtifactsManager(worktreePath);
-      const checkpointManager = this.checkpointRepo
-        ? createCheckpointManager(this.checkpointRepo)
-        : createCheckpointManager({ get: () => null, upsert: () => {}, delete: () => {} } as any);
+      if (!this.workflowRunService) {
+        this.completeTask(task.id, 'failed', 'WorkflowRunService not available');
+        return;
+      }
 
-      const taskLoaderRegistry = createTaskLoaderRegistry([
-        createDefaultStaticTaskLoader(worktreePath),
-        createOpenSpecTaskLoader(),
-      ]);
+      const db = this.workflowRunService.getDatabaseManager();
+      const store = new WorkflowStoreAdapter(db);
 
-      const activeWorkflowRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-      const workflowDefinitionSnapshot = workflowDefinitionSnapshotFromUnknown(activeWorkflowRun?.workflowDefinition) ?? undefined;
-      const checkRegistry = createDefaultCheckRegistry({ worktreePath, workflowDefinitionSnapshot });
+      // Load workflow definition from workspace or use default
+      // TODO: implement proper definition loading from workspace config
+      const definition = MOHIST_DEFAULT_WORKFLOW_DEFINITION;
 
-      const unifiedRunner = new GenericStageRunner({
-        taskLoaderRegistry,
-        checkRegistry,
-        taskDispatchRegistry: createMohistBuiltinTaskDispatchRegistry(),
-        getStageDefinition: (stage) => {
-          const activeRun = this.workflowRunService?.getActiveRunForIssue(issue.id);
-          const snapshot = workflowDefinitionSnapshotFromUnknown(activeRun?.workflowDefinition);
-          return snapshot?.compiledStageDefinitions.find(d => d.stage === stage)
-            ?? DEFAULT_STAGE_DEFINITIONS.find(d => d.stage === stage);
-        },
+      const handlerCtx = {
         worktreePath,
-      });
-
-      const runners = [unifiedRunner];
-      const workflowApplicationService = this.workflowRunService
-        ? new WorkflowApplicationService(this.workflowRunService.getDatabaseManager())
-        : undefined;
-      const pipeline = new WorkflowEngine({
-        runners,
-        artifactManager,
-        issueRepo,
-        eventBus: this.eventBus,
+        issue,
         projectId,
-        checkpointManager,
-        worktreeManager: this.worktreeManager,
-        projectRepo: this.projectRepo,
-        signal: abortController.signal,
-        coderSessionRepo: this.coderSessionRepo,
-        workflowLogRepo: this.workflowLogRepo,
-        sessionStreamLogRepo: this.sessionStreamLogRepo,
-        stageExecutionRepo: this.stageExecutionRepo,
-        stageStateService: this.stageStateService,
-        workflowRunService: this.workflowRunService,
-        workflowApplicationService,
-        config: load(),
+        eventBus: this.eventBus,
+      };
+
+      const runtime = new WorkflowRuntime({
+        store,
+        tasks: createMohistTaskHandlers(handlerCtx),
+        checks: createMohistCheckHandlers(handlerCtx),
+        taskLoaders: createMohistTaskLoaders(handlerCtx),
       });
 
-      const abortPromise = new Promise<never>((_resolve, reject) => {
-        abortController.signal.addEventListener('abort', () => {
-          reject(new Error('Agent stopped by user'));
+      // Try to load existing workflow run, or create new one
+      const runId = `wr_${issue.projectId}_${issue.number}_${Date.now()}`;
+      let runner = await runtime.load(runId);
+      if (!runner) {
+        runner = await runtime.create({
+          id: runId,
+          definition,
         });
-      });
+      }
 
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_resolve, reject) => {
-        timeoutId = setTimeout(() => {
-          abortController.abort();
-          reject(new Error(`Pipeline timed out after ${PIPELINE_TIMEOUT_MS / 60000} minutes`));
-        }, PIPELINE_TIMEOUT_MS);
-      });
+      // Set abort signal
+      runner.withSignal(abortController.signal);
 
-      let result: PipelineResult;
-      try {
-        result = await Promise.race([
-          pipeline.run(issue, acpOptions),
-          abortPromise,
-          timeoutPromise,
-        ]);
-      } finally {
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      // Start or resume execution
+      if (runner.status === 'pending') {
+        await runner.start();
+      } else {
+        await runner.resume();
       }
 
       const duration = Date.now() - startTime;
       const latestIssue = issueRepo.findById(issue.id);
-      const isPaused = !result.completed && isCurrentStageAwaitingApproval(latestIssue);
-      log.info('Pipeline run completed', { issueNumber: issue.number, elapsedMs: duration, completed: result.completed, paused: isPaused });
+      // TODO: isPaused should check for approval state properly - currently 'paused' is used for both signal pause and approval wait
+      const isPaused = runner.status === 'paused' && latestIssue?.approvalState?.status === 'awaiting';
+
+      log.info('Pipeline run completed', {
+        issueNumber: issue.number,
+        elapsedMs: duration,
+        completed: runner.status === 'completed',
+        paused: isPaused,
+        status: runner.status,
+      });
 
       if (isPaused) {
         this.eventBus.emit('agent_paused', {
@@ -1036,23 +950,28 @@ export class AgentRunnerService {
         });
         log.info('Pipeline paused at approval, marking task completed', {
           issueNumber: issue.number,
-          stage: result.stage,
+          stage: runner.currentStage,
           taskId: task.id,
         });
         this.completeTask(task.id, 'completed', 'awaiting_approval');
         return;
       }
 
-      if (result.completed) {
+      if (runner.status === 'completed') {
         this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
         this.completeTask(task.id, 'completed', 'success');
       } else {
-        const failureSummary = result.stage
-          ? `[${result.stage}] ${result.message ?? 'Pipeline 未完成'}`
-          : result.message ?? 'Pipeline 未完成';
+        const failure = runner.failure;
+        const failureMessage = failure?.message ?? failure?.reason ?? 'Pipeline execution failed';
+        const failureSummary = `[${runner.currentStage}] ${failureMessage}`;
         this.handlePipelineFailure(issue, issueRepo, projectId, failureSummary);
         this.completeTask(task.id, 'failed', failureSummary);
       }
+
+      const failureMessage = runner.failure?.message ?? runner.failure?.reason ?? 'Pipeline execution failed';
+      const failureSummary = `[${runner.currentStage}] ${failureMessage}`;
+      this.handlePipelineFailure(issue, issueRepo, projectId, failureSummary);
+      this.completeTask(task.id, 'failed', failureSummary);
     } catch (err) {
       const rawErrorMsg = err instanceof Error ? err.message : String(err);
       const currentIssue = issueRepo.findById(issue.id);
