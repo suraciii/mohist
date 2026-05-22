@@ -13,11 +13,11 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         await StartWorkflowAsync(ApprovalStage());
 
         var (task, r1) = await PollWorkAnyAsync();
-        Assert.Equal("draft", task.WorkId);
+        Assert.StartsWith("draft.", task.WorkId);
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        Assert.Equal("check", check.WorkType);
+        Assert.StartsWith("plan-ok:", check.WorkId);
         await ReportAsync(r2, check.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
@@ -39,11 +39,11 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         await workflow.ApproveAsync();
 
         var (task2, r3) = await PollWorkAnyAsync();
-        Assert.Equal("compile", task2.WorkId);
+        Assert.StartsWith("compile.", task2.WorkId);
         await ReportAsync(r3, task2.WorkId, "completed");
 
         var (check2, r4) = await PollWorkAnyAsync();
-        Assert.Equal("check", check2.WorkType);
+        Assert.StartsWith("build-ok:", check2.WorkId);
         await ReportAsync(r4, check2.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);

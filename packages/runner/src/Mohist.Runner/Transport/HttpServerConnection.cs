@@ -43,27 +43,23 @@ public class HttpServerConnection : IServerConnection
         if (dispatch is null) return null;
 
         return new WorkItem(
-            dispatch.RunId,
-            dispatch.Stage,
+            dispatch.WorkflowRunId,
             dispatch.WorkId,
-            dispatch.WorkType,
             dispatch.Uses,
             dispatch.With);
     }
 
-    public async Task ReportAsync(string workId, WorkItemResult result, CancellationToken ct)
+    public async Task ReportAsync(WorkItem workItem, WorkItemResult result, CancellationToken ct)
     {
         var resp = await _http.PostAsJsonAsync($"/api/runner/{_runnerId}/report",
-            new { workId, result.Status, result.Message, result.Output, result.ExitCode }, ct);
+            new { workItem.WorkId, result.Status, result.Message, result.Output, result.ExitCode }, ct);
 
         resp.EnsureSuccessStatusCode();
     }
 }
 
 public record WorkDispatchResponse(
-    string RunId,
-    string Stage,
+    string WorkflowRunId,
     string WorkId,
-    string WorkType,
     string? Uses,
     Dictionary<string, JsonElement?>? With);

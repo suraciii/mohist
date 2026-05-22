@@ -10,14 +10,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
-    private string? _runnerId;
+    private string? _assignedRunnerId;
     private string? _pendingWorkId;
     private string? _pendingWorkType;
-    private PendingDispatch? _pendingDispatch;
-    private IDisposable? _runnerWaitTimer;
     private readonly ILogger<WorkflowGrain> _log;
-
-    private static readonly TimeSpan RunnerCheckInterval = TimeSpan.FromSeconds(1);
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
     {
@@ -26,7 +22,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private string GrainKey => this.GetPrimaryKeyString();
 
-    public async Task StartAsync(WorkflowDefinitionInput? definition = null)
+    public override Task OnActivateAsync(CancellationToken ct)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task StartAsync(WorkflowDefinitionInput? definition = null)
     {
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
@@ -39,35 +40,34 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-
-        await RunLoop();
+        return Task.CompletedTask;
     }
 
-    public async Task ResumeAsync()
+    public Task ResumeAsync()
     {
         EnsureRun();
         _run.Start();
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        await RunLoop();
+        return Task.CompletedTask;
     }
 
     public Task PauseAsync(string? reason = null)
     {
         EnsureRun();
-        _run.RequestPause();
-        _log.LogInformation("Workflow {Id} pause requested: {Reason}", GrainKey, reason);
+        _run.Pause();
+        _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         return Task.CompletedTask;
     }
 
-    public async Task ApproveAsync()
+    public Task ApproveAsync()
     {
         EnsureRun();
         _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        await RunLoop();
+        return Task.CompletedTask;
     }
 
-    public async Task RejectAsync(string? reason = null)
+    public Task RejectAsync(string? reason = null)
     {
         EnsureRun();
         var output = reason is not null
@@ -75,27 +75,50 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             : (JsonElement?)null;
         _run.Reject(new ApprovalInput(output));
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStage.Stage, reason);
+        return Task.CompletedTask;
     }
 
-    public async Task RetryAsync()
+    public Task RetryAsync()
     {
         EnsureRun();
+        _pendingWorkId = null;
+        _pendingWorkType = null;
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        await RunLoop();
+        return Task.CompletedTask;
     }
 
-    public async Task RerunAsync()
+    public Task RerunAsync()
     {
         EnsureRun();
+        _pendingWorkId = null;
+        _pendingWorkType = null;
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        await RunLoop();
+        return Task.CompletedTask;
     }
 
-    public async Task ReportResultAsync(string workId, WorkDispatchResult result)
+    public Task AssignRunnerAsync(string runnerId)
     {
-        if (workId != _pendingWorkId) return;
+        _assignedRunnerId = runnerId;
+        _log.LogInformation("Workflow {Id} assigned runner {RunnerId}", GrainKey, runnerId);
+        return Task.CompletedTask;
+    }
+
+    public Task<WorkDispatch?> GetWorkAsync()
+    {
+        if (_run is null) return Task.FromResult<WorkDispatch?>(null);
+        if (_pendingWorkId is not null) return Task.FromResult<WorkDispatch?>(null);
+
+        var work = _run.GetNextWork();
+        if (work is null) return Task.FromResult<WorkDispatch?>(null);
+
+        return Task.FromResult<WorkDispatch?>(PrepareWork(work));
+    }
+
+    public Task ReportResultAsync(string workId, WorkDispatchResult result)
+    {
+        if (workId != _pendingWorkId) return Task.CompletedTask;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
@@ -116,127 +139,46 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 break;
         }
 
-        await RunLoop();
+        return Task.CompletedTask;
     }
 
-    private async Task RunLoop()
+    private WorkDispatch? PrepareWork(WorkflowWork work)
     {
-        EnsureRun();
-
-        while (true)
+        switch (work)
         {
-            if (_run.PauseRequested)
-            {
-                _run.Pause();
-                CancelPendingDispatch();
-                await ReleaseRunnerAsync();
-                _log.LogInformation("Workflow {Id} paused", GrainKey);
-                return;
-            }
+            case WorkflowWork.StageInit si:
+                var stageDef = RequireStageDefinition(si.Stage);
+                if (stageDef.TasksFrom is null)
+                {
+                    _run.InitTasks(MaterializeTasks(stageDef));
+                    return PrepareFromDomain();
+                }
+                return MakeDispatch(si.Stage, $"load-{si.Stage}", "load", stageDef.TasksFrom.Uses, stageDef.TasksFrom.With);
 
-            var work = _run.Next();
+            case WorkflowWork.Task t:
+                return MakeDispatch(t.Stage, t.Id, "task", t.Uses, t.With);
 
-            switch (work)
-            {
-                case WorkflowWork.Complete c:
-                    CancelPendingDispatch();
-                    await ReleaseRunnerAsync();
-                    _log.LogInformation("Workflow {Id} completed at stage={Stage}", GrainKey, c.Stage);
-                    return;
+            case WorkflowWork.Check ch:
+                return MakeDispatch(ch.Stage, ch.Name, "check", ch.Uses, ch.With);
 
-                case WorkflowWork.Failed f:
-                    CancelPendingDispatch();
-                    await ReleaseRunnerAsync();
-                    _log.LogWarning("Workflow {Id} failed: {Reason}", GrainKey, f.Reason.Message);
-                    return;
-
-                case WorkflowWork.Blocked b:
-                    CancelPendingDispatch();
-                    await ReleaseRunnerAsync();
-                    _log.LogWarning("Workflow {Id} blocked at stage={Stage}: {Reason}", GrainKey, b.Stage, b.Reason);
-                    return;
-
-                case WorkflowWork.AwaitApproval a:
-                    CancelPendingDispatch();
-                    _log.LogInformation("Workflow {Id} awaiting approval at stage={Stage}", GrainKey, a.Stage);
-                    return;
-
-                case WorkflowWork.StageInit si:
-                    if (await HandleStageInitAsync(si))
-                        return;
-                    if (_run!.PauseRequested) { _run.Pause(); CancelPendingDispatch(); await ReleaseRunnerAsync(); return; }
-                    continue;
-
-                case WorkflowWork.Task t:
-                    await DispatchOrDeferAsync(t.Stage, t.Id, "task", t.Uses, t.With);
-                    return;
-
-                case WorkflowWork.Check ch:
-                    await DispatchOrDeferAsync(ch.Stage, ch.Name, "check", ch.Uses, ch.With);
-                    return;
-            }
+            default:
+                return null;
         }
     }
 
-    private async Task<bool> HandleStageInitAsync(WorkflowWork.StageInit work)
+    private WorkDispatch? PrepareFromDomain()
     {
-        if (work.TasksFrom is null)
-        {
-            _run.InitTasks();
-            return false;
-        }
-
-        await DispatchOrDeferAsync(work.Stage, $"load-{work.Stage}", "load", work.TasksFrom.Uses, work.TasksFrom.With);
-        return true;
+        var work = _run.GetNextWork();
+        return work is not null ? PrepareWork(work) : null;
     }
 
-    private async Task DispatchOrDeferAsync(string stage, string workId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
+    private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
     {
-        var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
-        _runnerId ??= await registry.FindIdleRunnerAsync([]);
-
-        if (_runnerId is null)
-        {
-            _pendingDispatch = new PendingDispatch(stage, workId, workType, uses, withStr);
-            _runnerWaitTimer ??= this.RegisterGrainTimer(
-                _ => OnRunnerAvailableAsync(),
-                RunnerCheckInterval,
-                RunnerCheckInterval);
-            _log.LogInformation("No runner available, deferring {WorkType} {WorkId}", workType, workId);
-            return;
-        }
-
-        await DoDispatchAsync(stage, workId, workType, uses, withStr);
-    }
-
-    private async Task OnRunnerAvailableAsync()
-    {
-        if (_pendingDispatch is null) return;
-        if (_run?.PauseRequested == true) return;
-
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
-        _runnerId = await registry.FindIdleRunnerAsync([]);
-        if (_runnerId is null) return;
-
-        _runnerWaitTimer?.Dispose();
-        _runnerWaitTimer = null;
-
-        var p = _pendingDispatch;
-        _pendingDispatch = null;
-        _log.LogInformation("Runner {RunnerId} now available, dispatching deferred {WorkType}", _runnerId, p!.WorkType);
-        await DoDispatchAsync(p.Stage, p.WorkId, p.WorkType, p.Uses, p.With);
-    }
-
-    private async Task DoDispatchAsync(string stage, string workId, string workType, string? uses, string? with)
-    {
+        var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         _pendingWorkId = workId;
         _pendingWorkType = workType;
-
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId!);
-        await runner.DispatchAsync(new WorkDispatch(GrainKey, stage, workId, workType, uses, with));
-
-        _log.LogInformation("Dispatched {WorkType} {WorkId} to runner {RunnerId}", workType, workId, _runnerId);
+        var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
+        return new WorkDispatch(GrainKey, workId, uses, withStr);
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)
@@ -287,30 +229,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             case "completed":
             case "loaded":
-                _run.InitTasks();
+                var stageDef = RequireStageDefinition(_run.CurrentStage.Stage);
+                _run.InitTasks(MaterializeTasks(stageDef, ParseLoadedTasks(result.Output)));
                 break;
             default:
                 _run.FailStage(result.Message ?? "Task loading failed");
                 break;
         }
-    }
-
-    private async Task ReleaseRunnerAsync()
-    {
-        if (_runnerId is null) return;
-
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(_runnerId);
-        var id = _runnerId;
-        _runnerId = null;
-        await runner.ReleaseAsync();
-        _log.LogInformation("Runner {RunnerId} released", id);
-    }
-
-    private void CancelPendingDispatch()
-    {
-        _runnerWaitTimer?.Dispose();
-        _runnerWaitTimer = null;
-        _pendingDispatch = null;
     }
 
     private bool TryInjectRetryTask(string stage, string checkName, CheckResult result)
@@ -343,6 +268,62 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
     }
 
+    private StageDefinition RequireStageDefinition(string stage) =>
+        _stageDefinitions?.Find(s => s.Stage == stage)
+        ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{stage}'");
+
+    private static List<LoadedTaskInput> MaterializeTasks(StageDefinition stage, List<LoadedTaskInput>? dynamicTasks = null)
+    {
+        var tasks = stage.Tasks
+            .Select(t => new LoadedTaskInput(t.Id, t.Title, t.Uses, t.With))
+            .ToList();
+
+        if (dynamicTasks is not null)
+            tasks.AddRange(dynamicTasks);
+
+        return tasks;
+    }
+
+    private static List<LoadedTaskInput> ParseLoadedTasks(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return [];
+
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        var taskArray = root.ValueKind == JsonValueKind.Array
+            ? root
+            : root.TryGetProperty("tasks", out var tasksProperty) && tasksProperty.ValueKind == JsonValueKind.Array
+                ? tasksProperty
+                : default;
+
+        if (taskArray.ValueKind != JsonValueKind.Array) return [];
+
+        var tasks = new List<LoadedTaskInput>();
+        foreach (var item in taskArray.EnumerateArray())
+        {
+            var id = item.TryGetProperty("id", out var idProperty)
+                ? idProperty.GetString()
+                : item.TryGetProperty("taskId", out var taskIdProperty)
+                    ? taskIdProperty.GetString()
+                    : null;
+            if (string.IsNullOrWhiteSpace(id)) continue;
+
+            var title = item.TryGetProperty("title", out var titleProperty)
+                ? titleProperty.GetString()
+                : id;
+            var uses = item.TryGetProperty("uses", out var usesProperty)
+                ? usesProperty.GetString()
+                : null;
+            var with = item.TryGetProperty("with", out var withProperty) && withProperty.ValueKind == JsonValueKind.Object
+                ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withProperty.GetRawText())
+                : null;
+
+            tasks.Add(new LoadedTaskInput(id, title ?? id, uses, with));
+        }
+
+        return tasks;
+    }
+
     private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
         with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
 
@@ -358,6 +339,4 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             s.TasksFromUses is not null ? new WorkflowTasksFromDefinition(s.TasksFromUses, ParseWith(s.TasksFromWith)) : null,
             s.RequiresApproval
         )).ToList();
-
-    private record PendingDispatch(string Stage, string WorkId, string WorkType, string? Uses, string? With);
 }

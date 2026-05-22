@@ -8,10 +8,8 @@ public interface IAction
 }
 
 public record ActionContext(
-    string RunId,
-    string Stage,
+    string WorkflowRunId,
     string WorkId,
-    string WorkType,
     string? Uses,
     Dictionary<string, JsonElement?>? With,
     string WorkDir);

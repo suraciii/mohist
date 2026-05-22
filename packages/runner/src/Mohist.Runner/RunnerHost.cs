@@ -37,14 +37,14 @@ public class RunnerHost
                 continue;
             }
 
-            _log.LogInformation("Received work: {WorkId} type={WorkType} uses={Uses}",
-                workItem.WorkId, workItem.WorkType, workItem.Uses);
+            _log.LogInformation("Received work: {WorkId} uses={Uses}",
+                workItem.WorkId, workItem.Uses);
 
             var result = await ExecuteAsync(workItem, ct);
 
             _log.LogInformation("Work {WorkId} completed: {Status}", workItem.WorkId, result.Status);
 
-            await _connection.ReportAsync(workItem.WorkId, result, ct);
+            await _connection.ReportAsync(workItem, result, ct);
         }
     }
 
@@ -56,12 +56,10 @@ public class RunnerHost
             return new WorkItemResult("failed", $"No action found for '{workItem.Uses}'");
 
         var context = new ActionContext(
-            workItem.RunId,
-            workItem.Stage,
-            workItem.WorkId,
-            workItem.WorkType,
-            workItem.Uses,
-            workItem.With,
+                workItem.WorkflowRunId,
+                workItem.WorkId,
+                workItem.Uses,
+                workItem.With,
             ResolveWorkDir(workItem));
 
         try
@@ -87,7 +85,7 @@ public class RunnerHost
 
     private string ResolveWorkDir(WorkItem workItem)
     {
-        var dir = Path.Combine(_workDir, workItem.RunId);
+        var dir = Path.Combine(_workDir, workItem.WorkflowRunId);
         Directory.CreateDirectory(dir);
         return dir;
     }

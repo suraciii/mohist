@@ -5,7 +5,7 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
     Task RegisterAsync(string runnerId, string[] capabilities);
     Task UnregisterAsync(string runnerId);
     Task<IReadOnlyList<string>> ListRunnerIdsAsync();
-    Task<string?> FindIdleRunnerAsync(string[] capabilities);
+    Task<string?> FindRunnerAsync(string[] capabilities, string? preferredRunnerId = null);
 }
 
 public static class RunnerRegistryKeys

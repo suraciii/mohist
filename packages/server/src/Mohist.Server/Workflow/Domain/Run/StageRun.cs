@@ -8,14 +8,14 @@ public class StageRun
 {
     private readonly List<TaskRun> _tasks = [];
     private readonly List<StageCheck> _checks = [];
-    private readonly List<TaskDefinition> _staticTasks;
     private readonly List<CheckDefinition> _staticChecks;
+    private readonly Dictionary<string, int> _taskAttempts = new();
     private bool _started;
     private bool _initialized;
 
     public string Stage { get; }
     public int Order { get; }
-    public WorkflowTasksFromDefinition? TasksFrom { get; }
+    public int Attempt { get; }
     public bool RequiresApproval { get; }
     public FailureDetails? Failure { get; set; }
     public ApprovalState? Approval { get; set; }
@@ -50,51 +50,40 @@ public class StageRun
     public StageRun(
         string stage,
         int order,
-        List<TaskDefinition> staticTasks,
         List<CheckDefinition> staticChecks,
-        WorkflowTasksFromDefinition? tasksFrom = null,
+        int attempt = 1,
         bool requiresApproval = false)
     {
         Stage = stage;
         Order = order;
-        _staticTasks = staticTasks;
         _staticChecks = staticChecks;
-        TasksFrom = tasksFrom;
+        Attempt = attempt;
         RequiresApproval = requiresApproval;
     }
 
     public void Start() => _started = true;
 
-    public void InitTasks(List<LoadedTaskInput>? loadedTasks = null)
+    public void InitTasks(List<LoadedTaskInput>? tasks = null)
     {
         if (_initialized) return;
-        loadedTasks ??= [];
+        tasks ??= [];
 
-        foreach (var t in _staticTasks)
-            _tasks.Add(new TaskRun(t.Id, t.Title, t.Uses, t.With));
-
-        foreach (var t in loadedTasks)
-            _tasks.Add(new TaskRun(t.Id, t.Title, t.Uses, t.With));
+        foreach (var t in tasks)
+            AddTask(t);
 
         foreach (var c in _staticChecks)
             _checks.Add(new StageCheck(c.Name, c.Title, c.Uses, c.With));
 
         _initialized = true;
+        Advance();
     }
 
-    public StageWork NextWork()
+    public StageWork? GetNextWork()
     {
-        if (Status == StageRunStatus.Passed) return new StageWork.Complete();
-        if (Status == StageRunStatus.AwaitingApproval) return new StageWork.AwaitApproval();
-        if (Status == StageRunStatus.Failed) return new StageWork.Blocked("stage-failed");
-        if (Status != StageRunStatus.Running) return new StageWork.Blocked("stage-not-running");
+        if (Status != StageRunStatus.Running) return null;
 
         if (!_initialized)
-        {
-            return new StageWork.StageInit(TasksFrom is not null
-                ? new WorkflowTasksFromDefinition(TasksFrom.Uses, TasksFrom.With)
-                : null);
-        }
+            return new StageWork.StageInit();
 
         var task = CurrentTask;
         if (task is not null)
@@ -104,10 +93,7 @@ public class StageRun
         if (check is not null)
             return new StageWork.Check(check.Name, check.Title, check.Uses, check.WithInput);
 
-        if (RequiresApproval && Approval is null)
-            return new StageWork.AwaitApproval();
-
-        return new StageWork.Complete();
+        return null;
     }
 
     public void CompleteTask()
@@ -116,6 +102,7 @@ public class StageRun
         if (task is null) return;
         task.Start();
         task.Complete();
+        Advance();
     }
 
     public void FailTask(string? reason = null)
@@ -133,6 +120,7 @@ public class StageRun
         check.Message = result.Message;
         check.Output = result.Output;
         check.Pass();
+        Advance();
     }
 
     public void ResetCheck(CheckResult result)
@@ -152,9 +140,15 @@ public class StageRun
         Failure = new FailureDetails(FailureReason.CheckUnrepaired, Stage, CheckName: check.Name, Message: result.Message);
     }
 
-    public void RequestApproval(JsonElement? output = null)
+    private void RequestApproval(JsonElement? output = null)
     {
         Approval = new ApprovalState("awaiting", output, DateTime.UtcNow.ToString("O"), null);
+    }
+
+    private void Advance()
+    {
+        if (RequiresApproval && Approval is null && IsComplete)
+            RequestApproval();
     }
 
     public void Approve(ApprovalInput? input = null)
@@ -177,12 +171,12 @@ public class StageRun
 
     public void InjectRetryTask(string checkName, LoadedTaskInput task)
     {
-        _tasks.Add(new TaskRun(task.Id, task.Title, task.Uses, task.With));
+        AddTask(task);
     }
 
     public int RetryCountForCheck(string checkName)
     {
-        return _tasks.Count(t => t.Id.StartsWith(checkName) || t.Id.Contains($":{checkName}"));
+        return _tasks.Count(t => t.DefinitionId == checkName || t.DefinitionId.Contains($":{checkName}"));
     }
 
     public void Retry()
@@ -190,10 +184,10 @@ public class StageRun
         if (Failure is null)
             throw new WorkflowDomainException($"Stage {Stage} is not failed");
 
-        var failedTask = _tasks.FirstOrDefault(t => t.Status == TaskRunStatus.Failed);
+        var failedTask = _tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed);
         if (failedTask is not null)
         {
-            failedTask.Reset();
+            AddTask(new LoadedTaskInput(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput));
             Failure = null;
             return;
         }
@@ -205,13 +199,11 @@ public class StageRun
         Failure = null;
     }
 
-    public void Reset()
+    private void AddTask(LoadedTaskInput input)
     {
-        _tasks.Clear();
-        _checks.Clear();
-        Failure = null;
-        Approval = null;
-        _initialized = false;
+        var attempt = _taskAttempts.GetValueOrDefault(input.Id, 0) + 1;
+        _taskAttempts[input.Id] = attempt;
+        _tasks.Add(new TaskRun(input.Id, attempt, input.Title, input.Uses, input.With));
     }
 
     private StageCheck? PendingCheck =>

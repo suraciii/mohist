@@ -7,24 +7,24 @@ namespace Mohist.Server.Workflow.Domain.Run;
 public class WorkflowRun
 {
     private readonly List<StageDefinition> _definitionStages;
-    private readonly List<StageRun> _stageRuns;
+    private readonly List<StageRun> _stageRuns = [];
+    private readonly Dictionary<string, int> _stageAttempts = new();
     private bool _started;
     private bool _paused;
 
     public string Id { get; }
     public IReadOnlyList<StageRun> StageRuns => _stageRuns.AsReadOnly();
     public StageRun CurrentStage { get; private set; }
-    public bool PauseRequested { get; set; }
 
     public WorkflowRunStatus Status
     {
         get
         {
             if (!_started) return WorkflowRunStatus.Pending;
-            if (_paused) return WorkflowRunStatus.Paused;
             if (CurrentStage.Status == StageRunStatus.Failed) return WorkflowRunStatus.Failed;
-            if (CurrentStage.Status == StageRunStatus.Passed
-                && CurrentStage == _stageRuns[^1]) return WorkflowRunStatus.Passed;
+            if (_paused) return WorkflowRunStatus.Paused;
+            if (CurrentStage.Status == StageRunStatus.AwaitingApproval) return WorkflowRunStatus.AwaitingApproval;
+            if (CurrentStage.Status == StageRunStatus.Passed && IsLastDefinitionStage(CurrentStage)) return WorkflowRunStatus.Passed;
             return WorkflowRunStatus.Running;
         }
     }
@@ -55,17 +55,8 @@ public class WorkflowRun
         Id = id;
         _definitionStages = definitionStages;
 
-        _stageRuns = definitionStages.Select((def, index) =>
-            new StageRun(
-                def.Stage,
-                index,
-                def.Tasks,
-                def.Checks,
-                def.TasksFrom,
-                def.RequiresApproval
-            )).ToList();
-
-        CurrentStage = _stageRuns[0];
+        var first = AppendStageRun(0);
+        CurrentStage = first;
     }
 
     public void Start()
@@ -75,79 +66,63 @@ public class WorkflowRun
 
         _started = true;
         _paused = false;
-        PauseRequested = false;
 
         if (CurrentStage.Status == StageRunStatus.Pending)
             CurrentStage.Start();
     }
 
-    public WorkflowWork Next()
+    public WorkflowWork? GetNextWork()
     {
         var status = Status;
-        if (status == WorkflowRunStatus.Passed)
-            return new WorkflowWork.Complete(CurrentStage.Stage);
-
-        if (status == WorkflowRunStatus.Failed)
-        {
-            if (Failure is null)
-                throw new WorkflowDomainException("Failed WorkflowRun requires failure details");
-            return new WorkflowWork.Failed(Failure);
-        }
-
         if (status != WorkflowRunStatus.Running)
-            return new WorkflowWork.Blocked(CurrentStage.Stage, "workflow-not-running");
+            return null;
 
-        var work = CurrentStage.NextWork();
+        if (CurrentStage.Status != StageRunStatus.Running)
+            return null;
 
-        if (work is StageWork.AwaitApproval && CurrentStage.Status == StageRunStatus.Running)
-            CurrentStage.RequestApproval();
-
-        if (work is StageWork.Complete)
-        {
-            if (PassStage())
-                return new WorkflowWork.Complete(CurrentStage.Stage);
-            return Next();
-        }
-
-        if (work is StageWork.Blocked)
-        {
-            if (Failure is null)
-                throw new WorkflowDomainException("Failed stage requires failure details");
-            return new WorkflowWork.Failed(Failure);
-        }
+        var work = CurrentStage.GetNextWork();
+        if (work is null) return null;
 
         return MapWork(work);
-    }
-
-    public void RequestPause()
-    {
-        if (Status == WorkflowRunStatus.Running)
-            PauseRequested = true;
     }
 
     public void Pause()
     {
         if (Status != WorkflowRunStatus.Running) return;
         _paused = true;
-        PauseRequested = false;
     }
 
-    public void InitTasks(List<LoadedTaskInput>? tasks = null) =>
+    public void InitTasks(List<LoadedTaskInput> tasks)
+    {
         CurrentStage.InitTasks(tasks);
+        Advance();
+    }
 
     public void FailStage(string reason) =>
         CurrentStage.Failure = new FailureDetails(FailureReason.TaskFailed, CurrentStage.Stage, Message: reason);
 
-    public void CompleteTask() => CurrentStage.CompleteTask();
+    public void CompleteTask()
+    {
+        CurrentStage.CompleteTask();
+        Advance();
+    }
     public void FailTask(TaskResult result) => CurrentStage.FailTask(result.Reason);
-    public void PassCheck(CheckResult result) => CurrentStage.PassCheck(result);
+    public void PassCheck(CheckResult result)
+    {
+        CurrentStage.PassCheck(result);
+        Advance();
+    }
     public void ResetCheck(CheckResult result) => CurrentStage.ResetCheck(result);
     public void PendingCheck(CheckResult result) => CurrentStage.ResetCheck(result);
     public void FailCheck(CheckResult result) => CurrentStage.FailCheck(result);
     public void ClearStageFailure() => CurrentStage.Failure = null;
     public void InjectRetryTask(string checkName, LoadedTaskInput task) => CurrentStage.InjectRetryTask(checkName, task);
     public int RetryCountForCheck(string checkName) => CurrentStage.RetryCountForCheck(checkName);
-    public void Approve(ApprovalInput? input = null) => CurrentStage.Approve(input);
+    public void Approve(ApprovalInput? input = null)
+    {
+        CurrentStage.Approve(input);
+        Advance();
+    }
     public void Reject(ApprovalInput? input = null) => CurrentStage.Reject(input);
 
     public void Retry()
@@ -160,31 +135,55 @@ public class WorkflowRun
 
     public void Rerun()
     {
-        CurrentStage.Reset();
+        var defIndex = _definitionStages.FindIndex(d => d.Stage == CurrentStage.Stage);
+        var newRun = AppendStageRun(defIndex);
+        CurrentStage = newRun;
+        CurrentStage.Start();
         _paused = false;
     }
 
-    private bool PassStage()
+    private void Advance()
     {
-        if (!CurrentStage.IsComplete) return false;
-        if (CurrentStage.RequiresApproval && CurrentStage.Approval?.Status != "approved") return false;
+        while (CurrentStage.Status == StageRunStatus.Passed)
+        {
+            var defIndex = _definitionStages.FindIndex(d => d.Stage == CurrentStage.Stage);
+            var nextDefIndex = defIndex + 1;
+            if (nextDefIndex >= _definitionStages.Count) return;
 
-        var nextIndex = CurrentStage.Order + 1;
-        if (nextIndex >= _stageRuns.Count) return true;
+            var next = AppendStageRun(nextDefIndex);
+            CurrentStage = next;
+            CurrentStage.Start();
+        }
+    }
 
-        CurrentStage = _stageRuns[nextIndex];
-        CurrentStage.Start();
-        return false;
+    private StageRun AppendStageRun(int definitionIndex)
+    {
+        var def = _definitionStages[definitionIndex];
+        var attempt = _stageAttempts.GetValueOrDefault(def.Stage, 0) + 1;
+        _stageAttempts[def.Stage] = attempt;
+
+        var run = new StageRun(
+            def.Stage,
+            definitionIndex,
+            def.Checks,
+            attempt,
+            def.RequiresApproval);
+
+        _stageRuns.Add(run);
+        return run;
+    }
+
+    private bool IsLastDefinitionStage(StageRun stageRun)
+    {
+        var lastDef = _definitionStages[^1];
+        return stageRun.Stage == lastDef.Stage && stageRun.Order == _definitionStages.Count - 1;
     }
 
     private WorkflowWork MapWork(StageWork work) => work switch
     {
-        StageWork.StageInit si => new WorkflowWork.StageInit(CurrentStage.Stage, si.TasksFrom),
+        StageWork.StageInit => new WorkflowWork.StageInit(CurrentStage.Stage),
         StageWork.Task t => new WorkflowWork.Task(CurrentStage.Stage, t.Id, t.Title, t.Uses, t.With),
         StageWork.Check c => new WorkflowWork.Check(CurrentStage.Stage, c.Name, c.Title, c.Uses, c.With),
-        StageWork.AwaitApproval => new WorkflowWork.AwaitApproval(CurrentStage.Stage),
-        StageWork.Complete => new WorkflowWork.Complete(CurrentStage.Stage),
-        StageWork.Blocked b => new WorkflowWork.Blocked(CurrentStage.Stage, b.Reason),
         _ => throw new WorkflowDomainException($"Unknown work kind: {work.GetType().Name}")
     };
 }
