@@ -1,4 +1,4 @@
-import type { MaterializedTaskInput } from '../domain';
+import type { LoadedTaskInput } from '../domain';
 
 export interface TaskLoadInput {
   run: unknown;
@@ -7,7 +7,7 @@ export interface TaskLoadInput {
 }
 
 export type TaskLoadResult =
-  | { state: 'loaded'; tasks: MaterializedTaskInput[] }
+  | { state: 'loaded'; tasks: LoadedTaskInput[] }
   | { state: 'empty' }
   | { state: 'missing'; message?: string }
   | { state: 'invalid'; message?: string };

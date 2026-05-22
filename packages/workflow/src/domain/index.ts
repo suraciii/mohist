@@ -7,7 +7,7 @@ export {
   type FailureReason,
   type FailureDetails,
   type ApprovalInput,
-  type MaterializedTaskInput,
+  type LoadedTaskInput,
   type TaskResult,
   type CheckResult,
   type StageWork,
