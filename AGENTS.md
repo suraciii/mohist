@@ -142,3 +142,101 @@ node bin/mo issue start 1
 - `review.md` 在 Check 阶段自动生成（AI 审查）
 - Integrate 阶段自动同步增量规格到主规格 + 归档 change
 - 支持 Ralph 式任务执行（逐个任务、断点续传、失败恢复）
+
+## 后端重构：ASP.NET Core / Orleans
+
+### 重构目标
+
+将 mohist 后端从 TypeScript/Node.js 单体逐步迁移到 **ASP.NET Core + Orleans** 方案，提升分布式能力、可靠性和可维护性。
+
+| 维度 | 现状 (TypeScript) | 目标 (ASP.NET Core + Orleans) |
+|------|-------------------|-------------------------------|
+| 运行时 | Node.js 单进程 | .NET 8 + Orleans Silo |
+| HTTP | Hono | ASP.NET Core Minimal API |
+| 状态管理 | 内存 Map + SQLite | Orleans Virtual Actor + 持久化 Grain State |
+| 并发调度 | 手动内存队列 + Map | Orleans Grain 天然并发安全 |
+| 工作流引擎 | 自研 `@mohist/workflow` 状态机 | Orleans Grain 状态机 (每个 issue = 一个 Grain) |
+| Agent 进程管理 | spawn `opencode agent` 子进程 | Orleans Grain 管理 Agent 生命周期 |
+| 事件推送 | 内存 EventBus + SSE | Orleans Stream + SSE |
+| 存储 | SQLite (better-sqlite3) | SQLite / PostgreSQL (via Entity Framework Core) |
+
+### 重构策略
+
+- **渐进式迁移**：不是一次性替换，而是按领域逐步迁移，TypeScript 和 .NET 并存
+- **API 兼容**：ASP.NET Core 后端提供与现有 Hono 后端相同的 REST API，前端无需改动
+- **第一步：Issue Workflow → Orleans**：将 issue 的生命周期状态机建模为 Orleans Grain
+
+### 重构决策记录
+
+#### Decision 1: Issue Workflow → Orleans Grain
+
+**日期**: 2026-05-22
+**决策**: 将每个 Issue 建模为一个 `IssueWorkflowGrain`（StatelessWorker 或 Reentrant），管理其完整的生命周期状态机。
+
+**核心 Grain 设计思路**:
+- `IIssueWorkflowGrain` — 一个 issue 一个 Grain，持有 issue 的 workflow state
+  - 状态: Draft → Plan → Build → Check → Integrate → Done
+  - 内嵌 `WorkflowRun` 领域模型（复用 `@mohist/workflow` 的领域逻辑）
+  - 通过 Orleans Reminder / Timer 实现 timeout、retry、auto-fix
+  - Approval gate 通过 Grain Method 调用（`SubmitApprovalAsync`）
+  - 事件通过 Orleans Stream 推送到 SSE endpoint
+
+**映射关系**:
+| 现有 TypeScript 组件 | Orleans 对应 |
+|---------------------|-------------|
+| `AgentRunnerService` (1118行) | 多个 Grain: `IIssueWorkflowGrain` + `IAgentSchedulerGrain` |
+| 内存 `runningSlots` / `pendingQueues` Map | Grain 内部状态 + Orleans 并发保证 |
+| `WorkflowRun` / `StageRun` / `TaskRun` 领域模型 | Grain State (可序列化) |
+| `EventBus` (内存事件) | Orleans Stream (`IAsyncObservable`) |
+| `WorkflowRuntime` / `WorkflowRunner` | Grain 方法编排 |
+| `CheckpointManager` 断点续传 | Grain 天然持久化，Silo 重启自动恢复 |
+| `UserApprovalCheck` 暂停等待 | Grain Method + `await` 或 Reminder 轮询 |
+| Agent 子进程 spawn | `IAgentProcessGrain` 管理进程生命周期 |
+| Orphan scan 定时器 | Orleans Reminder / Silo 周期扫描 |
+
+**不做的**:
+- 不改变前端 API 契约
+- 不改变 `@mohist/workflow` 领域模型的核心语义（Stage/Task/Check/Approval）
+- 不在此步迁移 Provider、Config、Web UI
+
+#### Decision 2: 单项目结构 + Central Package Management
+
+**日期**: 2026-05-22
+**决策**: .NET 后端使用单项目 `Mohist.Server`（非多项目拆分），Workflow 作为命名空间目录而非独立项目。
+
+**项目结构**:
+```
+packages/server/
+├── Mohist.sln
+├── Directory.Build.props          # 统一 net10.0
+├── Directory.Packages.props       # CPM 统一版本管理
+├── src/Mohist.Server/
+│   ├── Workflow/
+│   │   ├── Domain/                # 领域模型 (WorkflowRun, StageRun, ...)
+│   │   ├── Grains/                # Orleans Grain (IWorkflowGrain, WorkflowGrain)
+│   │   └── Handlers/              # Handler 接口 + Registry
+│   └── Mohist.Server.csproj
+└── tests/Mohist.Server.Tests/
+```
+
+**理由**: 当前阶段以迁移为主，无需过早拆分项目。领域模型和 Grain 在同一项目中减少序列化/反序列化开销，后续按需拆分。
+
+#### Decision 3: WorkflowRunner → WorkflowGrain 迁移
+
+**日期**: 2026-05-22
+**决策**: 将 TypeScript `WorkflowRunner`（run loop + Mutex + LoopController）迁移为 Orleans `WorkflowGrain`，利用 Grain 单线程保证替代 Mutex，利用 Grain 持久化替代 WorkflowStore。
+
+**映射关系**:
+| TypeScript WorkflowRunner | C# WorkflowGrain |
+|---------------------------|------------------|
+| `Mutex` (内存锁) | Orleans Grain 天然单线程访问（Reentrant） |
+| `LoopController` (wake/wait) | Grain Method 调用直接驱动（无需事件循环） |
+| `WorkflowStore.save()` | Grain State 持久化（后续接入） |
+| `HandlerRegistry` | `IHandlerRegistry`（DI 注入） |
+| `TaskHandler.run()` | `ITaskHandler.RunAsync()` |
+| `CheckHandler.run()` | `ICheckHandler.RunAsync()` |
+| `TaskLoader.load()` | `ITaskLoader.LoadAsync()` |
+| `AbortSignal` 中断 | `PauseAsync()` / Orleans Cancellation |
+| `tryInjectRetryTask` | 内置 `TryInjectRetryTask` |
+
+**关键差异**: WorkflowGrain 不使用 while 循环 + wake/wait 模式。外部（API 调用、Reminder）通过调用 Grain Method（`StartAsync`、`ApproveAsync`、`ResumeAsync`）驱动状态推进，Grain 内部 `RunLoop` 处理到下一个挂起点（await-approval / failed / complete / paused）即返回。

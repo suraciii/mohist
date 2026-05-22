@@ -1,0 +1,8 @@
+namespace Mohist.Server.Storage;
+
+public interface IStateStore<T> where T : class
+{
+    Task<T?> LoadAsync(string key);
+    Task SaveAsync(string key, T state);
+    Task DeleteAsync(string key);
+}
