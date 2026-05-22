@@ -24,7 +24,6 @@ export class Registry {
   private readonly checks = new Map<string, CheckHandler>();
   private readonly taskSources = new Map<string, TaskSourceHandler>();
   private readonly checkProviders = new Map<string, { build: (input: unknown) => Promise<Check | null> }>();
-  private readonly markerFormats = new Map<string, unknown>();
 
   task(uses: string | undefined): TaskHandler | null {
     if (!uses) return null;
@@ -55,13 +54,5 @@ export class Registry {
 
   registerCheckProvider(id: string, provider: { build: (input: unknown) => Promise<Check | null> }): void {
     this.checkProviders.set(id, provider);
-  }
-
-  registerMarkerFormat(format: string, handler: unknown): void {
-    this.markerFormats.set(format, handler);
-  }
-
-  getMarkerFormat(format: string | undefined): unknown {
-    return format ? this.markerFormats.get(format) : undefined;
   }
 }
