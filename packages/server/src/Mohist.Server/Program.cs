@@ -1,6 +1,8 @@
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Api;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
+using Mohist.Server.Storage.Db;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,9 +14,25 @@ builder.Host.UseOrleans(silo =>
     });
 });
 
-builder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
+var home = Environment.GetEnvironmentVariable("HOME")
+    ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+var dataDir = Path.Combine(home, ".mohist");
+Directory.CreateDirectory(dataDir);
+var dbPath = Path.Combine(dataDir, "mohist.db");
+
+builder.Services.AddDbContextFactory<MohistDbContext>(options =>
+    options.UseSqlite($"Data Source={dbPath}"));
+
+builder.Services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
 
 var app = builder.Build();
+
+// Ensure database schema is created
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+    db.Database.EnsureCreated();
+}
 
 app.UseApiExceptionHandler();
 app.MapHealthRoutes();
