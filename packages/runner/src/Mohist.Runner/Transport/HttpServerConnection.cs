@@ -66,7 +66,8 @@ public class HttpServerConnection : IServerConnection
             dispatch.Stage,
             dispatch.Title,
             dispatch.Uses,
-            ParseWith(dispatch.With));
+            ParseJson(dispatch.With),
+            ParseJson(dispatch.Variables));
     }
 
     public async Task ReportAsync(WorkItem workItem, WorkItemResult result, CancellationToken ct)
@@ -77,7 +78,7 @@ public class HttpServerConnection : IServerConnection
         resp.EnsureSuccessStatusCode();
     }
 
-    private static Dictionary<string, JsonElement?>? ParseWith(string? value)
+    private static Dictionary<string, JsonElement?>? ParseJson(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         return JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(value);
@@ -89,6 +90,7 @@ public record WorkDispatchResponse(
     string WorkId,
     string? Uses,
     string? With,
+    string? Variables,
     string WorkType,
     string? Stage,
     string? Title);

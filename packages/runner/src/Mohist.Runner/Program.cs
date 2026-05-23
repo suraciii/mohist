@@ -35,6 +35,8 @@ builder.Services.AddSingleton<ActionManager>(sp =>
 
 builder.Services.AddSingleton<RunnerHostOptions>();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IWorkspaceManager>(sp =>
+    new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>()));
 builder.Services.AddSingleton<IWorkExecutor, WorkExecutor>();
 builder.Services.AddSingleton<RunnerHost>();
 

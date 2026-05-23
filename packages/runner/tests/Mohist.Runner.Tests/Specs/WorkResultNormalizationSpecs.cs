@@ -86,7 +86,7 @@ public class WorkResultNormalizationSpecs
         if (action is not null)
             manager.Register("spec/action", () => action);
 
-        return new WorkExecutor(manager, SpecHelpers.Logger<WorkExecutor>());
+        return new WorkExecutor(manager, SpecHelpers.Logger<WorkExecutor>(), SpecHelpers.CreateWorkspaceManager("/tmp/test"));
     }
 
     private sealed class FakeAction : IAction

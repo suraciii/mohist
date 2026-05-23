@@ -11,8 +11,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
     private string? _assignedRunnerId;
-    private string? _pendingWorkId;
-    private string? _pendingWorkType;
+    private WorkDispatch? _pendingWork;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
@@ -81,8 +80,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task RetryAsync()
     {
         EnsureRun();
-        _pendingWorkId = null;
-        _pendingWorkType = null;
+        _pendingWork = null;
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await RegisterToBacklogAsync();
@@ -91,8 +89,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task RerunAsync()
     {
         EnsureRun();
-        _pendingWorkId = null;
-        _pendingWorkType = null;
+        _pendingWork = null;
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await RegisterToBacklogAsync();
@@ -108,7 +105,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public Task<WorkDispatch?> GetWorkAsync()
     {
         if (_run is null) return Task.FromResult<WorkDispatch?>(null);
-        if (_pendingWorkId is not null) return Task.FromResult<WorkDispatch?>(null);
+        if (_pendingWork is not null) return Task.FromResult<WorkDispatch?>(null);
 
         var work = _run.GetNextWork();
         if (work is null) return Task.FromResult<WorkDispatch?>(null);
@@ -118,15 +115,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public async Task ReportResultAsync(string workId, WorkDispatchResult result)
     {
-        if (workId != _pendingWorkId) return;
+        var pending = _pendingWork;
+        if (pending is null || workId != pending.WorkId) return;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
-        _pendingWorkId = null;
-        var workType = _pendingWorkType;
-        _pendingWorkType = null;
+        _pendingWork = null;
 
-        switch (workType)
+        switch (pending.WorkType)
         {
             case "task":
                 ProcessTaskResult(result);
@@ -140,6 +136,37 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
 
         await ReleaseFromBacklogIfTerminalAsync();
+    }
+
+    public Task<WorkflowStatusSnapshot?> GetStatusAsync()
+    {
+        if (_run is null) return Task.FromResult<WorkflowStatusSnapshot?>(null);
+
+        var stages = _run.Stages.Select(s => new StageStatusSnapshot(
+            s.Stage,
+            s.Status.ToString(),
+            s.Order,
+            s.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList(),
+            s.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList(),
+            s.Approval is not null
+                ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
+                : null,
+            s.Failure?.Message
+        )).ToList();
+
+        var pending = _pendingWork is not null
+            ? new PendingWorkSnapshot(_pendingWork.WorkId, _pendingWork.WorkType, _pendingWork.Stage, _pendingWork.Title, _pendingWork.Uses)
+            : null;
+
+        var failure = _run.Failure?.Message;
+
+        return Task.FromResult<WorkflowStatusSnapshot?>(new WorkflowStatusSnapshot(
+            _run.Id,
+            _run.Status.ToString(),
+            _run.CurrentStage.Stage,
+            stages,
+            pending,
+            failure));
     }
 
     private async Task ReleaseFromBacklogIfTerminalAsync()
@@ -193,10 +220,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
-        _pendingWorkId = workId;
-        _pendingWorkType = workType;
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        return new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
+        var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
+        _pendingWork = dispatch;
+        return dispatch;
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)

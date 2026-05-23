@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Variables.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -33,7 +34,25 @@ public static class RunnerRoutes
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var work = await runner.PollAsync();
-            return work is not null ? Results.Ok(work) : Results.NoContent();
+            if (work is null) return Results.NoContent();
+
+            var scope = grains.GetGrain<IVariableScopeGrain>(work.WorkflowRunId);
+            var variables = await scope.SnapshotAsync(new VariableSnapshotRequest(
+                work.WorkflowRunId,
+                work.WorkId,
+                work.WorkType,
+                work.Stage,
+                work.Title));
+
+            return Results.Ok(new WorkDispatchResponse(
+                work.WorkflowRunId,
+                work.WorkId,
+                work.Uses,
+                work.With,
+                variables,
+                work.WorkType,
+                work.Stage,
+                work.Title));
         });
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
@@ -50,3 +69,12 @@ public static class RunnerRoutes
 
 public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null);
 public record RunnerReportRequest(string WorkId, string Status, string? Message = null, string? Output = null, int? ExitCode = null);
+public record WorkDispatchResponse(
+    string WorkflowRunId,
+    string WorkId,
+    string? Uses,
+    string? With,
+    string? Variables,
+    string WorkType,
+    string? Stage,
+    string? Title);

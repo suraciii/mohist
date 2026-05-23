@@ -18,7 +18,8 @@ public record WorkItem(
     string? Stage,
     string? Title,
     string? Uses,
-    Dictionary<string, JsonElement?>? With);
+    Dictionary<string, JsonElement?>? With,
+    Dictionary<string, JsonElement?>? Variables = null);
 
 public record WorkItemResult(
     string Status,
