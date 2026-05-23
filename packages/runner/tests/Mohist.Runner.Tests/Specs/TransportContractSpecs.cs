@@ -17,6 +17,7 @@ public class TransportContractSpecs
             workId = "check-1:abc",
             uses = "mohist/artifact-exists",
             with = "{\"path\":\"proposal.md\"}",
+            variables = "{\"issue\":{\"number\":42}}",
             workType = "check",
             stage = "plan",
             title = "Proposal complete"
@@ -29,6 +30,7 @@ public class TransportContractSpecs
         Assert.Equal("check", work.WorkType);
         Assert.Equal("plan", work.Stage);
         Assert.Equal("proposal.md", work.With!["path"]!.Value.GetString());
+        Assert.Equal(42, work.Variables!["issue"]!.Value.GetProperty("number").GetInt32());
     }
 
     [Fact]

@@ -15,6 +15,7 @@ public record ActionContext(
     string? Title,
     string? Uses,
     Dictionary<string, JsonElement?>? With,
+    Dictionary<string, JsonElement?>? Variables,
     string WorkDir,
     CancellationToken CancellationToken);
 

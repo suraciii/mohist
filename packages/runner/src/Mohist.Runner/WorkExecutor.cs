@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Runner.Actions;
 using Mohist.Runner.Transport;
 
@@ -8,12 +9,14 @@ public class WorkExecutor : IWorkExecutor
     private readonly ActionManager _actionManager;
     private readonly ILogger<WorkExecutor> _log;
     private readonly string _workDir;
+    private readonly IWorkspaceManager _workspaceManager;
 
-    public WorkExecutor(ActionManager actionManager, ILogger<WorkExecutor> log)
+    public WorkExecutor(ActionManager actionManager, ILogger<WorkExecutor> log, IWorkspaceManager workspaceManager, string? workDir = null)
     {
         _actionManager = actionManager;
         _log = log;
-        _workDir = Directory.GetCurrentDirectory();
+        _workspaceManager = workspaceManager;
+        _workDir = workDir ?? Directory.GetCurrentDirectory();
     }
 
     public async Task<WorkItemResult> ExecuteAsync(WorkItem workItem, CancellationToken ct)
@@ -23,6 +26,17 @@ public class WorkExecutor : IWorkExecutor
         if (action is null)
             return Failure(workItem, $"No action found for '{workItem.Uses}'");
 
+        var variables = BuildVariables(workItem);
+        var workspace = await _workspaceManager.EnsureAsync(variables, ct);
+        variables["workspace"] = JsonSerializer.SerializeToElement(new
+        {
+            path = workspace.Path,
+            branch = workspace.Branch,
+            changeDir = workspace.ChangeDir
+        });
+
+        var renderedWith = TemplateRenderer.Render(workItem.With, variables);
+
         var context = new ActionContext(
             workItem.WorkflowRunId,
             workItem.WorkId,
@@ -30,8 +44,9 @@ public class WorkExecutor : IWorkExecutor
             workItem.Stage,
             workItem.Title,
             workItem.Uses,
-            workItem.With,
-            ResolveWorkDir(workItem),
+            renderedWith,
+            variables,
+            ResolveWorkDir(renderedWith, variables),
             ct);
 
         try
@@ -80,10 +95,46 @@ public class WorkExecutor : IWorkExecutor
         _ => new WorkItemResult("failed", message),
     };
 
-    private string ResolveWorkDir(WorkItem workItem)
+    private Dictionary<string, JsonElement?> BuildVariables(WorkItem workItem)
     {
-        var dir = Path.Combine(_workDir, workItem.WorkflowRunId);
+        var variables = workItem.Variables is not null
+            ? new Dictionary<string, JsonElement?>(workItem.Variables)
+            : new Dictionary<string, JsonElement?>();
+
+        variables["runner"] = JsonSerializer.SerializeToElement(new
+        {
+            os = Environment.OSVersion.Platform.ToString(),
+            hostname = Environment.MachineName,
+            temp = Path.GetTempPath()
+        });
+
+        return variables;
+    }
+
+    private string ResolveWorkDir(
+        Dictionary<string, JsonElement?>? renderedWith,
+        Dictionary<string, JsonElement?> variables)
+    {
+        var dir = JsonInputs.String(renderedWith, "working-directory")
+            ?? ResolveString(variables, "workspace.path")
+            ?? Path.Combine(_workDir, "default");
         Directory.CreateDirectory(dir);
         return dir;
+    }
+
+    private static string? ResolveString(Dictionary<string, JsonElement?> variables, string path)
+    {
+        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0 || !variables.TryGetValue(parts[0], out var current) || current is null)
+            return null;
+
+        var element = current.Value;
+        for (var i = 1; i < parts.Length; i++)
+        {
+            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parts[i], out element))
+                return null;
+        }
+
+        return element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
     }
 }

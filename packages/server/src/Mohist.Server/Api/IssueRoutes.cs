@@ -32,6 +32,13 @@ public static class IssueRoutes
 
         var wf = issues.MapGroup("/workflow");
 
+        wf.MapGet("/status", async (string issueId, IGrainFactory grains) =>
+        {
+            var grain = grains.GetGrain<IIssueGrain>(issueId);
+            var status = await grain.GetWorkflowStatusAsync();
+            return status is not null ? Results.Ok(status) : Results.NotFound();
+        });
+
         wf.MapPost("/start", async (string issueId, IGrainFactory grains) =>
         {
             var grain = grains.GetGrain<IIssueGrain>(issueId);
