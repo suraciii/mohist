@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Api;
+using Mohist.Server.Config.Domain;
 using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
@@ -26,6 +27,7 @@ builder.Services.AddDbContextFactory<MohistDbContext>(options =>
 
 builder.Services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
+builder.Services.AddScoped<ConfigService>();
 
 var app = builder.Build();
 
@@ -38,9 +40,11 @@ using (var scope = app.Services.CreateScope())
 
 app.UseApiExceptionHandler();
 app.MapHealthRoutes();
+app.MapStatusRoutes();
 app.MapProjectRoutes();
 app.MapIssueRoutes();
 app.MapEventRoutes();
+app.MapConfigRoutes();
 app.MapRunnerRoutes();
 
 app.Run();
