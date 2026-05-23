@@ -14,6 +14,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task AssignRunnerAsync(string runnerId);
     Task<WorkDispatch?> GetWorkAsync();
     Task ReportResultAsync(string workId, WorkDispatchResult result);
+    Task FailInFlightWorkAsync(string reason);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
 }
 

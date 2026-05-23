@@ -101,6 +101,26 @@ public class WorkflowRun
     public void FailStage(string reason) =>
         CurrentStage.Failure = new FailureDetails(FailureReason.TaskFailed, CurrentStage.Stage, Message: reason);
 
+    public void FailInFlightWork(string workType, string? reason)
+    {
+        switch (workType)
+        {
+            case "task":
+                CurrentStage.FailInFlightTask(reason);
+                break;
+            case "load":
+                CurrentStage.Failure = new FailureDetails(FailureReason.TaskFailed, CurrentStage.Stage, Message: reason ?? "Task loading failed");
+                break;
+            case "check":
+            case "checks":
+                CurrentStage.FailPendingChecks(reason);
+                break;
+            default:
+                CurrentStage.Failure = new FailureDetails(FailureReason.TaskFailed, CurrentStage.Stage, Message: reason ?? $"In-flight work lost (type={workType})");
+                break;
+        }
+    }
+
     public void CompleteTask()
     {
         CurrentStage.CompleteTask();

@@ -39,7 +39,7 @@ public class StageRun
     }
 
     public bool IsComplete => _initialized
-        && _tasks.All(t => t.Status == TaskRunStatus.Completed)
+        && CurrentTask is null
         && _checks.All(c => c.Status == CheckRunStatus.Passed);
 
     public bool Initialized => _initialized;
@@ -115,6 +115,27 @@ public class StageRun
         task.Start();
         task.Fail();
         Failure = new FailureDetails(FailureReason.TaskFailed, Stage, task.Id, Message: reason);
+    }
+
+    public void FailInFlightTask(string? reason = null)
+    {
+        var task = CurrentTask;
+        if (task is null) return;
+        if (task.Status == TaskRunStatus.Pending)
+            task.Start();
+        task.Fail();
+        Failure = new FailureDetails(FailureReason.TaskFailed, Stage, task.Id, Message: reason);
+    }
+
+    public void FailPendingChecks(string? reason = null)
+    {
+        var pending = _checks.FirstOrDefault(c => c.Status == CheckRunStatus.Pending);
+        if (pending is not null)
+        {
+            pending.Fail();
+            pending.Message = reason;
+            Failure = new FailureDetails(FailureReason.CheckUnrepaired, Stage, CheckName: pending.Name, Message: reason);
+        }
     }
 
     public void PassCheck(CheckResult result)
