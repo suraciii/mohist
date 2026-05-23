@@ -1,0 +1,19 @@
+namespace Mohist.Server.Api;
+
+public record ApiResponse<T>(bool Success, T? Data = default, string? Error = null, string? Code = null);
+
+public static class ApiResults
+{
+    public static IResult Ok<T>(T data) => Results.Ok(new ApiResponse<T>(true, data));
+
+    public static IResult Ok() => Results.Ok(new ApiResponse<object>(true));
+
+    public static IResult Fail(string error, int statusCode = 400, string? code = null) =>
+        Results.Json(new ApiResponse<object>(false, Error: error, Code: code), statusCode: statusCode);
+
+    public static IResult NotFound(string error) => Fail(error, 404, "not_found");
+
+    public static IResult Conflict(string error, string? code = null) => Fail(error, 409, code ?? "conflict");
+
+    public static IResult BadRequest(string error, string? code = null) => Fail(error, 400, code ?? "bad_request");
+}
