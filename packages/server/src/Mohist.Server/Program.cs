@@ -18,6 +18,7 @@ var app = builder.Build();
 
 app.UseApiExceptionHandler();
 app.MapHealthRoutes();
+app.MapProjectRoutes();
 app.MapIssueRoutes();
 app.MapRunnerRoutes();
 
