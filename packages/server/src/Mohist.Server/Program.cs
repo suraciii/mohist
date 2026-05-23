@@ -5,6 +5,7 @@ using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Workspace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +29,7 @@ builder.Services.AddDbContextFactory<MohistDbContext>(options =>
 builder.Services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddScoped<ConfigService>();
+builder.Services.AddSingleton<IGitService, GitService>();
 
 var app = builder.Build();
 
@@ -49,6 +51,7 @@ app.MapProvidersRoutes();
 app.MapLabelsRoutes();
 app.MapLogsRoutes();
 app.MapFsRoutes();
+app.MapWorkspaceRoutes();
 app.MapRunnerRoutes();
 
 app.Run();
