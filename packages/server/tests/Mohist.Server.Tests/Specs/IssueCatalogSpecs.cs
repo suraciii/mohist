@@ -31,7 +31,8 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal(1, issue.Number);
         Assert.Equal("Test issue", issue.Title);
         Assert.Equal("body", issue.Body);
-        Assert.Equal("Draft", issue.Status);
+        Assert.Equal("backlog", issue.Stage);
+        Assert.Equal("active", issue.Status);
         Assert.Equal(pid, issue.ProjectId);
         Assert.StartsWith("issue_", issue.Id);
     }
@@ -72,6 +73,20 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
     }
 
     [Fact]
+    public async Task ListIssues_FilterByStage()
+    {
+        var pid = await SetupProjectAsync();
+        var catalog = _grains.GetGrain<IIssueCatalogGrain>(pid);
+        await catalog.CreateAsync("A", null, null, null);
+
+        var backlog = await catalog.ListAsync(stage: "backlog");
+        var plan = await catalog.ListAsync(stage: "plan");
+
+        Assert.Single(backlog);
+        Assert.Empty(plan);
+    }
+
+    [Fact]
     public async Task GetInfo_ReturnsIssueFromGrain()
     {
         var pid = await SetupProjectAsync();
@@ -102,7 +117,7 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
     }
 
     [Fact]
-    public async Task Close_DraftIssue_ReturnsToDraftStatus()
+    public async Task Close_ActiveIssue_ResetsToBacklog()
     {
         var pid = await SetupProjectAsync();
         var catalog = _grains.GetGrain<IIssueCatalogGrain>(pid);
@@ -113,7 +128,8 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
         await grain.CloseAsync();
 
         var info = await grain.GetInfoAsync();
-        Assert.Equal("Draft", info.Status);
+        Assert.Equal("backlog", info.Stage);
+        Assert.Equal("closed", info.Status);
     }
 
     [Fact]

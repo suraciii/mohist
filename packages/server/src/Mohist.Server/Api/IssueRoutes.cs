@@ -13,13 +13,29 @@ public static class IssueRoutes
     {
         var issues = app.MapGroup("/api/issues");
 
-        issues.MapGet("/", async (string? projectId, IGrainFactory grains) =>
+        issues.MapGet("/", async (
+            string? projectId,
+            string? stage,
+            string? label,
+            string? priority,
+            bool? archived,
+            bool? all,
+            IGrainFactory grains) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var catalog = grains.GetGrain<IIssueCatalogGrain>(pid);
-            var list = await catalog.ListAsync();
+            var list = await catalog.ListAsync(stage, label, priority, archived, all);
+
+            // Enrich with project name
+            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
+            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            foreach (var issue in list)
+            {
+                issue.ProjectName = project?.Name;
+            }
+
             return ApiResults.Ok(list);
         });
 
@@ -32,7 +48,7 @@ public static class IssueRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var catalog = grains.GetGrain<IIssueCatalogGrain>(pid);
-            var issue = await catalog.CreateAsync(req.Title, req.Body, req.Labels, req.Priority);
+            var issue = await catalog.CreateAsync(req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
 
@@ -61,7 +77,8 @@ public static class IssueRoutes
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
-                await grain.UpdateAsync(req.Title, req.Body);
+                await grain.UpdateFullAsync(new UpdateIssueData(
+                    req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels));
                 var info = await grain.GetInfoAsync();
                 return ApiResults.Ok(info);
             }
@@ -105,6 +122,23 @@ public static class IssueRoutes
             }
         });
 
+        issues.MapPost("/{number:int}/reopen", async (int number, IGrainFactory grains) =>
+        {
+            var pid = await ResolveProjectIdAsync(null, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            try
+            {
+                await grain.ReopenAsync();
+                return ApiResults.Ok();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
+        });
+
         issues.MapPost("/{number:int}/archive", async (int number, IGrainFactory grains) =>
         {
             var pid = await ResolveProjectIdAsync(null, grains);
@@ -116,10 +150,52 @@ public static class IssueRoutes
                 await grain.ArchiveAsync();
                 return ApiResults.Ok();
             }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
+        });
+
+        issues.MapPost("/{number:int}/unarchive", async (int number, IGrainFactory grains) =>
+        {
+            var pid = await ResolveProjectIdAsync(null, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            try
+            {
+                await grain.UnarchiveAsync();
+                return ApiResults.Ok();
+            }
             catch (InvalidOperationException)
             {
                 return ApiResults.NotFound($"Issue #{number} not found");
             }
+        });
+
+        issues.MapPost("/archive-completed", async (IGrainFactory grains) =>
+        {
+            var pid = await ResolveProjectIdAsync(null, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var catalog = grains.GetGrain<IIssueCatalogGrain>(pid);
+            var all = await catalog.ListAsync(all: true);
+            var completed = all.Where(i => i.Stage == "done" && i.ArchivedAt == null).ToList();
+            var skipped = all.Where(i => i.Stage != "done" && i.ArchivedAt == null).ToList();
+
+            foreach (var issue in completed)
+            {
+                var grain = grains.GetGrain<IIssueGrain>($"{pid}:{issue.Number}");
+                try { await grain.ArchiveAsync(); } catch { /* skip if already archived */ }
+            }
+
+            return ApiResults.Ok(new
+            {
+                archived = completed.Count,
+                skipped = skipped.Count,
+                skippedNumbers = skipped.Select(s => s.Number).ToList(),
+                message = $"Archived {completed.Count} completed issues, skipped {skipped.Count}"
+            });
         });
 
         issues.MapGet("/{number:int}/workflow/status", async (int number, IGrainFactory grains) =>
@@ -223,6 +299,20 @@ public static class IssueRoutes
     }
 }
 
-public record CreateIssueRequest(string Title, string? Body = null, string[]? Labels = null, string? Priority = null);
-public record UpdateIssueRequest(string Title, string? Body);
+public record CreateIssueRequest(
+    string Title,
+    string? Body = null,
+    string[]? Labels = null,
+    string? Priority = null,
+    string? Model = null,
+    Dictionary<string, string>? StageModels = null);
+
+public record UpdateIssueRequest(
+    string? Title = null,
+    string? Body = null,
+    string[]? Labels = null,
+    string? Priority = null,
+    string? Model = null,
+    Dictionary<string, string>? StageModels = null);
+
 public record RejectRequest(string? Reason);
