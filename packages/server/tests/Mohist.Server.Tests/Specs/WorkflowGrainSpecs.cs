@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
 using Xunit;
@@ -14,6 +16,10 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public Task InitializeAsync()
     {
         var builder = new InProcessTestClusterBuilder();
+        builder.ConfigureSilo((_, siloBuilder) =>
+        {
+            siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
+        });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
     }

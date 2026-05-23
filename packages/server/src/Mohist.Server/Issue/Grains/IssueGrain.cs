@@ -147,6 +147,42 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
+    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority)
+    {
+        if (_issue is not null)
+            throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
+
+        _issue = new Issue.Domain.Issue(
+            $"issue_{Guid.NewGuid():N}",
+            projectId,
+            number,
+            title,
+            body,
+            labels,
+            priority ?? "p2");
+        await _issueStore.SaveAsync(GrainKey, _issue);
+    }
+
+    public Task<IssueInfo> GetInfoAsync()
+    {
+        EnsureIssue();
+        var info = new IssueInfo
+        {
+            Id = _issue!.Id,
+            ProjectId = _issue.ProjectId,
+            Number = _issue.Number,
+            Title = _issue.Title,
+            Body = _issue.Body,
+            Status = _issue.Status.ToString(),
+            Labels = _issue.Labels,
+            Priority = _issue.Priority,
+            WorkflowRunId = _issue.WorkflowRunId,
+            CreatedAt = _issue.CreatedAt.ToString("o"),
+            UpdatedAt = _issue.UpdatedAt.ToString("o"),
+        };
+        return Task.FromResult(info);
+    }
+
     private void EnsureIssue()
     {
         if (_issue is null)
