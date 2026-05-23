@@ -51,12 +51,21 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task UnregisterAsync()
     {
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
+
+        var workflows = _assignedWorkflows.ToList();
         _status = RunnerStatus.Offline;
         _info = null;
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
+
+        foreach (var wfId in workflows)
+        {
+            _log.LogWarning("Runner {Id} unregistered with in-flight work, failing workflow {WorkflowId}", RunnerId, wfId);
+            var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
+            await workflowGrain.FailInFlightWorkAsync($"Runner {RunnerId} unregistered");
+        }
     }
 
     public Task HeartbeatAsync()
@@ -181,10 +190,9 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         foreach (var wfId in timedOutWorkflows)
         {
-            _log.LogWarning("Runner {Id} timed out, reporting failure for workflow {WorkflowId}", RunnerId, wfId);
-            var result = new WorkDispatchResult("failed", $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
+            _log.LogWarning("Runner {Id} timed out, failing in-flight work for workflow {WorkflowId}", RunnerId, wfId);
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            await workflowGrain.ReportResultAsync("", result);
+            await workflowGrain.FailInFlightWorkAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
     }
 }

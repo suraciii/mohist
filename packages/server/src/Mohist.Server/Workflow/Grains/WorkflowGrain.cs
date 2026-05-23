@@ -11,7 +11,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
     private string? _assignedRunnerId;
-    private WorkDispatch? _pendingWork;
+    private WorkLease? _lease;
+    private WorkDispatch? _lastDispatch;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
@@ -80,7 +81,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task RetryAsync()
     {
         EnsureRun();
-        _pendingWork = null;
+        ClearLease();
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await RegisterToBacklogAsync();
@@ -89,7 +90,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task RerunAsync()
     {
         EnsureRun();
-        _pendingWork = null;
+        ClearLease();
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await RegisterToBacklogAsync();
@@ -105,7 +106,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public Task<WorkDispatch?> GetWorkAsync()
     {
         if (_run is null) return Task.FromResult<WorkDispatch?>(null);
-        if (_pendingWork is not null) return Task.FromResult<WorkDispatch?>(null);
+        if (_lease is not null) return Task.FromResult<WorkDispatch?>(null);
 
         var work = _run.GetNextWork();
         if (work is null) return Task.FromResult<WorkDispatch?>(null);
@@ -115,14 +116,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public async Task ReportResultAsync(string workId, WorkDispatchResult result)
     {
-        var pending = _pendingWork;
-        if (pending is null || workId != pending.WorkId) return;
+        var lease = _lease;
+        if (lease is null || workId != lease.WorkId) return;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
-        _pendingWork = null;
+        ClearLease();
 
-        switch (pending.WorkType)
+        switch (lease.WorkType)
         {
             case "task":
                 ProcessTaskResult(result);
@@ -135,6 +136,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 ProcessLoadResult(result);
                 break;
         }
+
+        await ReleaseFromBacklogIfTerminalAsync();
+    }
+
+    public async Task FailInFlightWorkAsync(string reason)
+    {
+        var lease = _lease;
+        if (lease is null) return;
+
+        _log.LogWarning("Workflow {Id} failing in-flight work {WorkId} ({WorkType}): {Reason}",
+            GrainKey, lease.WorkId, lease.WorkType, reason);
+
+        ClearLease();
+        _run!.FailInFlightWork(lease.WorkType, reason);
 
         await ReleaseFromBacklogIfTerminalAsync();
     }
@@ -166,8 +181,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 stageFailure);
         }).ToList();
 
-        var pending = _pendingWork is not null
-            ? new PendingWorkSnapshot(_pendingWork.WorkId, _pendingWork.WorkType, _pendingWork.Stage, _pendingWork.Title, _pendingWork.Uses)
+        var pending = _lease is not null && _lastDispatch is not null
+            ? new PendingWorkSnapshot(_lastDispatch.WorkId, _lastDispatch.WorkType, _lastDispatch.Stage, _lastDispatch.Title, _lastDispatch.Uses)
             : null;
 
         var failure = _run.Failure is not null
@@ -279,8 +294,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
         var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
-        _pendingWork = dispatch;
+        _lease = new WorkLease(workId, workType, stage, logicalId);
+        _lastDispatch = dispatch;
         return dispatch;
+    }
+
+    private void ClearLease()
+    {
+        _lease = null;
+        _lastDispatch = null;
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)
