@@ -27,7 +27,7 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r2, retriedTask.WorkId, "completed");
 
         var (check, r3) = await PollWorkAnyAsync();
-        await ReportAsync(r3, check.WorkId, "pass");
+        await ReportChecksPassAsync(r3, check, "check-1");
     }
 
     [Fact]
@@ -39,16 +39,16 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", check.WorkId);
-        await ReportAsync(r2, check.WorkId, "fail", "broken");
+        Assert.StartsWith("checks-", check.WorkId);
+        await ReportChecksFailAsync(r2, check, "check-1", "broken");
 
         await workflow.RetryAsync();
 
         var (retriedCheck, r3) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", retriedCheck.WorkId);
+        Assert.StartsWith("checks-", retriedCheck.WorkId);
         Assert.Equal(r2, r3);
 
-        await ReportAsync(r3, retriedCheck.WorkId, "pass");
+        await ReportChecksPassAsync(r3, retriedCheck, "check-1");
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r2, task2.WorkId, "completed");
 
         var (check, r3) = await PollWorkAnyAsync();
-        await ReportAsync(r3, check.WorkId, "pass");
+        await ReportChecksPassAsync(r3, check, "check-1");
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "pass");
+        await ReportChecksPassAsync(r2, check, "check-1");
 
         await workflow.RerunAsync();
 
@@ -121,7 +121,7 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r2, retried.WorkId, "completed");
 
         var (check, r3) = await PollWorkAnyAsync();
-        await ReportAsync(r3, check.WorkId, "pass");
+        await ReportChecksPassAsync(r3, check, "check-1");
     }
 
     [Fact]
@@ -146,6 +146,6 @@ public class RetryRerunSpecs : WorkflowGrainSpecs
         await ReportAsync(r3, task3.WorkId, "completed");
 
         var (check, r4) = await PollWorkAnyAsync();
-        await ReportAsync(r4, check.WorkId, "pass");
+        await ReportChecksPassAsync(r4, check, "check-1");
     }
 }

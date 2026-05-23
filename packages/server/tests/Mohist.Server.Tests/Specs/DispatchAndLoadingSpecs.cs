@@ -24,7 +24,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         await ReportAsync(rId, task.WorkId, "completed");
         var (check, checkRunnerId) = await PollWorkAnyAsync();
-        await ReportAsync(checkRunnerId, check.WorkId, "pass");
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportAsync(r3, dynamic2.WorkId, "completed");
 
         var (check, r4) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", check.WorkId);
-        await ReportAsync(r4, check.WorkId, "pass");
+        Assert.StartsWith("checks-", check.WorkId);
+        await ReportChecksPassAsync(r4, check, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.True(await runner.IsAvailableAsync());
@@ -110,7 +110,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportAsync(r3, dynamicTask.WorkId, "completed");
 
         var (check, r4) = await PollWorkAnyAsync();
-        await ReportAsync(r4, check.WorkId, "pass");
+        await ReportChecksPassAsync(r4, check, "check-1");
     }
 
     [Fact]

@@ -20,11 +20,10 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, taskWork.WorkId, "completed");
 
         var (checkWork, rid2) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", checkWork.WorkId);
-        Assert.Equal("check", checkWork.WorkType);
+        Assert.StartsWith("checks-", checkWork.WorkId);
+        Assert.Equal("checks", checkWork.WorkType);
         Assert.Equal("build", checkWork.Stage);
-        Assert.Equal("Check 1", checkWork.Title);
-        await ReportAsync(rid2, checkWork.WorkId, "pass");
+        await ReportChecksPassAsync(rid2, checkWork, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(rid2);
         Assert.True(await runner.IsAvailableAsync());
@@ -40,16 +39,18 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task1.WorkId, "completed");
 
         var (check1, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("plan-ok:", check1.WorkId);
-        await ReportAsync(r2, check1.WorkId, "pass");
+        Assert.StartsWith("checks-", check1.WorkId);
+        Assert.Equal("checks", check1.WorkType);
+        await ReportChecksPassAsync(r2, check1, "plan-ok");
 
         var (task2, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", task2.WorkId);
         await ReportAsync(r3, task2.WorkId, "completed");
 
         var (check2, r4) = await PollWorkAnyAsync();
-        Assert.StartsWith("build-ok:", check2.WorkId);
-        await ReportAsync(r4, check2.WorkId, "pass");
+        Assert.StartsWith("checks-", check2.WorkId);
+        Assert.Equal("checks", check2.WorkType);
+        await ReportChecksPassAsync(r4, check2, "build-ok");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.True(await runner.IsAvailableAsync());
@@ -83,8 +84,9 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         await ReportAsync(r3, t3.WorkId, "completed");
 
         var (c1, r4) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", c1.WorkId);
-        await ReportAsync(r4, c1.WorkId, "pass");
+        Assert.StartsWith("checks-", c1.WorkId);
+        Assert.Equal("checks", c1.WorkType);
+        await ReportChecksPassAsync(r4, c1, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.True(await runner.IsAvailableAsync());

@@ -34,6 +34,12 @@ public sealed record CheckResult(
     string? Message = null,
     JsonElement? Output = null);
 
+public sealed record CheckItem(
+    string Name,
+    string Title,
+    string? Uses = null,
+    Dictionary<string, JsonElement?>? With = null);
+
 public abstract record StageWork
 {
     public sealed record StageInit() : StageWork;
@@ -44,11 +50,7 @@ public abstract record StageWork
         string? Uses = null,
         Dictionary<string, JsonElement?>? With = null) : StageWork;
 
-    public sealed record Check(
-        string Name,
-        string Title,
-        string? Uses = null,
-        Dictionary<string, JsonElement?>? With = null) : StageWork;
+    public sealed record Checks(List<CheckItem> Items) : StageWork;
 }
 
 public abstract record WorkflowWork
@@ -62,13 +64,9 @@ public abstract record WorkflowWork
         string? Uses = null,
         Dictionary<string, JsonElement?>? With = null) : WorkflowWork;
 
-    public sealed record Check(
+    public sealed record Checks(
         string Stage,
-        string Name,
-        string Title,
-        string? Uses = null,
-        Dictionary<string, JsonElement?>? With = null) : WorkflowWork;
-
+        List<CheckItem> Items) : WorkflowWork;
 }
 
 public sealed record TaskRunState(

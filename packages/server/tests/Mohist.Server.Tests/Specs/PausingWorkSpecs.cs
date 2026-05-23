@@ -56,7 +56,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await ReportAsync(r2, task2.WorkId, "completed");
 
         var (check, r3) = await PollWorkAnyAsync();
-        await ReportAsync(r3, check.WorkId, "pass");
+        await ReportChecksPassAsync(r3, check, "check-1");
 
         var runner2 = Grains.GetGrain<IRunnerGrain>(r3);
         Assert.True(await runner2.IsAvailableAsync());

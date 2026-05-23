@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
@@ -109,6 +110,31 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
     protected async Task ReportAsync(string runnerId, WorkDispatch work, WorkDispatchResult result)
     {
         await ReportAsync(runnerId, work.WorkId, result);
+    }
+
+    protected async Task ReportChecksAsync(string runnerId, WorkDispatch checksWork, params (string Name, string Status, string? Message)[] checkResults)
+    {
+        var output = JsonSerializer.Serialize(checkResults.Select(cr => new Dictionary<string, string?>
+        {
+            ["name"] = cr.Name,
+            ["status"] = cr.Status,
+            ["message"] = cr.Message,
+        }));
+        await ReportAsync(runnerId, checksWork.WorkId, new WorkDispatchResult(
+            checkResults.All(cr => cr.Status == "pass") ? "pass" : "fail",
+            Output: output));
+    }
+
+    protected async Task ReportChecksPassAsync(string runnerId, WorkDispatch checksWork, params string[] checkNames)
+    {
+        await ReportChecksAsync(runnerId, checksWork, checkNames.Select(n => (n, "pass", (string?)null)).ToArray());
+    }
+
+    protected async Task ReportChecksFailAsync(string runnerId, WorkDispatch checksWork, string failedCheckName, string message, params string[] passingCheckNames)
+    {
+        var results = passingCheckNames.Select(n => (n, "pass", (string?)null)).ToList();
+        results.Add((failedCheckName, "fail", message));
+        await ReportChecksAsync(runnerId, checksWork, results.ToArray());
     }
 
     protected static WorkflowDefinitionInput SingleStage(

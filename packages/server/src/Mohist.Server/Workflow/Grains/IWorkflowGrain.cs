@@ -52,7 +52,8 @@ public sealed record WorkflowStatusSnapshot(
     string? CurrentStage,
     List<StageStatusSnapshot> Stages,
     PendingWorkSnapshot? PendingWork,
-    string? FailureMessage);
+    FailureStatusSnapshot? Failure,
+    List<AvailableActionSnapshot> AvailableActions);
 
 [GenerateSerializer]
 public sealed record StageStatusSnapshot(
@@ -62,7 +63,21 @@ public sealed record StageStatusSnapshot(
     List<TaskStatusSnapshot> Tasks,
     List<CheckStatusSnapshot> Checks,
     ApprovalStatusSnapshot? Approval,
-    string? FailureMessage);
+    FailureStatusSnapshot? Failure);
+
+[GenerateSerializer]
+public sealed record FailureStatusSnapshot(
+    string Reason,
+    string? Stage,
+    string? TaskId,
+    string? CheckName,
+    string? Message);
+
+[GenerateSerializer]
+public sealed record AvailableActionSnapshot(
+    string Name,
+    string Label,
+    string? Target);
 
 [GenerateSerializer]
 public sealed record TaskStatusSnapshot(

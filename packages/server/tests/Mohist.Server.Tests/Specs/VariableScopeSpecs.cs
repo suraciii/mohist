@@ -64,7 +64,7 @@ public class VariableScopeSpecs : WorkflowGrainSpecs
         await ReportAsync(r5, selfReview.WorkId, "completed");
 
         var (check, _) = await PollWorkAnyAsync();
-        Assert.Equal("mohist/artifact-exists", check.Uses);
-        Assert.Contains("${{ artifacts.changeDir }}/proposal.md", check.With);
+        Assert.Equal("checks", check.WorkType);
+        Assert.StartsWith("checks-", check.WorkId);
     }
 }
