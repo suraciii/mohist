@@ -45,6 +45,10 @@ app.MapProjectRoutes();
 app.MapIssueRoutes();
 app.MapEventRoutes();
 app.MapConfigRoutes();
+app.MapProvidersRoutes();
+app.MapLabelsRoutes();
+app.MapLogsRoutes();
+app.MapFsRoutes();
 app.MapRunnerRoutes();
 
 app.Run();
