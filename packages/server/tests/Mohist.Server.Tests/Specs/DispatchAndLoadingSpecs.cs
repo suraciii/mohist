@@ -53,6 +53,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         var (load, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("load-build:", load.WorkId);
+        Assert.Equal("load", load.WorkType);
+        Assert.Equal("build", load.Stage);
         Assert.Equal("spec/load", load.Uses);
 
         await ReportAsync(r1, load.WorkId, new WorkDispatchResult("loaded", Output: """

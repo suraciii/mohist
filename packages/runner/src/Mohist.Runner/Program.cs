@@ -1,4 +1,5 @@
 using Mohist.Runner;
+using Mohist.Runner.Actions;
 using Mohist.Runner.Handlers;
 using Mohist.Runner.Transport;
 
@@ -25,9 +26,16 @@ builder.Services.AddSingleton<ActionManager>(sp =>
     var manager = new ActionManager(sp, sp.GetRequiredService<ILogger<ActionManager>>());
     manager.Register("mohist/process", () => new ProcessHandler(sp.GetRequiredService<ILogger<ProcessHandler>>()));
     manager.Register("mohist/script", () => new ScriptHandler(sp.GetRequiredService<ILogger<ScriptHandler>>()));
+    manager.Register("mohist/health-gate", () => new HealthGateAction(sp.GetRequiredService<ILogger<HealthGateAction>>()));
+    manager.Register("mohist/artifact-exists", () => new ArtifactExistsAction());
+    manager.Register("mohist/marker", () => new MarkerAction());
+    manager.Register("mohist/openspec-tasks", () => new OpenSpecTasksAction());
     return manager;
 });
 
+builder.Services.AddSingleton<RunnerHostOptions>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IWorkExecutor, WorkExecutor>();
 builder.Services.AddSingleton<RunnerHost>();
 
 var host = builder.Build();

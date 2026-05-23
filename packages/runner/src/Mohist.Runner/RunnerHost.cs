@@ -6,19 +6,23 @@ namespace Mohist.Runner;
 public class RunnerHost
 {
     private readonly IServerConnection _connection;
-    private readonly ActionManager _actionManager;
+    private readonly IWorkExecutor _executor;
     private readonly ILogger<RunnerHost> _log;
-    private readonly string _workDir;
+    private readonly TimeProvider _timeProvider;
+    private readonly RunnerHostOptions _options;
 
     public RunnerHost(
         IServerConnection connection,
-        ActionManager actionManager,
-        ILogger<RunnerHost> log)
+        IWorkExecutor executor,
+        ILogger<RunnerHost> log,
+        TimeProvider timeProvider,
+        RunnerHostOptions options)
     {
         _connection = connection;
-        _actionManager = actionManager;
+        _executor = executor;
         _log = log;
-        _workDir = Directory.GetCurrentDirectory();
+        _timeProvider = timeProvider;
+        _options = options;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -27,66 +31,73 @@ public class RunnerHost
         await _connection.ConnectAsync(ct);
         _log.LogInformation("Runner connected, polling for work...");
 
-        while (!ct.IsCancellationRequested)
-        {
-            var workItem = await _connection.PollAsync(ct);
-
-            if (workItem is null)
-            {
-                await Task.Delay(1000, ct);
-                continue;
-            }
-
-            _log.LogInformation("Received work: {WorkId} uses={Uses}",
-                workItem.WorkId, workItem.Uses);
-
-            var result = await ExecuteAsync(workItem, ct);
-
-            _log.LogInformation("Work {WorkId} completed: {Status}", workItem.WorkId, result.Status);
-
-            await _connection.ReportAsync(workItem, result, ct);
-        }
-    }
-
-    private async Task<WorkItemResult> ExecuteAsync(WorkItem workItem, CancellationToken ct)
-    {
-        var action = _actionManager.Resolve(workItem.Uses);
-
-        if (action is null)
-            return new WorkItemResult("failed", $"No action found for '{workItem.Uses}'");
-
-        var context = new ActionContext(
-                workItem.WorkflowRunId,
-                workItem.WorkId,
-                workItem.Uses,
-                workItem.With,
-            ResolveWorkDir(workItem));
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var heartbeatTask = RunHeartbeatAsync(heartbeatCts.Token);
 
         try
         {
-            var actionResult = await action.ExecuteAsync(context);
+            while (!ct.IsCancellationRequested)
+            {
+                var workItem = await _connection.PollAsync(ct);
 
-            return new WorkItemResult(
-                actionResult.Status,
-                actionResult.Message,
-                actionResult.Output,
-                actionResult.ExitCode);
+                if (workItem is null)
+                {
+                    await Task.Delay(_options.IdleDelay, _timeProvider, ct);
+                    continue;
+                }
+
+                _log.LogInformation("Received work: {WorkId} type={WorkType} stage={Stage} uses={Uses}",
+                    workItem.WorkId, workItem.WorkType, workItem.Stage, workItem.Uses);
+
+                var result = await _executor.ExecuteAsync(workItem, ct);
+
+                _log.LogInformation("Work {WorkId} completed: {Status}", workItem.WorkId, result.Status);
+
+                await _connection.ReportAsync(workItem, result, ct);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return new WorkItemResult("cancelled", "Runner shutting down");
+            _log.LogInformation("Runner stopping");
         }
-        catch (Exception ex)
+        finally
         {
-            _log.LogError(ex, "Action execution failed for {WorkId}", workItem.WorkId);
-            return new WorkItemResult("failed", ex.Message);
+            heartbeatCts.Cancel();
+            await StopAsync(heartbeatTask);
         }
     }
 
-    private string ResolveWorkDir(WorkItem workItem)
+    private async Task RunHeartbeatAsync(CancellationToken ct)
     {
-        var dir = Path.Combine(_workDir, workItem.WorkflowRunId);
-        Directory.CreateDirectory(dir);
-        return dir;
+        using var timer = new PeriodicTimer(_options.HeartbeatInterval, _timeProvider);
+        while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct))
+        {
+            try
+            {
+                await _connection.HeartbeatAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Runner heartbeat failed");
+            }
+        }
+    }
+
+    private async Task StopAsync(Task heartbeatTask)
+    {
+        try
+        {
+            await heartbeatTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        using var shutdownCts = new CancellationTokenSource(_options.ShutdownTimeout, _timeProvider);
+        await _connection.DisconnectAsync(shutdownCts.Token);
     }
 }

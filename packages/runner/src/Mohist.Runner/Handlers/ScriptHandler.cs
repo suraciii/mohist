@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Mohist.Runner.Actions;
 
@@ -64,7 +66,7 @@ public class ScriptHandler : IAction
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            await process.WaitForExitAsync();
+            await process.WaitForExitAsync(context.CancellationToken);
 
             return process.ExitCode == 0
                 ? new ActionResult("completed", stdout.ToString().Trim())
