@@ -1,4 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
 using Xunit;
@@ -13,6 +16,12 @@ public class BacklogFixture : IAsyncLifetime
     public Task InitializeAsync()
     {
         var builder = new InProcessTestClusterBuilder();
+        builder.Options.InitialSilosCount = 1;
+        builder.ConfigureSilo((_, siloBuilder) =>
+        {
+            siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
+            siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
+        });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
     }

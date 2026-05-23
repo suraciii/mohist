@@ -5,6 +5,10 @@ using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
+[CollectionDefinition("WorkflowEvents", DisableParallelization = true)]
+public class WorkflowEventsCollection;
+
+[Collection("WorkflowEvents")]
 public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
 {
     private readonly WorkflowGrainFixture _fixture;
@@ -12,6 +16,15 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
     public WorkflowEventSpecs(WorkflowGrainFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    [Fact]
+    public void EventBus_DirectEmit_Works()
+    {
+        var received = new List<object>();
+        _fixture.EventBus.On("test", data => received.Add(data));
+        _fixture.EventBus.Emit("test", new { x = 1 });
+        Assert.Single(received);
     }
 
     [Fact]
