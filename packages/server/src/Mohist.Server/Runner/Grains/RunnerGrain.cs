@@ -7,6 +7,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private readonly HashSet<string> _assignedWorkflows = [];
+    private readonly Dictionary<string, string> _workToWorkflow = new();
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
     private readonly ILogger<RunnerGrain> _log;
@@ -53,6 +54,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _status = RunnerStatus.Offline;
         _info = null;
         _assignedWorkflows.Clear();
+        _workToWorkflow.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
     }
@@ -78,7 +80,25 @@ public class RunnerGrain : Grain, IRunnerGrain
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
             var work = await workflow.GetWorkAsync();
             if (work is not null)
+            {
+                _workToWorkflow[work.WorkId] = wfId;
                 return work;
+            }
+        }
+
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var claimedId = await backlog.ClaimAsync(RunnerId);
+        if (claimedId is not null)
+        {
+            _assignedWorkflows.Add(claimedId);
+            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(claimedId);
+            await workflow.AssignRunnerAsync(RunnerId);
+            var work = await workflow.GetWorkAsync();
+            if (work is not null)
+            {
+                _workToWorkflow[work.WorkId] = claimedId;
+                return work;
+            }
         }
 
         return null;
@@ -94,19 +114,15 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.FromResult<IReadOnlyList<WorkDispatch>>([]);
     }
 
-#pragma warning disable CS8602
     public async Task<string?> ReportAsync(string workId, WorkDispatchResult result)
     {
-        foreach (var wfId in _assignedWorkflows)
-        {
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            await workflow.ReportResultAsync(workId, result);
-            return wfId;
-        }
+        if (!_workToWorkflow.Remove(workId, out var wfId))
+            return null;
 
-        return null;
+        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
+        await workflow.ReportResultAsync(workId, result);
+        return wfId;
     }
-#pragma warning restore CS8602
 
     public Task<bool> IsAvailableAsync()
     {
@@ -123,9 +139,20 @@ public class RunnerGrain : Grain, IRunnerGrain
     public Task ReleaseAsync(string? workflowRunId = null)
     {
         if (workflowRunId is not null)
+        {
             _assignedWorkflows.Remove(workflowRunId);
+            var staleKeys = _workToWorkflow
+                .Where(kv => kv.Value == workflowRunId)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var key in staleKeys)
+                _workToWorkflow.Remove(key);
+        }
         else
+        {
             _assignedWorkflows.Clear();
+            _workToWorkflow.Clear();
+        }
 
         _log.LogInformation("Runner {Id} released workflow {WorkflowId}", RunnerId, workflowRunId ?? "*");
         return Task.CompletedTask;
@@ -143,11 +170,11 @@ public class RunnerGrain : Grain, IRunnerGrain
         }
     }
 
-#pragma warning disable CS8602
     private async Task HandleTimeoutAsync()
     {
         var timedOutWorkflows = _assignedWorkflows.ToList();
         _assignedWorkflows.Clear();
+        _workToWorkflow.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
@@ -160,5 +187,4 @@ public class RunnerGrain : Grain, IRunnerGrain
             await workflowGrain.ReportResultAsync("", result);
         }
     }
-#pragma warning restore CS8602
 }
