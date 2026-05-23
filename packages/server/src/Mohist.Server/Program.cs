@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Api;
+using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
@@ -24,6 +25,7 @@ builder.Services.AddDbContextFactory<MohistDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
 builder.Services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
+builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 
 var app = builder.Build();
 
@@ -38,6 +40,7 @@ app.UseApiExceptionHandler();
 app.MapHealthRoutes();
 app.MapProjectRoutes();
 app.MapIssueRoutes();
+app.MapEventRoutes();
 app.MapRunnerRoutes();
 
 app.Run();
