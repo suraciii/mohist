@@ -28,7 +28,8 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task<string> StartWorkflowAsync()
     {
         EnsureIssue();
-        _issue!.Open();
+        _issue!.SetStage(IssueStage.Plan);
+        _issue.SetRuntimeStatus(IssueRuntimeStatus.Active);
         var wrId = $"wr_{_issue.ProjectId}_{_issue.Number}";
         _issue.SetWorkflowRunId(wrId);
         await _issueStore.SaveAsync(GrainKey, _issue);
@@ -95,8 +96,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task UpdateAsync(string title, string? body)
     {
         EnsureIssue();
-        _issue!.UpdateTitle(title);
-        _issue.UpdateBody(body);
+        _issue!.Update(title, body, null, null, null, null);
         await _issueStore.SaveAsync(GrainKey, _issue);
     }
 
@@ -104,6 +104,27 @@ public class IssueGrain : Grain, IIssueGrain
     {
         EnsureIssue();
         _issue!.Archive();
+        await _issueStore.SaveAsync(GrainKey, _issue);
+    }
+
+    public async Task UnarchiveAsync()
+    {
+        EnsureIssue();
+        _issue!.Unarchive();
+        await _issueStore.SaveAsync(GrainKey, _issue);
+    }
+
+    public async Task ReopenAsync()
+    {
+        EnsureIssue();
+        _issue!.Reopen();
+        await _issueStore.SaveAsync(GrainKey, _issue);
+    }
+
+    public async Task UpdateFullAsync(UpdateIssueData data)
+    {
+        EnsureIssue();
+        _issue!.Update(data.Title, data.Body, data.Labels, data.Priority, data.Model, data.StageModels);
         await _issueStore.SaveAsync(GrainKey, _issue);
     }
 
@@ -132,22 +153,21 @@ public class IssueGrain : Grain, IIssueGrain
                 ws.TryGetProperty("path", out var wp))
                 workspacePath = wp.GetString();
         }
-        catch
-        {
-        }
+        catch { }
 
         return new IssueWorkflowStatus(
             _issue.Id,
             _issue.Number,
             _issue.Title,
-            _issue.Status.ToString(),
+            _issue.Stage.ToString().ToLower(),
+            _issue.RuntimeStatus.ToString().ToLower(),
             wrId,
             changeDir,
             workspacePath,
             wfStatus);
     }
 
-    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority)
+    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, string>? stageModels = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -159,7 +179,9 @@ public class IssueGrain : Grain, IIssueGrain
             title,
             body,
             labels,
-            priority ?? "p2");
+            priority ?? "p2",
+            model,
+            stageModels);
         await _issueStore.SaveAsync(GrainKey, _issue);
     }
 
@@ -169,18 +191,60 @@ public class IssueGrain : Grain, IIssueGrain
         var info = new IssueInfo
         {
             Id = _issue!.Id,
-            ProjectId = _issue.ProjectId,
             Number = _issue.Number,
             Title = _issue.Title,
             Body = _issue.Body,
-            Status = _issue.Status.ToString(),
+            Stage = _issue.Stage.ToString().ToLower(),
+            Status = _issue.RuntimeStatus.ToString().ToLower(),
+            ProjectId = _issue.ProjectId,
             Labels = _issue.Labels,
             Priority = _issue.Priority,
-            WorkflowRunId = _issue.WorkflowRunId,
+            Model = _issue.Model,
+            StageModels = _issue.StageModels,
             CreatedAt = _issue.CreatedAt.ToString("o"),
             UpdatedAt = _issue.UpdatedAt.ToString("o"),
+            ArchivedAt = _issue.ArchivedAt?.ToString("o"),
+            ApprovalState = _issue.ApprovalState,
+            MergeState = _issue.MergeState?.ToString().ToLower(),
+            RetryCount = _issue.RetryCount,
+            ConflictRetryCount = _issue.ConflictRetryCount,
+            BlockedReason = _issue.BlockedReason,
+            WorkflowRunId = _issue.WorkflowRunId,
         };
         return Task.FromResult(info);
+    }
+
+    public Task SetStageAsync(string stage)
+    {
+        EnsureIssue();
+        if (Enum.TryParse<IssueStage>(stage, true, out var s))
+            _issue!.SetStage(s);
+        return Task.CompletedTask;
+    }
+
+    public Task SetRuntimeStatusAsync(string status, string? reason = null)
+    {
+        EnsureIssue();
+        if (Enum.TryParse<IssueRuntimeStatus>(status, true, out var s))
+            _issue!.SetRuntimeStatus(s, reason);
+        return Task.CompletedTask;
+    }
+
+    public Task SetApprovalStateAsync(ApprovalState? state)
+    {
+        EnsureIssue();
+        _issue!.SetApprovalState(state);
+        return Task.CompletedTask;
+    }
+
+    public Task SetMergeStateAsync(string? state)
+    {
+        EnsureIssue();
+        if (state == null)
+            _issue!.SetMergeState(null);
+        else if (Enum.TryParse<MergeState>(state, true, out var s))
+            _issue!.SetMergeState(s);
+        return Task.CompletedTask;
     }
 
     private void EnsureIssue()
@@ -200,3 +264,13 @@ public class IssueGrain : Grain, IIssueGrain
 
     private static string JsonString(string value) => System.Text.Json.JsonSerializer.Serialize(value);
 }
+
+[GenerateSerializer]
+public record UpdateIssueData(
+    [property: Id(0)] string? Title = null,
+    [property: Id(1)] string? Body = null,
+    [property: Id(2)] string[]? Labels = null,
+    [property: Id(3)] string? Priority = null,
+    [property: Id(4)] string? Model = null,
+    [property: Id(5)] Dictionary<string, string>? StageModels = null
+);
