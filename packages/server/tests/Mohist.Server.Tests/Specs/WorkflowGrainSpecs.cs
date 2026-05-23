@@ -18,6 +18,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public Task InitializeAsync()
     {
         var builder = new InProcessTestClusterBuilder();
+        builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));

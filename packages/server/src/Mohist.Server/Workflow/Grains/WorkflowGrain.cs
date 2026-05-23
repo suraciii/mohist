@@ -13,11 +13,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private List<StageDefinition>? _stageDefinitions;
     private WorkLease? _lease;
     private WorkDispatch? _lastDispatch;
-    private IEventBus EventBus => (GrainContext?.ActivationServices.GetService<IEventBus>() ?? NullEventBus.Instance);
+    private readonly IEventBus _eventBus;
     private readonly ILogger<WorkflowGrain> _log;
 
-    public WorkflowGrain(ILogger<WorkflowGrain> log)
+    public WorkflowGrain(IEventBus eventBus, ILogger<WorkflowGrain> log)
     {
+        _eventBus = eventBus;
         _log = log;
     }
 
@@ -517,7 +518,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private void EmitStageChanged(string action, string? reason = null)
     {
         if (_run is null) return;
-        EventBus.Emit("stage_changed", new
+        _eventBus.Emit("stage_changed", new
         {
             workflowRunId = GrainKey,
             stage = _run.CurrentStage.Stage,
