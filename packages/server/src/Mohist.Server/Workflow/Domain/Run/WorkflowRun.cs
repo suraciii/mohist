@@ -183,7 +183,7 @@ public class WorkflowRun
     {
         StageWork.StageInit => new WorkflowWork.StageInit(CurrentStage.Stage),
         StageWork.Task t => new WorkflowWork.Task(CurrentStage.Stage, t.Id, t.Title, t.Uses, t.With),
-        StageWork.Check c => new WorkflowWork.Check(CurrentStage.Stage, c.Name, c.Title, c.Uses, c.With),
+        StageWork.Checks c => new WorkflowWork.Checks(CurrentStage.Stage, c.Items),
         _ => throw new WorkflowDomainException($"Unknown work kind: {work.GetType().Name}")
     };
 }

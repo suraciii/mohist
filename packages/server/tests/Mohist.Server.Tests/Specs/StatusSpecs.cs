@@ -64,7 +64,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "pass");
+        await ReportChecksPassAsync(r2, check, "plan-ok");
 
         var status = await Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
 

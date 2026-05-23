@@ -89,9 +89,12 @@ public class StageRun
         if (task is not null)
             return new StageWork.Task(task.Id, task.Title, task.Uses, task.WithInput);
 
-        var check = PendingCheck;
-        if (check is not null)
-            return new StageWork.Check(check.Name, check.Title, check.Uses, check.WithInput);
+        var pendingChecks = _checks
+            .Where(c => c.Status == CheckRunStatus.Pending)
+            .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
+            .ToList();
+        if (pendingChecks.Count > 0)
+            return new StageWork.Checks(pendingChecks);
 
         return null;
     }
@@ -116,7 +119,7 @@ public class StageRun
 
     public void PassCheck(CheckResult result)
     {
-        var check = RequirePendingCheck();
+        var check = FindCheck(result.Name);
         check.Message = result.Message;
         check.Output = result.Output;
         check.Pass();
@@ -125,7 +128,7 @@ public class StageRun
 
     public void ResetCheck(CheckResult result)
     {
-        var check = RequirePendingCheck();
+        var check = FindCheck(result.Name);
         check.Message = result.Message;
         check.Output = result.Output;
         check.Reset();
@@ -133,7 +136,7 @@ public class StageRun
 
     public void FailCheck(CheckResult result)
     {
-        var check = RequirePendingCheck();
+        var check = FindCheck(result.Name);
         check.Message = result.Message;
         check.Output = result.Output;
         check.Fail();
@@ -184,19 +187,43 @@ public class StageRun
         if (Failure is null)
             throw new WorkflowDomainException($"Stage {Stage} is not failed");
 
-        var failedTask = _tasks.LastOrDefault(t => t.Status == TaskRunStatus.Failed);
-        if (failedTask is not null)
+        switch (Failure.Reason)
         {
-            AddTask(new LoadedTaskInput(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput));
-            Failure = null;
-            return;
+            case FailureReason.TaskFailed:
+                RetryFailedTask(Failure.TaskId);
+                break;
+            case FailureReason.CheckUnrepaired:
+                RetryFailedCheck(Failure.CheckName);
+                break;
+            case FailureReason.ApprovalRejected:
+                throw new WorkflowDomainException($"Stage {Stage} failure is approval rejection; use rerun to restart the stage");
         }
 
-        foreach (var check in _checks)
-            if (check.Status == CheckRunStatus.Failed)
-                check.Reset();
-
         Failure = null;
+    }
+
+    private void RetryFailedTask(string? taskRunId)
+    {
+        var failedTask = _tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed);
+
+        if (failedTask is null)
+            throw new WorkflowDomainException($"Failed task {taskRunId} not found or not in failed state");
+
+        AddTask(new LoadedTaskInput(
+            failedTask.DefinitionId,
+            failedTask.Title,
+            failedTask.Uses,
+            failedTask.WithInput));
+    }
+
+    private void RetryFailedCheck(string? checkName)
+    {
+        var failedCheck = _checks.FirstOrDefault(c => c.Name == checkName && c.Status == CheckRunStatus.Failed);
+
+        if (failedCheck is null)
+            throw new WorkflowDomainException($"Failed check {checkName} not found or not in failed state");
+
+        failedCheck.Reset();
     }
 
     private void AddTask(LoadedTaskInput input)
@@ -206,14 +233,11 @@ public class StageRun
         _tasks.Add(new TaskRun(input.Id, attempt, input.Title, input.Uses, input.With));
     }
 
-    private StageCheck? PendingCheck =>
-        _checks.FirstOrDefault(c => c.Status == CheckRunStatus.Pending);
-
-    private StageCheck RequirePendingCheck()
+    private StageCheck FindCheck(string name)
     {
-        var check = PendingCheck;
+        var check = _checks.FirstOrDefault(c => c.Name == name);
         if (check is null)
-            throw new WorkflowDomainException($"No pending check in stage {Stage}");
+            throw new WorkflowDomainException($"Check {name} not found in stage {Stage}");
         return check;
     }
 }

@@ -29,7 +29,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "pass");
+        await ReportChecksPassAsync(r2, check, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.Null(await runner.PollAsync());
@@ -44,7 +44,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "pass");
+        await ReportChecksPassAsync(r2, check, "plan-ok");
 
         await workflow.RejectAsync("bad");
 
@@ -65,8 +65,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, task.WorkId, "completed");
         var (check, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", check.WorkId);
-        await ReportAsync(r2, check.WorkId, "pass");
+        Assert.StartsWith("checks-", check.WorkId);
+        await ReportChecksPassAsync(r2, check, "check-1");
     }
 
     [Fact]
@@ -78,12 +78,12 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", check.WorkId);
+        Assert.StartsWith("checks-", check.WorkId);
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
         await workflow.ReportResultAsync(task.WorkId, new WorkDispatchResult("failed", "stale"));
 
-        await ReportAsync(r2, check.WorkId, "pass");
+        await ReportChecksPassAsync(r2, check, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.Null(await runner.PollAsync());

@@ -30,13 +30,13 @@ public class BoundarySpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "pending", "not ready");
+        await ReportChecksAsync(r2, check, ("check-1", "pending", "not ready"));
 
         var (pendingCheck, r3) = await PollWorkAnyAsync();
-        Assert.StartsWith("check-1:", pendingCheck.WorkId);
+        Assert.StartsWith("checks-build:", pendingCheck.WorkId);
         Assert.NotEqual(check.WorkId, pendingCheck.WorkId);
 
-        await ReportAsync(r3, pendingCheck.WorkId, "pass");
+        await ReportChecksPassAsync(r3, pendingCheck, "check-1");
         var runner = Grains.GetGrain<IRunnerGrain>(r3);
         Assert.True(await runner.IsAvailableAsync());
     }
@@ -54,7 +54,7 @@ public class BoundarySpecs : WorkflowGrainSpecs
 
         await ReportAsync(runnerId, task.WorkId, "completed");
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "pass");
+        await ReportChecksPassAsync(r2, check, "check-1");
 
         Assert.True(await Grains.GetGrain<IRunnerGrain>(r2).IsAvailableAsync());
     }

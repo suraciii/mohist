@@ -96,7 +96,9 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         await runner.ReportAsync(work.WorkId, new WorkDispatchResult("completed"));
         var check = await runner.PollAsync();
         Assert.NotNull(check);
-        await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass"));
+        Assert.Equal("checks", check.WorkType);
+        Assert.StartsWith("checks-", check.WorkId);
+        await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
 
         Assert.Null(await runner.PollAsync());
     }
@@ -172,7 +174,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var check = await runner.PollAsync();
         Assert.NotNull(check);
-        await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass"));
+        Assert.Equal("checks", check.WorkType);
+        await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
     }
 
     [Fact]
@@ -220,7 +223,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var check = await runner.PollAsync();
         Assert.NotNull(check);
-        await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass"));
+        Assert.Equal("checks", check.WorkType);
+        await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
 
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
         var running = await backlog.ListRunningAsync();

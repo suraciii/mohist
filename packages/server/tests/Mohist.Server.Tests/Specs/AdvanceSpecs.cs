@@ -27,8 +27,8 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("review:", check.WorkId);
-        await ReportAsync(r2, check.WorkId, "pass");
+        Assert.StartsWith("checks-", check.WorkId);
+        await ReportChecksPassAsync(r2, check, "review");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.Null(await runner.PollAsync());
@@ -52,8 +52,8 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("review:", check.WorkId);
-        await ReportAsync(r2, check.WorkId, "pass");
+        Assert.StartsWith("checks-", check.WorkId);
+        await ReportChecksPassAsync(r2, check, "review");
 
         var (nextTask, r3) = await PollWorkAnyAsync();
         Assert.StartsWith("compile.", nextTask.WorkId);

@@ -28,7 +28,7 @@ public class FailureSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (check, r2) = await PollWorkAnyAsync();
-        await ReportAsync(r2, check.WorkId, "fail", "typecheck errors");
+        await ReportChecksFailAsync(r2, check, "check-1", "typecheck errors");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.True(await runner.IsAvailableAsync());

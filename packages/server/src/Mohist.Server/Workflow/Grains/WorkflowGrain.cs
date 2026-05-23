@@ -128,6 +128,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 ProcessTaskResult(result);
                 break;
             case "check":
+            case "checks":
                 ProcessCheckResult(result);
                 break;
             case "load":
@@ -142,23 +143,43 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_run is null) return Task.FromResult<WorkflowStatusSnapshot?>(null);
 
-        var stages = _run.Stages.Select(s => new StageStatusSnapshot(
-            s.Stage,
-            s.Status.ToString(),
-            s.Order,
-            s.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList(),
-            s.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList(),
-            s.Approval is not null
-                ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
-                : null,
-            s.Failure?.Message
-        )).ToList();
+        var stages = _run.Stages.Select(s =>
+        {
+            var stageFailure = s.Failure is not null
+                ? new FailureStatusSnapshot(
+                    s.Failure.Reason.ToString(),
+                    s.Failure.Stage,
+                    s.Failure.TaskId,
+                    s.Failure.CheckName,
+                    s.Failure.Message)
+                : null;
+
+            return new StageStatusSnapshot(
+                s.Stage,
+                s.Status.ToString(),
+                s.Order,
+                s.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList(),
+                s.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList(),
+                s.Approval is not null
+                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
+                    : null,
+                stageFailure);
+        }).ToList();
 
         var pending = _pendingWork is not null
             ? new PendingWorkSnapshot(_pendingWork.WorkId, _pendingWork.WorkType, _pendingWork.Stage, _pendingWork.Title, _pendingWork.Uses)
             : null;
 
-        var failure = _run.Failure?.Message;
+        var failure = _run.Failure is not null
+            ? new FailureStatusSnapshot(
+                _run.Failure.Reason.ToString(),
+                _run.Failure.Stage,
+                _run.Failure.TaskId,
+                _run.Failure.CheckName,
+                _run.Failure.Message)
+            : null;
+
+        var actions = BuildAvailableActions();
 
         return Task.FromResult<WorkflowStatusSnapshot?>(new WorkflowStatusSnapshot(
             _run.Id,
@@ -166,7 +187,36 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run.CurrentStage.Stage,
             stages,
             pending,
-            failure));
+            failure,
+            actions));
+    }
+
+    private List<AvailableActionSnapshot> BuildAvailableActions()
+    {
+        if (_run is null) return [];
+
+        var actions = new List<AvailableActionSnapshot>();
+
+        if (_run.Status == WorkflowRunStatus.AwaitingApproval)
+        {
+            actions.Add(new AvailableActionSnapshot("approve", "Approve", null));
+            actions.Add(new AvailableActionSnapshot("reject", "Reject", null));
+        }
+
+        if (_run.Status == WorkflowRunStatus.Failed && _run.Failure is not null)
+        {
+            var failure = _run.Failure;
+            if (failure.Reason is FailureReason.TaskFailed or FailureReason.CheckUnrepaired)
+            {
+                var target = failure.Reason == FailureReason.TaskFailed ? failure.TaskId : failure.CheckName;
+                var label = failure.Reason == FailureReason.TaskFailed ? "Retry failed task" : "Retry failed check";
+                actions.Add(new AvailableActionSnapshot("retry", label, target));
+            }
+
+            actions.Add(new AvailableActionSnapshot("rerun", "Rerun stage", _run.CurrentStage.Stage));
+        }
+
+        return actions;
     }
 
     private async Task ReleaseFromBacklogIfTerminalAsync()
@@ -203,8 +253,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             case WorkflowWork.Task t:
                 return MakeDispatch(t.Stage, t.Id, "task", t.Title, t.Uses, t.With);
 
-            case WorkflowWork.Check ch:
-                return MakeDispatch(ch.Stage, ch.Name, "check", ch.Title, ch.Uses, ch.With);
+            case WorkflowWork.Checks ch:
+                var checksPayload = ch.Items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
+                {
+                    ["name"] = JsonSerializer.SerializeToElement(i.Name),
+                    ["title"] = JsonSerializer.SerializeToElement(i.Title),
+                    ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
+                    ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
+                }).ToList();
+                return MakeDispatch(ch.Stage, $"checks-{ch.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) });
 
             default:
                 return null;
@@ -237,35 +294,70 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private void ProcessCheckResult(WorkDispatchResult result)
     {
         var work = _run.CurrentStage;
-        var pendingCheck = work.Checks.FirstOrDefault(c => c.Status == CheckRunStatus.Pending);
-        var checkName = pendingCheck?.Name ?? "";
+        var stage = work.Stage;
 
-        var output = result.Output is not null
-            ? JsonSerializer.Deserialize<JsonElement>(result.Output)
-            : (JsonElement?)null;
-        var checkResult = new CheckResult(checkName, result.Status, result.Message, output);
+        var checkResults = ParseCheckResults(result.Output);
+        if (checkResults.Count == 0)
+            return;
 
-        switch (result.Status)
+        foreach (var cr in checkResults)
         {
-            case "pass":
-                _run.PassCheck(checkResult);
-                break;
-            case "pending":
-                _run.PendingCheck(checkResult);
-                break;
-            default:
-                var injected = TryInjectRetryTask(work.Stage, checkName, checkResult);
+            if (cr.Status == "pass")
+            {
+                _run.PassCheck(cr);
+            }
+            else if (cr.Status == "pending")
+            {
+                _run.PendingCheck(cr);
+            }
+            else
+            {
+                var injected = TryInjectRetryTask(stage, cr.Name, cr);
                 if (injected)
                 {
-                    _run.ResetCheck(checkResult);
+                    _run.ResetCheck(cr);
                     _run.ClearStageFailure();
                 }
                 else
                 {
-                    _run.FailCheck(checkResult);
+                    _run.FailCheck(cr);
+                    return;
                 }
-                break;
+            }
         }
+    }
+
+    private static List<CheckResult> ParseCheckResults(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return [];
+
+        try
+        {
+            using var doc = JsonDocument.Parse(output);
+            var root = doc.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Array)
+                return root.EnumerateArray().Select(ParseSingleCheckResult).Where(r => r is not null).Cast<CheckResult>().ToList();
+
+            var single = ParseSingleCheckResult(root);
+            return single is not null ? [single] : [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static CheckResult? ParseSingleCheckResult(JsonElement element)
+    {
+        var name = element.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        var status = element.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "fail" : "fail";
+        var message = element.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : null;
+        JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp : null;
+
+        return new CheckResult(name!, status, message, output);
     }
 
     private void ProcessLoadResult(WorkDispatchResult result)
