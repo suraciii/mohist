@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -12,6 +13,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private List<StageDefinition>? _stageDefinitions;
     private WorkLease? _lease;
     private WorkDispatch? _lastDispatch;
+    private IEventBus EventBus => (GrainContext?.ActivationServices.GetService<IEventBus>() ?? NullEventBus.Instance);
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(ILogger<WorkflowGrain> log)
@@ -39,6 +41,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
+        EmitStageChanged("started");
         await Task.CompletedTask;
     }
 
@@ -47,6 +50,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         _run.Start();
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
+        EmitStageChanged("resumed");
         return Task.CompletedTask;
     }
 
@@ -55,6 +59,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         _run.Pause();
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
+        EmitStageChanged("paused", reason);
         return Task.CompletedTask;
     }
 
@@ -63,6 +68,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
+        EmitStageChanged("approved");
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
@@ -74,6 +80,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             : (JsonElement?)null;
         _run.Reject(new ApprovalInput(output));
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStage.Stage, reason);
+        EmitStageChanged("rejected", reason);
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
@@ -506,4 +513,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             s.TasksFromUses is not null ? new WorkflowTasksFromDefinition(s.TasksFromUses, ParseWith(s.TasksFromWith)) : null,
             s.RequiresApproval
         )).ToList();
+
+    private void EmitStageChanged(string action, string? reason = null)
+    {
+        if (_run is null) return;
+        EventBus.Emit("stage_changed", new
+        {
+            workflowRunId = GrainKey,
+            stage = _run.CurrentStage.Stage,
+            status = _run.CurrentStage.Status.ToString(),
+            action,
+            reason,
+            timestamp = DateTime.UtcNow.ToString("o"),
+        });
+    }
 }
