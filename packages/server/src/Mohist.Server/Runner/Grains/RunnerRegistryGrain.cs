@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Mohist.Server.Runner.Grains;
 
 public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
@@ -26,44 +28,5 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
     public Task<IReadOnlyList<string>> ListRunnerIdsAsync()
     {
         return Task.FromResult<IReadOnlyList<string>>(_runners.Keys.ToList());
-    }
-
-    public async Task<string?> FindRunnerAsync(string[] capabilities, string? preferredRunnerId = null)
-    {
-        if (preferredRunnerId is not null
-            && _runners.TryGetValue(preferredRunnerId, out var preferredCaps)
-            && CanRun(preferredCaps, capabilities)
-            && await GrainFactory.GetGrain<IRunnerGrain>(preferredRunnerId).IsAvailableAsync())
-        {
-            return preferredRunnerId;
-        }
-
-        foreach (var (id, caps) in _runners)
-        {
-            if (!CanRun(caps, capabilities))
-                continue;
-
-            var runner = GrainFactory.GetGrain<IRunnerGrain>(id);
-            if (await runner.IsAvailableAsync())
-                return id;
-        }
-
-        return null;
-    }
-
-    private static bool CanRun(string[] runnerCapabilities, string[] requiredCapabilities)
-    {
-        if (requiredCapabilities.Length == 0) return true;
-
-        return requiredCapabilities.All(required => runnerCapabilities.Any(capability => Matches(capability, required)));
-    }
-
-    private static bool Matches(string capability, string required)
-    {
-        if (capability == required) return true;
-        if (!capability.EndsWith("/*", StringComparison.Ordinal)) return false;
-
-        var prefix = capability[..^1];
-        return required.StartsWith(prefix, StringComparison.Ordinal);
     }
 }

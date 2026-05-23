@@ -27,7 +27,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.CompletedTask;
     }
 
-    public Task StartAsync(WorkflowDefinitionInput? definition = null)
+    public async Task StartAsync(WorkflowDefinitionInput? definition = null)
     {
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
@@ -40,7 +40,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        return Task.CompletedTask;
+        await Task.CompletedTask;
     }
 
     public Task ResumeAsync()
@@ -59,15 +59,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.CompletedTask;
     }
 
-    public Task ApproveAsync()
+    public async Task ApproveAsync()
     {
         EnsureRun();
         _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        return Task.CompletedTask;
+        await ReleaseFromBacklogIfTerminalAsync();
     }
 
-    public Task RejectAsync(string? reason = null)
+    public async Task RejectAsync(string? reason = null)
     {
         EnsureRun();
         var output = reason is not null
@@ -75,27 +75,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             : (JsonElement?)null;
         _run.Reject(new ApprovalInput(output));
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStage.Stage, reason);
-        return Task.CompletedTask;
+        await ReleaseFromBacklogIfTerminalAsync();
     }
 
-    public Task RetryAsync()
+    public async Task RetryAsync()
     {
         EnsureRun();
         _pendingWorkId = null;
         _pendingWorkType = null;
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        return Task.CompletedTask;
+        await RegisterToBacklogAsync();
     }
 
-    public Task RerunAsync()
+    public async Task RerunAsync()
     {
         EnsureRun();
         _pendingWorkId = null;
         _pendingWorkType = null;
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        return Task.CompletedTask;
+        await RegisterToBacklogAsync();
     }
 
     public Task AssignRunnerAsync(string runnerId)
@@ -116,9 +116,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.FromResult<WorkDispatch?>(PrepareWork(work));
     }
 
-    public Task ReportResultAsync(string workId, WorkDispatchResult result)
+    public async Task ReportResultAsync(string workId, WorkDispatchResult result)
     {
-        if (workId != _pendingWorkId) return Task.CompletedTask;
+        if (workId != _pendingWorkId) return;
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
@@ -139,7 +139,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 break;
         }
 
-        return Task.CompletedTask;
+        await ReleaseFromBacklogIfTerminalAsync();
+    }
+
+    private async Task ReleaseFromBacklogIfTerminalAsync()
+    {
+        if (_run is null) return;
+        if (_run.Status is WorkflowRunStatus.Passed or WorkflowRunStatus.Failed)
+        {
+            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+            await backlog.ReleaseAsync(GrainKey);
+            _log.LogInformation("Workflow {Id} released from backlog (status={Status})", GrainKey, _run.Status);
+        }
+    }
+
+    private async Task RegisterToBacklogAsync()
+    {
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        await backlog.RegisterAsync(GrainKey);
+        _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
     }
 
     private WorkDispatch? PrepareWork(WorkflowWork work)
