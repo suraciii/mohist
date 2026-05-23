@@ -13,16 +13,18 @@ public class WorkflowGrainFixture : IAsyncLifetime
 {
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
-    public IEventBus EventBus => Cluster.Silos[0].ServiceProvider.GetRequiredService<IEventBus>();
+    public IEventBus EventBus => _sharedEventBus;
+
+    private readonly InMemoryEventBus _sharedEventBus = new(
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
 
     public Task InitializeAsync()
     {
         var builder = new InProcessTestClusterBuilder();
-        builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
-            siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
+            siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
         });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
