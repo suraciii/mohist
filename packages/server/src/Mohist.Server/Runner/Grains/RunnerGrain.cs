@@ -64,7 +64,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         {
             _log.LogWarning("Runner {Id} unregistered with in-flight work, failing workflow {WorkflowId}", RunnerId, wfId);
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            await workflowGrain.FailInFlightWorkAsync($"Runner {RunnerId} unregistered");
+            await workflowGrain.FailInFlightWorkAsync(RunnerId, $"Runner {RunnerId} unregistered");
         }
     }
 
@@ -130,6 +130,20 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
         await workflow.ReportResultAsync(workId, result);
+
+        var status = await workflow.GetStatusAsync();
+        if (status?.Status is "Passed" or "Failed")
+        {
+            _assignedWorkflows.Remove(wfId);
+            var staleKeys = _workToWorkflow
+                .Where(kv => kv.Value == wfId)
+                .Select(kv => kv.Key)
+                .ToList();
+            foreach (var key in staleKeys)
+                _workToWorkflow.Remove(key);
+            _log.LogInformation("Runner {Id} released terminal workflow {WorkflowId} (status={Status})", RunnerId, wfId, status.Status);
+        }
+
         return wfId;
     }
 
@@ -192,7 +206,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         {
             _log.LogWarning("Runner {Id} timed out, failing in-flight work for workflow {WorkflowId}", RunnerId, wfId);
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            await workflowGrain.FailInFlightWorkAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
+            await workflowGrain.FailInFlightWorkAsync(RunnerId, $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
     }
 }
