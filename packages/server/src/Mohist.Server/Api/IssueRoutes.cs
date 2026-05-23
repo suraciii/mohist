@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Workflow.Domain.Errors;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
@@ -13,21 +14,21 @@ public static class IssueRoutes
         {
             var grain = grains.GetGrain<IIssueGrain>(issueId);
             await grain.UpdateAsync(req.Title, req.Body);
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         issues.MapPost("/archive", async (string issueId, IGrainFactory grains) =>
         {
             var grain = grains.GetGrain<IIssueGrain>(issueId);
             await grain.ArchiveAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         issues.MapPost("/close", async (string issueId, IGrainFactory grains) =>
         {
             var grain = grains.GetGrain<IIssueGrain>(issueId);
             await grain.CloseAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         var wf = issues.MapGroup("/workflow");
@@ -36,70 +37,70 @@ public static class IssueRoutes
         {
             var grain = grains.GetGrain<IIssueGrain>(issueId);
             var status = await grain.GetWorkflowStatusAsync();
-            return status is not null ? Results.Ok(status) : Results.NotFound();
+            return status is not null ? ApiResults.Ok(status) : ApiResults.NotFound("Workflow not found");
         });
 
         wf.MapPost("/start", async (string issueId, IGrainFactory grains) =>
         {
             var grain = grains.GetGrain<IIssueGrain>(issueId);
             await grain.StartWorkflowAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/stop", async (string issueId, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("user-requested");
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/resume", async (string issueId, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ResumeAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/approve", async (string issueId, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/reject", async (string issueId, RejectRequest? req, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RejectAsync(req?.Reason);
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/retry", async (string issueId, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/rerun", async (string issueId, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         wf.MapPost("/rebase", async (string issueId, IGrainFactory grains) =>
         {
             var wrId = await grains.GetGrain<IIssueGrain>(issueId).GetWorkflowRunIdAsync();
-            if (wrId is null) return Results.NotFound();
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ResumeAsync();
-            return Results.Ok();
+            return ApiResults.Ok();
         });
 
         return app;

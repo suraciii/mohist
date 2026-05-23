@@ -16,6 +16,8 @@ builder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>
 
 var app = builder.Build();
 
+app.UseApiExceptionHandler();
+app.MapHealthRoutes();
 app.MapIssueRoutes();
 app.MapRunnerRoutes();
 
