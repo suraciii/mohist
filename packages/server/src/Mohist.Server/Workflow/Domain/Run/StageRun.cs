@@ -210,9 +210,11 @@ public class StageRun
 
         switch (Failure.Reason)
         {
-            case FailureReason.TaskFailed:
+            case FailureReason.TaskFailed when Failure.TaskId is not null:
                 RetryFailedTask(Failure.TaskId);
                 break;
+            case FailureReason.TaskFailed:
+                throw new WorkflowDomainException($"Stage {Stage} task failure has no task ID; use rerun to restart the stage");
             case FailureReason.CheckUnrepaired:
                 RetryFailedCheck(Failure.CheckName);
                 break;

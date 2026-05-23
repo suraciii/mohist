@@ -140,10 +140,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
-    public async Task FailInFlightWorkAsync(string reason)
+    public async Task FailInFlightWorkAsync(string? runnerId, string reason)
     {
         var lease = _lease;
         if (lease is null) return;
+
+        if (lease.RunnerId is not null && runnerId is not null && lease.RunnerId != runnerId)
+        {
+            _log.LogWarning("Workflow {Id} ignoring FailInFlight from runner {Caller} — lease owned by {Owner}",
+                GrainKey, runnerId, lease.RunnerId);
+            return;
+        }
 
         _log.LogWarning("Workflow {Id} failing in-flight work {WorkId} ({WorkType}): {Reason}",
             GrainKey, lease.WorkId, lease.WorkType, reason);
@@ -221,11 +228,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run.Status == WorkflowRunStatus.Failed && _run.Failure is not null)
         {
             var failure = _run.Failure;
-            if (failure.Reason is FailureReason.TaskFailed or FailureReason.CheckUnrepaired)
+            if (failure.Reason is FailureReason.TaskFailed && failure.TaskId is not null)
             {
-                var target = failure.Reason == FailureReason.TaskFailed ? failure.TaskId : failure.CheckName;
-                var label = failure.Reason == FailureReason.TaskFailed ? "Retry failed task" : "Retry failed check";
-                actions.Add(new AvailableActionSnapshot("retry", label, target));
+                actions.Add(new AvailableActionSnapshot("retry", "Retry failed task", failure.TaskId));
+            }
+            else if (failure.Reason is FailureReason.CheckUnrepaired && failure.CheckName is not null)
+            {
+                actions.Add(new AvailableActionSnapshot("retry", "Retry failed check", failure.CheckName));
             }
 
             actions.Add(new AvailableActionSnapshot("rerun", "Rerun stage", _run.CurrentStage.Stage));
@@ -294,7 +303,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
         var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
-        _lease = new WorkLease(workId, workType, stage, logicalId);
+        _lease = new WorkLease(workId, workType, stage, logicalId, _assignedRunnerId);
         _lastDispatch = dispatch;
         return dispatch;
     }

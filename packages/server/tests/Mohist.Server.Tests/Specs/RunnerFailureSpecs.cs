@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Errors;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -9,13 +10,13 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     public RunnerFailureSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task InFlightTask_Fails_WorkflowFails()
+    public async Task InFlightTask_LosesRunner_WorkflowFails()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, _) = await PollWorkAnyAsync();
 
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -26,7 +27,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightChecks_Fails_WorkflowFails()
+    public async Task InFlightChecks_LoseRunner_WorkflowFails()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -35,7 +36,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var (checks, _) = await PollWorkAnyAsync();
 
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -45,13 +46,13 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightTask_Fails_WorkflowReleasedFromBacklog()
+    public async Task InFlightTask_LosesRunner_WorkflowLeavesBacklog()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, _) = await PollWorkAnyAsync();
 
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
         var running = await backlog.ListRunningAsync();
@@ -59,12 +60,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightTask_Fails_RetryRecoversWorkflow()
+    public async Task InFlightTask_LosesRunnerThenUserRetries_WorkflowPasses()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         await workflow.RetryAsync();
 
@@ -86,7 +87,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightChecks_Fails_RetryRecoversWorkflow()
+    public async Task InFlightChecks_LoseRunnerThenUserRetries_WorkflowPasses()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -94,7 +95,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (checks, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         await workflow.RetryAsync();
 
@@ -113,12 +114,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightWork_Fails_StatusExposesRetryAndRerunActions()
+    public async Task InFlightWork_LosesRunner_StatusShowsRetryAndRerun()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -131,14 +132,14 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StaleReport_AfterFailInFlight_IsIgnored()
+    public async Task StaleReport_ArrivesAfterInFlightFailure_WorkflowStaysFailed()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, r1) = await PollWorkAnyAsync();
         var staleWorkId = task.WorkId;
 
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         await ReportAsync(r1, staleWorkId, "completed");
 
@@ -148,11 +149,11 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task FailInFlight_NoInFlightWork_DoesNothing()
+    public async Task WorkflowHasNoInFlightWork_RunnerFailureDoesNothing()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
-        await workflow.FailInFlightWorkAsync("nothing in flight");
+        await workflow.FailInFlightWorkAsync(null, "nothing in flight");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -160,7 +161,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunnerUnregistered_WithInFlightTask_WorkflowFails()
+    public async Task RunnerUnregistersWithInFlightTask_WorkflowFails()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -176,7 +177,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunnerUnregistered_NoInFlightWork_WorkflowUnaffected()
+    public async Task RunnerUnregistersWithoutInFlightWork_WorkflowKeepsRunning()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
@@ -189,7 +190,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightLoad_Fails_WorkflowFails()
+    public async Task InFlightLoad_LosesRunner_WorkflowFails()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
         [
@@ -202,10 +203,178 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (loadWork, _) = await PollWorkAnyAsync();
         Assert.Equal("load", loadWork.WorkType);
 
-        await workflow.FailInFlightWorkAsync("Runner heartbeat timeout");
+        await workflow.FailInFlightWorkAsync(null, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
+    }
+
+    [Fact]
+    public async Task NewRunnerHoldsInFlightTask_OldRunnerUnregisters_WorkflowKeepsRunning()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "failed", "boom");
+
+        await workflow.RetryAsync();
+
+        var r2Id = await RegisterRunnerAsync();
+        _runnerId = r2Id;
+        var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
+        await r2.AssignWorkflowAsync(_workflowId!);
+        await workflow.AssignRunnerAsync(r2Id);
+
+        var (retried, _) = await PollWorkAnyAsync();
+        Assert.Equal("task", retried.WorkType);
+
+        var oldRunner = Grains.GetGrain<IRunnerGrain>(r1);
+        await oldRunner.UnregisterAsync();
+
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
+    }
+
+    [Fact]
+    public async Task NewRunnerHoldsInFlightChecks_OldRunnerUnregisters_WorkflowKeepsRunning()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+        var (checks, _) = await PollWorkAnyAsync();
+        await workflow.FailInFlightWorkAsync(null, "timeout");
+
+        await workflow.RetryAsync();
+
+        var r2Id = await RegisterRunnerAsync();
+        _runnerId = r2Id;
+        var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
+        await r2.AssignWorkflowAsync(_workflowId!);
+        await workflow.AssignRunnerAsync(r2Id);
+
+        var (retriedChecks, _) = await PollWorkAnyAsync();
+        Assert.Equal("checks", retriedChecks.WorkType);
+
+        var oldRunner = Grains.GetGrain<IRunnerGrain>(r1);
+        await oldRunner.UnregisterAsync();
+
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
+    }
+
+    [Fact]
+    public async Task NewRunnerHoldsInFlightTask_OldRunnerFailsInFlightWork_WorkflowKeepsRunning()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "failed", "boom");
+
+        await workflow.RetryAsync();
+
+        var r2Id = await RegisterRunnerAsync();
+        _runnerId = r2Id;
+        var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
+        await r2.AssignWorkflowAsync(_workflowId!);
+        await workflow.AssignRunnerAsync(r2Id);
+
+        var (retried, _) = await PollWorkAnyAsync();
+        Assert.Equal("task", retried.WorkType);
+
+        await workflow.FailInFlightWorkAsync(r1, "stale runner timeout");
+
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
+    }
+
+    [Fact]
+    public async Task LoadWorkFails_UserViewsStatus_RetryActionIsNotAvailable()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        [
+            new StageDefinitionInput("build",
+                [],
+                [new("check-1", "Check 1", "spec/check")],
+                TasksFromUses: "spec/loader")
+        ]));
+
+        var (loadWork, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, loadWork.WorkId, "failed", "loader crashed");
+
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Failed", status.Status);
+
+        var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
+        Assert.Null(retryAction);
+    }
+
+    [Fact]
+    public async Task LoadWorkFails_UserViewsStatus_RerunActionIsAvailable()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        [
+            new StageDefinitionInput("build",
+                [],
+                [new("check-1", "Check 1", "spec/check")],
+                TasksFromUses: "spec/loader")
+        ]));
+
+        var (loadWork, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, loadWork.WorkId, "failed", "loader crashed");
+
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+
+        var rerunAction = status.AvailableActions.Find(a => a.Name == "rerun");
+        Assert.NotNull(rerunAction);
+    }
+
+    [Fact]
+    public async Task LoadWorkFails_UserRerunsStage_LoadRunsAgain()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        [
+            new StageDefinitionInput("build",
+                [],
+                [new("check-1", "Check 1", "spec/check")],
+                TasksFromUses: "spec/loader")
+        ]));
+
+        var (loadWork, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, loadWork.WorkId, "failed", "loader crashed");
+
+        await workflow.RerunAsync();
+
+        var r2Id = await RegisterRunnerAsync();
+        _runnerId = r2Id;
+        var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
+        await r2.AssignWorkflowAsync(_workflowId!);
+
+        var (retried, _) = await PollWorkAnyAsync();
+        Assert.Equal("load", retried.WorkType);
+    }
+
+    [Fact]
+    public async Task LoadWorkFails_UserRetriesWorkflow_RetryIsRejected()
+    {
+        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        [
+            new StageDefinitionInput("build",
+                [],
+                [new("check-1", "Check 1", "spec/check")],
+                TasksFromUses: "spec/loader")
+        ]));
+
+        var (loadWork, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, loadWork.WorkId, "failed", "loader crashed");
+
+        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
+            await workflow.RetryAsync());
     }
 }
