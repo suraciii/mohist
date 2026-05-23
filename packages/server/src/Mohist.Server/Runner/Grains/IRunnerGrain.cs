@@ -18,7 +18,14 @@ public interface IRunnerGrain : IGrainWithStringKey
 public record RunnerInfo(string RunnerId, string[] Capabilities, string Hostname);
 
 [GenerateSerializer]
-public record WorkDispatch(string WorkflowRunId, string WorkId, string? Uses = null, string? With = null);
+public record WorkDispatch(
+    string WorkflowRunId,
+    string WorkId,
+    string? Uses = null,
+    string? With = null,
+    string WorkType = "task",
+    string? Stage = null,
+    string? Title = null);
 
 [GenerateSerializer]
 public record WorkDispatchResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);

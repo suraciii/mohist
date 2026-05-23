@@ -171,13 +171,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     _run.InitTasks(MaterializeTasks(stageDef));
                     return PrepareFromDomain();
                 }
-                return MakeDispatch(si.Stage, $"load-{si.Stage}", "load", stageDef.TasksFrom.Uses, stageDef.TasksFrom.With);
+                return MakeDispatch(si.Stage, $"load-{si.Stage}", "load", $"Load tasks for {si.Stage}", stageDef.TasksFrom.Uses, stageDef.TasksFrom.With);
 
             case WorkflowWork.Task t:
-                return MakeDispatch(t.Stage, t.Id, "task", t.Uses, t.With);
+                return MakeDispatch(t.Stage, t.Id, "task", t.Title, t.Uses, t.With);
 
             case WorkflowWork.Check ch:
-                return MakeDispatch(ch.Stage, ch.Name, "check", ch.Uses, ch.With);
+                return MakeDispatch(ch.Stage, ch.Name, "check", ch.Title, ch.Uses, ch.With);
 
             default:
                 return null;
@@ -190,13 +190,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return work is not null ? PrepareWork(work) : null;
     }
 
-    private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string? uses, Dictionary<string, JsonElement?>? with)
+    private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         _pendingWorkId = workId;
         _pendingWorkType = workType;
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        return new WorkDispatch(GrainKey, workId, uses, withStr);
+        return new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)

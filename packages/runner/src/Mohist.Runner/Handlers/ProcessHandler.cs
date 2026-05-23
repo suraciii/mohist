@@ -52,7 +52,7 @@ public class ProcessHandler : IAction
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync();
+        await process.WaitForExitAsync(context.CancellationToken);
 
         var exitCode = process.ExitCode;
         var message = stderr.Length > 0 ? stderr.ToString().Trim() : null;
@@ -71,7 +71,7 @@ public class ProcessHandler : IAction
         foreach (var kv in with)
         {
             if (kv.Value is not null)
-                parts.Add(kv.Value.ToString());
+                parts.Add(kv.Value.Value.ToString());
         }
         return string.Join(" ", parts);
     }

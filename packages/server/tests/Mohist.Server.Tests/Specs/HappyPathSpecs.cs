@@ -14,10 +14,16 @@ public class HappyPathSpecs : WorkflowGrainSpecs
 
         var (taskWork, runnerId) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", taskWork.WorkId);
+        Assert.Equal("task", taskWork.WorkType);
+        Assert.Equal("build", taskWork.Stage);
+        Assert.Equal("Task 1", taskWork.Title);
         await ReportAsync(runnerId, taskWork.WorkId, "completed");
 
         var (checkWork, rid2) = await PollWorkAnyAsync();
         Assert.StartsWith("check-1:", checkWork.WorkId);
+        Assert.Equal("check", checkWork.WorkType);
+        Assert.Equal("build", checkWork.Stage);
+        Assert.Equal("Check 1", checkWork.Title);
         await ReportAsync(rid2, checkWork.WorkId, "pass");
 
         var runner = Grains.GetGrain<IRunnerGrain>(rid2);

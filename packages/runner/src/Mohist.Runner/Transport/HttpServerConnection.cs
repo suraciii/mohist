@@ -30,6 +30,23 @@ public class HttpServerConnection : IServerConnection
         _log.LogInformation("Runner {Id} registered", _runnerId);
     }
 
+    public async Task HeartbeatAsync(CancellationToken ct)
+    {
+        if (!_registered) return;
+
+        var resp = await _http.PostAsync($"/api/runner/{_runnerId}/heartbeat", null, ct);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    public async Task DisconnectAsync(CancellationToken ct)
+    {
+        if (!_registered) return;
+
+        var resp = await _http.PostAsync($"/api/runner/{_runnerId}/unregister", null, ct);
+        resp.EnsureSuccessStatusCode();
+        _registered = false;
+    }
+
     public async Task<WorkItem?> PollAsync(CancellationToken ct)
     {
         var resp = await _http.PostAsync($"/api/runner/{_runnerId}/poll", null, ct);
@@ -45,8 +62,11 @@ public class HttpServerConnection : IServerConnection
         return new WorkItem(
             dispatch.WorkflowRunId,
             dispatch.WorkId,
+            dispatch.WorkType,
+            dispatch.Stage,
+            dispatch.Title,
             dispatch.Uses,
-            dispatch.With);
+            ParseWith(dispatch.With));
     }
 
     public async Task ReportAsync(WorkItem workItem, WorkItemResult result, CancellationToken ct)
@@ -56,10 +76,19 @@ public class HttpServerConnection : IServerConnection
 
         resp.EnsureSuccessStatusCode();
     }
+
+    private static Dictionary<string, JsonElement?>? ParseWith(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(value);
+    }
 }
 
 public record WorkDispatchResponse(
     string WorkflowRunId,
     string WorkId,
     string? Uses,
-    Dictionary<string, JsonElement?>? With);
+    string? With,
+    string WorkType,
+    string? Stage,
+    string? Title);
