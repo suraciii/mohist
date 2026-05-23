@@ -87,7 +87,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         foreach (var wfId in _assignedWorkflows)
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            var work = await workflow.GetWorkAsync();
+            var work = await workflow.GetWorkAsync(RunnerId);
             if (work is not null)
             {
                 _workToWorkflow[work.WorkId] = wfId;
@@ -101,8 +101,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         {
             _assignedWorkflows.Add(claimedId);
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(claimedId);
-            await workflow.AssignRunnerAsync(RunnerId);
-            var work = await workflow.GetWorkAsync();
+            var work = await workflow.GetWorkAsync(RunnerId);
             if (work is not null)
             {
                 _workToWorkflow[work.WorkId] = claimedId;
@@ -129,7 +128,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             return null;
 
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-        await workflow.ReportResultAsync(workId, result);
+        await workflow.ReportResultAsync(RunnerId, workId, result);
 
         var status = await workflow.GetStatusAsync();
         if (status?.Status is "Passed" or "Failed")

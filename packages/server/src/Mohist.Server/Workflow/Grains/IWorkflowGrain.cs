@@ -11,10 +11,9 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task RejectAsync(string? reason = null);
     Task RetryAsync();
     Task RerunAsync();
-    Task AssignRunnerAsync(string runnerId);
-    Task<WorkDispatch?> GetWorkAsync();
-    Task ReportResultAsync(string workId, WorkDispatchResult result);
-    Task FailInFlightWorkAsync(string? runnerId, string reason);
+    Task<WorkDispatch?> GetWorkAsync(string runnerId);
+    Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
+    Task FailInFlightWorkAsync(string runnerId, string reason);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
 }
 

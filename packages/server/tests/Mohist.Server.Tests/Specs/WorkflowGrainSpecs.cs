@@ -63,7 +63,6 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await runner.AssignWorkflowAsync(workflowId);
-        await workflow.AssignRunnerAsync(runnerId);
         await workflow.StartAsync(definition);
         return workflow;
     }

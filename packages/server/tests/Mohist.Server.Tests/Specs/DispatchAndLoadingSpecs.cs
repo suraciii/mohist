@@ -17,7 +17,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
         await runner.AssignWorkflowAsync(_workflowId!);
-        await workflow.AssignRunnerAsync(_runnerId);
 
         var (task, rId) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
@@ -37,7 +36,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
         await runner.AssignWorkflowAsync(_workflowId!);
-        await workflow.AssignRunnerAsync(_runnerId);
 
         Assert.Null(await runner.PollAsync());
         Assert.True(await runner.IsAvailableAsync());
