@@ -81,7 +81,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("checks-", check.WorkId);
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        await workflow.ReportResultAsync(task.WorkId, new WorkDispatchResult("failed", "stale"));
+        await workflow.ReportResultAsync(r1, task.WorkId, new WorkDispatchResult("failed", "stale"));
 
         await ReportChecksPassAsync(r2, check, "check-1");
 
@@ -101,7 +101,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
         await runner.AssignWorkflowAsync(workflowId);
-        await workflow.AssignRunnerAsync(runnerId);
         await workflow.StartAsync(SingleStage(checks: []));
 
         var work = await runner.PollAsync();
@@ -120,7 +119,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());
 
-        await workflow.AssignRunnerAsync(runnerId);
         await runner.AssignWorkflowAsync(_workflowId!);
 
         var work = await runner.PollAsync();

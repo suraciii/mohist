@@ -10,7 +10,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRun? _run;
     private List<StageDefinition>? _stageDefinitions;
-    private string? _assignedRunnerId;
     private WorkLease? _lease;
     private WorkDispatch? _lastDispatch;
     private readonly ILogger<WorkflowGrain> _log;
@@ -96,14 +95,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await RegisterToBacklogAsync();
     }
 
-    public Task AssignRunnerAsync(string runnerId)
-    {
-        _assignedRunnerId = runnerId;
-        _log.LogInformation("Workflow {Id} assigned runner {RunnerId}", GrainKey, runnerId);
-        return Task.CompletedTask;
-    }
-
-    public Task<WorkDispatch?> GetWorkAsync()
+    public Task<WorkDispatch?> GetWorkAsync(string runnerId)
     {
         if (_run is null) return Task.FromResult<WorkDispatch?>(null);
         if (_lease is not null) return Task.FromResult<WorkDispatch?>(null);
@@ -111,13 +103,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var work = _run.GetNextWork();
         if (work is null) return Task.FromResult<WorkDispatch?>(null);
 
-        return Task.FromResult<WorkDispatch?>(PrepareWork(work));
+        return Task.FromResult<WorkDispatch?>(PrepareWork(work, runnerId));
     }
 
-    public async Task ReportResultAsync(string workId, WorkDispatchResult result)
+    public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
     {
         var lease = _lease;
         if (lease is null || workId != lease.WorkId) return;
+
+        if (lease.RunnerId != runnerId)
+        {
+            _log.LogWarning("Workflow {Id} ignoring report from runner {Caller} — lease owned by {Owner}",
+                GrainKey, runnerId, lease.RunnerId);
+            return;
+        }
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
@@ -140,12 +139,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
-    public async Task FailInFlightWorkAsync(string? runnerId, string reason)
+    public async Task FailInFlightWorkAsync(string runnerId, string reason)
     {
         var lease = _lease;
         if (lease is null) return;
 
-        if (lease.RunnerId is not null && runnerId is not null && lease.RunnerId != runnerId)
+        if (lease.RunnerId != runnerId)
         {
             _log.LogWarning("Workflow {Id} ignoring FailInFlight from runner {Caller} — lease owned by {Owner}",
                 GrainKey, runnerId, lease.RunnerId);
@@ -261,7 +260,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
     }
 
-    private WorkDispatch? PrepareWork(WorkflowWork work)
+    private WorkDispatch? PrepareWork(WorkflowWork work, string runnerId)
     {
         switch (work)
         {
@@ -270,12 +269,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 if (stageDef.TasksFrom is null)
                 {
                     _run.InitTasks(MaterializeTasks(stageDef));
-                    return PrepareFromDomain();
+                    return PrepareFromDomain(runnerId);
                 }
-                return MakeDispatch(si.Stage, $"load-{si.Stage}", "load", $"Load tasks for {si.Stage}", stageDef.TasksFrom.Uses, stageDef.TasksFrom.With);
+                return MakeDispatch(si.Stage, $"load-{si.Stage}", "load", $"Load tasks for {si.Stage}", stageDef.TasksFrom.Uses, stageDef.TasksFrom.With, runnerId);
 
             case WorkflowWork.Task t:
-                return MakeDispatch(t.Stage, t.Id, "task", t.Title, t.Uses, t.With);
+                return MakeDispatch(t.Stage, t.Id, "task", t.Title, t.Uses, t.With, runnerId);
 
             case WorkflowWork.Checks ch:
                 var checksPayload = ch.Items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
@@ -285,25 +284,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
                     ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
                 }).ToList();
-                return MakeDispatch(ch.Stage, $"checks-{ch.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) });
+                return MakeDispatch(ch.Stage, $"checks-{ch.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
 
             default:
                 return null;
         }
     }
 
-    private WorkDispatch? PrepareFromDomain()
+    private WorkDispatch? PrepareFromDomain(string runnerId)
     {
         var work = _run.GetNextWork();
-        return work is not null ? PrepareWork(work) : null;
+        return work is not null ? PrepareWork(work, runnerId) : null;
     }
 
-    private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with)
+    private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
         var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
-        _lease = new WorkLease(workId, workType, stage, logicalId, _assignedRunnerId);
+        _lease = new WorkLease(workId, workType, stage, logicalId, runnerId);
         _lastDispatch = dispatch;
         return dispatch;
     }
