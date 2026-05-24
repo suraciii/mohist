@@ -160,4 +160,22 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal(1, issue2.Number);
     }
 
+    [Fact]
+    public async Task AddPrerequisite_StartEligibilityAndStartGateComeFromIssueGrain()
+    {
+        var project = await SetupProjectAsync();
+        var prereq = await CreateIssueAsync(project.Id, "Prereq");
+        var dependent = await CreateIssueAsync(project.Id, "Dependent");
+        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
+
+        await grain.AddPrerequisiteAsync(prereq.Number);
+        var info = await grain.GetInfoAsync();
+        var eligibility = await grain.GetStartEligibilityAsync();
+
+        Assert.Contains(prereq.Number, info.PrerequisiteNumbers);
+        Assert.False(eligibility.Startable);
+        Assert.Contains(eligibility.WaitingForDelivery, p => p.Number == prereq.Number);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkflowAsync());
+    }
+
 }

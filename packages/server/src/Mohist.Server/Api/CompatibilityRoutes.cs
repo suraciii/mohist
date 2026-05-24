@@ -125,23 +125,28 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(new { message = "Comment deleted" });
         });
 
-        app.MapPost("/api/issues/{number:int}/prerequisites", async (int number, string? projectId, PrerequisiteRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
+        app.MapPost("/api/issues/{number:int}/prerequisites", async (int number, string? projectId, PrerequisiteRequest req, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
-            var issue = await ResolveIssueAsync(pid, number, grains);
-            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-            var prereq = await issuesQuery.GetDomainAsync(pid, req.PrerequisiteNumber);
-            if (prereq is null) return ApiResults.NotFound($"Issue #{req.PrerequisiteNumber} not found");
-            if (req.PrerequisiteNumber == number) return ApiResults.Conflict("Issue cannot depend on itself", "circular_prerequisite");
-
-            await using var db = await dbFactory.CreateDbContextAsync();
-            var exists = await db.IssuePrerequisites.AnyAsync(p => p.ProjectId == pid && p.IssueNumber == number && p.PrerequisiteNumber == req.PrerequisiteNumber);
-            if (!exists)
+            var issueGrain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            try
             {
-                db.IssuePrerequisites.Add(new IssuePrerequisiteEntry { ProjectId = pid, IssueNumber = number, PrerequisiteNumber = req.PrerequisiteNumber });
-                await db.SaveChangesAsync();
+                await issueGrain.AddPrerequisiteAsync(req.PrerequisiteNumber);
             }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("depend on itself", StringComparison.OrdinalIgnoreCase))
+            {
+                return ApiResults.Conflict(ex.Message, "circular_prerequisite");
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains($"#{req.PrerequisiteNumber}", StringComparison.Ordinal))
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.NotFound($"Issue #{number} not found");
+            }
+
             var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
             var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
@@ -152,13 +157,24 @@ public static class CompatibilityRoutes
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
-            await using var db = await dbFactory.CreateDbContextAsync();
-            var row = await db.IssuePrerequisites.FindAsync(pid, number, prerequisiteNumber);
-            if (row is not null)
+
+            try
             {
-                db.IssuePrerequisites.Remove(row);
+                await grains.GetGrain<IIssueGrain>($"{pid}:{number}").RemovePrerequisiteAsync(prerequisiteNumber);
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.NotFound($"Issue #{number} not found");
+            }
+
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var legacyRow = await db.IssuePrerequisites.FindAsync(pid, number, prerequisiteNumber);
+            if (legacyRow is not null)
+            {
+                db.IssuePrerequisites.Remove(legacyRow);
                 await db.SaveChangesAsync();
             }
+
             var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
             var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");

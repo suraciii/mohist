@@ -26,6 +26,7 @@ public class Issue
     [Id(17), JsonInclude] public int RetryCount { get; private set; }
     [Id(18), JsonInclude] public int ConflictRetryCount { get; private set; }
     [Id(19), JsonInclude] public string? BlockedReason { get; private set; }
+    [Id(20), JsonInclude] public int[] PrerequisiteNumbers { get; private set; } = [];
 
     public Issue(
         string id,
@@ -93,6 +94,23 @@ public class Issue
     public void SetMergeState(MergeState? state)
     {
         MergeState = state;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void AddPrerequisite(int prerequisiteNumber)
+    {
+        if (prerequisiteNumber == Number)
+            throw new InvalidOperationException("Issue cannot depend on itself");
+        if (PrerequisiteNumbers.Contains(prerequisiteNumber)) return;
+        PrerequisiteNumbers = [.. PrerequisiteNumbers, prerequisiteNumber];
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void RemovePrerequisite(int prerequisiteNumber)
+    {
+        var next = PrerequisiteNumbers.Where(number => number != prerequisiteNumber).ToArray();
+        if (next.Length == PrerequisiteNumbers.Length) return;
+        PrerequisiteNumbers = next;
         UpdatedAt = DateTime.UtcNow;
     }
 

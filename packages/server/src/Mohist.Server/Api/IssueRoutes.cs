@@ -87,7 +87,7 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/start", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        issues.MapPost("/{number:int}/start", async (int number, string? projectId, IGrainFactory grains) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -95,7 +95,7 @@ public static class IssueRoutes
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
-                var eligibility = await issuesQuery.GetStartEligibilityAsync(pid, number);
+                var eligibility = await grain.GetStartEligibilityAsync();
                 if (!eligibility.Startable)
                     return ApiResults.Conflict(eligibility.Message ?? "Issue is waiting for prerequisites", "start_blocked", eligibility);
 

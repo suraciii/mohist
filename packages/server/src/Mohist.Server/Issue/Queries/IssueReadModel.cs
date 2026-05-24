@@ -25,6 +25,7 @@ public class IssueReadModel
     public int? ConflictRetryCount { get; set; }
     public string? BlockedReason { get; set; }
     public string? WorkflowRunId { get; set; }
+    public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
     public IssueStartEligibility StartEligibility { get; set; } = IssueStartEligibility.Ready();
