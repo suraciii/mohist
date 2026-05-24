@@ -19,16 +19,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartEligibility> GetStartEligibilityAsync();
-    Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection);
 }
-
-[GenerateSerializer]
-public sealed record WorkflowIssueProjection(
-    [property: Id(0)] string Stage,
-    [property: Id(1)] string RuntimeStatus,
-    [property: Id(2)] string? BlockedReason,
-    [property: Id(3)] ApprovalState? ApprovalState,
-    [property: Id(4)] bool Completed);
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(
@@ -48,15 +39,6 @@ public sealed record WorkflowProjectContext(
     [property: Id(1)] string Name,
     [property: Id(2)] string Path,
     [property: Id(3)] string BaseBranch);
-
-[GenerateSerializer]
-public sealed record WorkflowIssueContext(
-    [property: Id(0)] string ProjectId,
-    [property: Id(1)] string IssueId,
-    [property: Id(2)] int IssueNumber,
-    [property: Id(3)] string ProjectName,
-    [property: Id(4)] string ProjectPath,
-    [property: Id(5)] string BaseBranch);
 
 [GenerateSerializer]
 public sealed record IssuePrerequisiteResult(

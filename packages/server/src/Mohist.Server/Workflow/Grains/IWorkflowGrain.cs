@@ -1,11 +1,10 @@
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Issue.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
 
 public interface IWorkflowGrain : IGrainWithStringKey
 {
-    Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null, WorkflowStartInput? input = null);
+    Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task ApproveAsync();
@@ -21,6 +20,13 @@ public interface IWorkflowGrain : IGrainWithStringKey
 [GenerateSerializer]
 public sealed record WorkflowStartInput(
     [property: Id(0)] string? Variables = null);
+
+[GenerateSerializer]
+public sealed record WorkflowCorrelationContext(
+    [property: Id(0)] string? ProjectId = null,
+    [property: Id(1)] string? OwnerType = null,
+    [property: Id(2)] string? OwnerId = null,
+    [property: Id(3)] int? OwnerNumber = null);
 
 [GenerateSerializer]
 public sealed record WorkflowDefinitionInput(List<StageDefinitionInput> Stages);

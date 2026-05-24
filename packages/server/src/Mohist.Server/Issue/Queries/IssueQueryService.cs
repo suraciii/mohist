@@ -4,17 +4,20 @@ using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Queries;
 
 public class IssueQueryService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IGrainFactory _grains;
     private readonly string _issueType = typeof(Domain.Issue).FullName!;
 
-    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory)
+    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IGrainFactory grains)
     {
         _dbFactory = dbFactory;
+        _grains = grains;
     }
 
     public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
@@ -25,7 +28,7 @@ public class IssueQueryService
             .AsNoTracking()
             .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
         var issue = row is null ? null : JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
-        return issue is null ? null : await EnrichAsync(db, ToInfo(issue, project));
+        return issue is null ? null : await EnrichAsync(db, await ToReadModelAsync(issue, project));
     }
 
     public async Task<List<IssueReadModel>> ListAsync(
@@ -65,7 +68,16 @@ public class IssueQueryService
             query = query.Where(i => string.Equals(i.Priority, priority, StringComparison.OrdinalIgnoreCase));
 
         var list = query.OrderBy(i => i.Number).ToList();
+        foreach (var issue in list)
+            await ApplyWorkflowProjectionAsync(issue);
         return await EnrichAsync(db, list);
+    }
+
+    private async Task<IssueReadModel> ToReadModelAsync(Domain.Issue issue, ProjectInfo? project = null)
+    {
+        var model = ToReadModel(ToInfo(issue, project));
+        await ApplyWorkflowProjectionAsync(model);
+        return model;
     }
 
     public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null) => new()
@@ -118,6 +130,44 @@ public class IssueQueryService
         BlockedReason = issue.BlockedReason,
         WorkflowRunId = issue.WorkflowRunId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
+    };
+
+    private async Task ApplyWorkflowProjectionAsync(IssueReadModel issue)
+    {
+        if (issue.WorkflowRunId is null) return;
+
+        var workflow = _grains.GetGrain<IWorkflowGrain>(issue.WorkflowRunId);
+        var status = await workflow.GetStatusAsync();
+        if (status is null) return;
+
+        issue.Stage = ResolveWorkflowStage(status, issue.Stage);
+        issue.Status = ResolveWorkflowRuntimeStatus(status, issue.Status);
+        issue.BlockedReason = status.Status == "Failed" ? status.Failure?.Message : issue.BlockedReason;
+        issue.ApprovalState = status.Stages
+            .Select(s => s.Approval is null ? null : new ApprovalState
+            {
+                Stage = s.Stage,
+                Status = s.Approval.Status,
+                OutputJson = s.Approval.Output,
+                RequestedAt = s.Approval.RequestedAt,
+                RespondedAt = s.Approval.RespondedAt,
+            })
+            .Where(a => a is not null)
+            .LastOrDefault();
+    }
+
+    private static string ResolveWorkflowStage(WorkflowStatusSnapshot workflow, string fallback) => workflow.Status switch
+    {
+        "Passed" => "done",
+        _ => workflow.CurrentStage ?? fallback,
+    };
+
+    private static string ResolveWorkflowRuntimeStatus(WorkflowStatusSnapshot workflow, string fallback) => workflow.Status switch
+    {
+        "Passed" => "completed",
+        "Failed" => "blocked",
+        "Paused" => "paused",
+        _ => "active",
     };
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)

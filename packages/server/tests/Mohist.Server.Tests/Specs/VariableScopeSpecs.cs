@@ -64,6 +64,29 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task GenericWorkflowCorrelationDoesNotCreateIssueDispatchReference()
+    {
+        await ClearBacklogAsync();
+        _runnerId = await RegisterRunnerAsync();
+        var workflowId = $"wr_{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+
+        await workflow.StartAsync(
+            new WorkflowDefinitionInput([
+                new StageDefinitionInput("release",
+                    [new("publish", "Publish", "spec/task")],
+                    [])
+            ]),
+            new WorkflowCorrelationContext("project-1", "deployment", "deploy-1", null));
+
+        var (work, _) = await PollWorkAnyAsync();
+
+        Assert.Null(work.Issue);
+        Assert.Equal("release", work.Stage);
+    }
+
+    [Fact]
     public async Task MohistPipelineUsesExpressionInputs()
     {
         await StartWorkflowAsync(Mohist.Server.Issue.Domain.MohistPipeline.Definition);
