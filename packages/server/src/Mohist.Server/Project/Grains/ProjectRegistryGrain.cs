@@ -33,6 +33,12 @@ public class ProjectRegistryGrain : Grain, IProjectRegistryGrain
         return Task.FromResult(project);
     }
 
+    public Task<ProjectInfo?> GetByIdAsync(string id)
+    {
+        var project = _projects.Values.FirstOrDefault(p => p.Id == id);
+        return Task.FromResult(project);
+    }
+
     public Task<List<ProjectInfo>> GetAllAsync()
     {
         return Task.FromResult(_projects.Values.ToList());

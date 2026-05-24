@@ -24,10 +24,6 @@ public class IssueInfo
     [Id(18)] public int? ConflictRetryCount { get; set; }
     [Id(19)] public string? BlockedReason { get; set; }
     [Id(20)] public string? WorkflowRunId { get; set; }
-    [Id(21)] public IssueCommentDto[] Comments { get; set; } = [];
-    [Id(22)] public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
-    [Id(23)] public IssueStartEligibility StartEligibility { get; set; } = IssueStartEligibility.Ready();
-    [Id(24)] public IssuePrimaryEpic? PrimaryEpic { get; set; }
 }
 
 [GenerateSerializer]

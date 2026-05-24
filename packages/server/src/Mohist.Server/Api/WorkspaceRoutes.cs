@@ -18,7 +18,7 @@ public static class WorkspaceRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var status = await git.GetWorktreeStatusAsync(project.Path, project.Name, number, project.BaseBranch);
@@ -31,7 +31,7 @@ public static class WorkspaceRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var branchExists = await git.BranchExistsAsync(project.Path, $"mo/issue-{number}");
@@ -65,7 +65,7 @@ public static class WorkspaceRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var head = $"mo/issue-{number}";
@@ -109,7 +109,7 @@ public static class WorkspaceRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var head = $"mo/issue-{number}";
@@ -128,7 +128,7 @@ public static class WorkspaceRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var baseContent = await git.GetFileContentAsync(project.Path, project.BaseBranch, path);

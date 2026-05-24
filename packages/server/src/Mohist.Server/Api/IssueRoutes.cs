@@ -30,7 +30,8 @@ public static class IssueRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
             var list = await issuesQuery.ListAsync(pid, project, stage, label, priority, archived, all);
 
             return ApiResults.Ok(list);
@@ -55,7 +56,8 @@ public static class IssueRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
             var info = await issuesQuery.GetAsync(pid, number, project);
             return info is not null ? ApiResults.Ok(info) : ApiResults.NotFound($"Issue #{number} not found");
         });
@@ -79,7 +81,7 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/start", async (int number, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/start", async (int number, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(null, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -87,8 +89,12 @@ public static class IssueRoutes
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
+                var eligibility = await issuesQuery.GetStartEligibilityAsync(pid, number);
+                if (!eligibility.Startable)
+                    return ApiResults.Conflict(eligibility.Message ?? "Issue is waiting for prerequisites", "start_blocked", eligibility);
+
                 var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-                var project = await registry.GetCurrentAsync();
+                var project = await registry.GetByIdAsync(pid);
                 if (project is null) return ApiResults.BadRequest("No active project");
 
                 await grain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, project.Name, project.Path, project.BaseBranch));
