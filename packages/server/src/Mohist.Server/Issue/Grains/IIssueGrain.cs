@@ -6,7 +6,7 @@ namespace Mohist.Server.Issue.Grains;
 public interface IIssueGrain : IGrainWithStringKey
 {
     Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, string>? stageModels = null);
-    Task<string> StartWorkflowAsync();
+    Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null);
     Task CloseAsync();
     Task<string?> GetWorkflowRunIdAsync();
     Task UpdateAsync(string title, string? body);
@@ -33,3 +33,10 @@ public sealed record IssueWorkflowStatus(
     string? ChangeDir,
     string? WorkspacePath,
     WorkflowStatusSnapshot? Workflow);
+
+[GenerateSerializer]
+public sealed record WorkflowProjectContext(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string Name,
+    [property: Id(2)] string Path,
+    [property: Id(3)] string BaseBranch);

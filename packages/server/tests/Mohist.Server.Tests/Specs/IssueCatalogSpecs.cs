@@ -1,5 +1,6 @@
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
+using Mohist.Server.Variables.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -142,6 +143,24 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
         var grain = _grains.GetGrain<IIssueGrain>($"{pid}:{created.Number}");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.HydrateAsync(pid, 999, "dup", null, null, null));
+    }
+
+    [Fact]
+    public async Task StartWorkflow_WithProjectContext_AddsProjectVariables()
+    {
+        var pid = await SetupProjectAsync();
+        var catalog = _grains.GetGrain<IIssueCatalogGrain>(pid);
+        var created = await catalog.CreateAsync("Context", null, null, null);
+
+        var grain = _grains.GetGrain<IIssueGrain>($"{pid}:{created.Number}");
+        var wrId = await grain.StartWorkflowAsync(new WorkflowProjectContext(pid, "My Project", "/tmp/my-project", "trunk"));
+
+        var scope = _grains.GetGrain<IVariableScopeGrain>(wrId);
+        var snapshot = await scope.SnapshotAsync(new VariableSnapshotRequest(wrId, "", ""));
+
+        Assert.Contains("/tmp/my-project", snapshot);
+        Assert.Contains("My Project", snapshot);
+        Assert.Contains("trunk", snapshot);
     }
 
     [Fact]
