@@ -1,6 +1,6 @@
 ---
 name: mohist-explore
-description: 从产品和用户视角探索 mohist 项目，发现功能缺陷、体验问题、设计机会和价值增长点。当用户想要探索代码库、发现改进点、审查用户体验、思考功能设计、或无目标地巡检产品时使用。触发词包括 "explore"、"探索"、"巡检"、"找问题"、"体验审查"、"功能设计"、"产品思考"。
+description: 在外部 agent 中探索 Mohist-managed 项目的需求、产品问题、用户旅程和设计机会，并把结论整理成 Mohist issue 或普通探索记录。当用户想要 explore/探索/巡检/找问题/体验审查/功能设计/产品思考/需求澄清时使用。不要调用 Mohist 内置 Explore API；Mohist 的 Explore 能力通过此 skill 在外部 agent 中完成。
 hidden: true
 ---
 

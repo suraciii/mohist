@@ -5,7 +5,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Stage, IssueStatus, type RecoveryProjection } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useExploreSessions, useCreateExploreSession } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus } from '../hooks/useQueries'
 import { EditIssueDialog } from './EditIssueDialog'
 import { WorkflowConvergencePanel } from './WorkflowConvergencePanel'
 import { NotFoundPage } from './NotFoundPage'
@@ -213,29 +213,6 @@ export function IssueDetailPage() {
       setDeletingCommentId(null)
     },
   })
-
-  const { data: exploreSessions } = useExploreSessions(issue?.projectId ?? '')
-  const createExploreMutation = useCreateExploreSession()
-  const [exploreError, setExploreError] = useState<string | null>(null)
-
-  const handleExplore = async () => {
-    if (!issue) return
-    setExploreError(null)
-    const existing = exploreSessions?.find((s) => s.issueId === issue.id)
-    if (existing) {
-      navigate(`/explore/${existing.id}`)
-      return
-    }
-    try {
-      const session = await createExploreMutation.mutateAsync({
-        projectId: issue.projectId,
-        issueId: issue.id,
-      })
-      navigate(`/explore/${session.id}`)
-    } catch (e) {
-      setExploreError(e instanceof Error ? e.message : 'Failed to create explore session')
-    }
-  }
 
   if (isError) {
     return <NotFoundPage />
@@ -682,16 +659,6 @@ export function IssueDetailPage() {
                     </>
                   )}
 
-                  {isBacklog && (
-                    <button
-                      onClick={handleExplore}
-                      disabled={createExploreMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                    >
-                      {createExploreMutation.isPending ? 'Opening...' : 'Explore'}
-                    </button>
-                  )}
-
                   {issue.status === IssueStatus.Active && !isBacklog && !isAgentRunningOnThis && (
                     <button
                       onClick={() => closeMutation.mutate()}
@@ -842,12 +809,6 @@ export function IssueDetailPage() {
                         startMutation.error?.message ||
                         rerunMutation.error?.message ||
                         retryMutation.error?.message}
-                    </div>
-                  )}
-
-                  {exploreError && (
-                    <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-                      {exploreError}
                     </div>
                   )}
 

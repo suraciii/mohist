@@ -14,16 +14,14 @@ import { createEventRoutes } from '../api/events';
 import { createAgentRoutes } from '../api/agent';
 import { createFsRoutes } from '../api/fs';
 import { createQuestionRoutes } from '../api/questions';
-import { createExploreRoutes } from '../api/explore';
 import { createLogRoutes } from '../api/logs';
 import { createOpencodeModelsRoutes } from '../api/opencode-models';
 import { createScheduleRoutes } from '../api/schedules';
 import { createSettingsConfigRoutes } from '../api/settings-config';
 import { createSettingsSystemRoutes } from '../api/settings-system';
-import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, ExploreService, ExploreAcpService, SchedulerService, WorkflowRunService, IssuePrerequisiteService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
+import { ConfigService, EventBus, AgentRunnerService, IssueService, ProjectService, SchedulerService, WorkflowRunService, IssuePrerequisiteService, EpicService, type SkillRunner, type ConflictResolutionDeps } from '../services';
 import { ProviderStateService } from '../services/provider-state-service';
 import { WorktreeManager } from '../git/worktree-manager';
-import { ChangeArtifactsManager } from '../artifacts/change-artifacts-manager';
 import { Log } from '../util/log';
 import { getVersionInfo } from '../version';
 
@@ -107,7 +105,6 @@ async function main(): Promise<void> {
 
   const issueService = new IssueService(stateManager.getIssueRepo(), stateManager.getCommentRepo());
   const projectService = new ProjectService(stateManager.getProjectRepo(), stateManager.getConfigRepo(), stateManager.getIssueRepo(), stateManager.getLabelRepo());
-  const exploreService = new ExploreService(stateManager.getExploreSessionRepo(), stateManager.getExploreMessageRepo());
   const epicService = new EpicService(stateManager.getEpicRepo(), stateManager.getIssueRepo());
 
   const worktreeManager = new WorktreeManager();
@@ -179,13 +176,6 @@ async function main(): Promise<void> {
   server.addRouter('/api/agent', createAgentRoutes(agentRunner, coderSessionRepo, projectService));
   server.addRouter('/api/opencode', createOpencodeModelsRoutes());
   server.addRouter('/api/fs', createFsRoutes());
-  server.addRouter('/api/explore', createExploreRoutes(exploreService, issueService, projectService, stateManager.getExploreSessionRepo(), eventBus, (projectPath: string) => {
-    return new ExploreAcpService({
-      worktreePath: projectPath,
-      issueService,
-      artifactManager: new ChangeArtifactsManager(projectPath),
-    });
-  }));
   server.addRouter('/api/logs', createLogRoutes());
   server.addRouter('/api/agent/schedules', createScheduleRoutes(stateManager.getScheduleRepo(), scheduler));
   server.addRouter('/api', createSettingsConfigRoutes({ host: config.serverHost, port: config.serverPort }));

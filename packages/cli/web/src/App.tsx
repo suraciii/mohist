@@ -8,8 +8,6 @@ import { Header } from './components/Header'
 import { IssueDetailPage } from './components/IssueDetailPage'
 import { IssueChangedFilesPage } from './components/IssueChangedFilesPage'
 import { SessionPage } from './components/SessionPage'
-import { ExplorePage } from './components/ExplorePage'
-import { ExploreSessionList } from './components/ExploreSessionList'
 import { CreateProjectDialog } from './components/CreateProjectDialog'
 import { CreateIssueDialog } from './components/CreateIssueDialog'
 import { SettingsPage } from './components/SettingsPage'
@@ -109,8 +107,6 @@ function AppContent() {
           <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
           <Route path="/issue/:number/session/:sessionId" element={<SessionPage />} />
           <Route path="/activity" element={<ActivityPage />} />
-          <Route path="/explore" element={<ExploreSessionList />} />
-          <Route path="/explore/:id" element={<ExplorePage />} />
           <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
           <Route path="/settings/:section" element={<SettingsPage />} />
           <Route path="/logs" element={<LogsPage />} />

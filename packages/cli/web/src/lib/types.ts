@@ -342,7 +342,6 @@ export type EventMap = {
   approval_requested: { issueId: string; projectId: string; stage: string }
   question_asked: { issueId: string; projectId: string; questionId: string; question: string }
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
-  explore_crystallized: { sessionId: string; issueId: string; projectId: string }
   merge_queued: { issueId: string; projectId: string; issueNumber: number; position: number }
   merge_started: { issueId: string; projectId: string; issueNumber: number }
   merge_completed: { issueId: string; projectId: string; issueNumber: number }
@@ -373,37 +372,10 @@ export interface DirEntry {
   absolute: string
 }
 
-export interface ExploreSession {
-  id: string
-  projectId: string
-  issueId: string | null
-  issueNumber?: number
-  title: string
-  status: 'active' | 'crystallized' | 'archived'
-  model?: string
-  variant?: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ExploreMessage {
-  id: string
-  sessionId: string
-  role: 'user' | 'assistant'
-  content: string
-  toolCalls: ToolCallRecord[] | null
-  createdAt: string
-}
-
 export interface ToolCallRecord {
   name: string
   args: Record<string, unknown>
   result: unknown
-}
-
-export interface ExploreSessionWithMessages {
-  session: ExploreSession
-  messages: ExploreMessage[]
 }
 
 export interface LogTailResult {

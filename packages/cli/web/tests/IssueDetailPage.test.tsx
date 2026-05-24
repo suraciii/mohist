@@ -45,8 +45,6 @@ vi.mock('../src/hooks/useQueries', async () => {
     useAgentStatus: () => ({ data: mocks.agentStatus }),
     useIssueDiff: () => ({ data: null }),
     useIssueCommits: () => ({ data: null }),
-    useExploreSessions: () => ({ data: [] }),
-    useCreateExploreSession: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useIssueExecutions: () => ({ data: [] as any[] }),
     useWorktreeStatus: () => ({ data: null }),
     useIssueStageState: () => ({ data: null }),
@@ -456,6 +454,7 @@ describe('IssueDetailPage Markdown rendering', () => {
         body: 'Issue body',
         stage: Stage.Plan,
         status: IssueStatus.Blocked,
+        recovery: { allowedActions: ['retry'], latestAttemptState: 'failed' },
       })
       const { api: originalApi } = await import('../src/lib/api')
       vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
@@ -474,6 +473,7 @@ describe('IssueDetailPage Markdown rendering', () => {
         body: 'Issue body',
         stage: Stage.Plan,
         status: IssueStatus.Blocked,
+        recovery: { allowedActions: ['retry', 'rerun'], latestAttemptState: 'failed' },
       })
       const { api: originalApi } = await import('../src/lib/api')
       vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))

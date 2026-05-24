@@ -200,25 +200,6 @@ export interface Question {
   answeredAt?: string;
 }
 
-export enum ExploreStatus {
-  Active = 'active',
-  Crystallized = 'crystallized',
-  Archived = 'archived',
-}
-
-export interface ExploreSession {
-  id: string;
-  projectId: string;
-  issueId: string | null;
-  issueNumber?: number;
-  title: string;
-  status: ExploreStatus;
-  model?: string;
-  variant?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ToolCallRecord {
   name: string;
   args: Record<string, unknown>;
@@ -260,15 +241,6 @@ export interface BaseDriftState {
   staleEvidence?: StaleEvidence;
   conflicts?: string[];
   message: string;
-}
-
-export interface ExploreMessage {
-  id: string;
-  sessionId: string;
-  role: 'user' | 'assistant';
-  content: string;
-  toolCalls: ToolCallRecord[] | null;
-  createdAt: string;
 }
 
 export interface IssueStartPrerequisite {

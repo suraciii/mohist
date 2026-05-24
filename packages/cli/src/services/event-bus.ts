@@ -9,7 +9,6 @@ export type EventMap = {
   tool_call: { issueId: string; projectId: string; toolName: string; status: string; locations?: string[] };
   question_asked: { issueId: string; projectId: string; questionId: string; question: string };
   question_answered: { issueId: string; projectId: string; questionId: string; answer: string };
-  explore_crystallized: { sessionId: string; issueId: string; projectId: string };
   agent_text_chunk: { issueId: string; projectId: string; text: string; stepIndex: number };
   main_tool_call: { issueId: string; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number };
   coder_text_chunk: { issueId: string; projectId: string; executionId: string; acpSessionId: string; text: string; coderSessionId?: string; model?: string };

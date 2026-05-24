@@ -14,7 +14,6 @@ const ALL_EVENT_TYPES: EventName[] = [
   'tool_call',
   'question_asked',
   'question_answered',
-  'explore_crystallized',
   'agent_text_chunk',
   'main_tool_call',
   'coder_text_chunk',
