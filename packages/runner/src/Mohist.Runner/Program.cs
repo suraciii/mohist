@@ -20,11 +20,17 @@ builder.Services.AddSingleton<IServerConnection>(sp =>
     var http = httpFactory.CreateClient(nameof(IServerConnection));
     return new HttpServerConnection(http, runnerId, sp.GetRequiredService<ILogger<HttpServerConnection>>());
 });
+builder.Services.AddSingleton<ISessionTelemetrySink>(sp =>
+{
+    var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
+    var http = httpFactory.CreateClient(nameof(IServerConnection));
+    return new HttpSessionTelemetrySink(http, runnerId);
+});
 
 builder.Services.AddSingleton<ActionManager>(sp =>
 {
     var manager = new ActionManager(sp, sp.GetRequiredService<ILogger<ActionManager>>());
-    manager.Register("mohist/agent", () => new AgentAction(sp.GetRequiredService<IAgentExecutor>()));
+    manager.Register("mohist/agent", () => new AgentAction(sp.GetRequiredService<IAgentExecutor>(), sp.GetRequiredService<ISessionTelemetrySink>()));
     manager.Register("mohist/check/ai-review", () => new AiReviewAction(sp.GetRequiredService<IAgentExecutor>()));
     manager.Register("mohist/process", () => new ProcessHandler(sp.GetRequiredService<ILogger<ProcessHandler>>()));
     manager.Register("mohist/script", () => new ScriptHandler(sp.GetRequiredService<ILogger<ScriptHandler>>()));

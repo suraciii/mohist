@@ -73,6 +73,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly IClusterClient _clusterClient;
     private readonly IEventBus _eventBus;
+    private string? _webRoot;
 
     public MohistWebApplicationFactory(string connectionString, IClusterClient clusterClient, IEventBus eventBus)
     {
@@ -83,8 +84,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        _webRoot ??= CreateWebRoot();
         builder.UseSetting("Mohist:UseExternalOrleans", "true");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
+        builder.UseSetting("Mohist:WebRoot", _webRoot);
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -92,6 +95,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             {
                 ["Mohist:UseExternalOrleans"] = "true",
                 ["Mohist:SqliteConnectionString"] = _connectionString,
+                ["Mohist:WebRoot"] = _webRoot,
             });
         });
 
@@ -101,6 +105,14 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<IGrainFactory>(_clusterClient);
             services.AddSingleton<IEventBus>(_eventBus);
         });
+    }
+
+    private static string CreateWebRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mohist-web-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "index.html"), "<html><body>Mohist Test Web</body></html>");
+        return root;
     }
 }
 

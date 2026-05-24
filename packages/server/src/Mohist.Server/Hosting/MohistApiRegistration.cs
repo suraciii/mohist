@@ -21,6 +21,7 @@ public static class MohistApiRegistration
         app.MapStatusRoutes();
         app.MapProjectRoutes();
         app.MapIssueRoutes();
+        app.MapWorkflowEventRoutes();
         app.MapEventRoutes();
         app.MapConfigRoutes();
         app.MapProvidersRoutes();
@@ -28,6 +29,7 @@ public static class MohistApiRegistration
         app.MapLogsRoutes();
         app.MapFsRoutes();
         app.MapWorkspaceRoutes();
+        app.MapAgentRoutes();
         app.MapRunnerRoutes();
         return app;
     }

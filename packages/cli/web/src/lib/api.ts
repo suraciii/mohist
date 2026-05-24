@@ -202,6 +202,9 @@ export const api = {
   getWorkflowLogs: (number: number) =>
     request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
 
+  getWorkflowTimeline: (number: number) =>
+    request<import('./types').WorkflowTimeline>(`/issues/${number}/workflow/timeline`),
+
   rebaseIssue: async (number: number) => {
     try {
       return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(`/issues/${number}/rebase`, { method: 'POST' })

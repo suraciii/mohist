@@ -4,17 +4,17 @@ import * as path from 'path';
 import chalk from 'chalk';
 import http from 'http';
 import {
-  isSystemdServiceInstalled,
-  getSystemdStatus,
-  runSystemctlUser,
   restartServer as restartServerSystemd,
   updateServer as updateServerSystemd,
 } from './server-systemd';
 
 const PID_FILE = path.join(process.env.HOME || '', '.mohist', 'server.pid');
+const RUNNER_PID_FILE = path.join(process.env.HOME || '', '.mohist', 'runner.pid');
 const LOGS_DIR = path.join(process.env.HOME || '', '.mohist', 'logs');
 const STDERR_LOG_FILE = path.join(LOGS_DIR, 'server.log');
+const RUNNER_LOG_FILE = path.join(LOGS_DIR, 'runner.log');
 const LOG_FILE_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}\.log$/;
+const SERVER_URL = 'http://localhost:3456';
 
 function getLatestLogFile(): string | null {
   if (!fs.existsSync(LOGS_DIR)) return null;
@@ -29,6 +29,17 @@ interface ServerStatus {
   pid?: number;
   port?: number;
   uptime?: number;
+}
+
+interface RuntimeCommand {
+  command: string;
+  args: string[];
+  cwd: string;
+}
+
+interface MohistRuntimeCommands {
+  server: RuntimeCommand;
+  runner: RuntimeCommand;
 }
 
 interface HealthResponse {
@@ -50,6 +61,128 @@ async function checkServerHealth(): Promise<boolean> {
       resolve(false);
     });
   });
+}
+
+export function findMohistRepoRoot(start: string = __dirname): string | null {
+  let dir = path.resolve(start);
+  while (true) {
+    const serverProject = path.join(dir, 'packages', 'server', 'src', 'Mohist.Server', 'Mohist.Server.csproj');
+    const runnerProject = path.join(dir, 'packages', 'runner', 'src', 'Mohist.Runner', 'Mohist.Runner.csproj');
+    if (fs.existsSync(serverProject) && fs.existsSync(runnerProject)) {
+      return dir;
+    }
+
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+export function resolveRuntimeCommands(start: string = __dirname): MohistRuntimeCommands {
+  const repoRoot = findMohistRepoRoot(start);
+  if (!repoRoot) {
+    throw new Error('Unable to locate Mohist .NET runtime projects. Run from a source checkout or install a packaged runtime.');
+  }
+
+  return {
+    server: {
+      command: 'dotnet',
+      args: ['run', '--project', path.join(repoRoot, 'packages', 'server', 'src', 'Mohist.Server', 'Mohist.Server.csproj')],
+      cwd: repoRoot,
+    },
+    runner: {
+      command: 'dotnet',
+      args: [
+        'run',
+        '--project',
+        path.join(repoRoot, 'packages', 'runner', 'src', 'Mohist.Runner', 'Mohist.Runner.csproj'),
+        '--',
+        `--ServerUrl=${SERVER_URL}`,
+        `--RunnerId=mohist-local-${process.env.USER || 'user'}`,
+      ],
+      cwd: repoRoot,
+    },
+  };
+}
+
+export function getPidFileStatus(pidFile: string): ServerStatus {
+  const status: ServerStatus = { running: false };
+
+  if (!fs.existsSync(pidFile)) return status;
+
+  const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+  try {
+    process.kill(pid, 0);
+    status.running = true;
+    status.pid = pid;
+    status.port = pidFile === PID_FILE ? 3456 : undefined;
+    const stats = fs.statSync(pidFile);
+    status.uptime = Date.now() - stats.birthtimeMs;
+  } catch {
+    fs.unlinkSync(pidFile);
+  }
+
+  return status;
+}
+
+function spawnDetached(name: string, runtime: RuntimeCommand, pidFile: string, logFile: string): number {
+  if (!fs.existsSync(LOGS_DIR)) {
+    fs.mkdirSync(LOGS_DIR, { recursive: true });
+  }
+  const pidDir = path.dirname(pidFile);
+  if (!fs.existsSync(pidDir)) {
+    fs.mkdirSync(pidDir, { recursive: true });
+  }
+
+  const logStream = fs.openSync(logFile, 'a');
+  const child = spawn(runtime.command, runtime.args, {
+    detached: true,
+    stdio: ['ignore', logStream, logStream],
+    cwd: runtime.cwd,
+    env: { ...process.env, ASPNETCORE_URLS: SERVER_URL },
+  });
+
+  child.unref();
+  if (!child.pid) {
+    throw new Error(`Failed to start ${name}`);
+  }
+
+  fs.writeFileSync(pidFile, child.pid.toString());
+  return child.pid;
+}
+
+function ensureRunner(commands: MohistRuntimeCommands): void {
+  const runnerStatus = getPidFileStatus(RUNNER_PID_FILE);
+  if (!runnerStatus.running) {
+    try {
+      const runnerPid = spawnDetached('runner', commands.runner, RUNNER_PID_FILE, RUNNER_LOG_FILE);
+      console.log(chalk.green('Runner started'));
+      console.log(chalk.gray(`Runner PID: ${runnerPid}`));
+      console.log(chalk.gray(`Runner logs: ${RUNNER_LOG_FILE}`));
+    } catch (error: any) {
+      console.log(chalk.yellow(`Warning: failed to start local runner: ${error.message || error}`));
+    }
+  } else {
+    console.log(chalk.yellow('Runner is already running'));
+    console.log(chalk.gray(`Runner PID: ${runnerStatus.pid}`));
+  }
+}
+
+function stopPidFile(pidFile: string, label: string): boolean {
+  const status = getPidFileStatus(pidFile);
+  if (!status.running || !status.pid) {
+    return false;
+  }
+
+  try {
+    process.kill(status.pid, 'SIGTERM');
+    if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+    return true;
+  } catch {
+    if (fs.existsSync(pidFile)) fs.unlinkSync(pidFile);
+    console.log(chalk.yellow(`${label} was not running; cleaned stale pid file`));
+    return false;
+  }
 }
 
 async function fetchVersionFromHealth(): Promise<string | null> {
@@ -82,87 +215,32 @@ async function fetchVersionFromHealth(): Promise<string | null> {
 }
 
 function getServerStatus(): ServerStatus {
-  const status: ServerStatus = { running: false };
-  
-  if (fs.existsSync(PID_FILE)) {
-    const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
-    
-    try {
-      process.kill(pid, 0);
-      status.running = true;
-      status.pid = pid;
-      status.port = 3456;
-      
-      const stats = fs.statSync(PID_FILE);
-      status.uptime = Date.now() - stats.birthtimeMs;
-    } catch (error) {
-      fs.unlinkSync(PID_FILE);
-    }
-  }
-  
-  return status;
+  return getPidFileStatus(PID_FILE);
 }
 
 export async function startServer(): Promise<void> {
-  if (isSystemdServiceInstalled()) {
-    runSystemctlUser('start mohist.service');
-
-    console.log(chalk.blue('Starting server (systemd)...'));
-
-    let retries = 10;
-    while (retries > 0) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      if (await checkServerHealth()) {
-        const sdStatus = getSystemdStatus();
-        const pid = sdStatus?.mainPID || 0;
-        console.log(chalk.green('Server started (systemd)'));
-        console.log(chalk.gray(`PID: ${pid}`));
-        console.log(chalk.gray('Port: 3456'));
-        return;
-      }
-      retries--;
-    }
-
-    console.error(chalk.red('Server failed to start within timeout'));
-    console.log(chalk.gray('Check: systemctl --user status mohist.service'));
-    process.exit(1);
-  }
-
   const status = getServerStatus();
   
   if (status.running) {
     console.log(chalk.yellow('Server is already running'));
     console.log(chalk.gray(`PID: ${status.pid}`));
+    try {
+      ensureRunner(resolveRuntimeCommands());
+    } catch (error: any) {
+      console.log(chalk.yellow(`Warning: failed to ensure local runner: ${error.message || error}`));
+    }
     return;
   }
   
-  const serverPath = path.join(__dirname, '..', '..', '..', 'bin', 'mo-server');
-  
-  if (!fs.existsSync(LOGS_DIR)) {
-    fs.mkdirSync(LOGS_DIR, { recursive: true });
-  }
-  
-  const stderrStream = fs.openSync(STDERR_LOG_FILE, 'a');
-  
-  const child = spawn(process.execPath, [serverPath], {
-    detached: true,
-    stdio: ['ignore', 'ignore', stderrStream],
-    cwd: process.cwd()
-  });
-  
-  child.unref();
-  
-  const pid = child.pid;
-  if (!pid) {
-    console.error(chalk.red('Failed to start server'));
+  let commands: MohistRuntimeCommands;
+  try {
+    commands = resolveRuntimeCommands();
+  } catch (error: any) {
+    console.error(chalk.red(error.message || String(error)));
     process.exit(1);
   }
-  
-  const pidDir = path.dirname(PID_FILE);
-  if (!fs.existsSync(pidDir)) {
-    fs.mkdirSync(pidDir, { recursive: true });
-  }
-  fs.writeFileSync(PID_FILE, pid.toString());
+
+  const pid = spawnDetached('server', commands.server, PID_FILE, STDERR_LOG_FILE);
   
   console.log(chalk.blue('Starting server...'));
   
@@ -175,8 +253,9 @@ export async function startServer(): Promise<void> {
       console.log(chalk.green('Server started'));
       console.log(chalk.gray(`PID: ${pid}`));
       console.log(chalk.gray(`Port: 3456`));
-      const latestLog = getLatestLogFile();
-      console.log(chalk.gray(`Logs: ${latestLog || LOGS_DIR}`));
+      console.log(chalk.gray(`Logs: ${STDERR_LOG_FILE}`));
+
+      ensureRunner(commands);
       return;
     }
     
@@ -189,10 +268,9 @@ export async function startServer(): Promise<void> {
 }
 
 export async function stopServer(): Promise<void> {
-  if (isSystemdServiceInstalled()) {
-    runSystemctlUser('stop mohist.service');
-    console.log(chalk.green('Server stopped (systemd)'));
-    return;
+  const runnerStopped = stopPidFile(RUNNER_PID_FILE, 'Runner');
+  if (runnerStopped) {
+    console.log(chalk.green('Runner stopped'));
   }
 
   const status = getServerStatus();
@@ -241,42 +319,19 @@ export async function stopServer(): Promise<void> {
 }
 
 export async function serverStatus(): Promise<void> {
-  if (isSystemdServiceInstalled()) {
-    const sdStatus = getSystemdStatus();
-    if (!sdStatus) {
-      console.log(chalk.yellow('Service is installed but status query failed'));
-      console.log(chalk.gray('Run: systemctl --user status mohist.service'));
-      return;
-    }
-
-    const stateLabel = sdStatus.activeState === 'active'
-      ? chalk.green(sdStatus.activeState)
-      : sdStatus.activeState === 'failed'
-        ? chalk.red(sdStatus.activeState)
-        : chalk.yellow(sdStatus.activeState);
-
-    console.log(`Server state (systemd): ${stateLabel}`);
-
-    if (sdStatus.mainPID > 0 && sdStatus.activeState === 'active') {
-      console.log(chalk.gray(`PID: ${sdStatus.mainPID}`));
-      console.log(chalk.gray('Port: 3456'));
-
-      const versionStr = await fetchVersionFromHealth();
-      if (versionStr) {
-        console.log(chalk.gray(`Version: ${versionStr}`));
-      }
-    }
-
-    console.log(chalk.gray('Service: systemctl --user status mohist.service'));
-    return;
-  }
-
   const status = getServerStatus();
   
   if (status.running) {
     console.log(chalk.green('Server is running'));
     console.log(chalk.gray(`PID: ${status.pid}`));
     console.log(chalk.gray(`Port: ${status.port}`));
+    const runnerStatus = getPidFileStatus(RUNNER_PID_FILE);
+    if (runnerStatus.running) {
+      console.log(chalk.green('Runner is running'));
+      console.log(chalk.gray(`Runner PID: ${runnerStatus.pid}`));
+    } else {
+      console.log(chalk.yellow('Runner is not running'));
+    }
     
     if (status.uptime) {
       const seconds = Math.floor(status.uptime / 1000);
@@ -297,7 +352,7 @@ export async function serverStatus(): Promise<void> {
       console.log(chalk.gray(`Version: ${versionStr}`));
     }
 
-    console.log(chalk.gray(`Logs: ${getLatestLogFile() || LOGS_DIR}`));
+    console.log(chalk.gray(`Logs: ${STDERR_LOG_FILE}`));
   } else {
     console.log(chalk.red('Server is not running'));
     console.log(chalk.yellow('Start with: mo server start'));
@@ -305,7 +360,7 @@ export async function serverStatus(): Promise<void> {
 }
 
 export async function serverLogs(lines: number = 50): Promise<void> {
-  const logFile = getLatestLogFile();
+  const logFile = getLatestLogFile() || (fs.existsSync(STDERR_LOG_FILE) ? STDERR_LOG_FILE : null);
   if (!logFile || !fs.existsSync(logFile)) {
     console.log(chalk.yellow('No logs found'));
     console.log(chalk.gray('Server may not have been started yet'));

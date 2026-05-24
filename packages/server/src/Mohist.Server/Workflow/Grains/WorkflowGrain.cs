@@ -17,12 +17,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkDispatch? _lastDispatch;
     private readonly IStateStore<WorkflowGrainState> _stateStore;
     private readonly IEventBus _eventBus;
+    private readonly IEventStore _events;
     private readonly ILogger<WorkflowGrain> _log;
 
-    public WorkflowGrain(IStateStore<WorkflowGrainState> stateStore, IEventBus eventBus, ILogger<WorkflowGrain> log)
+    public WorkflowGrain(IStateStore<WorkflowGrainState> stateStore, IEventBus eventBus, IEventStore events, ILogger<WorkflowGrain> log)
     {
         _stateStore = stateStore;
         _eventBus = eventBus;
+        _events = events;
         _log = log;
     }
 
@@ -55,6 +57,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("started");
         await PersistAsync();
+        await AppendWorkflowEventAsync("workflow_started", "started", "Workflow started");
     }
 
     public async Task ResumeAsync()
@@ -64,6 +67,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("resumed");
         await PersistAndProjectAsync();
+        await AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed");
     }
 
     public async Task PauseAsync(string? reason = null)
@@ -73,6 +77,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
         await PersistAsync();
+        await AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused");
     }
 
     public async Task ApproveAsync()
@@ -82,6 +87,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("approved");
         await PersistAndProjectAsync();
+        await AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved");
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
@@ -95,6 +101,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStage.Stage, reason);
         EmitStageChanged("rejected", reason);
         await PersistAndProjectAsync();
+        await AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", reason ?? "Workflow approval rejected");
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
@@ -105,6 +112,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await PersistAndProjectAsync();
+        await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
         await RegisterToBacklogAsync();
     }
 
@@ -115,6 +123,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await PersistAndProjectAsync();
+        await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
         await RegisterToBacklogAsync();
     }
 
@@ -128,6 +137,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var dispatch = PrepareWork(work, runnerId);
         await PersistAsync();
+        if (dispatch is not null)
+            await AppendWorkDispatchedEventAsync(dispatch, runnerId);
         return dispatch;
     }
 
@@ -151,17 +162,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             case "task":
                 ProcessTaskResult(result);
+                await AppendTaskResultEventAsync(lease, result);
                 break;
             case "check":
             case "checks":
-                ProcessCheckResult(result);
+                await ProcessCheckResultAsync(result);
                 break;
             case "load":
                 ProcessLoadResult(result);
+                await AppendWorkflowEventAsync(result.Status is "completed" or "loaded" ? "workflow_tasks_loaded" : "workflow_tasks_load_failed",
+                    result.Status,
+                    result.Message ?? "Workflow tasks load reported",
+                    TaskId: lease.LogicalId,
+                    RunnerId: runnerId,
+                    Payload: new { result.Status, result.Message, result.Output, result.ExitCode });
                 break;
         }
 
         await PersistAndProjectAsync();
+        await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
@@ -184,6 +203,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run!.FailInFlightWork(lease.WorkType, reason);
 
         await PersistAndProjectAsync();
+        await AppendWorkflowEventAsync("workflow_work_failed", "failed", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
+        await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
     }
 
@@ -206,8 +227,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 s.Stage,
                 s.Status.ToString(),
                 s.Order,
-                s.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList(),
-                s.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList(),
+                SnapshotTasks(s),
+                SnapshotChecks(s),
                 s.Approval is not null
                     ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
                     : null,
@@ -237,6 +258,30 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             pending,
             failure,
             actions));
+    }
+
+    private List<TaskStatusSnapshot> SnapshotTasks(StageRunState stage)
+    {
+        if (stage.Tasks.Count > 0)
+            return stage.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList();
+
+        var definition = _stageDefinitions?.FirstOrDefault(d => d.Stage == stage.Stage);
+        if (definition is null) return [];
+        return definition.Tasks
+            .Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, "Pending"))
+            .ToList();
+    }
+
+    private List<CheckStatusSnapshot> SnapshotChecks(StageRunState stage)
+    {
+        if (stage.Checks.Count > 0)
+            return stage.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList();
+
+        var definition = _stageDefinitions?.FirstOrDefault(d => d.Stage == stage.Stage);
+        if (definition is null) return [];
+        return definition.Checks
+            .Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, "Pending", null))
+            .ToList();
     }
 
     private List<AvailableActionSnapshot> BuildAvailableActions()
@@ -348,7 +393,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run.FailTask(new TaskResult("failed", result.Message));
     }
 
-    private void ProcessCheckResult(WorkDispatchResult result)
+    private async Task ProcessCheckResultAsync(WorkDispatchResult result)
     {
         var work = _run.CurrentStage;
         var stage = work.Stage;
@@ -362,10 +407,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             if (cr.Status == "pass")
             {
                 _run.PassCheck(cr);
+                await AppendWorkflowEventAsync("workflow_check_passed", "pass", cr.Message ?? $"Check passed: {cr.Name}", CheckName: cr.Name, Payload: cr);
             }
             else if (cr.Status == "pending")
             {
                 _run.PendingCheck(cr);
+                await AppendWorkflowEventAsync("workflow_check_pending", "pending", cr.Message ?? $"Check pending: {cr.Name}", CheckName: cr.Name, Payload: cr);
             }
             else
             {
@@ -374,10 +421,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 {
                     _run.ResetCheck(cr);
                     _run.ClearStageFailure();
+                    await AppendWorkflowEventAsync("workflow_retry_task_injected", "retrying", cr.Message ?? $"Retry task injected for check: {cr.Name}", CheckName: cr.Name, Payload: cr);
                 }
                 else
                 {
                     _run.FailCheck(cr);
+                    await AppendWorkflowEventAsync("workflow_check_failed", "fail", cr.Message ?? $"Check failed: {cr.Name}", CheckName: cr.Name, Payload: cr);
                     return;
                 }
             }
@@ -546,6 +595,79 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             reason,
             timestamp = DateTime.UtcNow.ToString("o"),
         });
+    }
+
+    private Task AppendWorkDispatchedEventAsync(WorkDispatch dispatch, string runnerId) =>
+        AppendWorkflowEventAsync(
+            dispatch.WorkType switch
+            {
+                "task" => "workflow_task_started",
+                "checks" => "workflow_check_started",
+                "load" => "workflow_tasks_load_started",
+                _ => "workflow_work_dispatched",
+            },
+            "started",
+            dispatch.Title ?? "Workflow work dispatched",
+            TaskId: dispatch.WorkId,
+            RunnerId: runnerId,
+            Payload: dispatch);
+
+    private Task AppendTaskResultEventAsync(WorkLease lease, WorkDispatchResult result) =>
+        AppendWorkflowEventAsync(
+            result.Status == "completed" ? "workflow_task_completed" : "workflow_task_failed",
+            result.Status,
+            result.Message ?? (result.Status == "completed" ? "Workflow task completed" : "Workflow task failed"),
+            TaskId: lease.LogicalId,
+            RunnerId: lease.RunnerId,
+            Payload: new { result.Status, result.Message, result.Output, result.ExitCode });
+
+    private Task AppendTerminalEventIfNeededAsync()
+    {
+        if (_run is null) return Task.CompletedTask;
+        return _run.Status switch
+        {
+            WorkflowRunStatus.Passed => AppendWorkflowEventAsync("workflow_completed", "completed", "Workflow completed"),
+            WorkflowRunStatus.Failed => AppendWorkflowEventAsync("workflow_failed", "failed", _run.Failure?.Message ?? "Workflow failed", Payload: _run.Failure),
+            WorkflowRunStatus.AwaitingApproval => AppendWorkflowEventAsync("workflow_approval_requested", "awaiting", "Workflow approval requested"),
+            _ => Task.CompletedTask,
+        };
+    }
+
+    private Task AppendWorkflowEventAsync(
+        string type,
+        string? status,
+        string? message,
+        string? TaskId = null,
+        string? CheckName = null,
+        string? RunnerId = null,
+        object? Payload = null)
+    {
+        var context = TryParseEventContext();
+        if (context is null || _run is null) return Task.CompletedTask;
+
+        return _events.AppendAsync(new EventInput(
+            context.Value.ProjectId,
+            context.Value.IssueNumber,
+            "workflow",
+            type,
+            WorkflowRunId: GrainKey,
+            Stage: _run.CurrentStage.Stage,
+            TaskId: TaskId,
+            CheckName: CheckName,
+            RunnerId: RunnerId,
+            Status: status,
+            Message: message,
+            Payload: Payload));
+    }
+
+    private (string ProjectId, int IssueNumber)? TryParseEventContext()
+    {
+        if (!GrainKey.StartsWith("wr_", StringComparison.Ordinal)) return null;
+        var value = GrainKey[3..];
+        var lastUnderscore = value.LastIndexOf('_');
+        if (lastUnderscore <= 0 || lastUnderscore == value.Length - 1) return null;
+        var projectId = value[..lastUnderscore];
+        return int.TryParse(value[(lastUnderscore + 1)..], out var number) ? (projectId, number) : null;
     }
 
     private Task PersistAsync() => _stateStore.SaveAsync(GrainKey, new WorkflowGrainState(

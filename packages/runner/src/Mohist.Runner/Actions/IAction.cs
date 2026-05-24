@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Runner.Transport;
 
 namespace Mohist.Runner.Actions;
 
@@ -17,7 +18,8 @@ public record ActionContext(
     Dictionary<string, JsonElement?>? With,
     Dictionary<string, JsonElement?>? Variables,
     string WorkDir,
-    CancellationToken CancellationToken);
+    CancellationToken CancellationToken,
+    AgentSessionContext? Session = null);
 
 public record ActionResult(
     string Status,

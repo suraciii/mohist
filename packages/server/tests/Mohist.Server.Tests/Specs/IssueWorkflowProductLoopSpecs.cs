@@ -26,13 +26,30 @@ public class IssueWorkflowProductLoopSpecs
         var projectName = $"project-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-product-loop", baseBranch = "main" });
         await _client.PostOkAsync($"/api/projects/{projectName}/use");
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", stageModels = new Dictionary<string, string> { ["plan"] = "anthropic/claude" } });
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start");
         _runnerId = "product-loop-runner";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
+        var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events");
+        Assert.Contains(startEvents, e => e.Type == "issue_created");
+        Assert.Contains(startEvents, e => e.Type == "issue_started");
+        Assert.Contains(startEvents, e => e.Type == "workflow_started");
+
+        var initialTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline");
+        Assert.Contains(initialTimeline.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
+
         await DrainUntilApprovalAsync(issue.Number, "plan");
+
+        var planTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline");
+        var planStage = Assert.Single(planTimeline.Stages, s => s.Stage == "plan");
+        Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "completed");
+        Assert.Equal("awaiting", planStage.Approval?.Status);
+
+        var planLogs = await _client.GetDataAsync<WorkflowLogDto[]>($"/api/issues/{issue.Number}/logs");
+        Assert.Contains(planLogs, e => e.EventType == "workflow_task_completed");
+        Assert.Contains(planLogs, e => e.EventType == "workflow_check_passed");
 
         var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}");
         Assert.Equal("plan", listedAtApproval.Stage);
@@ -111,8 +128,15 @@ public class IssueWorkflowProductLoopSpecs
                 continue;
             }
             response.EnsureSuccessStatusCode();
-            return await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 ?? throw new InvalidOperationException("Empty work dispatch");
+            if (work.Stage == "plan" && work.Uses == "mohist/agent")
+            {
+                Assert.NotNull(work.Variables);
+                using var doc = JsonDocument.Parse(work.Variables);
+                Assert.Equal("anthropic/claude", doc.RootElement.GetProperty("model").GetProperty("stage").GetProperty("plan").GetString());
+            }
+            return work;
         }
 
         Assert.Fail($"Runner '{_runnerId}' has no work");
@@ -141,11 +165,18 @@ public class IssueWorkflowProductLoopSpecs
     private sealed record ApprovalStateDto(string Stage, string Status);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);
     private sealed record WorkflowStatusDto(string Status, string? CurrentStage);
+    private sealed record EventDto(string Id, string Type, string Category, string? Status, string CreatedAt);
+    private sealed record WorkflowLogDto(string Id, string EventType, string CreatedAt);
+    private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
+    private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? Approval);
+    private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
+    private sealed record ApprovalDto(string Status);
     private sealed record WorkDispatchDto(
         string WorkflowRunId,
         string WorkId,
         string? Uses,
         string? With,
+        string? Variables,
         string WorkType,
         string? Stage,
         string? Title);

@@ -6,6 +6,51 @@ public static class ConfigRoutes
 {
     public static WebApplication MapConfigRoutes(this WebApplication app)
     {
+        app.MapGet("/api/model", async (ConfigService svc) =>
+        {
+            var all = await svc.GetAllAsync();
+            all.TryGetValue("model", out var model);
+            return ApiResults.Ok(new { model = string.IsNullOrWhiteSpace(model) ? null : model });
+        });
+
+        app.MapPut("/api/model", async (ModelRequest req, ConfigService svc) =>
+        {
+            if (req.Model is null) await svc.ClearAsync("model");
+            else await svc.SetAsync("model", req.Model);
+            return ApiResults.Ok(new { req.Model });
+        });
+
+        app.MapGet("/api/opencode-model", async (ConfigService svc) =>
+        {
+            var all = await svc.GetAllAsync();
+            all.TryGetValue("model", out var model);
+            return ApiResults.Ok(new { model = string.IsNullOrWhiteSpace(model) ? null : model });
+        });
+
+        app.MapPut("/api/opencode-model", async (ModelRequest req, ConfigService svc) =>
+        {
+            if (req.Model is null) await svc.ClearAsync("model");
+            else await svc.SetAsync("model", req.Model);
+            return ApiResults.Ok(new { req.Model });
+        });
+
+        app.MapGet("/api/stage-models", async (ConfigService svc) =>
+        {
+            var all = await svc.GetAllAsync();
+            if (!all.TryGetValue("stageModels", out var json) || string.IsNullOrWhiteSpace(json))
+                return ApiResults.Ok(new { stageModels = (Dictionary<string, string>?)null });
+            return ApiResults.Ok(new { stageModels = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) });
+        });
+
+        app.MapPut("/api/stage-models", async (StageModelsRequest req, ConfigService svc) =>
+        {
+            if (req.StageModels is null) await svc.ClearAsync("stageModels");
+            else await svc.SetAsync("stageModels", req.StageModels);
+            return ApiResults.Ok(new { req.StageModels });
+        });
+
+        app.MapGet("/api/opencode/models", () => ApiResults.Ok(Array.Empty<string>()));
+
         var config = app.MapGroup("/api/config");
 
         config.MapGet("/", async (ConfigService svc) =>
@@ -48,3 +93,5 @@ public static class ConfigRoutes
 }
 
 public record ConfigValueRequest(object? Value);
+public record ModelRequest(string? Model);
+public record StageModelsRequest(Dictionary<string, string>? StageModels);

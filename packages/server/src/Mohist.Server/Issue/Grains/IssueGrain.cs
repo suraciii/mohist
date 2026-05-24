@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Storage;
 using Mohist.Server.Variables.Grains;
@@ -10,11 +11,13 @@ public class IssueGrain : Grain, IIssueGrain
 {
     private Issue.Domain.Issue? _issue;
     private readonly IStateStore<Issue.Domain.Issue> _issueStore;
+    private readonly IEventStore _events;
     private readonly ILogger<IssueGrain> _log;
 
-    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, ILogger<IssueGrain> log)
+    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, IEventStore events, ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
+        _events = events;
         _log = log;
     }
 
@@ -33,6 +36,7 @@ public class IssueGrain : Grain, IIssueGrain
         var wrId = $"wr_{_issue.ProjectId}_{_issue.Number}";
         _issue.SetWorkflowRunId(wrId);
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(MohistPipeline.Definition);
@@ -65,6 +69,12 @@ public class IssueGrain : Grain, IIssueGrain
           "changeDir": "openspec/changes/{{_issue.Number}}-{{Slug(_issue.Title)}}"
         }
         """);
+        await variables.SetContextAsync("model", $$"""
+        {
+          "default": {{JsonString(_issue.Model ?? "")}},
+          "stage": {{JsonObject(_issue.StageModels)}}
+        }
+        """);
         await variables.SetContextAsync("vars", """
         {
           "planHealthCommand": "npm ci && npm run typecheck",
@@ -92,6 +102,7 @@ public class IssueGrain : Grain, IIssueGrain
         }
         _issue.Close();
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_closed", "closed", "Issue closed");
     }
 
     public Task<string?> GetWorkflowRunIdAsync()
@@ -105,6 +116,7 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Update(title, body, null, null, null, null);
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
 
     public async Task ArchiveAsync()
@@ -112,6 +124,7 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Archive();
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_archived", "archived", "Issue archived");
     }
 
     public async Task UnarchiveAsync()
@@ -119,6 +132,7 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Unarchive();
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_unarchived", "active", "Issue unarchived");
     }
 
     public async Task ReopenAsync()
@@ -126,6 +140,7 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Reopen();
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_reopened", "active", "Issue reopened");
     }
 
     public async Task UpdateFullAsync(UpdateIssueData data)
@@ -133,6 +148,7 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Update(data.Title, data.Body, data.Labels, data.Priority, data.Model, data.StageModels);
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
 
     public async Task<IssueWorkflowStatus?> GetWorkflowStatusAsync()
@@ -190,6 +206,7 @@ public class IssueGrain : Grain, IIssueGrain
             model,
             stageModels);
         await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
     }
 
     public Task<IssueInfo> GetInfoAsync()
@@ -227,6 +244,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (Enum.TryParse<IssueStage>(stage, true, out var s))
             _issue!.SetStage(s);
         await _issueStore.SaveAsync(GrainKey, _issue!);
+        await AppendIssueEventAsync("issue_stage_changed", _issue!.Stage.ToString().ToLower(), "Issue stage changed");
     }
 
     public async Task SetRuntimeStatusAsync(string status, string? reason = null)
@@ -235,6 +253,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (Enum.TryParse<IssueRuntimeStatus>(status, true, out var s))
             _issue!.SetRuntimeStatus(s, reason);
         await _issueStore.SaveAsync(GrainKey, _issue!);
+        await AppendIssueEventAsync("issue_runtime_status_changed", _issue!.RuntimeStatus.ToString().ToLower(), reason ?? "Issue runtime status changed");
     }
 
     public async Task SetApprovalStateAsync(ApprovalState? state)
@@ -242,6 +261,8 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.SetApprovalState(state);
         await _issueStore.SaveAsync(GrainKey, _issue!);
+        if (state is not null)
+            await AppendIssueEventAsync($"issue_approval_{state.Status}", state.Status, $"Issue approval {state.Status}", state);
     }
 
     public async Task SetMergeStateAsync(string? state)
@@ -257,9 +278,12 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection)
     {
         EnsureIssue();
+        var previousStage = _issue!.Stage;
+        var previousStatus = _issue.RuntimeStatus;
+        var previousApproval = _issue.ApprovalState;
 
         if (Enum.TryParse<IssueStage>(projection.Stage, true, out var stage))
-            _issue!.SetStage(stage);
+            _issue.SetStage(stage);
         if (Enum.TryParse<IssueRuntimeStatus>(projection.RuntimeStatus, true, out var status))
             _issue!.SetRuntimeStatus(status, projection.BlockedReason);
         _issue!.SetApprovalState(projection.ApprovalState);
@@ -267,6 +291,53 @@ public class IssueGrain : Grain, IIssueGrain
             _issue.SetRuntimeStatus(IssueRuntimeStatus.Completed);
 
         await _issueStore.SaveAsync(GrainKey, _issue!);
+        await AppendProjectionEventsAsync(previousStage, previousStatus, previousApproval, projection.Completed);
+    }
+
+    private async Task AppendProjectionEventsAsync(IssueStage previousStage, IssueRuntimeStatus previousStatus, ApprovalState? previousApproval, bool completed)
+    {
+        if (_issue is null) return;
+
+        if (_issue.Stage != previousStage)
+            await AppendIssueEventAsync("issue_stage_changed", _issue.Stage.ToString().ToLower(), $"Issue moved to {_issue.Stage.ToString().ToLower()}", new { from = previousStage.ToString().ToLower(), to = _issue.Stage.ToString().ToLower() });
+
+        if (_issue.RuntimeStatus != previousStatus)
+            await AppendIssueEventAsync("issue_runtime_status_changed", _issue.RuntimeStatus.ToString().ToLower(), $"Issue is {_issue.RuntimeStatus.ToString().ToLower()}", new { from = previousStatus.ToString().ToLower(), to = _issue.RuntimeStatus.ToString().ToLower(), reason = _issue.BlockedReason });
+
+        var approval = _issue.ApprovalState;
+        if (approval?.Status != previousApproval?.Status || approval?.Stage != previousApproval?.Stage)
+        {
+            if (approval is not null)
+            {
+                var type = approval.Status switch
+                {
+                    "awaiting" => "issue_approval_requested",
+                    "approved" => "issue_approval_approved",
+                    "rejected" => "issue_approval_rejected",
+                    _ => $"issue_approval_{approval.Status}",
+                };
+                await AppendIssueEventAsync(type, approval.Status, $"Issue approval {approval.Status}", approval);
+            }
+        }
+
+        if (completed)
+            await AppendIssueEventAsync("issue_completed", "completed", "Issue completed");
+    }
+
+    private Task AppendIssueEventAsync(string type, string? status, string? message, object? payload = null)
+    {
+        if (_issue is null) return Task.CompletedTask;
+        return _events.AppendAsync(new EventInput(
+            _issue.ProjectId,
+            _issue.Number,
+            "issue",
+            type,
+            IssueId: _issue.Id,
+            WorkflowRunId: _issue.WorkflowRunId,
+            Stage: _issue.Stage.ToString().ToLower(),
+            Status: status,
+            Message: message,
+            Payload: payload));
     }
 
     private void EnsureIssue()
@@ -285,6 +356,7 @@ public class IssueGrain : Grain, IIssueGrain
     }
 
     private static string JsonString(string value) => System.Text.Json.JsonSerializer.Serialize(value);
+    private static string JsonObject(Dictionary<string, string>? value) => System.Text.Json.JsonSerializer.Serialize(value ?? []);
 }
 
 [GenerateSerializer]

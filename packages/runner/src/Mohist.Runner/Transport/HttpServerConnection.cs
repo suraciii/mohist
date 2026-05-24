@@ -67,7 +67,18 @@ public class HttpServerConnection : IServerConnection
             dispatch.Title,
             dispatch.Uses,
             ParseJson(dispatch.With),
-            ParseJson(dispatch.Variables));
+            ParseJson(dispatch.Variables),
+            dispatch.Session is null
+                ? null
+                : new AgentSessionContext(
+                    dispatch.Session.Id,
+                    dispatch.Session.ProjectId,
+                    dispatch.Session.IssueNumber,
+                    dispatch.Session.WorkflowRunId,
+                    dispatch.Session.WorkId,
+                    dispatch.Session.Stage,
+                    dispatch.Session.Title,
+                    dispatch.Session.ExternalSessionId));
     }
 
     public async Task ReportAsync(WorkItem workItem, WorkItemResult result, CancellationToken ct)
@@ -93,4 +104,15 @@ public record WorkDispatchResponse(
     string? Variables,
     string WorkType,
     string? Stage,
-    string? Title);
+    string? Title,
+    AgentSessionDispatch? Session = null);
+
+public record AgentSessionDispatch(
+    string Id,
+    string ProjectId,
+    int IssueNumber,
+    string WorkflowRunId,
+    string WorkId,
+    string? Stage,
+    string? Title,
+    string? ExternalSessionId);

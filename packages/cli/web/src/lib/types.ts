@@ -982,6 +982,64 @@ export interface StageStateRead {
   checkRepair?: CheckRepairState
 }
 
+export interface WorkflowTimeline {
+  workflowRunId: string
+  status: string
+  currentStage: string | null
+  pendingWork: WorkflowTimelinePendingWork | null
+  stages: WorkflowTimelineStage[]
+  availableActions: WorkflowTimelineAction[]
+}
+
+export interface WorkflowTimelinePendingWork {
+  workId: string
+  workType: string
+  stage: string | null
+  title: string | null
+  uses: string | null
+}
+
+export interface WorkflowTimelineStage {
+  stage: Stage
+  status: StageStateStatus
+  order: number
+  startedAt: string | null
+  completedAt: string | null
+  durationMs: number | null
+  tasks: WorkflowTimelineTask[]
+  checks: WorkflowTimelineCheck[]
+  approval: StageApprovalState | null
+}
+
+export interface WorkflowTimelineTask {
+  id: string
+  title: string
+  uses: string | null
+  status: StageTaskStatus
+  startedAt: string | null
+  completedAt: string | null
+  durationMs: number | null
+  attempts: number
+  message: string | null
+}
+
+export interface WorkflowTimelineCheck {
+  name: string
+  title: string
+  uses: string | null
+  status: string
+  message: string | null
+  startedAt: string | null
+  completedAt: string | null
+  durationMs: number | null
+}
+
+export interface WorkflowTimelineAction {
+  name: string
+  label: string
+  target: string | null
+}
+
 export interface IssueStageStateResponse {
   issueId: string
   issueNumber: number

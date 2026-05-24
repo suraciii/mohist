@@ -2,7 +2,9 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Grains;
+using Mohist.Server.Sessions;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Projection;
 
 namespace Mohist.Server.Api;
 
@@ -206,6 +208,31 @@ public static class IssueRoutes
                 return ApiResults.NotFound($"Issue #{number} not found");
             }
         });
+
+        issues.MapGet("/{number:int}/workflow/timeline", async (int number, IGrainFactory grains, WorkflowProjectionService projection) =>
+        {
+            var pid = await ResolveProjectIdAsync(null, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var timeline = await projection.GetTimelineAsync(pid, number);
+            return timeline is not null ? ApiResults.Ok(timeline) : ApiResults.NotFound("Workflow not found");
+        });
+
+        issues.MapGet("/{number:int}/coder-sessions", async (int number, IGrainFactory grains, AgentSessionService sessions) =>
+        {
+            var pid = await ResolveProjectIdAsync(null, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            return ApiResults.Ok(await sessions.ListByIssueAsync(pid, number));
+        });
+
+        issues.MapGet("/{number:int}/coder-sessions/{sessionId}", async (int number, string sessionId, IGrainFactory grains, AgentSessionService sessions) =>
+        {
+            var pid = await ResolveProjectIdAsync(null, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var detail = await sessions.GetDetailAsync(pid, number, sessionId);
+            return detail is null ? ApiResults.NotFound($"Coder session {sessionId} not found") : ApiResults.Ok(detail);
+        });
+
+        issues.MapGet("/{number:int}/agent-session", () => ApiResults.Ok(Array.Empty<object>()));
 
         issues.MapPost("/{number:int}/resume", async (int number, IGrainFactory grains) =>
         {
