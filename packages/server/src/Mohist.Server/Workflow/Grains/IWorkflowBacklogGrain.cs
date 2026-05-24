@@ -14,3 +14,9 @@ public static class WorkflowBacklogKeys
 {
     public const string Key = "default";
 }
+
+[GenerateSerializer]
+public sealed record WorkflowBacklogState(
+    [property: Id(0)] List<string> Waiting,
+    [property: Id(1)] Dictionary<string, string> Running,
+    [property: Id(2)] HashSet<string> All);

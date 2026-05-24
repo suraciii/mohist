@@ -12,3 +12,8 @@ public interface IProjectRegistryGrain : IGrainWithStringKey
     Task<ProjectInfo?> GetCurrentAsync();
     Task<ProjectInfo?> SetCurrentAsync(string name);
 }
+
+[GenerateSerializer]
+public sealed record ProjectRegistryState(
+    [property: Id(0)] Dictionary<string, ProjectInfo> Projects,
+    [property: Id(1)] string? CurrentProjectName);

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Storage;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -7,24 +8,40 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
     private readonly Queue<string> _waiting = new();
     private readonly Dictionary<string, string> _running = new();
     private readonly HashSet<string> _all = new();
+    private readonly IStateStore<WorkflowBacklogState> _store;
     private readonly ILogger<WorkflowBacklogGrain> _log;
 
-    public WorkflowBacklogGrain(ILogger<WorkflowBacklogGrain> log)
+    public WorkflowBacklogGrain(IStateStore<WorkflowBacklogState> store, ILogger<WorkflowBacklogGrain> log)
     {
+        _store = store;
         _log = log;
     }
 
-    public Task RegisterAsync(string workflowId)
+    private string GrainKey => this.GetPrimaryKeyString();
+
+    public override async Task OnActivateAsync(CancellationToken ct)
     {
-        if (_all.Contains(workflowId)) return Task.CompletedTask;
+        var state = await _store.LoadAsync(GrainKey);
+        if (state is null) return;
+        foreach (var wfId in state.Waiting)
+            _waiting.Enqueue(wfId);
+        foreach (var (wfId, runnerId) in state.Running)
+            _running[wfId] = runnerId;
+        foreach (var wfId in state.All)
+            _all.Add(wfId);
+    }
+
+    public async Task RegisterAsync(string workflowId)
+    {
+        if (_all.Contains(workflowId)) return;
 
         _all.Add(workflowId);
         _waiting.Enqueue(workflowId);
+        await SaveAsync();
         _log.LogInformation("Workflow {WfId} registered to backlog, waiting={Waiting}", workflowId, _waiting.Count);
-        return Task.CompletedTask;
     }
 
-    public Task<string?> ClaimAsync(string runnerId)
+    public async Task<string?> ClaimAsync(string runnerId)
     {
         while (_waiting.Count > 0)
         {
@@ -32,19 +49,20 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
             if (!_all.Contains(wfId)) continue;
 
             _running[wfId] = runnerId;
+            await SaveAsync();
             _log.LogInformation("Runner {RunnerId} claimed workflow {WfId}", runnerId, wfId);
-            return Task.FromResult<string?>(wfId);
+            return wfId;
         }
 
-        return Task.FromResult<string?>(null);
+        return null;
     }
 
-    public Task ReleaseAsync(string workflowId)
+    public async Task ReleaseAsync(string workflowId)
     {
         _all.Remove(workflowId);
         _running.Remove(workflowId);
+        await SaveAsync();
         _log.LogInformation("Workflow {WfId} released from backlog", workflowId);
-        return Task.CompletedTask;
     }
 
     public Task<IReadOnlyList<string>> ListWaitingAsync()
@@ -57,11 +75,13 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
         return Task.FromResult<IReadOnlyList<(string, string)>>(_running.Select(kv => (kv.Key, kv.Value)).ToList().AsReadOnly());
     }
 
-    public Task ClearAsync()
+    public async Task ClearAsync()
     {
         _waiting.Clear();
         _running.Clear();
         _all.Clear();
-        return Task.CompletedTask;
+        await SaveAsync();
     }
+
+    private Task SaveAsync() => _store.SaveAsync(GrainKey, new WorkflowBacklogState(_waiting.ToList(), new Dictionary<string, string>(_running), new HashSet<string>(_all)));
 }

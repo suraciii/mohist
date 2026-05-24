@@ -21,7 +21,23 @@ public class TaskRun
         WithInput = withInput;
     }
 
+    private TaskRun(string definitionId, int attempt, string title, string? uses, Dictionary<string, JsonElement?>? withInput, TaskRunStatus status)
+        : this(definitionId, attempt, title, uses, withInput)
+    {
+        Status = status;
+    }
+
     public void Start() => Status = TaskRunStatus.Running;
     public void Complete() => Status = TaskRunStatus.Completed;
     public void Fail() => Status = TaskRunStatus.Failed;
+
+    public TaskRunSnapshot Snapshot() => new(DefinitionId, Attempt, Title, Uses, WithInput, Status);
+
+    public static TaskRun Restore(TaskRunSnapshot snapshot) => new(
+        snapshot.DefinitionId,
+        snapshot.Attempt,
+        snapshot.Title,
+        snapshot.Uses,
+        snapshot.WithInput,
+        snapshot.Status);
 }

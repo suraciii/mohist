@@ -8,6 +8,10 @@ public interface IVariableScopeGrain : IGrainWithStringKey
 }
 
 [GenerateSerializer]
+public sealed record VariableScopeState(
+    [property: Id(0)] Dictionary<string, string> Contexts);
+
+[GenerateSerializer]
 public sealed record VariableSnapshotRequest(
     string WorkflowRunId,
     string WorkId,

@@ -59,6 +59,40 @@ public class WorkflowRun
         CurrentStage = first;
     }
 
+    public WorkflowRunSnapshot Snapshot() => new(
+        Id,
+        _started,
+        _paused,
+        Math.Max(0, _stageRuns.IndexOf(CurrentStage)),
+        new Dictionary<string, int>(_stageAttempts),
+        _stageRuns.Select(s => s.Snapshot()).ToList());
+
+    public static WorkflowRun Restore(List<StageDefinition> definitionStages, WorkflowRunSnapshot snapshot)
+    {
+        var run = new WorkflowRun(snapshot.Id, definitionStages);
+        run._stageRuns.Clear();
+        run._stageAttempts.Clear();
+
+        foreach (var (key, value) in snapshot.StageAttempts)
+            run._stageAttempts[key] = value;
+
+        foreach (var stageSnapshot in snapshot.Stages)
+        {
+            var stageDefinition = definitionStages.FirstOrDefault(d => d.Stage == stageSnapshot.Stage)
+                ?? throw new WorkflowDomainException($"Cannot restore stage {stageSnapshot.Stage}: definition not found");
+            run._stageRuns.Add(StageRun.Restore(stageSnapshot, stageDefinition.Checks));
+        }
+
+        if (run._stageRuns.Count == 0)
+            throw new WorkflowDomainException("Cannot restore WorkflowRun without stage runs");
+
+        var index = Math.Clamp(snapshot.CurrentStageIndex, 0, run._stageRuns.Count - 1);
+        run.CurrentStage = run._stageRuns[index];
+        run._started = snapshot.Started;
+        run._paused = snapshot.Paused;
+        return run;
+    }
+
     public void Start()
     {
         if (Status != WorkflowRunStatus.Pending && Status != WorkflowRunStatus.Paused)

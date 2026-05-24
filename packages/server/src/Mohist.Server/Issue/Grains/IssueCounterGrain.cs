@@ -1,17 +1,28 @@
 namespace Mohist.Server.Issue.Grains;
+using Mohist.Server.Storage;
 
 public class IssueCounterGrain : Grain, IIssueCounterGrain
 {
     private int _next;
+    private readonly IStateStore<IssueCounterState> _store;
 
-    public override Task OnActivateAsync(CancellationToken ct)
+    public IssueCounterGrain(IStateStore<IssueCounterState> store)
     {
-        _next = 1;
-        return Task.CompletedTask;
+        _store = store;
     }
 
-    public Task<int> NextAsync()
+    private string GrainKey => this.GetPrimaryKeyString();
+
+    public override async Task OnActivateAsync(CancellationToken ct)
     {
-        return Task.FromResult(_next++);
+        var state = await _store.LoadAsync(GrainKey);
+        _next = state?.Next ?? 1;
+    }
+
+    public async Task<int> NextAsync()
+    {
+        var value = _next++;
+        await _store.SaveAsync(GrainKey, new IssueCounterState(_next));
+        return value;
     }
 }

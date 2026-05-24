@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Issue.Domain;
 
 [GenerateSerializer]
@@ -6,24 +8,24 @@ public class Issue
     [Id(0)]  public string Id { get; }
     [Id(1)]  public string ProjectId { get; }
     [Id(2)]  public int Number { get; }
-    [Id(3)]  public string Title { get; private set; }
-    [Id(4)]  public string? Body { get; private set; }
-    [Id(5)]  public string[] Labels { get; private set; }
-    [Id(6)]  public string Priority { get; private set; }
-    [Id(7)]  public string? Model { get; private set; }
-    [Id(8)]  public Dictionary<string, string>? StageModels { get; private set; }
+    [Id(3), JsonInclude]  public string Title { get; private set; }
+    [Id(4), JsonInclude]  public string? Body { get; private set; }
+    [Id(5), JsonInclude]  public string[] Labels { get; private set; }
+    [Id(6), JsonInclude]  public string Priority { get; private set; }
+    [Id(7), JsonInclude]  public string? Model { get; private set; }
+    [Id(8), JsonInclude]  public Dictionary<string, string>? StageModels { get; private set; }
     [Id(9)]  public DateTime CreatedAt { get; }
-    [Id(10)] public DateTime UpdatedAt { get; private set; }
-    [Id(11)] public DateTime? ArchivedAt { get; private set; }
-    [Id(12)] public string? WorkflowRunId { get; private set; }
+    [Id(10), JsonInclude] public DateTime UpdatedAt { get; private set; }
+    [Id(11), JsonInclude] public DateTime? ArchivedAt { get; private set; }
+    [Id(12), JsonInclude] public string? WorkflowRunId { get; private set; }
 
-    [Id(13)] public IssueStage Stage { get; private set; } = IssueStage.Backlog;
-    [Id(14)] public IssueRuntimeStatus RuntimeStatus { get; private set; } = IssueRuntimeStatus.Active;
-    [Id(15)] public ApprovalState? ApprovalState { get; private set; }
-    [Id(16)] public MergeState? MergeState { get; private set; }
-    [Id(17)] public int RetryCount { get; private set; }
-    [Id(18)] public int ConflictRetryCount { get; private set; }
-    [Id(19)] public string? BlockedReason { get; private set; }
+    [Id(13), JsonInclude] public IssueStage Stage { get; private set; } = IssueStage.Backlog;
+    [Id(14), JsonInclude] public IssueRuntimeStatus RuntimeStatus { get; private set; } = IssueRuntimeStatus.Active;
+    [Id(15), JsonInclude] public ApprovalState? ApprovalState { get; private set; }
+    [Id(16), JsonInclude] public MergeState? MergeState { get; private set; }
+    [Id(17), JsonInclude] public int RetryCount { get; private set; }
+    [Id(18), JsonInclude] public int ConflictRetryCount { get; private set; }
+    [Id(19), JsonInclude] public string? BlockedReason { get; private set; }
 
     public Issue(
         string id,

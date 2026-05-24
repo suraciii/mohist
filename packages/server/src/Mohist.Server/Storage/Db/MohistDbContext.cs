@@ -9,37 +9,8 @@ public class MohistDbContext : DbContext
     public DbSet<GrainState> GrainStates { get; set; } = null!;
     public DbSet<ConfigEntry> Configs { get; set; } = null!;
 
-    private readonly string _dbPath;
-
-    public MohistDbContext()
-    {
-        var home = Environment.GetEnvironmentVariable("HOME")
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var dataDir = Path.Combine(home, ".mohist");
-        Directory.CreateDirectory(dataDir);
-        _dbPath = Path.Combine(dataDir, "mohist.db");
-    }
-
-    public MohistDbContext(string dbPath)
-    {
-        _dbPath = dbPath;
-    }
-
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
-        var home = Environment.GetEnvironmentVariable("HOME")
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var dataDir = Path.Combine(home, ".mohist");
-        Directory.CreateDirectory(dataDir);
-        _dbPath = Path.Combine(dataDir, "mohist.db");
-    }
-
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        if (!optionsBuilder.IsConfigured)
-        {
-            optionsBuilder.UseSqlite($"Data Source={_dbPath}");
-        }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

@@ -25,6 +25,7 @@ builder.Services.AddSingleton<ActionManager>(sp =>
 {
     var manager = new ActionManager(sp, sp.GetRequiredService<ILogger<ActionManager>>());
     manager.Register("mohist/agent", () => new AgentAction(sp.GetRequiredService<IAgentExecutor>()));
+    manager.Register("mohist/check/ai-review", () => new AiReviewAction(sp.GetRequiredService<IAgentExecutor>()));
     manager.Register("mohist/process", () => new ProcessHandler(sp.GetRequiredService<ILogger<ProcessHandler>>()));
     manager.Register("mohist/script", () => new ScriptHandler(sp.GetRequiredService<ILogger<ScriptHandler>>()));
     manager.Register("mohist/health-gate", () => new HealthGateAction(sp.GetRequiredService<ILogger<HealthGateAction>>()));
