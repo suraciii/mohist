@@ -1,10 +1,11 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Issue.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
 
 public interface IWorkflowGrain : IGrainWithStringKey
 {
-    Task StartAsync(WorkflowDefinitionInput? definition = null);
+    Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task ApproveAsync();

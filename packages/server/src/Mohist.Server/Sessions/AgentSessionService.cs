@@ -20,8 +20,7 @@ public class AgentSessionService
     public async Task<AgentSessionDto?> CreateForDispatchAsync(string runnerId, WorkDispatch dispatch, CancellationToken ct = default)
     {
         if (dispatch.Uses != "mohist/agent") return null;
-        var parsed = TryParseWorkflowRunId(dispatch.WorkflowRunId);
-        if (parsed is null) return null;
+        if (dispatch.ProjectId is null || dispatch.IssueNumber is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var existing = await db.AgentSessions.AsNoTracking()
@@ -30,8 +29,8 @@ public class AgentSessionService
 
         var session = new AgentSession
         {
-            ProjectId = parsed.Value.ProjectId,
-            IssueNumber = parsed.Value.IssueNumber,
+            ProjectId = dispatch.ProjectId,
+            IssueNumber = dispatch.IssueNumber.Value,
             WorkflowRunId = dispatch.WorkflowRunId,
             WorkId = dispatch.WorkId,
             WorkType = dispatch.WorkType,
@@ -363,16 +362,6 @@ public class AgentSessionService
         return Math.Max(0, (long)(end - start).TotalMilliseconds);
     }
 
-    private static (string ProjectId, int IssueNumber)? TryParseWorkflowRunId(string workflowRunId)
-    {
-        if (!workflowRunId.StartsWith("wr_", StringComparison.Ordinal)) return null;
-        var rest = workflowRunId[3..];
-        var idx = rest.LastIndexOf('_');
-        if (idx <= 0 || idx == rest.Length - 1) return null;
-        return int.TryParse(rest[(idx + 1)..], out var number)
-            ? (rest[..idx], number)
-            : null;
-    }
 }
 
 public sealed record AgentSessionDto(

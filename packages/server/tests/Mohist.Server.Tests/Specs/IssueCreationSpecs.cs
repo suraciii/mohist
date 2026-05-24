@@ -133,6 +133,10 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
         var wrId = await grain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "trunk"));
 
+        Assert.StartsWith("wr_", wrId);
+        Assert.DoesNotContain(project.Id, wrId);
+        Assert.False(wrId.EndsWith($"_{created.Number}", StringComparison.Ordinal));
+
         var scope = _grains.GetGrain<IVariableScopeGrain>(wrId);
         var snapshot = await scope.SnapshotAsync(new VariableSnapshotRequest(wrId, "", ""));
 
