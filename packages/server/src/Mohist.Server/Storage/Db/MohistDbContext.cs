@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Config.Domain;
+using Mohist.Server.Epics;
 using Mohist.Server.Events;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Sessions;
 using Mohist.Server.Storage.Db.Entities;
 
@@ -13,6 +15,10 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowEventEntry> WorkflowEvents { get; set; } = null!;
     public DbSet<AgentSession> AgentSessions { get; set; } = null!;
     public DbSet<AgentSessionEvent> AgentSessionEvents { get; set; } = null!;
+    public DbSet<IssueCommentEntry> IssueComments { get; set; } = null!;
+    public DbSet<IssuePrerequisiteEntry> IssuePrerequisites { get; set; } = null!;
+    public DbSet<EpicEntry> Epics { get; set; } = null!;
+    public DbSet<EpicIssueEntry> EpicIssues { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -84,6 +90,43 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.PayloadJson).IsRequired();
             entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
+        });
+
+        modelBuilder.Entity<IssueCommentEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Body).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
+        });
+
+        modelBuilder.Entity<IssuePrerequisiteEntry>(entity =>
+        {
+            entity.HasKey(e => new { e.ProjectId, e.IssueNumber, e.PrerequisiteNumber });
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<EpicEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Title).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.Priority).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+        });
+
+        modelBuilder.Entity<EpicIssueEntry>(entity =>
+        {
+            entity.HasKey(e => new { e.EpicId, e.IssueId });
+            entity.Property(e => e.EpicId).HasMaxLength(64);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.IssueId }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
         });
     }
 }

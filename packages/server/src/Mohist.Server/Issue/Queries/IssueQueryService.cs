@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Storage.Db;
@@ -24,7 +25,7 @@ public class IssueQueryService
             .AsNoTracking()
             .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
         var issue = row is null ? null : JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
-        return issue is null ? null : ToInfo(issue, project);
+        return issue is null ? null : await EnrichAsync(db, ToInfo(issue, project));
     }
 
     public async Task<List<IssueInfo>> ListAsync(
@@ -63,7 +64,18 @@ public class IssueQueryService
         if (!string.IsNullOrEmpty(priority))
             query = query.Where(i => string.Equals(i.Priority, priority, StringComparison.OrdinalIgnoreCase));
 
-        return query.OrderBy(i => i.Number).ToList();
+        var list = query.OrderBy(i => i.Number).ToList();
+        return await EnrichAsync(db, list);
+    }
+
+    public async Task<Domain.Issue?> GetDomainAsync(string projectId, int number)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var key = $"{projectId}:{number}";
+        var row = await db.GrainStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
+        return row is null ? null : JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
     }
 
     public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null) => new()
@@ -89,5 +101,111 @@ public class IssueQueryService
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         WorkflowRunId = issue.WorkflowRunId,
+    };
+
+    private static async Task<List<IssueInfo>> EnrichAsync(MohistDbContext db, List<IssueInfo> issues)
+    {
+        if (issues.Count == 0) return issues;
+
+        var projectId = issues[0].ProjectId;
+        var numbers = issues.Select(i => i.Number).ToArray();
+        var issueIds = issues.Select(i => i.Id).ToArray();
+        var byNumber = issues.ToDictionary(i => i.Number);
+        var byId = issues.ToDictionary(i => i.Id);
+
+        var comments = await db.IssueComments.AsNoTracking()
+            .Where(c => c.ProjectId == projectId && numbers.Contains(c.IssueNumber))
+            .ToListAsync();
+        comments = comments.OrderBy(c => c.CreatedAt).ToList();
+        foreach (var group in comments.GroupBy(c => c.IssueNumber))
+        {
+            if (byNumber.TryGetValue(group.Key, out var issue))
+            {
+                issue.Comments = group.Select(ToCommentDto).ToArray();
+            }
+        }
+
+        var prereqRows = await db.IssuePrerequisites.AsNoTracking()
+            .Where(p => p.ProjectId == projectId && numbers.Contains(p.IssueNumber))
+            .ToListAsync();
+        var prereqNumbers = prereqRows.Select(p => p.PrerequisiteNumber).Distinct().ToArray();
+        var prereqIssues = issues.Where(i => prereqNumbers.Contains(i.Number)).ToDictionary(i => i.Number);
+        var missingPrereqNumbers = prereqNumbers.Where(number => !prereqIssues.ContainsKey(number)).ToArray();
+        if (missingPrereqNumbers.Length > 0)
+        {
+            var keys = missingPrereqNumbers.Select(number => $"{projectId}:{number}").ToArray();
+            var rows = await db.GrainStates.AsNoTracking()
+                .Where(row => row.Type == typeof(Domain.Issue).FullName! && keys.Contains(row.Key))
+                .ToListAsync();
+            foreach (var row in rows)
+            {
+                var domain = JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
+                if (domain is not null)
+                    prereqIssues[domain.Number] = ToInfo(domain);
+            }
+        }
+        foreach (var group in prereqRows.GroupBy(p => p.IssueNumber))
+        {
+            if (!byNumber.TryGetValue(group.Key, out var issue)) continue;
+            var summaries = group
+                .Select(p => prereqIssues.TryGetValue(p.PrerequisiteNumber, out var prereq) ? ToPrerequisiteSummary(prereq) : null)
+                .Where(p => p is not null)
+                .Cast<IssuePrerequisiteSummary>()
+                .ToArray();
+            issue.Prerequisites = summaries;
+            var waiting = summaries.Where(p => !p.Delivered).ToArray();
+            issue.StartEligibility = waiting.Length == 0
+                ? IssueStartEligibility.Ready()
+                : new IssueStartEligibility
+                {
+                    Startable = false,
+                    Reason = "waiting-for-delivery",
+                    Message = $"Waiting for #{waiting[0].Number}",
+                    WaitingForDelivery = waiting,
+                };
+        }
+
+        var epicLinks = await db.EpicIssues.AsNoTracking()
+            .Where(link => link.ProjectId == projectId && issueIds.Contains(link.IssueId))
+            .ToListAsync();
+        if (epicLinks.Count > 0)
+        {
+            var epicIds = epicLinks.Select(l => l.EpicId).Distinct().ToArray();
+            var epics = await db.Epics.AsNoTracking()
+                .Where(epic => epic.ProjectId == projectId && epicIds.Contains(epic.Id))
+                .ToDictionaryAsync(e => e.Id);
+            foreach (var link in epicLinks)
+            {
+                if (byId.TryGetValue(link.IssueId, out var issue) && epics.TryGetValue(link.EpicId, out var epic))
+                {
+                    issue.PrimaryEpic = new IssuePrimaryEpic
+                    {
+                        Id = epic.Id,
+                        Title = epic.Title,
+                        Status = epic.Status,
+                        Priority = epic.Priority,
+                    };
+                }
+            }
+        }
+
+        return issues;
+    }
+
+    private static async Task<IssueInfo> EnrichAsync(MohistDbContext db, IssueInfo issue) =>
+        (await EnrichAsync(db, [issue]))[0];
+
+    public static IssueCommentDto ToCommentDto(IssueCommentEntry comment) =>
+        new(comment.Id, comment.IssueId, comment.Body, comment.CreatedAt.ToString("o"));
+
+    private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueInfo issue) => new()
+    {
+        IssueId = issue.Id,
+        Number = issue.Number,
+        Title = issue.Title,
+        Delivered = issue.Stage == "done" || issue.Status == "completed" || issue.MergeState == "merged",
+        Stage = issue.Stage,
+        Status = issue.Status,
+        MergeState = issue.MergeState,
     };
 }

@@ -29,7 +29,9 @@ public static class MohistApiRegistration
         app.MapLogsRoutes();
         app.MapFsRoutes();
         app.MapWorkspaceRoutes();
+        app.MapEpicRoutes();
         app.MapAgentRoutes();
+        app.MapCompatibilityRoutes();
         app.MapRunnerRoutes();
         return app;
     }
