@@ -67,4 +67,19 @@ public class VariableScopeSpecs : WorkflowGrainSpecs
         Assert.Equal("checks", check.WorkType);
         Assert.StartsWith("checks-", check.WorkId);
     }
+
+    [Fact]
+    public async Task MohistPipelineDispatchesAgentWorkWithoutExecutingAgent()
+    {
+        await StartWorkflowAsync(Mohist.Server.Issue.Domain.MohistPipeline.Definition);
+
+        var (proposal, _) = await PollWorkAnyAsync();
+
+        Assert.Equal("task", proposal.WorkType);
+        Assert.Equal("plan", proposal.Stage);
+        Assert.Equal("mohist/agent", proposal.Uses);
+        Assert.Contains("proposal", proposal.WorkId);
+        Assert.Contains("\"stage\":\"plan\"", proposal.With);
+        Assert.Contains("\"task\":\"proposal\"", proposal.With);
+    }
 }

@@ -96,7 +96,11 @@ public static class IssueRoutes
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
-                await grain.StartWorkflowAsync();
+                var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
+                var project = await registry.GetCurrentAsync();
+                if (project is null) return ApiResults.BadRequest("No active project");
+
+                await grain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, project.Name, project.Path, project.BaseBranch));
                 return ApiResults.Ok();
             }
             catch (InvalidOperationException ex)

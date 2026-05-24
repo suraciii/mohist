@@ -25,7 +25,7 @@ public class IssueGrain : Grain, IIssueGrain
         _issue = await _issueStore.LoadAsync(GrainKey);
     }
 
-    public async Task<string> StartWorkflowAsync()
+    public async Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null)
     {
         EnsureIssue();
         _issue!.SetStage(IssueStage.Plan);
@@ -46,11 +46,18 @@ public class IssueGrain : Grain, IIssueGrain
           "body": {{JsonString(_issue.Body ?? "")}}
         }
         """);
+        var projectId = project?.Id ?? _issue.ProjectId;
+        var projectName = project?.Name ?? _issue.ProjectId;
+        var projectPath = project?.Path ?? ".";
+        var baseBranch = project?.BaseBranch ?? "main";
+
         await variables.SetContextAsync("project", $$"""
         {
-          "id": {{JsonString(_issue.ProjectId)}},
-          "path": ".",
-          "defaultBranch": "main"
+          "id": {{JsonString(projectId)}},
+          "name": {{JsonString(projectName)}},
+          "path": {{JsonString(projectPath)}},
+          "baseBranch": {{JsonString(baseBranch)}},
+          "defaultBranch": {{JsonString(baseBranch)}}
         }
         """);
         await variables.SetContextAsync("artifacts", $$"""
