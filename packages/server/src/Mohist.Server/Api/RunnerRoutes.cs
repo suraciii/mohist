@@ -56,6 +56,9 @@ public static class RunnerRoutes
                 work.WorkType,
                 work.Stage,
                 work.Title,
+                work.ProjectId,
+                work.IssueId,
+                work.IssueNumber,
                 session));
         });
 
@@ -107,4 +110,7 @@ public record WorkDispatchResponse(
     string WorkType,
     string? Stage,
     string? Title,
+    string? ProjectId = null,
+    string? IssueId = null,
+    int? IssueNumber = null,
     AgentSessionDto? Session = null);

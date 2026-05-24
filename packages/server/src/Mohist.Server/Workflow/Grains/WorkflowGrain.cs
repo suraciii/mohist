@@ -15,6 +15,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private List<StageDefinition>? _stageDefinitions;
     private WorkLease? _lease;
     private WorkDispatch? _lastDispatch;
+    private WorkflowIssueContext? _issueContext;
     private readonly IStateStore<WorkflowGrainState> _stateStore;
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
@@ -38,14 +39,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _stageDefinitions = state.StageDefinitions;
         _lease = state.Lease;
         _lastDispatch = state.LastDispatch;
+        _issueContext = state.IssueContext;
         if (state.Run is not null && _stageDefinitions is not null)
             _run = WorkflowRun.Restore(_stageDefinitions, state.Run);
     }
 
-    public async Task StartAsync(WorkflowDefinitionInput? definition = null)
+    public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null)
     {
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
+        if (issue is not null)
+            _issueContext = issue;
 
         if (_run is null && _stageDefinitions is not null)
             _run = new WorkflowRun(GrainKey, _stageDefinitions);
@@ -373,7 +377,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title);
+        var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title, _issueContext?.ProjectId, _issueContext?.IssueId, _issueContext?.IssueNumber);
         _lease = new WorkLease(workId, workType, stage, logicalId, runnerId);
         _lastDispatch = dispatch;
         return dispatch;
@@ -642,14 +646,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         string? RunnerId = null,
         object? Payload = null)
     {
-        var context = TryParseEventContext();
+        var context = _issueContext;
         if (context is null || _run is null) return Task.CompletedTask;
 
         return _events.AppendAsync(new EventInput(
-            context.Value.ProjectId,
-            context.Value.IssueNumber,
+            context.ProjectId,
+            context.IssueNumber,
             "workflow",
             type,
+            IssueId: context.IssueId,
             WorkflowRunId: GrainKey,
             Stage: _run.CurrentStage.Stage,
             TaskId: TaskId,
@@ -660,21 +665,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             Payload: Payload));
     }
 
-    private (string ProjectId, int IssueNumber)? TryParseEventContext()
-    {
-        if (!GrainKey.StartsWith("wr_", StringComparison.Ordinal)) return null;
-        var value = GrainKey[3..];
-        var lastUnderscore = value.LastIndexOf('_');
-        if (lastUnderscore <= 0 || lastUnderscore == value.Length - 1) return null;
-        var projectId = value[..lastUnderscore];
-        return int.TryParse(value[(lastUnderscore + 1)..], out var number) ? (projectId, number) : null;
-    }
-
     private Task PersistAsync() => _stateStore.SaveAsync(GrainKey, new WorkflowGrainState(
         _stageDefinitions,
         _run?.Snapshot(),
         _lease,
-        _lastDispatch));
+        _lastDispatch,
+        _issueContext));
 
     private async Task PersistAndProjectAsync()
     {
@@ -685,22 +681,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private async Task ProjectIssueStateAsync()
     {
         if (_run is null) return;
-        var issueKey = TryParseIssueKey();
-        if (issueKey is null) return;
+        if (_issueContext is null) return;
 
-        var issue = GrainFactory.GetGrain<IIssueGrain>(issueKey);
+        var issue = GrainFactory.GetGrain<IIssueGrain>($"{_issueContext.ProjectId}:{_issueContext.IssueNumber}");
         await issue.ProjectWorkflowStateAsync(ToProjection());
-    }
-
-    private string? TryParseIssueKey()
-    {
-        if (!GrainKey.StartsWith("wr_", StringComparison.Ordinal)) return null;
-        var value = GrainKey[3..];
-        var lastUnderscore = value.LastIndexOf('_');
-        if (lastUnderscore <= 0 || lastUnderscore == value.Length - 1) return null;
-        var projectId = value[..lastUnderscore];
-        var number = value[(lastUnderscore + 1)..];
-        return int.TryParse(number, out _) ? $"{projectId}:{number}" : null;
     }
 
     private WorkflowIssueProjection ToProjection()
@@ -741,4 +725,5 @@ public sealed record WorkflowGrainState(
     [property: Id(0)] List<StageDefinition>? StageDefinitions,
     [property: Id(1)] WorkflowRunSnapshot? Run,
     [property: Id(2)] WorkLease? Lease,
-    [property: Id(3)] WorkDispatch? LastDispatch);
+    [property: Id(3)] WorkDispatch? LastDispatch,
+    [property: Id(4)] WorkflowIssueContext? IssueContext);

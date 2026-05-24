@@ -33,13 +33,19 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.SetStage(IssueStage.Plan);
         _issue.SetRuntimeStatus(IssueRuntimeStatus.Active);
-        var wrId = $"wr_{_issue.ProjectId}_{_issue.Number}";
+        var wrId = $"wr_{Guid.NewGuid():N}";
         _issue.SetWorkflowRunId(wrId);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
 
+        var projectId = project?.Id ?? _issue.ProjectId;
+        var projectName = project?.Name ?? _issue.ProjectId;
+        var projectPath = project?.Path ?? ".";
+        var baseBranch = project?.BaseBranch ?? "main";
+        var issueContext = new WorkflowIssueContext(projectId, _issue.Id, _issue.Number, projectName, projectPath, baseBranch);
+
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.StartAsync(MohistPipeline.Definition);
+        await wfGrain.StartAsync(MohistPipeline.Definition, issueContext);
 
         var variables = GrainFactory.GetGrain<IVariableScopeGrain>(wrId);
         await variables.SetContextAsync("issue", $$"""
@@ -50,10 +56,6 @@ public class IssueGrain : Grain, IIssueGrain
           "body": {{JsonString(_issue.Body ?? "")}}
         }
         """);
-        var projectId = project?.Id ?? _issue.ProjectId;
-        var projectName = project?.Name ?? _issue.ProjectId;
-        var projectPath = project?.Path ?? ".";
-        var baseBranch = project?.BaseBranch ?? "main";
 
         await variables.SetContextAsync("project", $$"""
         {
