@@ -182,7 +182,10 @@ public class IssueGrain : Grain, IIssueGrain
                 ws.TryGetProperty("path", out var wp))
                 workspacePath = wp.GetString();
         }
-        catch { }
+        catch (JsonException ex)
+        {
+            _log.LogDebug(ex, "Issue {Key} workflow variables were not valid JSON", GrainKey);
+        }
 
         return new IssueWorkflowStatus(
             _issue.Id,
@@ -245,15 +248,19 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.FromResult(info);
     }
 
-    public async Task AddPrerequisiteAsync(int prerequisiteNumber)
+    public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
-        EnsureIssue();
-        if (prerequisiteNumber != _issue!.Number)
-            _ = await LoadIssueSummaryAsync(prerequisiteNumber) ?? throw new InvalidOperationException($"Issue #{prerequisiteNumber} not found");
+        if (_issue is null)
+            return IssuePrerequisiteResult.IssueNotFound();
+        if (prerequisiteNumber == _issue.Number)
+            return IssuePrerequisiteResult.Circular();
+        if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
+            return IssuePrerequisiteResult.PrerequisiteNotFound(prerequisiteNumber);
 
         _issue.AddPrerequisite(prerequisiteNumber);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_prerequisite_added", "updated", $"Prerequisite #{prerequisiteNumber} added", new { prerequisiteNumber });
+        return IssuePrerequisiteResult.Added();
     }
 
     public async Task RemovePrerequisiteAsync(int prerequisiteNumber)
@@ -267,23 +274,15 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task<IssueStartEligibility> GetStartEligibilityAsync()
     {
         EnsureIssue();
-        var waiting = new List<IssuePrerequisiteSummary>();
+        var prerequisites = new List<IssuePrerequisiteSummary>();
         foreach (var prerequisiteNumber in _issue!.PrerequisiteNumbers)
         {
             var summary = await LoadIssueSummaryAsync(prerequisiteNumber);
-            if (summary is not null && !summary.Delivered)
-                waiting.Add(summary);
+            if (summary is not null)
+                prerequisites.Add(summary);
         }
 
-        return waiting.Count == 0
-            ? IssueStartEligibility.Ready()
-            : new IssueStartEligibility
-            {
-                Startable = false,
-                Reason = "waiting-for-delivery",
-                Message = $"Waiting for #{waiting[0].Number}",
-                WaitingForDelivery = waiting.ToArray(),
-            };
+        return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
     public async Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection)

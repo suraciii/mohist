@@ -48,6 +48,20 @@ public class IssueStartEligibility
     [Id(3)] public IssuePrerequisiteSummary[] WaitingForDelivery { get; set; } = [];
 
     public static IssueStartEligibility Ready() => new() { Startable = true };
+
+    public static IssueStartEligibility FromPrerequisites(IssuePrerequisiteSummary[] prerequisites)
+    {
+        var waiting = prerequisites.Where(p => !p.Delivered).ToArray();
+        return waiting.Length == 0
+            ? Ready()
+            : new IssueStartEligibility
+            {
+                Startable = false,
+                Reason = "waiting-for-delivery",
+                Message = $"Waiting for #{waiting[0].Number}",
+                WaitingForDelivery = waiting,
+            };
+    }
 }
 
 [GenerateSerializer]

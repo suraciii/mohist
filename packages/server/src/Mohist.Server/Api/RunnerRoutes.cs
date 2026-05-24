@@ -56,9 +56,9 @@ public static class RunnerRoutes
                 work.WorkType,
                 work.Stage,
                 work.Title,
-                work.ProjectId,
-                work.IssueId,
-                work.IssueNumber,
+                work.Issue?.ProjectId,
+                work.Issue?.IssueId,
+                work.Issue?.IssueNumber,
                 session));
         });
 

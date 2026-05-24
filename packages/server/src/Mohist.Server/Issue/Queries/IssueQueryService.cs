@@ -181,16 +181,7 @@ public class IssueQueryService
                 .Cast<IssuePrerequisiteSummary>()
                 .ToArray();
             issue.Prerequisites = summaries;
-            var waiting = summaries.Where(p => !p.Delivered).ToArray();
-            issue.StartEligibility = waiting.Length == 0
-                ? IssueStartEligibility.Ready()
-                : new IssueStartEligibility
-                {
-                    Startable = false,
-                    Reason = "waiting-for-delivery",
-                    Message = $"Waiting for #{waiting[0].Number}",
-                    WaitingForDelivery = waiting,
-                };
+            issue.StartEligibility = IssueStartEligibility.FromPrerequisites(summaries);
         }
 
         var epicLinks = await db.EpicIssues.AsNoTracking()

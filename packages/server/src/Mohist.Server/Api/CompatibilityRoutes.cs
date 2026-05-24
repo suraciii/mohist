@@ -130,21 +130,13 @@ public static class CompatibilityRoutes
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
             var issueGrain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
-            try
+            var result = await issueGrain.AddPrerequisiteAsync(req.PrerequisiteNumber);
+            if (!result.Success)
             {
-                await issueGrain.AddPrerequisiteAsync(req.PrerequisiteNumber);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("depend on itself", StringComparison.OrdinalIgnoreCase))
-            {
-                return ApiResults.Conflict(ex.Message, "circular_prerequisite");
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains($"#{req.PrerequisiteNumber}", StringComparison.Ordinal))
-            {
-                return ApiResults.NotFound(ex.Message);
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
+                var message = result.Code == "issue_not_found" ? $"Issue #{number} not found" : result.Message;
+                return result.Code == "circular_prerequisite"
+                    ? ApiResults.Conflict(message, result.Code)
+                    : ApiResults.NotFound(message);
             }
 
             var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
