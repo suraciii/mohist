@@ -40,6 +40,7 @@ public static class ProjectRoutes
             try
             {
                 var project = await registry.CreateAsync(req.Name, req.Path, req.BaseBranch);
+                await registry.SetCurrentAsync(project.Name);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)

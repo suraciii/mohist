@@ -47,5 +47,5 @@ public static class ApiTestClient
         return envelope.Data!;
     }
 
-    private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null);
+    private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null, object? Details = null);
 }

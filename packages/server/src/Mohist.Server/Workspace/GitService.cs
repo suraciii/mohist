@@ -6,7 +6,7 @@ public class GitService : IGitService
 {
     public async Task<bool> BranchExistsAsync(string repoPath, string branchName)
     {
-        var result = await RunGitAsync(repoPath, "rev-parse", $"--verify refs/heads/{branchName}");
+        var result = await RunGitAsync(repoPath, "rev-parse", "--verify", $"refs/heads/{branchName}");
         return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output);
     }
 
@@ -30,6 +30,7 @@ public class GitService : IGitService
     {
         var numstat = await RunGitAsync(repoPath, "diff", $"{baseRef}...{headRef}", "--numstat");
         var fullDiff = await RunGitAsync(repoPath, "diff", $"{baseRef}...{headRef}");
+        var patches = SplitDiffByFile(fullDiff.Output);
 
         var files = new List<DiffFile>();
         var totalAdditions = 0;
@@ -43,7 +44,8 @@ public class GitService : IGitService
             var isBinary = parts[0] == "-" && parts[1] == "-";
             var add = isBinary ? 0 : int.TryParse(parts[0], out var a) ? a : 0;
             var del = isBinary ? 0 : int.TryParse(parts[1], out var d) ? d : 0;
-            files.Add(new DiffFile(parts[2], add, del, "", isBinary));
+            var path = parts[2];
+            files.Add(new DiffFile(path, add, del, patches.GetValueOrDefault(path, ""), isBinary));
             totalAdditions += add;
             totalDeletions += del;
         }
@@ -69,6 +71,12 @@ public class GitService : IGitService
             .Where(p => p.Length >= 5)
             .Select(p => new GitCommit(p[0], p[1], p[2], p[3], p[4], []))
             .ToArray();
+    }
+
+    public async Task<string?> GetCommitDiffAsync(string repoPath, string hash)
+    {
+        var result = await RunGitAsync(repoPath, "show", "--format=", "--patch", hash);
+        return result.ExitCode == 0 ? result.Output : null;
     }
 
     public async Task<string?> GetFileContentAsync(string repoPath, string branch, string filePath)
@@ -129,6 +137,36 @@ public class GitService : IGitService
         await process.WaitForExitAsync();
         return (output, process.ExitCode);
     }
+
+    private static Dictionary<string, string> SplitDiffByFile(string diff)
+    {
+        var result = new Dictionary<string, string>();
+        if (string.IsNullOrWhiteSpace(diff)) return result;
+
+        string? currentPath = null;
+        var current = new List<string>();
+        foreach (var line in diff.Split('\n'))
+        {
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                Flush();
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                currentPath = parts.Length >= 4 && parts[3].StartsWith("b/", StringComparison.Ordinal)
+                    ? parts[3][2..]
+                    : null;
+            }
+            current.Add(line);
+        }
+        Flush();
+        return result;
+
+        void Flush()
+        {
+            if (currentPath is not null && current.Count > 0)
+                result[currentPath] = string.Join('\n', current) + "\n";
+            current.Clear();
+        }
+    }
 }
 
 public interface IGitService
@@ -138,6 +176,7 @@ public interface IGitService
     Task<(int ahead, int behind)> GetAheadBehindAsync(string repoPath, string baseBranch, string headBranch);
     Task<GitDiffResult> GetDiffAsync(string repoPath, string baseRef, string headRef);
     Task<GitCommit[]> GetCommitsAsync(string repoPath, string baseRef, string headRef);
+    Task<string?> GetCommitDiffAsync(string repoPath, string hash);
     Task<string?> GetFileContentAsync(string repoPath, string branch, string filePath);
     Task<WorkspaceStatus> GetWorktreeStatusAsync(string projectPath, string projectName, int issueNumber, string baseBranch);
 }

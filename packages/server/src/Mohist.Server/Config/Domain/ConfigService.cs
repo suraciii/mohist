@@ -20,6 +20,7 @@ public class ConfigService
         ["maxGracePeriods"] = ("number", 3),
         ["model"] = ("string", null),
         ["stageModels"] = ("json", null),
+        ["logLevel"] = ("string", "INFO"),
     };
 
     public ConfigService(IDbContextFactory<MohistDbContext> contextFactory, ILogger<ConfigService> log)
