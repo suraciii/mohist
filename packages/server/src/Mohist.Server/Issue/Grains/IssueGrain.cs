@@ -2,6 +2,7 @@ using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
+using System.Text.Json;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -50,7 +51,7 @@ public class IssueGrain : Grain, IIssueGrain
         await wfGrain.StartAsync(
             MohistPipeline.Definition,
             issueContext,
-            new WorkflowStartInput(new WorkflowIssueSeed(_issue.Title, _issue.Body ?? "", _issue.Model, _issue.StageModels)));
+            new WorkflowStartInput(BuildWorkflowVariables(wrId, _issue, projectId, projectName, projectPath, baseBranch)));
 
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
@@ -318,6 +319,35 @@ public class IssueGrain : Grain, IIssueGrain
         Status = issue.Status,
         MergeState = issue.MergeState,
     };
+
+    private static string BuildWorkflowVariables(
+        string workflowRunId,
+        Issue.Domain.Issue issue,
+        string projectId,
+        string projectName,
+        string projectPath,
+        string baseBranch)
+    {
+        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+        {
+            ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
+            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
+            ["project"] = JsonSerializer.SerializeToElement(new { id = projectId, name = projectName, path = projectPath, baseBranch, defaultBranch = baseBranch }, WorkflowVariableJson.Options),
+            ["artifacts"] = JsonSerializer.SerializeToElement(new { changeDir = $"openspec/changes/{issue.Number}-{Slug(issue.Title)}" }, WorkflowVariableJson.Options),
+            ["model"] = JsonSerializer.SerializeToElement(new { @default = issue.Model ?? "", stage = issue.StageModels ?? new Dictionary<string, string>() }, WorkflowVariableJson.Options),
+            ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>(), WorkflowVariableJson.Options),
+        };
+        return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+    }
+
+    private static string Slug(string value)
+    {
+        var chars = value.ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
+    }
 
 }
 

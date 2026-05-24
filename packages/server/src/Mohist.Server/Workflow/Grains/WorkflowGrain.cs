@@ -60,8 +60,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException("Cannot start: no workflow definition provided");
 
         _run.Start();
-        if (_issueContext is not null && input is not null)
-            _variables = WorkflowExecutionContext.FromIssue(GrainKey, _issueContext, input.Issue);
+        if (!string.IsNullOrWhiteSpace(input?.Variables))
+            _variables = new WorkflowExecutionContext(input.Variables!);
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("started");
@@ -264,11 +264,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run.Id,
             _run.Status.ToString(),
             _run.CurrentStage.Stage,
-            _variables?.Artifacts.ChangeDir,
+            ContextString("artifacts", "changeDir"),
             stages,
             pending,
             failure,
             actions));
+    }
+
+    private string? ContextString(string section, string property)
+    {
+        if (_variables is null) return null;
+        return _variables.String(section, property);
     }
 
     private List<TaskStatusSnapshot> SnapshotTasks(StageRunState stage)
