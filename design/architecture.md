@@ -52,6 +52,8 @@ User Project
 | shell/process/agent 执行 | Runner | Server |
 | git merge/rebase 等副作用 | Runner | Server |
 | OpenSpec 文件副作用 | Runner | Server |
+| 探索/需求澄清对话 | 外部 agent skill | Mohist runtime |
+| skill 安装和分发 | CLI | Server workflow runtime |
 | 产品流程设计 | product/design docs | architecture doc |
 | 领域模型表达 | code | architecture doc |
 | 架构边界和原则 | `design/architecture.md` | OpenSpec spec |
@@ -101,6 +103,17 @@ WorkflowRun decides.
 ```
 
 含义：执行事实和状态裁判分离。Runner 可以产生事实，不能解释事实；Workflow 可以解释事实，不能制造事实。
+
+## Agent Skill Boundary
+
+Mohist 不拥有探索式 AI 对话。Explore 是外部 agent 能力，由 Mohist 分发为 skill（例如 `mohist-explore`），在 OpenCode、Claude Code、Hermes 等外部 agent 中运行。
+
+边界规则：
+
+- Mohist runtime 不提供 Explore session、Explore chat 或 `/api/explore`。
+- 外部 agent skill 可以读取项目、调用 `mo` CLI、创建/更新 issue、写入普通探索记录文件。
+- 外部 agent skill 不直接写 Mohist 数据库，不依赖 Mohist 内部运行时 session。
+- Runner 可以调用外部 agent CLI 执行 workflow task；这是 Execution Plane adapter，不是内置 Explore 产品。
 
 ## Control Plane
 
@@ -228,6 +241,7 @@ Runner 不可以说：
 
 - CLI 不合进 Server；Server 是 daemon/API/runtime。
 - Action execution 不放进 Server；所有 shell、agent、merge、OpenSpec side effect 都归 Runner。
+- Explore 不放进 Server；探索通过外部 agent skill 完成。
 - 当前假设单机 daemon；actor runtime 主要作为 state model，而不是优先服务分布式部署。
 - 可以先接受单进程事件总线，但不能因此把执行逻辑塞回 server。
 - OpenSpec spec 不作为架构文档来源；架构文档由 `design/` 和 `talks/` 人工维护。

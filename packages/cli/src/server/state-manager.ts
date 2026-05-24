@@ -9,8 +9,6 @@ import {
   WorkflowLogRepo,
   SessionStreamLogRepo,
   QuestionRepo,
-  ExploreSessionRepo,
-  ExploreMessageRepo,
   CoderSessionRepo,
   PipelineCheckpointRepo,
   ScheduleRepo,
@@ -31,8 +29,6 @@ export class StateManager {
   private workflowLogRepo: WorkflowLogRepo;
   private sessionStreamLogRepo: SessionStreamLogRepo;
   private questionRepo: QuestionRepo;
-  private exploreSessionRepo: ExploreSessionRepo;
-  private exploreMessageRepo: ExploreMessageRepo;
   private coderSessionRepo: CoderSessionRepo;
   private pipelineCheckpointRepo: PipelineCheckpointRepo;
   private scheduleRepo: ScheduleRepo;
@@ -54,8 +50,6 @@ export class StateManager {
     this.workflowLogRepo = new WorkflowLogRepo(db);
     this.sessionStreamLogRepo = new SessionStreamLogRepo(db);
     this.questionRepo = new QuestionRepo(db);
-    this.exploreSessionRepo = new ExploreSessionRepo(db);
-    this.exploreMessageRepo = new ExploreMessageRepo(db);
     this.coderSessionRepo = new CoderSessionRepo(db);
     this.pipelineCheckpointRepo = new PipelineCheckpointRepo(db);
     this.scheduleRepo = new ScheduleRepo(db);
@@ -103,14 +97,6 @@ export class StateManager {
 
   getQuestionRepo(): QuestionRepo {
     return this.questionRepo;
-  }
-
-  getExploreSessionRepo(): ExploreSessionRepo {
-    return this.exploreSessionRepo;
-  }
-
-  getExploreMessageRepo(): ExploreMessageRepo {
-    return this.exploreMessageRepo;
   }
 
   getCoderSessionRepo(): CoderSessionRepo {

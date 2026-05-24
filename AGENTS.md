@@ -26,7 +26,7 @@ packages/cli/
 │   ├── agent-runtime/          # Agent 运行时管理
 │   ├── agent-skills/           # Skill 调度和执行
 │   ├── agents/                 # Agent 提示词和配置
-│   │   └── prompts/            # 阶段 prompt (plan/build/check/explore/review 等)
+│   │   └── prompts/            # 阶段 prompt (plan/build/check/review 等)
 │   │       └── artifacts/      # 产物模板 (proposal/specs/design/tasks 等)
 │   ├── api/                    # REST API 路由 (issues/projects/config/providers 等)
 │   ├── artifacts/              # 产物读写服务
@@ -45,7 +45,7 @@ packages/cli/
 │   └── workflow/               # 工作流引擎 (Plan/Build/Check/Integrate runners)
 ├── web/                        # Web UI (React + Vite + Tailwind + TanStack Query)
 │   └── src/
-│       ├── components/         # 页面组件 (看板/详情/活动/探索/设置/日志/归档)
+│       ├── components/         # 页面组件 (看板/详情/活动/设置/日志/归档)
 │       ├── hooks/              # React hooks (含 useSSE 实时事件)
 │       ├── lib/                # API 客户端、类型定义
 │       └── context/            # React context (ProjectContext 等)
@@ -61,13 +61,12 @@ Draft → Plan → Build → Check → Integrate → Done
 Backlog  (用户审批)          (用户审批)  (自动合并)
 ```
 
-Explore 为 Pipeline 外的独立模式，通过 AI 面试梳理需求，产出 proposal.md。
+Explore 不再是 Mohist runtime 内置功能。探索/需求澄清通过 `mo skills install` 安装的外部 agent skill（如 `mohist-explore`）完成；Mohist runtime 只管理 issue、workflow、审批、产物和执行调度。
 
 ### 各阶段职责
 
 | 阶段 | 职责 | Gate |
 |------|------|------|
-| Explore | AI 面试梳理需求，产出 proposal.md | — (Pipeline 外) |
 | Plan | 技术设计，拆解任务 | 用户审批 + 健康门控 (typecheck) |
 | Build | 逐个执行任务 (AFK/HITL) | 健康门控 (build) + 全任务完成 |
 | Check | AI 代码审查 | 用户审批 + merge-ready 检查 |
@@ -101,7 +100,7 @@ node bin/mo issue start 1
 
 ## 探索讨论记录
 
-使用 openspec-explore 模式进行设计讨论时，讨论内容应自动记录到 `talks/` 目录。文件名格式：`YYYY-MM-DD-<主题>.md`（主题由 agent 根据讨论内容自动拟定）。
+探索讨论由外部 agent skill 完成。需要保留结论时，外部 agent 可将提炼后的发现记录到 `.mohist/explores/` 或 `talks/`，也可以通过 `mo issue create` 创建 Mohist issue。Mohist server 不保存 Explore session/chat runtime。
 
 ## Web UI
 

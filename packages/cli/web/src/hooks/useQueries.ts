@@ -148,52 +148,6 @@ export function useUseProject() {
   })
 }
 
-export function useExploreSession(id: string) {
-  return useQuery({
-    queryKey: ['explore', id],
-    queryFn: () => api.getExploreSession(id),
-    enabled: !!id,
-  })
-}
-
-export function useExploreSessions(projectId: string) {
-  return useQuery({
-    queryKey: ['explore-sessions', projectId],
-    queryFn: () => api.listExploreSessions(projectId),
-    enabled: !!projectId,
-  })
-}
-
-export function useCreateExploreSession() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (data: { projectId?: string; title?: string; issueId?: string }) => api.createExploreSession(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
-      toast.success('Explore session created')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
-export function useUpdateExploreSessionTitle() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
-      api.updateExploreSessionTitle(sessionId, title),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['explore-sessions'] })
-      queryClient.invalidateQueries({ queryKey: ['explore', variables.sessionId] })
-      toast.success('Title updated')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
 export function useStatus() {
   return useQuery({
     queryKey: ['status'],

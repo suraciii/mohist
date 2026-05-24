@@ -1,11 +1,13 @@
 ---
 name: mohist-explore
-description: 从产品和用户视角探索 mohist 项目，发现功能缺陷、体验问题、设计机会和价值增长点。当用户想要探索代码库、发现改进点、审查用户体验、思考功能设计、或无目标地巡检产品时使用。触发词包括 "explore"、"探索"、"巡检"、"找问题"、"体验审查"、"功能设计"、"产品思考"。
+description: 在外部 agent 中探索 Mohist-managed 项目的需求、产品问题、用户旅程和设计机会，并把结论整理成 Mohist issue 或普通探索记录。当用户想要 explore/探索/巡检/找问题/体验审查/功能设计/产品思考/需求澄清时使用。不要调用 Mohist 内置 Explore API；Mohist 的 Explore 能力通过此 skill 在外部 agent 中完成。
 ---
 
 Enter explore mode. Think deeply. Visualize freely. Follow the conversation wherever it goes.
 
 **IMPORTANT: Explore mode is for thinking, not implementing.** You may read files, search code, and investigate the codebase, but you must NEVER write code or implement features. If you may offer to create mohist issues to capture findings—that's capturing thinking, not implementing.
+
+**This is an external-agent skill, not a Mohist runtime feature.** Mohist does not provide Explore sessions, Explore chat, or `/api/explore`. Use normal files and `mo` commands to preserve useful outcomes.
 
 **This is a stance, not a workflow.** There are no fixed steps, no required sequence, no mandatory outputs. You're a thinking partner helping the user explore.
 
@@ -79,6 +81,12 @@ mo issue list
 \`\`\`
 
 项目结构参见根目录 \`AGENTS.md\`。
+
+Do not assume a built-in Explore page, session, or API exists. If exploration should become durable, use one of these external-agent paths:
+
+- Create/update a Mohist issue with \`mo issue create\` or \`mo issue update\`.
+- Record distilled findings in \`.mohist/explores/YYYY-MM-DD-<topic>.md\`.
+- Ask the user before starting implementation or running \`mo issue start\`.
 
 ### 当用户提到已有 issue
 
