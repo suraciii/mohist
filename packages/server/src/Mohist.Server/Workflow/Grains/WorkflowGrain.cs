@@ -3,6 +3,7 @@ using Mohist.Server.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
+using Mohist.Server.Variables.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 
@@ -44,7 +45,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run = WorkflowRun.Restore(_stageDefinitions, state.Run);
     }
 
-    public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null)
+    public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null, WorkflowStartInput? input = null)
     {
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
@@ -58,10 +59,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException("Cannot start: no workflow definition provided");
 
         _run.Start();
+        if (_issueContext is not null && input is not null)
+            await InitializeVariablesAsync(_issueContext, input.Issue);
+
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("started");
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_started", "started", "Workflow started");
+        await RegisterToBacklogAsync();
     }
 
     public async Task ResumeAsync()
@@ -581,6 +586,52 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
         with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
+
+    private async Task InitializeVariablesAsync(WorkflowIssueContext context, WorkflowIssueSeed issue)
+    {
+        var variables = GrainFactory.GetGrain<IVariableScopeGrain>(GrainKey);
+        await variables.SetContextAsync("issue", JsonSerializer.Serialize(new
+        {
+            id = context.IssueId,
+            number = context.IssueNumber,
+            title = issue.Title,
+            body = issue.Body,
+        }));
+        await variables.SetContextAsync("project", JsonSerializer.Serialize(new
+        {
+            id = context.ProjectId,
+            name = context.ProjectName,
+            path = context.ProjectPath,
+            baseBranch = context.BaseBranch,
+            defaultBranch = context.BaseBranch,
+        }));
+        await variables.SetContextAsync("artifacts", JsonSerializer.Serialize(new
+        {
+            changeDir = $"openspec/changes/{context.IssueNumber}-{Slug(issue.Title)}",
+        }));
+        await variables.SetContextAsync("model", JsonSerializer.Serialize(new
+        {
+            @default = issue.Model ?? "",
+            stage = issue.StageModels ?? [],
+        }));
+        await variables.SetContextAsync("vars", JsonSerializer.Serialize(new
+        {
+            planHealthCommand = "npm ci && npm run typecheck",
+            buildHealthCommand = "npm ci && npm run build",
+            checkHealthCommand = "npm ci && npm run build && npm test",
+            integrateHealthCommand = "npm ci && npm run build && npm test",
+            projectPath = ".",
+        }));
+    }
+
+    private static string Slug(string value)
+    {
+        var chars = value.ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
+    }
 
     private static List<StageDefinition> MapStageDefinitions(WorkflowDefinitionInput input) =>
         input.Stages.Select(s => new StageDefinition(

@@ -60,12 +60,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         return runnerId;
     }
 
-    private async Task RegisterToBacklogAsync(string workflowId)
-    {
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
-        await backlog.RegisterAsync(workflowId);
-    }
-
     private async Task ClearBacklogAsync()
     {
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
@@ -93,7 +87,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
-        await RegisterToBacklogAsync(workflowId);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
@@ -124,7 +117,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
         await workflow.PauseAsync("hold");
-        await RegisterToBacklogAsync(workflowId);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
@@ -142,7 +134,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
-        await RegisterToBacklogAsync(workflowId);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
@@ -166,7 +157,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
-        await RegisterToBacklogAsync(workflowId);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
@@ -198,7 +188,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
-        await RegisterToBacklogAsync(workflowId);
 
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
         var waiting = await backlog.ListWaitingAsync();
@@ -222,7 +211,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
-        await RegisterToBacklogAsync(workflowId);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;

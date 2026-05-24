@@ -49,50 +49,10 @@ public class IssueGrain : Grain, IIssueGrain
         var issueContext = new WorkflowIssueContext(projectId, _issue.Id, _issue.Number, projectName, projectPath, baseBranch);
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.StartAsync(MohistPipeline.Definition, issueContext);
-
-        var variables = GrainFactory.GetGrain<IVariableScopeGrain>(wrId);
-        await variables.SetContextAsync("issue", $$"""
-        {
-          "id": {{JsonString(_issue.Id)}},
-          "number": {{_issue.Number}},
-          "title": {{JsonString(_issue.Title)}},
-          "body": {{JsonString(_issue.Body ?? "")}}
-        }
-        """);
-
-        await variables.SetContextAsync("project", $$"""
-        {
-          "id": {{JsonString(projectId)}},
-          "name": {{JsonString(projectName)}},
-          "path": {{JsonString(projectPath)}},
-          "baseBranch": {{JsonString(baseBranch)}},
-          "defaultBranch": {{JsonString(baseBranch)}}
-        }
-        """);
-        await variables.SetContextAsync("artifacts", $$"""
-        {
-          "changeDir": "openspec/changes/{{_issue.Number}}-{{Slug(_issue.Title)}}"
-        }
-        """);
-        await variables.SetContextAsync("model", $$"""
-        {
-          "default": {{JsonString(_issue.Model ?? "")}},
-          "stage": {{JsonObject(_issue.StageModels)}}
-        }
-        """);
-        await variables.SetContextAsync("vars", """
-        {
-          "planHealthCommand": "npm ci && npm run typecheck",
-          "buildHealthCommand": "npm ci && npm run build",
-          "checkHealthCommand": "npm ci && npm run build && npm test",
-          "integrateHealthCommand": "npm ci && npm run build && npm test",
-          "projectPath": "."
-        }
-        """);
-
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
-        await backlog.RegisterAsync(wrId);
+        await wfGrain.StartAsync(
+            MohistPipeline.Definition,
+            issueContext,
+            new WorkflowStartInput(new WorkflowIssueSeed(_issue.Title, _issue.Body ?? "", _issue.Model, _issue.StageModels)));
 
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
@@ -381,17 +341,6 @@ public class IssueGrain : Grain, IIssueGrain
         MergeState = issue.MergeState,
     };
 
-    private static string Slug(string value)
-    {
-        var chars = value.ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray();
-        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
-    }
-
-    private static string JsonString(string value) => System.Text.Json.JsonSerializer.Serialize(value);
-    private static string JsonObject(Dictionary<string, string>? value) => System.Text.Json.JsonSerializer.Serialize(value ?? []);
 }
 
 [GenerateSerializer]

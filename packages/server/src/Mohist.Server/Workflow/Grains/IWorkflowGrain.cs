@@ -5,7 +5,7 @@ namespace Mohist.Server.Workflow.Grains;
 
 public interface IWorkflowGrain : IGrainWithStringKey
 {
-    Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null);
+    Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null, WorkflowStartInput? input = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task ApproveAsync();
@@ -17,6 +17,10 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task FailInFlightWorkAsync(string runnerId, string reason);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
 }
+
+[GenerateSerializer]
+public sealed record WorkflowStartInput(
+    [property: Id(0)] WorkflowIssueSeed Issue);
 
 [GenerateSerializer]
 public sealed record WorkflowDefinitionInput(List<StageDefinitionInput> Stages);

@@ -90,8 +90,9 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task SameRunnerAssignedTwice_WorkflowStillRuns()
+    public async Task StartedWorkflow_RunnerClaimsFromBacklog()
     {
+        await ClearBacklogAsync();
         var runnerId = await RegisterRunnerAsync();
         var workflowId = $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
@@ -100,7 +101,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        await runner.AssignWorkflowAsync(workflowId);
         await workflow.StartAsync(SingleStage(checks: []));
 
         var work = await runner.PollAsync();
@@ -108,7 +108,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StartWithoutRunner_ManualAssignLater()
+    public async Task StartWithoutRunner_RunnerClaimsFromBacklogLater()
     {
         var workflow = await CreateWorkflowAsync();
         await workflow.StartAsync(SingleStage());
@@ -117,10 +117,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         _runnerId = runnerId;
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        Assert.Null(await runner.PollAsync());
-
-        await runner.AssignWorkflowAsync(_workflowId!);
-
         var work = await runner.PollAsync();
         Assert.NotNull(work);
         Assert.StartsWith("task-1.", work.WorkId);
