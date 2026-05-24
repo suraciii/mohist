@@ -25,6 +25,9 @@ public class AiReviewAction : IAction
             changeDir,
             context.WorkDir,
             BuildPrompt(changeDir, reviewPath),
+            null,
+            null,
+            new Mohist.Runner.Transport.NullSessionTelemetrySink(),
             context.CancellationToken);
 
         var result = await _executor.ExecuteAsync(request);

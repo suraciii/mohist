@@ -1,16 +1,19 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Mohist.Runner.Transport;
 
 namespace Mohist.Runner.Actions;
 
 public class AgentAction : IAction
 {
     private readonly IAgentExecutor _executor;
+    private readonly ISessionTelemetrySink _telemetry;
 
-    public AgentAction(IAgentExecutor executor)
+    public AgentAction(IAgentExecutor executor, ISessionTelemetrySink? telemetry = null)
     {
         _executor = executor;
+        _telemetry = telemetry ?? new NullSessionTelemetrySink();
     }
 
     public async Task<ActionResult> ExecuteAsync(ActionContext context)
@@ -24,13 +27,31 @@ public class AgentAction : IAction
         if (string.IsNullOrWhiteSpace(task))
             return new ActionResult("failure", "Agent action requires 'task'");
 
+        var prompt = AgentPromptRenderer.Render(new AgentPromptContext(stage, task, changeDir, context.WorkDir, context.Variables));
+        var model = AgentPromptRenderer.ResolveModel(context.Variables, stage);
+
         var request = new AgentExecutionRequest(
             stage,
             task,
             changeDir,
             context.WorkDir,
-            BuildPrompt(stage, task, changeDir),
+            prompt,
+            model,
+            context.Session,
+            _telemetry,
             context.CancellationToken);
+
+        if (context.Session is not null)
+            await _telemetry.AppendAsync(context.Session, [new SessionEventInput(
+                "mohist_prompt",
+                JsonSerializer.SerializeToElement(new
+                {
+                    text = prompt,
+                    sentAt = DateTime.UtcNow.ToString("o"),
+                    kind = "task",
+                    issueId = context.Session.IssueNumber.ToString(),
+                    acpSessionId = context.Session.ExternalSessionId ?? context.Session.Id,
+                }))], context.CancellationToken);
 
         var result = await _executor.ExecuteAsync(request);
         var output = JsonSerializer.Serialize(new
@@ -42,6 +63,10 @@ public class AgentAction : IAction
             result.Stdout,
             result.Stderr,
         });
+
+        var status = result.ExitCode == 0 ? "completed" : "failed";
+        if (context.Session is not null)
+            await _telemetry.CompletedAsync(context.Session, new SessionCompleted(status, result.Stderr, result.ExitCode), context.CancellationToken);
 
         return result.ExitCode == 0
             ? new ActionResult("success", $"Agent task completed: {stage}/{task}", output, result.ExitCode)
@@ -55,23 +80,8 @@ public class AgentAction : IAction
         return Path.IsPathRooted(changeDir) ? changeDir : Path.GetFullPath(Path.Combine(context.WorkDir, changeDir));
     }
 
-    private static string BuildPrompt(string stage, string task, string? changeDir)
-    {
-        var artifactInstruction = changeDir is null
-            ? "No change artifact directory was provided."
-            : $"Use this change artifact directory for stage outputs: {changeDir}";
-
-        return $$"""
-        You are running a Mohist workflow task.
-
-        Stage: {{stage}}
-        Task: {{task}}
-
-        {{artifactInstruction}}
-
-        Complete only this workflow task. Keep changes scoped to the current workspace.
-        """;
-    }
+    private static string BuildPrompt(string stage, string task, string? changeDir) =>
+        AgentPromptRenderer.Render(new AgentPromptContext(stage, task, changeDir, Directory.GetCurrentDirectory(), null));
 }
 
 public interface IAgentExecutor
@@ -85,6 +95,9 @@ public sealed record AgentExecutionRequest(
     string? ChangeDir,
     string WorkDir,
     string Prompt,
+    string? Model,
+    AgentSessionContext? Session,
+    ISessionTelemetrySink Telemetry,
     CancellationToken CancellationToken);
 
 public sealed record AgentExecutionResult(int ExitCode, string? Stdout = null, string? Stderr = null);
@@ -115,19 +128,43 @@ public class ProcessAgentExecutor : IAgentExecutor
         process.StartInfo.ArgumentList.Add("agent");
         process.StartInfo.ArgumentList.Add("--local");
         process.StartInfo.ArgumentList.Add("--message");
+        if (!string.IsNullOrWhiteSpace(request.Model))
+        {
+            process.StartInfo.ArgumentList.Add("--model");
+            process.StartInfo.ArgumentList.Add(request.Model);
+        }
         process.StartInfo.ArgumentList.Add(request.Prompt);
 
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            stdout.AppendLine(e.Data);
+            if (request.Session is not null)
+                _ = request.Telemetry.AppendAsync(request.Session, [new SessionEventInput("agent_message_chunk", JsonSerializer.SerializeToElement(new { text = e.Data + Environment.NewLine }))], request.CancellationToken);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            stderr.AppendLine(e.Data);
+            if (request.Session is not null)
+                _ = request.Telemetry.AppendAsync(request.Session, [new SessionEventInput("agent_output_chunk", JsonSerializer.SerializeToElement(new { text = e.Data + Environment.NewLine, stream = "stderr" }))], request.CancellationToken);
+        };
 
         _log.LogInformation("Running agent task {Stage}/{Task} in {WorkDir}", request.Stage, request.Task, request.WorkDir);
         process.Start();
+        if (request.Session is not null)
+            await request.Telemetry.StartedAsync(request.Session, new SessionStarted(
+                ExternalSessionId: request.Session.ExternalSessionId ?? request.Session.Id,
+                WorkDir: request.WorkDir,
+                ChangeDir: request.ChangeDir,
+                ProcessPid: process.Id), request.CancellationToken);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         await process.WaitForExitAsync(request.CancellationToken);
 
         return new AgentExecutionResult(process.ExitCode, stdout.ToString().Trim(), stderr.ToString().Trim());
     }
+
 }

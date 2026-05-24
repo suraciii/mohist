@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { StageTaskState, Stage } from '../lib/types'
 import { Stage as StageEnum } from '../lib/types'
+import { useWorkflowTimeline } from '../hooks/useQueries'
 
 interface TaskProgressPanelProps {
   issueNumber: number
@@ -97,13 +98,27 @@ function ProgressBar({ completed, failed, total }: { completed: number; failed: 
 }
 
 export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }: TaskProgressPanelProps) {
-  void issueNumber
-
   const isBacklog = currentStage === StageEnum.Backlog
+  const { data: timeline } = useWorkflowTimeline(issueNumber, !isBacklog)
 
   if (isBacklog) return null
 
-  const tasks: StageTaskState[] = []
+  const stage = timeline?.stages.find((s) => s.stage === currentStage)
+  const tasks: StageTaskState[] = (stage?.tasks ?? []).map((task, index) => ({
+    taskId: task.id,
+    title: task.title,
+    status: task.status,
+    order: index,
+    attempts: task.attempts,
+    duration: task.durationMs ?? 0,
+    artifacts: [],
+    output: null,
+    startedAt: task.startedAt,
+    completedAt: task.completedAt,
+    updatedAt: task.completedAt ?? task.startedAt ?? new Date().toISOString(),
+    reason: task.message ?? undefined,
+    origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
+  }))
 
   if (tasks.length === 0) {
     return (

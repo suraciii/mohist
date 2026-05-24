@@ -50,7 +50,8 @@ public class WorkExecutor : IWorkExecutor
             renderedWith,
             variables,
             ResolveWorkDir(renderedWith, variables),
-            ct);
+            ct,
+            workItem.Session);
 
         try
         {

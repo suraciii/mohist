@@ -1,4 +1,5 @@
 using Mohist.Runner.Actions;
+using Mohist.Runner.Transport;
 using Xunit;
 
 namespace Mohist.Runner.Tests.Specs;
@@ -26,7 +27,36 @@ public class AgentActionSpecs
         Assert.EndsWith(Path.Combine("openspec", "changes", "1-test"), executor.Request.ChangeDir);
         Assert.Contains("Stage: plan", executor.Request.Prompt);
         Assert.Contains("Task: proposal", executor.Request.Prompt);
+        Assert.Contains("Output Contract: Proposal", executor.Request.Prompt);
+        Assert.Contains("proposal.md", executor.Request.Prompt);
         Assert.Contains("agent", result.Output);
+    }
+
+    [Fact]
+    public async Task AgentAction_WithVariables_RendersIssueAndStageModel()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"));
+        var action = new AgentAction(executor);
+
+        var result = await action.ExecuteAsync(SpecHelpers.Context(
+            temp.Path,
+            "task",
+            "mohist/agent",
+            new { stage = "build", task = "T-001", changeDir = "openspec/changes/1-test" },
+            new
+            {
+                issue = new { number = 7, title = "Add sessions", body = "Track agent activity" },
+                project = new { name = "Mohist", path = temp.Path },
+                model = new { @default = "openai/gpt-4o", stage = new { build = "anthropic/claude" } }
+            }));
+
+        Assert.Equal("success", result.Status);
+        Assert.NotNull(executor.Request);
+        Assert.Equal("anthropic/claude", executor.Request.Model);
+        Assert.Contains("#7 Add sessions", executor.Request.Prompt);
+        Assert.Contains("Track agent activity", executor.Request.Prompt);
+        Assert.Contains("Output Contract: Build Task", executor.Request.Prompt);
     }
 
     [Fact]
@@ -45,6 +75,33 @@ public class AgentActionSpecs
         Assert.Equal("failure", result.Status);
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("agent failed", result.Message);
+    }
+
+    [Fact]
+    public async Task AgentAction_WithSession_ReportsPromptAndCompletion()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"));
+        var telemetry = new RecordingTelemetrySink();
+        var action = new AgentAction(executor, telemetry);
+        var context = new ActionContext(
+            "wr_project_1",
+            "work-1",
+            "task",
+            "build",
+            "Build task",
+            "mohist/agent",
+            null,
+            null,
+            temp.Path,
+            CancellationToken.None,
+            new AgentSessionContext("session-1", "project", 1, "wr_project_1", "work-1", "build", "Build task"));
+
+        var result = await action.ExecuteAsync(context);
+
+        Assert.Equal("success", result.Status);
+        Assert.Contains(telemetry.Events, e => e.Type == "mohist_prompt");
+        Assert.Equal("completed", telemetry.Completed?.Status);
     }
 
     [Fact]
@@ -106,6 +163,26 @@ public class AgentActionSpecs
         {
             Request = request;
             return Task.FromResult(_result);
+        }
+    }
+
+    private sealed class RecordingTelemetrySink : ISessionTelemetrySink
+    {
+        public List<SessionEventInput> Events { get; } = [];
+        public SessionCompleted? Completed { get; private set; }
+
+        public Task StartedAsync(AgentSessionContext session, SessionStarted started, CancellationToken ct) => Task.CompletedTask;
+
+        public Task AppendAsync(AgentSessionContext session, IReadOnlyList<SessionEventInput> events, CancellationToken ct)
+        {
+            Events.AddRange(events);
+            return Task.CompletedTask;
+        }
+
+        public Task CompletedAsync(AgentSessionContext session, SessionCompleted completed, CancellationToken ct)
+        {
+            Completed = completed;
+            return Task.CompletedTask;
         }
     }
 }

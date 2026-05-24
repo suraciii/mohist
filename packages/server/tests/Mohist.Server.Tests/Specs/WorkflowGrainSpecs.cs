@@ -4,6 +4,7 @@ using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
+using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
 using Xunit;
@@ -27,6 +28,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
             siloBuilder.Services.AddSingleton<IssueQueryService>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
+            siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
         });
         Cluster = builder.Build();
         return Cluster.DeployAsync();

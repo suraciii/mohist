@@ -14,6 +14,7 @@ builder.Services.AddMohistServerCore(builder.Configuration);
 var app = builder.Build();
 app.EnsureMohistDatabase();
 app.MapMohistApi();
+app.MapMohistWeb(builder.Configuration);
 
 app.Run();
 

@@ -19,7 +19,8 @@ public record WorkItem(
     string? Title,
     string? Uses,
     Dictionary<string, JsonElement?>? With,
-    Dictionary<string, JsonElement?>? Variables = null);
+    Dictionary<string, JsonElement?>? Variables = null,
+    AgentSessionContext? Session = null);
 
 public record WorkItemResult(
     string Status,

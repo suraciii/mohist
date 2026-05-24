@@ -75,6 +75,15 @@ export function useAgentStatus() {
   })
 }
 
+export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['issues', issueNumber, 'workflow-timeline'],
+    queryFn: () => api.getWorkflowTimeline(issueNumber),
+    enabled: enabled && issueNumber > 0,
+    refetchInterval: enabled ? 5000 : false,
+  })
+}
+
 export function useAgentSessions(params?: { status?: string; limit?: number }) {
   return useQuery<AgentSessionInfo[]>({
     queryKey: ['agent-sessions', params],

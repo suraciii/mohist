@@ -55,9 +55,13 @@ public class ConfigService
             throw new InvalidOperationException($"Unknown config key: {key}");
 
         await using var db = await _contextFactory.CreateDbContextAsync();
-        var strValue = value?.ToString() ?? "";
-        if (value is JsonElement json)
-            strValue = json.ToString();
+        var strValue = value switch
+        {
+            null => "",
+            JsonElement json => json.GetRawText(),
+            string text => text,
+            _ => JsonSerializer.Serialize(value),
+        };
 
         var row = await db.Configs.FindAsync(key);
         if (row is null)
@@ -71,6 +75,20 @@ public class ConfigService
         }
         await db.SaveChangesAsync();
         _log.LogInformation("Config {Key} updated", key);
+    }
+
+    public async Task ClearAsync(string key)
+    {
+        if (!_schema.ContainsKey(key))
+            throw new InvalidOperationException($"Unknown config key: {key}");
+
+        await using var db = await _contextFactory.CreateDbContextAsync();
+        var row = await db.Configs.FindAsync(key);
+        if (row is not null)
+        {
+            db.Configs.Remove(row);
+            await db.SaveChangesAsync();
+        }
     }
 
     public (bool valid, string? error) Validate(string key, string value)

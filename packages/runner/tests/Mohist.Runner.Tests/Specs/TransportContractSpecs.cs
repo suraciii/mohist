@@ -20,7 +20,17 @@ public class TransportContractSpecs
             variables = "{\"issue\":{\"number\":42}}",
             workType = "check",
             stage = "plan",
-            title = "Proposal complete"
+            title = "Proposal complete",
+            session = new
+            {
+                id = "session-1",
+                projectId = "project",
+                issueNumber = 42,
+                workflowRunId = "wr-1",
+                workId = "check-1:abc",
+                stage = "plan",
+                title = "Proposal complete"
+            }
         }));
         var connection = Connection(handler);
 
@@ -31,6 +41,8 @@ public class TransportContractSpecs
         Assert.Equal("plan", work.Stage);
         Assert.Equal("proposal.md", work.With!["path"]!.Value.GetString());
         Assert.Equal(42, work.Variables!["issue"]!.Value.GetProperty("number").GetInt32());
+        Assert.NotNull(work.Session);
+        Assert.Equal("session-1", work.Session.Id);
     }
 
     [Fact]

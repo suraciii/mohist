@@ -150,7 +150,7 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
     {
         var pid = await SetupProjectAsync();
         var catalog = _grains.GetGrain<IIssueCatalogGrain>(pid);
-        var created = await catalog.CreateAsync("Context", null, null, null);
+        var created = await catalog.CreateAsync("Context", null, null, null, "openai/gpt-4o", new Dictionary<string, string> { ["plan"] = "anthropic/claude" });
 
         var grain = _grains.GetGrain<IIssueGrain>($"{pid}:{created.Number}");
         var wrId = await grain.StartWorkflowAsync(new WorkflowProjectContext(pid, "My Project", "/tmp/my-project", "trunk"));
@@ -161,6 +161,8 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Contains("/tmp/my-project", snapshot);
         Assert.Contains("My Project", snapshot);
         Assert.Contains("trunk", snapshot);
+        Assert.Contains("openai/gpt-4o", snapshot);
+        Assert.Contains("anthropic/claude", snapshot);
     }
 
     [Fact]
