@@ -22,3 +22,7 @@ public interface IIssueCatalogGrain : IGrainWithStringKey
     Task<IssueInfo?> GetByNumberAsync(int number);
     Task<IssueInfo?> RemoveAsync(int number);
 }
+
+[GenerateSerializer]
+public sealed record IssueCatalogState(
+    [property: Id(0)] List<IssueInfo> Issues);

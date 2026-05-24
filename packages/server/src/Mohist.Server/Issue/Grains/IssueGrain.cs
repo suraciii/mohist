@@ -221,37 +221,52 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.FromResult(info);
     }
 
-    public Task SetStageAsync(string stage)
+    public async Task SetStageAsync(string stage)
     {
         EnsureIssue();
         if (Enum.TryParse<IssueStage>(stage, true, out var s))
             _issue!.SetStage(s);
-        return Task.CompletedTask;
+        await _issueStore.SaveAsync(GrainKey, _issue!);
     }
 
-    public Task SetRuntimeStatusAsync(string status, string? reason = null)
+    public async Task SetRuntimeStatusAsync(string status, string? reason = null)
     {
         EnsureIssue();
         if (Enum.TryParse<IssueRuntimeStatus>(status, true, out var s))
             _issue!.SetRuntimeStatus(s, reason);
-        return Task.CompletedTask;
+        await _issueStore.SaveAsync(GrainKey, _issue!);
     }
 
-    public Task SetApprovalStateAsync(ApprovalState? state)
+    public async Task SetApprovalStateAsync(ApprovalState? state)
     {
         EnsureIssue();
         _issue!.SetApprovalState(state);
-        return Task.CompletedTask;
+        await _issueStore.SaveAsync(GrainKey, _issue!);
     }
 
-    public Task SetMergeStateAsync(string? state)
+    public async Task SetMergeStateAsync(string? state)
     {
         EnsureIssue();
         if (state == null)
             _issue!.SetMergeState(null);
         else if (Enum.TryParse<MergeState>(state, true, out var s))
             _issue!.SetMergeState(s);
-        return Task.CompletedTask;
+        await _issueStore.SaveAsync(GrainKey, _issue!);
+    }
+
+    public async Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection)
+    {
+        EnsureIssue();
+
+        if (Enum.TryParse<IssueStage>(projection.Stage, true, out var stage))
+            _issue!.SetStage(stage);
+        if (Enum.TryParse<IssueRuntimeStatus>(projection.RuntimeStatus, true, out var status))
+            _issue!.SetRuntimeStatus(status, projection.BlockedReason);
+        _issue!.SetApprovalState(projection.ApprovalState);
+        if (projection.Completed)
+            _issue.SetRuntimeStatus(IssueRuntimeStatus.Completed);
+
+        await _issueStore.SaveAsync(GrainKey, _issue!);
     }
 
     private void EnsureIssue()

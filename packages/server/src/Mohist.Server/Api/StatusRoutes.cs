@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Grains;
 
 namespace Mohist.Server.Api;
@@ -9,7 +10,7 @@ public static class StatusRoutes
 
     public static WebApplication MapStatusRoutes(this WebApplication app)
     {
-        app.MapGet("/api/status", async (bool? all, IGrainFactory grains) =>
+        app.MapGet("/api/status", async (bool? all, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
 
@@ -21,8 +22,7 @@ public static class StatusRoutes
 
                 foreach (var project in projects)
                 {
-                    var catalog = grains.GetGrain<IIssueCatalogGrain>(project.Id);
-                    var issues = await catalog.ListAsync(all: true);
+                    var issues = await issuesQuery.ListAsync(project.Id, project, all: true);
                     var activeIssues = issues.Count(i => i.Status == "active");
 
                     status.Add(new
@@ -42,8 +42,7 @@ public static class StatusRoutes
             if (current is null)
                 return ApiResults.BadRequest("No active project. Use: mo project use <name>");
 
-            var issueCatalog = grains.GetGrain<IIssueCatalogGrain>(current.Id);
-            var allIssues = await issueCatalog.ListAsync(all: true);
+            var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Status == "active").ToList();
 
             var llm = new { configured = false };

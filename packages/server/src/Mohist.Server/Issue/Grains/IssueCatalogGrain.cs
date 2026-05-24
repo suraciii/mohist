@@ -1,18 +1,28 @@
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Storage;
 
 namespace Mohist.Server.Issue.Grains;
 
 public class IssueCatalogGrain : Grain, IIssueCatalogGrain
 {
     private readonly List<IssueInfo> _issues = [];
+    private readonly IStateStore<IssueCatalogState> _store;
     private readonly ILogger<IssueCatalogGrain> _log;
 
-    public IssueCatalogGrain(ILogger<IssueCatalogGrain> log)
+    public IssueCatalogGrain(IStateStore<IssueCatalogState> store, ILogger<IssueCatalogGrain> log)
     {
+        _store = store;
         _log = log;
     }
 
     private string ProjectId => this.GetPrimaryKeyString();
+
+    public override async Task OnActivateAsync(CancellationToken ct)
+    {
+        var state = await _store.LoadAsync(ProjectId);
+        if (state is not null)
+            _issues.AddRange(state.Issues);
+    }
 
     public async Task<IssueInfo> CreateAsync(
         string title,
@@ -31,6 +41,7 @@ public class IssueCatalogGrain : Grain, IIssueCatalogGrain
 
         var info = await issueGrain.GetInfoAsync();
         _issues.Add(info);
+        await SaveAsync();
 
         _log.LogInformation("Issue #{Number} created in project {Project}", number, ProjectId);
         return info;
@@ -63,11 +74,16 @@ public class IssueCatalogGrain : Grain, IIssueCatalogGrain
         return Task.FromResult(issue);
     }
 
-    public Task<IssueInfo?> RemoveAsync(int number)
+    public async Task<IssueInfo?> RemoveAsync(int number)
     {
         var issue = _issues.FirstOrDefault(i => i.Number == number);
         if (issue != null)
+        {
             _issues.Remove(issue);
-        return Task.FromResult(issue);
+            await SaveAsync();
+        }
+        return issue;
     }
+
+    private Task SaveAsync() => _store.SaveAsync(ProjectId, new IssueCatalogState(_issues));
 }

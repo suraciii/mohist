@@ -70,6 +70,27 @@ public class AgentActionSpecs
         Assert.Null(executor.Request);
     }
 
+    [Fact]
+    public async Task AiReviewAction_WithFakeExecutor_WritesReviewRequest()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "reviewed"));
+        var action = new AiReviewAction(executor);
+
+        var result = await action.ExecuteAsync(SpecHelpers.Context(
+            temp.Path,
+            "task",
+            "mohist/check/ai-review",
+            new { changeDir = "openspec/changes/1-test" }));
+
+        Assert.Equal("success", result.Status);
+        Assert.NotNull(executor.Request);
+        Assert.Equal("check", executor.Request.Stage);
+        Assert.Equal("ai-review", executor.Request.Task);
+        Assert.Contains("review.md", executor.Request.Prompt);
+        Assert.EndsWith(Path.Combine("openspec", "changes", "1-test"), executor.Request.ChangeDir);
+    }
+
     private sealed class FakeAgentExecutor : IAgentExecutor
     {
         private readonly AgentExecutionResult _result;

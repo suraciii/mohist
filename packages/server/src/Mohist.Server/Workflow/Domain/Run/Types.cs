@@ -106,3 +106,41 @@ public sealed record StageRunState(
     List<CheckRunState> Checks,
     ApprovalState? Approval,
     FailureDetails? Failure);
+
+public sealed record WorkflowRunSnapshot(
+    string Id,
+    bool Started,
+    bool Paused,
+    int CurrentStageIndex,
+    Dictionary<string, int> StageAttempts,
+    List<StageRunSnapshot> Stages);
+
+public sealed record StageRunSnapshot(
+    string Stage,
+    int Order,
+    int Attempt,
+    bool RequiresApproval,
+    bool Started,
+    bool Initialized,
+    Dictionary<string, int> TaskAttempts,
+    List<TaskRunSnapshot> Tasks,
+    List<StageCheckSnapshot> Checks,
+    ApprovalState? Approval,
+    FailureDetails? Failure);
+
+public sealed record TaskRunSnapshot(
+    string DefinitionId,
+    int Attempt,
+    string Title,
+    string? Uses,
+    Dictionary<string, JsonElement?>? WithInput,
+    TaskRunStatus Status);
+
+public sealed record StageCheckSnapshot(
+    string Name,
+    string Title,
+    string? Uses,
+    Dictionary<string, JsonElement?>? WithInput,
+    CheckRunStatus Status,
+    string? Message,
+    JsonElement? Output);

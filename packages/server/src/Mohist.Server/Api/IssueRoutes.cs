@@ -1,5 +1,6 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Workflow.Grains;
 
@@ -20,21 +21,15 @@ public static class IssueRoutes
             string? priority,
             bool? archived,
             bool? all,
-            IGrainFactory grains) =>
+            IGrainFactory grains,
+            IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var catalog = grains.GetGrain<IIssueCatalogGrain>(pid);
-            var list = await catalog.ListAsync(stage, label, priority, archived, all);
-
-            // Enrich with project name
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
             var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
-            foreach (var issue in list)
-            {
-                issue.ProjectName = project?.Name;
-            }
+            var list = await issuesQuery.ListAsync(pid, project, stage, label, priority, archived, all);
 
             return ApiResults.Ok(list);
         });
@@ -52,21 +47,15 @@ public static class IssueRoutes
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
 
-        issues.MapGet("/{number:int}", async (int number, IGrainFactory grains) =>
+        issues.MapGet("/{number:int}", async (int number, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(null, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
-            try
-            {
-                var info = await grain.GetInfoAsync();
-                return ApiResults.Ok(info);
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
+            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var info = await issuesQuery.GetAsync(pid, number, project);
+            return info is not null ? ApiResults.Ok(info) : ApiResults.NotFound($"Issue #{number} not found");
         });
 
         issues.MapPatch("/{number:int}", async (int number, UpdateIssueRequest req, IGrainFactory grains) =>
@@ -177,13 +166,12 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/archive-completed", async (IGrainFactory grains) =>
+        issues.MapPost("/archive-completed", async (IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(null, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var catalog = grains.GetGrain<IIssueCatalogGrain>(pid);
-            var all = await catalog.ListAsync(all: true);
+            var all = await issuesQuery.ListAsync(pid, all: true);
             var completed = all.Where(i => i.Stage == "done" && i.ArchivedAt == null).ToList();
             var skipped = all.Where(i => i.Stage != "done" && i.ArchivedAt == null).ToList();
 

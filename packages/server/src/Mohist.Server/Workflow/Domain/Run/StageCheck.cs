@@ -20,6 +20,14 @@ public class StageCheck
         WithInput = withInput;
     }
 
+    private StageCheck(string name, string title, string? uses, Dictionary<string, JsonElement?>? withInput, CheckRunStatus status, string? message, JsonElement? output)
+        : this(name, title, uses, withInput)
+    {
+        Status = status;
+        Message = message;
+        Output = output;
+    }
+
     public void Reset()
     {
         Status = CheckRunStatus.Pending;
@@ -29,4 +37,15 @@ public class StageCheck
 
     public void Pass() => Status = CheckRunStatus.Passed;
     public void Fail() => Status = CheckRunStatus.Failed;
+
+    public StageCheckSnapshot Snapshot() => new(Name, Title, Uses, WithInput, Status, Message, Output);
+
+    public static StageCheck Restore(StageCheckSnapshot snapshot) => new(
+        snapshot.Name,
+        snapshot.Title,
+        snapshot.Uses,
+        snapshot.WithInput,
+        snapshot.Status,
+        snapshot.Message,
+        snapshot.Output);
 }

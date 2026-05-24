@@ -20,7 +20,16 @@ public interface IIssueGrain : IGrainWithStringKey
     Task SetRuntimeStatusAsync(string status, string? reason = null);
     Task SetApprovalStateAsync(ApprovalState? state);
     Task SetMergeStateAsync(string? state);
+    Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection);
 }
+
+[GenerateSerializer]
+public sealed record WorkflowIssueProjection(
+    [property: Id(0)] string Stage,
+    [property: Id(1)] string RuntimeStatus,
+    [property: Id(2)] string? BlockedReason,
+    [property: Id(3)] ApprovalState? ApprovalState,
+    [property: Id(4)] bool Completed);
 
 [GenerateSerializer]
 public sealed record IssueWorkflowStatus(

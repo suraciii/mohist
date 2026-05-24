@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
@@ -24,6 +25,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
+            siloBuilder.Services.AddSingleton<IssueQueryService>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
         });
         Cluster = builder.Build();

@@ -63,6 +63,36 @@ public class StageRun
 
     public void Start() => _started = true;
 
+    public StageRunSnapshot Snapshot() => new(
+        Stage,
+        Order,
+        Attempt,
+        RequiresApproval,
+        _started,
+        _initialized,
+        new Dictionary<string, int>(_taskAttempts),
+        _tasks.Select(t => t.Snapshot()).ToList(),
+        _checks.Select(c => c.Snapshot()).ToList(),
+        Approval,
+        Failure);
+
+    public static StageRun Restore(StageRunSnapshot snapshot, List<CheckDefinition> staticChecks)
+    {
+        var run = new StageRun(snapshot.Stage, snapshot.Order, staticChecks, snapshot.Attempt, snapshot.RequiresApproval)
+        {
+            _started = snapshot.Started,
+            _initialized = snapshot.Initialized,
+            Approval = snapshot.Approval,
+            Failure = snapshot.Failure,
+        };
+
+        foreach (var (key, value) in snapshot.TaskAttempts)
+            run._taskAttempts[key] = value;
+        run._tasks.AddRange(snapshot.Tasks.Select(TaskRun.Restore));
+        run._checks.AddRange(snapshot.Checks.Select(StageCheck.Restore));
+        return run;
+    }
+
     public void InitTasks(List<LoadedTaskInput>? tasks = null)
     {
         if (_initialized) return;
