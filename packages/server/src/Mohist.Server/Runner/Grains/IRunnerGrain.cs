@@ -26,9 +26,13 @@ public record WorkDispatch(
     string WorkType = "task",
     string? Stage = null,
     string? Title = null,
-    string? ProjectId = null,
-    string? IssueId = null,
-    int? IssueNumber = null);
+    WorkIssueRef? Issue = null);
+
+[GenerateSerializer]
+public record WorkIssueRef(
+    string ProjectId,
+    string IssueId,
+    int IssueNumber);
 
 [GenerateSerializer]
 public record WorkDispatchResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);

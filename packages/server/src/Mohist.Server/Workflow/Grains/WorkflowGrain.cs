@@ -377,7 +377,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        var dispatch = new WorkDispatch(GrainKey, workId, uses, withStr, workType, stage, title, _issueContext?.ProjectId, _issueContext?.IssueId, _issueContext?.IssueNumber);
+        var dispatch = new WorkDispatch(
+            WorkflowRunId: GrainKey,
+            WorkId: workId,
+            Uses: uses,
+            With: withStr,
+            WorkType: workType,
+            Stage: stage,
+            Title: title,
+            Issue: _issueContext is not null ? new WorkIssueRef(_issueContext.ProjectId, _issueContext.IssueId, _issueContext.IssueNumber) : null);
         _lease = new WorkLease(workId, workType, stage, logicalId, runnerId);
         _lastDispatch = dispatch;
         return dispatch;

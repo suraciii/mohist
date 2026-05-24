@@ -16,7 +16,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task ReopenAsync();
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
     Task<IssueInfo> GetInfoAsync();
-    Task AddPrerequisiteAsync(int prerequisiteNumber);
+    Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartEligibility> GetStartEligibilityAsync();
     Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection);
@@ -57,3 +57,15 @@ public sealed record WorkflowIssueContext(
     [property: Id(3)] string ProjectName,
     [property: Id(4)] string ProjectPath,
     [property: Id(5)] string BaseBranch);
+
+[GenerateSerializer]
+public sealed record IssuePrerequisiteResult(
+    [property: Id(0)] bool Success,
+    [property: Id(1)] string Code,
+    [property: Id(2)] string Message)
+{
+    public static IssuePrerequisiteResult Added() => new(true, "ok", "Prerequisite added");
+    public static IssuePrerequisiteResult IssueNotFound() => new(false, "issue_not_found", "Issue not found");
+    public static IssuePrerequisiteResult PrerequisiteNotFound(int number) => new(false, "prerequisite_not_found", $"Issue #{number} not found");
+    public static IssuePrerequisiteResult Circular() => new(false, "circular_prerequisite", "Issue cannot depend on itself");
+}

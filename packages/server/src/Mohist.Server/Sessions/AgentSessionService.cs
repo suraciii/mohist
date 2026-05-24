@@ -20,7 +20,7 @@ public class AgentSessionService
     public async Task<AgentSessionDto?> CreateForDispatchAsync(string runnerId, WorkDispatch dispatch, CancellationToken ct = default)
     {
         if (dispatch.Uses != "mohist/agent") return null;
-        if (dispatch.ProjectId is null || dispatch.IssueNumber is null) return null;
+        if (dispatch.Issue is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var existing = await db.AgentSessions.AsNoTracking()
@@ -29,8 +29,8 @@ public class AgentSessionService
 
         var session = new AgentSession
         {
-            ProjectId = dispatch.ProjectId,
-            IssueNumber = dispatch.IssueNumber.Value,
+            ProjectId = dispatch.Issue.ProjectId,
+            IssueNumber = dispatch.Issue.IssueNumber,
             WorkflowRunId = dispatch.WorkflowRunId,
             WorkId = dispatch.WorkId,
             WorkType = dispatch.WorkType,
