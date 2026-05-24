@@ -161,7 +161,7 @@ node bin/mo issue start 1
 | HTTP | Hono | ASP.NET Core Minimal API |
 | 状态管理 | 内存 Map + SQLite | Orleans Virtual Actor + 持久化 Grain State |
 | 并发调度 | 手动内存队列 + Map | Orleans Grain 天然并发安全 |
-| 工作流引擎 | 自研 `@mohist/workflow` 状态机 | Orleans Grain 状态机 (每个 issue = 一个 Grain) |
+| 工作流引擎 | 旧 TypeScript workflow runtime（已移除） | Orleans Grain 状态机 (每个 issue = 一个 Grain) |
 | Agent 进程管理 | spawn `opencode agent` 子进程 | Orleans Grain 管理 Agent 生命周期 |
 | 事件推送 | 内存 EventBus + SSE | Orleans Stream + SSE |
 | 存储 | SQLite (better-sqlite3) | SQLite / PostgreSQL (via Entity Framework Core) |
@@ -182,7 +182,7 @@ node bin/mo issue start 1
 **核心 Grain 设计思路**:
 - `IIssueWorkflowGrain` — 一个 issue 一个 Grain，持有 issue 的 workflow state
   - 状态: Draft → Plan → Build → Check → Integrate → Done
-  - 内嵌 `WorkflowRun` 领域模型（复用 `@mohist/workflow` 的领域逻辑）
+  - 内嵌 C# `WorkflowRun` 领域模型
   - 通过 Orleans Reminder / Timer 实现 timeout、retry、auto-fix
   - Approval gate 通过 Grain Method 调用（`SubmitApprovalAsync`）
   - 事件通过 Orleans Stream 推送到 SSE endpoint
@@ -202,7 +202,7 @@ node bin/mo issue start 1
 
 **不做的**:
 - 不改变前端 API 契约
-- 不改变 `@mohist/workflow` 领域模型的核心语义（Stage/Task/Check/Approval）
+- 不改变 workflow 领域模型的核心语义（Stage/Task/Check/Approval）
 - 不在此步迁移 Provider、Config、Web UI
 
 #### Decision 2: 单项目结构 + Central Package Management

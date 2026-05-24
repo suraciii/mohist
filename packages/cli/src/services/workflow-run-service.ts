@@ -1,6 +1,5 @@
 import { DatabaseManager } from '../db/database';
 
-// TODO: Replace old workflow repo usage with new WorkflowStoreAdapter once fully migrated
 export class WorkflowRunService {
   private db: DatabaseManager;
 
@@ -12,6 +11,6 @@ export class WorkflowRunService {
     return this.db;
   }
 
-  // TODO: These methods use old workflow schema - will be replaced by new WorkflowStoreAdapter
-  // getActiveRunForIssue, getLatestRunForIssue, canRetryStage, materializeBuildTasks
+  // Legacy compatibility wrapper for callers that still expect a service object.
+  // Workflow execution and persistence are owned by the .NET server.
 }
