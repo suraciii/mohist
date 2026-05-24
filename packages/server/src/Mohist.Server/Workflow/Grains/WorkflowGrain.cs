@@ -3,7 +3,6 @@ using Mohist.Server.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
-using Mohist.Server.Variables.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 
@@ -17,6 +16,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkLease? _lease;
     private WorkDispatch? _lastDispatch;
     private WorkflowIssueContext? _issueContext;
+    private WorkflowExecutionContext? _variables;
     private readonly IStateStore<WorkflowGrainState> _stateStore;
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
@@ -41,6 +41,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _lease = state.Lease;
         _lastDispatch = state.LastDispatch;
         _issueContext = state.IssueContext;
+        _variables = state.Variables;
         if (state.Run is not null && _stageDefinitions is not null)
             _run = WorkflowRun.Restore(_stageDefinitions, state.Run);
     }
@@ -60,7 +61,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         if (_issueContext is not null && input is not null)
-            await InitializeVariablesAsync(_issueContext, input.Issue);
+            _variables = WorkflowExecutionContext.FromIssue(GrainKey, _issueContext, input.Issue);
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("started");
@@ -263,6 +264,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run.Id,
             _run.Status.ToString(),
             _run.CurrentStage.Stage,
+            _variables?.Artifacts.ChangeDir,
             stages,
             pending,
             failure,
@@ -382,11 +384,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
+        var attempt = ResolveWorkAttempt(stage, logicalId, workType);
+        var variables = _variables?.ToDispatchJson(new WorkflowDispatchContext(GrainKey, workId, workType, stage, title, attempt));
         var dispatch = new WorkDispatch(
             WorkflowRunId: GrainKey,
             WorkId: workId,
             Uses: uses,
             With: withStr,
+            Variables: variables,
             WorkType: workType,
             Stage: stage,
             Title: title,
@@ -587,50 +592,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
         with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
 
-    private async Task InitializeVariablesAsync(WorkflowIssueContext context, WorkflowIssueSeed issue)
+    private int ResolveWorkAttempt(string stage, string logicalId, string workType)
     {
-        var variables = GrainFactory.GetGrain<IVariableScopeGrain>(GrainKey);
-        await variables.SetContextAsync("issue", JsonSerializer.Serialize(new
-        {
-            id = context.IssueId,
-            number = context.IssueNumber,
-            title = issue.Title,
-            body = issue.Body,
-        }));
-        await variables.SetContextAsync("project", JsonSerializer.Serialize(new
-        {
-            id = context.ProjectId,
-            name = context.ProjectName,
-            path = context.ProjectPath,
-            baseBranch = context.BaseBranch,
-            defaultBranch = context.BaseBranch,
-        }));
-        await variables.SetContextAsync("artifacts", JsonSerializer.Serialize(new
-        {
-            changeDir = $"openspec/changes/{context.IssueNumber}-{Slug(issue.Title)}",
-        }));
-        await variables.SetContextAsync("model", JsonSerializer.Serialize(new
-        {
-            @default = issue.Model ?? "",
-            stage = issue.StageModels ?? [],
-        }));
-        await variables.SetContextAsync("vars", JsonSerializer.Serialize(new
-        {
-            planHealthCommand = "npm ci && npm run typecheck",
-            buildHealthCommand = "npm ci && npm run build",
-            checkHealthCommand = "npm ci && npm run build && npm test",
-            integrateHealthCommand = "npm ci && npm run build && npm test",
-            projectPath = ".",
-        }));
-    }
+        if (_run is null || workType != "task") return 1;
 
-    private static string Slug(string value)
-    {
-        var chars = value.ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray();
-        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
+        var current = _run.Stages.LastOrDefault(s => s.Stage == stage);
+        if (current is null) return 1;
+
+        var marker = $"{logicalId}.";
+        var task = current.Tasks.LastOrDefault(t => t.Id.StartsWith(marker, StringComparison.Ordinal));
+        if (task is null) return 1;
+
+        return int.TryParse(task.Id[marker.Length..], out var attempt) ? attempt : 1;
     }
 
     private static List<StageDefinition> MapStageDefinitions(WorkflowDefinitionInput input) =>
@@ -729,7 +702,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run?.Snapshot(),
         _lease,
         _lastDispatch,
-        _issueContext));
+        _issueContext,
+        _variables));
 
     private async Task PersistAndProjectAsync()
     {
@@ -785,4 +759,5 @@ public sealed record WorkflowGrainState(
     [property: Id(1)] WorkflowRunSnapshot? Run,
     [property: Id(2)] WorkLease? Lease,
     [property: Id(3)] WorkDispatch? LastDispatch,
-    [property: Id(4)] WorkflowIssueContext? IssueContext);
+    [property: Id(4)] WorkflowIssueContext? IssueContext,
+    [property: Id(5)] WorkflowExecutionContext? Variables);

@@ -7,7 +7,7 @@ public class MergeReadyAction : IAction
     public async Task<ActionResult> ExecuteAsync(ActionContext context)
     {
         var baseBranch = JsonInputs.String(context.With, "baseBranch")
-            ?? ResolveVariable(context.Variables, "project.defaultBranch")
+            ?? new VariableBag(context.Variables).String("project.defaultBranch")
             ?? "main";
 
         var baseResult = await GitCommand.RunAsync(context.WorkDir, ["rev-parse", baseBranch], context.CancellationToken);
@@ -46,22 +46,5 @@ public class MergeReadyAction : IAction
         return canMerge
             ? new ActionResult("success", "Merge ready", output, exitCode)
             : new ActionResult("failure", error ?? "Merge is not ready", output, exitCode);
-    }
-
-    private static string? ResolveVariable(Dictionary<string, JsonElement?>? variables, string path)
-    {
-        if (variables is null) return null;
-        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0 || !variables.TryGetValue(parts[0], out var current) || current is null)
-            return null;
-
-        var element = current.Value;
-        for (var i = 1; i < parts.Length; i++)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parts[i], out element))
-                return null;
-        }
-
-        return element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
     }
 }

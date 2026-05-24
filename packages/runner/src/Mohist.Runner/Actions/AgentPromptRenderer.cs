@@ -6,11 +6,12 @@ public static class AgentPromptRenderer
 {
     public static string Render(AgentPromptContext context)
     {
-        var issueTitle = ReadString(context.Variables, "issue.title") ?? "Untitled issue";
-        var issueBody = ReadString(context.Variables, "issue.body") ?? "";
-        var issueNumber = ReadString(context.Variables, "issue.number") ?? "";
-        var projectName = ReadString(context.Variables, "project.name") ?? ReadString(context.Variables, "project.id") ?? "project";
-        var projectPath = ReadString(context.Variables, "project.path") ?? context.WorkDir;
+        var variables = new VariableBag(context.Variables);
+        var issueTitle = variables.String("issue.title") ?? "Untitled issue";
+        var issueBody = variables.String("issue.body") ?? "";
+        var issueNumber = variables.String("issue.number") ?? "";
+        var projectName = variables.String("project.name") ?? variables.String("project.id") ?? "project";
+        var projectPath = variables.String("project.path") ?? context.WorkDir;
         var model = ResolveModel(context.Variables, context.Stage);
 
         var changeDir = context.ChangeDir is null
@@ -104,25 +105,11 @@ public static class AgentPromptRenderer
         string.IsNullOrWhiteSpace(changeDir) ? path : Path.Combine(changeDir, path);
 
     public static string? ResolveModel(Dictionary<string, JsonElement?>? variables, string stage) =>
-        ReadString(variables, $"model.stage.{stage}")
-        ?? ReadString(variables, "model.default");
+        ResolveModel(new VariableBag(variables), stage);
 
-    private static string? ReadString(Dictionary<string, JsonElement?>? variables, string path)
-    {
-        if (variables is null) return null;
-        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0 || !variables.TryGetValue(parts[0], out var current) || current is null)
-            return null;
-
-        var element = current.Value;
-        for (var i = 1; i < parts.Length; i++)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parts[i], out element))
-                return null;
-        }
-
-        return element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
-    }
+    private static string? ResolveModel(VariableBag variables, string stage) =>
+        variables.String($"model.stage.{stage}")
+        ?? variables.String("model.default");
 }
 
 public sealed record AgentPromptContext(

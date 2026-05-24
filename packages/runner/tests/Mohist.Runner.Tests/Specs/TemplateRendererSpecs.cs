@@ -20,13 +20,13 @@ public class TemplateRendererSpecs
     }
 
     [Fact]
-    public void MissingValueBecomesEmptyString()
+    public void MissingValueFailsWithVariableName()
     {
         var input = Json("""{ "path": "${{ missing.value }}/proposal.md" }""");
 
-        var rendered = TemplateRenderer.Render(input, []);
+        var ex = Assert.Throws<InvalidOperationException>(() => TemplateRenderer.Render(input, []));
 
-        Assert.Equal("/proposal.md", rendered!["path"]!.Value.GetString());
+        Assert.Contains("missing.value", ex.Message);
     }
 
     [Fact]

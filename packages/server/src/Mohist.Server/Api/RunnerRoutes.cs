@@ -1,6 +1,5 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
-using Mohist.Server.Variables.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -39,20 +38,12 @@ public static class RunnerRoutes
 
             var session = await sessions.CreateForDispatchAsync(runnerId, work);
 
-            var scope = grains.GetGrain<IVariableScopeGrain>(work.WorkflowRunId);
-            var variables = await scope.SnapshotAsync(new VariableSnapshotRequest(
-                work.WorkflowRunId,
-                work.WorkId,
-                work.WorkType,
-                work.Stage,
-                work.Title));
-
             return Results.Ok(new WorkDispatchResponse(
                 work.WorkflowRunId,
                 work.WorkId,
                 work.Uses,
                 work.With,
-                variables,
+                work.Variables,
                 work.WorkType,
                 work.Stage,
                 work.Title,

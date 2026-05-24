@@ -9,6 +9,13 @@ public static partial class TemplateRenderer
         Dictionary<string, JsonElement?>? input,
         Dictionary<string, JsonElement?>? variables)
     {
+        return Render(input, new VariableBag(variables));
+    }
+
+    public static Dictionary<string, JsonElement?>? Render(
+        Dictionary<string, JsonElement?>? input,
+        VariableBag variables)
+    {
         if (input is null) return null;
 
         var rendered = new Dictionary<string, JsonElement?>();
@@ -18,7 +25,7 @@ public static partial class TemplateRenderer
         return rendered;
     }
 
-    private static JsonElement RenderElement(JsonElement element, Dictionary<string, JsonElement?>? variables)
+    private static JsonElement RenderElement(JsonElement element, VariableBag variables)
     {
         return element.ValueKind switch
         {
@@ -29,7 +36,7 @@ public static partial class TemplateRenderer
         };
     }
 
-    private static JsonElement RenderObject(JsonElement element, Dictionary<string, JsonElement?>? variables)
+    private static JsonElement RenderObject(JsonElement element, VariableBag variables)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -46,7 +53,7 @@ public static partial class TemplateRenderer
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static JsonElement RenderArray(JsonElement element, Dictionary<string, JsonElement?>? variables)
+    private static JsonElement RenderArray(JsonElement element, VariableBag variables)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -60,37 +67,25 @@ public static partial class TemplateRenderer
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static JsonElement RenderString(string value, Dictionary<string, JsonElement?>? variables)
+    private static JsonElement RenderString(string value, VariableBag variables)
     {
         var full = FullExpression().Match(value);
         if (full.Success)
-            return Resolve(variables, full.Groups[1].Value) ?? JsonSerializer.SerializeToElement("");
+            return ResolveRequired(variables, full.Groups[1].Value);
 
         var rendered = InlineExpression().Replace(value, match =>
         {
-            var resolved = Resolve(variables, match.Groups[1].Value);
-            return resolved is null ? "" : ToTemplateString(resolved.Value);
+            var resolved = ResolveRequired(variables, match.Groups[1].Value);
+            return ToTemplateString(resolved);
         });
 
         return JsonSerializer.SerializeToElement(rendered);
     }
 
-    private static JsonElement? Resolve(Dictionary<string, JsonElement?>? variables, string path)
+    private static JsonElement ResolveRequired(VariableBag variables, string path)
     {
-        if (variables is null) return null;
-
-        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0 || !variables.TryGetValue(parts[0], out var current) || current is null)
-            return null;
-
-        var element = current.Value;
-        for (var i = 1; i < parts.Length; i++)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parts[i], out element))
-                return null;
-        }
-
-        return element.ValueKind == JsonValueKind.Null ? null : element.Clone();
+        return variables.Element(path)
+            ?? throw new InvalidOperationException($"Template variable '{path}' was not found");
     }
 
     private static string ToTemplateString(JsonElement value) => value.ValueKind switch

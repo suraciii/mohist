@@ -29,32 +29,32 @@ public class WorkExecutor : IWorkExecutor
         if (action is null)
             return Failure(workItem, $"No action found for '{workItem.Uses}'");
 
-        var variables = BuildVariables(workItem);
-        var workspace = await _workspaceManager.EnsureAsync(variables, ct);
-        variables["workspace"] = JsonSerializer.SerializeToElement(new
-        {
-            path = workspace.Path,
-            branch = workspace.Branch,
-            changeDir = workspace.ChangeDir
-        });
-
-        var renderedWith = TemplateRenderer.Render(workItem.With, variables);
-
-        var context = new ActionContext(
-            workItem.WorkflowRunId,
-            workItem.WorkId,
-            workItem.WorkType,
-            workItem.Stage,
-            workItem.Title,
-            workItem.Uses,
-            renderedWith,
-            variables,
-            ResolveWorkDir(renderedWith, variables),
-            ct,
-            workItem.Session);
-
         try
         {
+            var variables = BuildVariables(workItem);
+            var workspace = await _workspaceManager.EnsureAsync(variables.ToDictionary(), ct);
+            variables.Set("workspace", new
+            {
+                path = workspace.Path,
+                branch = workspace.Branch,
+                changeDir = workspace.ChangeDir
+            });
+
+            var renderedWith = TemplateRenderer.Render(workItem.With, variables);
+
+            var context = new ActionContext(
+                workItem.WorkflowRunId,
+                workItem.WorkId,
+                workItem.WorkType,
+                workItem.Stage,
+                workItem.Title,
+                workItem.Uses,
+                renderedWith,
+                variables.ToDictionary(),
+                ResolveWorkDir(renderedWith, variables),
+                ct,
+                workItem.Session);
+
             var result = await action.ExecuteAsync(context);
             return Normalize(workItem, result);
         }
@@ -72,8 +72,8 @@ public class WorkExecutor : IWorkExecutor
     private async Task<WorkItemResult> ExecuteChecksAsync(WorkItem workItem, CancellationToken ct)
     {
         var variables = BuildVariables(workItem);
-        var workspace = await _workspaceManager.EnsureAsync(variables, ct);
-        variables["workspace"] = JsonSerializer.SerializeToElement(new
+        var workspace = await _workspaceManager.EnsureAsync(variables.ToDictionary(), ct);
+        variables.Set("workspace", new
         {
             path = workspace.Path,
             branch = workspace.Branch,
@@ -99,19 +99,19 @@ public class WorkExecutor : IWorkExecutor
                 return;
             }
 
-            var checkWith = check.TryGetValue("with", out var withStr) && withStr is not null
-                ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withStr)
-                : null;
-            var renderedWith = TemplateRenderer.Render(checkWith, variables);
-            var workDir = ResolveWorkDir(renderedWith, variables);
-
-            var context = new ActionContext(
-                workItem.WorkflowRunId, workItem.WorkId, "check",
-                workItem.Stage, check.GetValueOrDefault("title"), uses,
-                renderedWith, variables, workDir, ct);
-
             try
             {
+                var checkWith = check.TryGetValue("with", out var withStr) && withStr is not null
+                    ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withStr)
+                    : null;
+                var renderedWith = TemplateRenderer.Render(checkWith, variables);
+                var workDir = ResolveWorkDir(renderedWith, variables);
+
+                var context = new ActionContext(
+                    workItem.WorkflowRunId, workItem.WorkId, "check",
+                    workItem.Stage, check.GetValueOrDefault("title"), uses,
+                    renderedWith, variables.ToDictionary(), workDir, ct);
+
                 var result = await action.ExecuteAsync(context);
                 var status = result.Status.ToLowerInvariant() switch
                 {
@@ -183,13 +183,11 @@ public class WorkExecutor : IWorkExecutor
         _ => new WorkItemResult("failed", message),
     };
 
-    private Dictionary<string, JsonElement?> BuildVariables(WorkItem workItem)
+    private VariableBag BuildVariables(WorkItem workItem)
     {
-        var variables = workItem.Variables is not null
-            ? new Dictionary<string, JsonElement?>(workItem.Variables)
-            : new Dictionary<string, JsonElement?>();
+        var variables = new VariableBag(workItem.Variables);
 
-        variables["runner"] = JsonSerializer.SerializeToElement(new
+        variables.Set("runner", new
         {
             os = Environment.OSVersion.Platform.ToString(),
             hostname = Environment.MachineName,
@@ -201,28 +199,12 @@ public class WorkExecutor : IWorkExecutor
 
     private string ResolveWorkDir(
         Dictionary<string, JsonElement?>? renderedWith,
-        Dictionary<string, JsonElement?> variables)
+        VariableBag variables)
     {
         var dir = JsonInputs.String(renderedWith, "working-directory")
-            ?? ResolveString(variables, "workspace.path")
+            ?? variables.String("workspace.path")
             ?? Path.Combine(_workDir, "default");
         Directory.CreateDirectory(dir);
         return dir;
-    }
-
-    private static string? ResolveString(Dictionary<string, JsonElement?> variables, string path)
-    {
-        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0 || !variables.TryGetValue(parts[0], out var current) || current is null)
-            return null;
-
-        var element = current.Value;
-        for (var i = 1; i < parts.Length; i++)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parts[i], out element))
-                return null;
-        }
-
-        return element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
     }
 }

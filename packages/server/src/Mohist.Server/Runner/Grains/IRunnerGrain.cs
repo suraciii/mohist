@@ -23,6 +23,7 @@ public record WorkDispatch(
     string WorkId,
     string? Uses = null,
     string? With = null,
+    string? Variables = null,
     string WorkType = "task",
     string? Stage = null,
     string? Title = null,
