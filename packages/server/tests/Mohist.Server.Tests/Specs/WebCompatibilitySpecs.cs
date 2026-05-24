@@ -1,5 +1,6 @@
 using Mohist.Server.Tests.Support;
 using Xunit;
+using System.Net;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -38,6 +39,19 @@ public class WebCompatibilitySpecs
 
         Assert.False(detail.StartEligibility.Startable);
         Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Delivered);
+    }
+
+    [Fact]
+    public async Task StartIssue_WithUndeliveredPrerequisite_IsRejectedByWorkflowGate()
+    {
+        await _client.PostOkAsync("/api/projects", new { name = $"web-prereq-gate-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var prereq = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Gate prereq" });
+        var dependent = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Gate dependent" });
+        await _client.PostOkAsync($"/api/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
+
+        using var response = await _client.PostAsync($"/api/issues/{dependent.Number}/start", null);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     [Fact]

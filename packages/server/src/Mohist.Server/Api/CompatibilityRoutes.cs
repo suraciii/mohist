@@ -143,7 +143,8 @@ public static class CompatibilityRoutes
                 await db.SaveChangesAsync();
             }
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
             return ApiResults.Ok(new { issue = await issuesQuery.GetAsync(pid, number, project), message = "Prerequisite added" });
         });
 
@@ -159,7 +160,8 @@ public static class CompatibilityRoutes
                 await db.SaveChangesAsync();
             }
             var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByNameAsync(pid) ?? await registry.GetCurrentAsync();
+            var project = await registry.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
             return ApiResults.Ok(new { issue = await issuesQuery.GetAsync(pid, number, project), message = "Prerequisite removed" });
         });
 

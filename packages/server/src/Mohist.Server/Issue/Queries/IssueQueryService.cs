@@ -17,7 +17,7 @@ public class IssueQueryService
         _dbFactory = dbFactory;
     }
 
-    public async Task<IssueInfo?> GetAsync(string projectId, int number, ProjectInfo? project = null)
+    public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var key = $"{projectId}:{number}";
@@ -28,7 +28,7 @@ public class IssueQueryService
         return issue is null ? null : await EnrichAsync(db, ToInfo(issue, project));
     }
 
-    public async Task<List<IssueInfo>> ListAsync(
+    public async Task<List<IssueReadModel>> ListAsync(
         string projectId,
         ProjectInfo? project = null,
         string? stage = null,
@@ -47,7 +47,7 @@ public class IssueQueryService
             .Where(issue => issue is not null)
             .Cast<Domain.Issue>()
             .Where(issue => issue.ProjectId == projectId)
-            .Select(issue => ToInfo(issue, project))
+            .Select(issue => ToReadModel(ToInfo(issue, project)))
             .AsEnumerable();
 
         if (archived == true)
@@ -78,6 +78,12 @@ public class IssueQueryService
         return row is null ? null : JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
     }
 
+    public async Task<IssueStartEligibility> GetStartEligibilityAsync(string projectId, int number)
+    {
+        var issue = await GetAsync(projectId, number);
+        return issue?.StartEligibility ?? IssueStartEligibility.Ready();
+    }
+
     public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null) => new()
     {
         Id = issue.Id,
@@ -103,7 +109,32 @@ public class IssueQueryService
         WorkflowRunId = issue.WorkflowRunId,
     };
 
-    private static async Task<List<IssueInfo>> EnrichAsync(MohistDbContext db, List<IssueInfo> issues)
+    public static IssueReadModel ToReadModel(IssueInfo issue) => new()
+    {
+        Id = issue.Id,
+        Number = issue.Number,
+        Title = issue.Title,
+        Body = issue.Body,
+        Stage = issue.Stage,
+        Status = issue.Status,
+        ProjectId = issue.ProjectId,
+        ProjectName = issue.ProjectName,
+        Labels = issue.Labels,
+        Priority = issue.Priority,
+        Model = issue.Model,
+        StageModels = issue.StageModels,
+        CreatedAt = issue.CreatedAt,
+        UpdatedAt = issue.UpdatedAt,
+        ArchivedAt = issue.ArchivedAt,
+        ApprovalState = issue.ApprovalState,
+        MergeState = issue.MergeState,
+        RetryCount = issue.RetryCount,
+        ConflictRetryCount = issue.ConflictRetryCount,
+        BlockedReason = issue.BlockedReason,
+        WorkflowRunId = issue.WorkflowRunId,
+    };
+
+    private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
     {
         if (issues.Count == 0) return issues;
 
@@ -141,7 +172,7 @@ public class IssueQueryService
             {
                 var domain = JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
                 if (domain is not null)
-                    prereqIssues[domain.Number] = ToInfo(domain);
+                    prereqIssues[domain.Number] = ToReadModel(ToInfo(domain));
             }
         }
         foreach (var group in prereqRows.GroupBy(p => p.IssueNumber))
@@ -192,13 +223,16 @@ public class IssueQueryService
         return issues;
     }
 
-    private static async Task<IssueInfo> EnrichAsync(MohistDbContext db, IssueInfo issue) =>
+    private static async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueInfo issue) =>
+        (await EnrichAsync(db, [ToReadModel(issue)]))[0];
+
+    private static async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueReadModel issue) =>
         (await EnrichAsync(db, [issue]))[0];
 
     public static IssueCommentDto ToCommentDto(IssueCommentEntry comment) =>
         new(comment.Id, comment.IssueId, comment.Body, comment.CreatedAt.ToString("o"));
 
-    private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueInfo issue) => new()
+    private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueReadModel issue) => new()
     {
         IssueId = issue.Id,
         Number = issue.Number,
