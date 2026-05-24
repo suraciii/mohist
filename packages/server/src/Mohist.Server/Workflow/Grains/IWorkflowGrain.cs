@@ -20,7 +20,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
 
 [GenerateSerializer]
 public sealed record WorkflowStartInput(
-    [property: Id(0)] WorkflowIssueSeed Issue);
+    [property: Id(0)] string? Variables = null);
 
 [GenerateSerializer]
 public sealed record WorkflowDefinitionInput(List<StageDefinitionInput> Stages);

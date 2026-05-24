@@ -1,88 +1,45 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Mohist.Server.Issue.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
 
 [GenerateSerializer]
 public sealed record WorkflowExecutionContext(
-    [property: Id(0)] MohistContext Mohist,
-    [property: Id(1)] WorkflowIssueVariables Issue,
-    [property: Id(2)] WorkflowProjectVariables Project,
-    [property: Id(3)] WorkflowArtifactVariables Artifacts,
-    [property: Id(4)] WorkflowModelVariables Model,
-    [property: Id(5)] WorkflowUserVariables Vars)
+    [property: Id(0)] string Json)
 {
-    public static WorkflowExecutionContext FromIssue(string workflowRunId, WorkflowIssueContext context, WorkflowIssueSeed issue) => new(
-        new MohistContext("mohist", workflowRunId),
-        new WorkflowIssueVariables(context.IssueId, context.IssueNumber, issue.Title, issue.Body),
-        new WorkflowProjectVariables(context.ProjectId, context.ProjectName, context.ProjectPath, context.BaseBranch, context.BaseBranch),
-        new WorkflowArtifactVariables($"openspec/changes/{context.IssueNumber}-{Slug(issue.Title)}"),
-        new WorkflowModelVariables(issue.Model ?? "", issue.StageModels ?? []),
-        WorkflowUserVariables.Empty());
-
     public string ToDispatchJson(WorkflowDispatchContext dispatch)
     {
-        var payload = new
-        {
-            mohist = Mohist,
-            issue = Issue,
-            project = Project,
-            artifacts = Artifacts,
-            model = Model,
-            vars = Vars.Values,
-            workflow = new { runId = dispatch.WorkflowRunId },
-            stage = new { name = dispatch.Stage },
-            work = new { id = dispatch.WorkId, type = dispatch.WorkType, title = dispatch.Title, attempt = dispatch.Attempt }
-        };
+        var payload = ParseObject(Json);
+
+        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = dispatch.WorkflowRunId }, WorkflowVariableJson.Options);
+        payload["stage"] = JsonSerializer.SerializeToElement(new { name = dispatch.Stage }, WorkflowVariableJson.Options);
+        payload["work"] = JsonSerializer.SerializeToElement(new { id = dispatch.WorkId, type = dispatch.WorkType, title = dispatch.Title, attempt = dispatch.Attempt }, WorkflowVariableJson.Options);
 
         return JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
     }
 
-    private static string Slug(string value)
+    public string? String(string section, string property)
     {
-        var chars = value.ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray();
-        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
+        using var document = JsonDocument.Parse(Json);
+        return document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty(section, out var sectionValue)
+            && sectionValue.ValueKind == JsonValueKind.Object
+            && sectionValue.TryGetProperty(property, out var propertyValue)
+            ? propertyValue.GetString()
+            : null;
     }
-}
 
-[GenerateSerializer]
-public sealed record MohistContext(
-    [property: Id(0)] string System,
-    [property: Id(1)] string RunId);
+    private static Dictionary<string, JsonElement?> ParseObject(string json)
+    {
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            return new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
 
-[GenerateSerializer]
-public sealed record WorkflowIssueVariables(
-    [property: Id(0)] string Id,
-    [property: Id(1)] int Number,
-    [property: Id(2)] string Title,
-    [property: Id(3)] string Body);
-
-[GenerateSerializer]
-public sealed record WorkflowProjectVariables(
-    [property: Id(0)] string Id,
-    [property: Id(1)] string Name,
-    [property: Id(2)] string Path,
-    [property: Id(3)] string BaseBranch,
-    [property: Id(4)] string DefaultBranch);
-
-[GenerateSerializer]
-public sealed record WorkflowArtifactVariables(
-    [property: Id(0)] string ChangeDir);
-
-[GenerateSerializer]
-public sealed record WorkflowModelVariables(
-    [property: Id(0)] string Default,
-    [property: Id(1)] Dictionary<string, string> Stage);
-
-[GenerateSerializer]
-public sealed record WorkflowUserVariables(
-    [property: Id(0)] Dictionary<string, string> Values)
-{
-    public static WorkflowUserVariables Empty() => new([]);
+        return document.RootElement.EnumerateObject().ToDictionary(
+            property => property.Name,
+            property => (JsonElement?)property.Value.Clone(),
+            StringComparer.Ordinal);
+    }
 }
 
 [GenerateSerializer]
