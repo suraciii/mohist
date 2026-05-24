@@ -29,10 +29,11 @@ export function useIssues(params?: { stage?: string; label?: string; projectId?:
 }
 
 export function useIssue(number: number) {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number],
-    queryFn: () => api.getIssue(number),
-    enabled: number > 0,
+    queryKey: ['issues', number, projectId],
+    queryFn: () => api.getIssue(number, projectId),
+    enabled: number > 0 && !!projectId,
   })
 }
 
@@ -44,26 +45,29 @@ export function useLabels() {
 }
 
 export function useIssueDiff(number: number) {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, 'diff'],
-    queryFn: () => api.getIssueDiff(number),
-    enabled: number > 0,
+    queryKey: ['issues', number, projectId, 'diff'],
+    queryFn: () => api.getIssueDiff(number, projectId),
+    enabled: number > 0 && !!projectId,
   })
 }
 
 export function useIssueCommits(number: number) {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, 'commits'],
-    queryFn: () => api.getIssueCommits(number),
-    enabled: number > 0,
+    queryKey: ['issues', number, projectId, 'commits'],
+    queryFn: () => api.getIssueCommits(number, projectId),
+    enabled: number > 0 && !!projectId,
   })
 }
 
 export function useCommitDiff(number: number, hash: string, enabled: boolean = false) {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', number, 'commits', hash, 'diff'],
-    queryFn: () => api.getCommitDiff(number, hash),
-    enabled: enabled && number > 0 && !!hash,
+    queryKey: ['issues', number, projectId, 'commits', hash, 'diff'],
+    queryFn: () => api.getCommitDiff(number, hash, projectId),
+    enabled: enabled && number > 0 && !!hash && !!projectId,
   })
 }
 
@@ -76,18 +80,21 @@ export function useAgentStatus() {
 }
 
 export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true) {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', issueNumber, 'workflow-timeline'],
-    queryFn: () => api.getWorkflowTimeline(issueNumber),
-    enabled: enabled && issueNumber > 0,
+    queryKey: ['issues', issueNumber, projectId, 'workflow-timeline'],
+    queryFn: () => api.getWorkflowTimeline(issueNumber, projectId),
+    enabled: enabled && issueNumber > 0 && !!projectId,
     refetchInterval: enabled ? 5000 : false,
   })
 }
 
 export function useAgentSessions(params?: { status?: string; limit?: number }) {
+  const { projectId } = useProject()
   return useQuery<AgentSessionInfo[]>({
-    queryKey: ['agent-sessions', params],
-    queryFn: () => api.getAgentSessions(params),
+    queryKey: ['agent-sessions', params, projectId],
+    queryFn: () => api.getAgentSessions({ ...params, projectId }),
+    enabled: !!projectId,
   })
 }
 
@@ -129,8 +136,9 @@ export function useDeleteProject() {
 
 export function useSendMessage(issueNumber: number) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation({
-    mutationFn: (message: string) => api.sendMessage(issueNumber, message),
+    mutationFn: (message: string) => api.sendMessage(issueNumber, message, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -158,9 +166,11 @@ export function useUseProject() {
 }
 
 export function useStatus() {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['status'],
-    queryFn: () => api.getStatus(),
+    queryKey: ['status', projectId],
+    queryFn: () => api.getStatus(projectId),
+    enabled: !!projectId,
     retry: false,
   })
 }
@@ -319,10 +329,11 @@ export function useTestProvider() {
 }
 
 export function useWorktreeStatus(issueNumber: number, enabled: boolean) {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['issues', issueNumber, 'worktree-status'],
-    queryFn: () => api.getWorktreeStatus(issueNumber),
-    enabled: enabled && issueNumber > 0,
+    queryKey: ['issues', issueNumber, projectId, 'worktree-status'],
+    queryFn: () => api.getWorktreeStatus(issueNumber, projectId),
+    enabled: enabled && issueNumber > 0 && !!projectId,
     refetchInterval: 30_000,
   })
 }
@@ -340,8 +351,9 @@ export function useArchivedIssues(params?: { projectId?: string }) {
 
 export function useUnarchiveIssue() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation({
-    mutationFn: (number: number) => api.unarchiveIssue(number),
+    mutationFn: (number: number) => api.unarchiveIssue(number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
@@ -532,8 +544,9 @@ export function useEpic(id: string) {
 
 export function useCreateEpic() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation<import('../lib/types').Epic, Error, { title: string; description: string; priority: string }>({
-    mutationFn: (data) => api.createEpic(data),
+    mutationFn: (data) => api.createEpic({ ...data, projectId: projectId ?? undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       toast.success('Epic created')
@@ -546,8 +559,9 @@ export function useCreateEpic() {
 
 export function useAddEpicIssue() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
-    mutationFn: ({ epicId, issueId }) => api.addEpicIssue(epicId, issueId),
+    mutationFn: ({ epicId, issueId }) => api.addEpicIssue(epicId, issueId, projectId),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
@@ -562,8 +576,9 @@ export function useAddEpicIssue() {
 
 export function useRemoveEpicIssue() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation<{ epicId: string; issueId: string }, Error, { epicId: string; issueId: string }>({
-    mutationFn: ({ epicId, issueId }) => api.removeEpicIssue(epicId, issueId),
+    mutationFn: ({ epicId, issueId }) => api.removeEpicIssue(epicId, issueId, projectId),
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', variables.epicId] })
@@ -578,8 +593,9 @@ export function useRemoveEpicIssue() {
 
 export function useMarkEpicDone() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation<import('../lib/types').Epic, Error, string>({
-    mutationFn: (id) => api.markEpicDone(id),
+    mutationFn: (id) => api.markEpicDone(id, projectId),
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', id] })
@@ -593,8 +609,9 @@ export function useMarkEpicDone() {
 
 export function useCloseEpic() {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   return useMutation<import('../lib/types').Epic, Error, string>({
-    mutationFn: (id) => api.closeEpic(id),
+    mutationFn: (id) => api.closeEpic(id, projectId),
     onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ['epics'] })
       queryClient.invalidateQueries({ queryKey: ['epics', id] })

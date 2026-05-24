@@ -3,6 +3,7 @@ import { Stage } from '../lib/types'
 import { api, ApiError } from '../lib/api'
 import { useWorktreeStatus } from '../hooks/useQueries'
 import { useLiveTask } from '../hooks/useSSE'
+import { useProject } from '../context/ProjectContext'
 
 const BRANCH_BAR_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
 
@@ -14,12 +15,13 @@ interface BranchBarProps {
 
 export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const { rebaseConflict } = useLiveTask()
 
   const { data, isLoading } = useWorktreeStatus(issueNumber, BRANCH_BAR_STAGES.has(stage))
 
   const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber),
+    mutationFn: () => api.rebaseIssue(issueNumber, projectId),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'worktree-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })

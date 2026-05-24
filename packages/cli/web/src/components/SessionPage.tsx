@@ -5,6 +5,7 @@ import { useIssue } from '../hooks/useQueries'
 import { useCoderSessions } from '../hooks/useCoderSessions'
 import { api } from '../lib/api'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { useProject } from '../context/ProjectContext'
 import { useSessionTranscript } from '../hooks/useSessionTranscript'
 import { projectTurn } from '../lib/session-transcript-display'
 import type { CoderSessionDetail, SessionStatusKind } from '../lib/types'
@@ -293,6 +294,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
 
 export function SessionPage() {
   const { number: numberStr, sessionId } = useParams<{ number: string; sessionId: string }>()
+  const { projectId } = useProject()
   const issueNumber = Number(numberStr)
 
   useDocumentTitle(`Session — Issue #${issueNumber} — Mohist`)
@@ -306,9 +308,9 @@ export function SessionPage() {
     isLoading: detailLoading,
     isError: detailError,
   } = useQuery<CoderSessionDetail, Error>({
-    queryKey: ['issues', issueNumber, 'coder-sessions', sessionId],
-    queryFn: () => api.getCoderSessionDetail(issueNumber, sessionId!),
-    enabled: !!sessionId && sessionId.length > 0 && issueNumber > 0,
+    queryKey: ['issues', issueNumber, projectId, 'coder-sessions', sessionId],
+    queryFn: () => api.getCoderSessionDetail(issueNumber, sessionId!, projectId),
+    enabled: !!sessionId && sessionId.length > 0 && issueNumber > 0 && !!projectId,
   })
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)

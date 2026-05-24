@@ -21,10 +21,9 @@ public class AgentSessionSpecs
     {
         var projectName = $"session-spec-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        await _client.PostOkAsync($"/api/projects/{projectName}/use");
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Build session management", body = "track sessions", labels = Array.Empty<string>(), priority = "p1" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Build session management", body = "track sessions", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start");
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
         var sessionWork = await PollUntilAgentWorkAsync();
@@ -46,10 +45,10 @@ public class AgentSessionSpecs
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{session.Id}/completed", new { status = "completed", exitCode = 0 });
         await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = sessionWork.WorkId, status = "completed" });
 
-        var sessions = await _client.GetDataAsync<CoderSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions");
+        var sessions = await _client.GetDataAsync<CoderSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
         Assert.Contains(sessions, s => s.Id == session.Id && s.Status == "completed");
 
-        var detail = await _client.GetDataAsync<CoderSessionDetailDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}");
+        var detail = await _client.GetDataAsync<CoderSessionDetailDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
         Assert.Equal(session.Id, detail.Id);
         Assert.Contains("hello from agent", JsonSerializer.Serialize(detail.Turns));
 

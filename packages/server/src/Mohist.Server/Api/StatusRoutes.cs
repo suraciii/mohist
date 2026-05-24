@@ -6,18 +6,17 @@ namespace Mohist.Server.Api;
 
 public static class StatusRoutes
 {
-    private const string ProjectRegistryKey = "project-registry";
+    private const string ProjectKey = "projects";
 
     public static WebApplication MapStatusRoutes(this WebApplication app)
     {
-        app.MapGet("/api/status", async (bool? all, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        app.MapGet("/api/status", async (bool? all, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
 
             if (all == true)
             {
-                var projects = await registry.GetAllAsync();
-                var currentId = (await registry.GetCurrentAsync())?.Id;
+                var projects = await projectsGrain.GetAllAsync();
                 var status = new List<object>();
 
                 foreach (var project in projects)
@@ -30,15 +29,14 @@ public static class StatusRoutes
                         name = project.Name,
                         path = project.Path,
                         issues = issues.Count,
-                        activeIssues,
-                        isCurrent = currentId == project.Id
+                        activeIssues
                     });
                 }
 
                 return ApiResults.Ok(status);
             }
 
-            var current = await registry.GetCurrentAsync();
+            var current = await ResolveProjectAsync(projectId, projectsGrain);
             if (current is null)
                 return ApiResults.BadRequest("No active project. Use: mo project use <name>");
 
@@ -75,6 +73,15 @@ public static class StatusRoutes
         });
 
         return app;
+    }
+
+    private static async Task<Mohist.Server.Project.Domain.ProjectInfo?> ResolveProjectAsync(string? projectId, IProjectGrain projectsGrain)
+    {
+        if (!string.IsNullOrWhiteSpace(projectId))
+            return await projectsGrain.GetByIdAsync(projectId);
+
+        var projects = await projectsGrain.GetAllAsync();
+        return projects.Count == 1 ? projects[0] : null;
     }
 
     private static (string? Version, string? GitHash, string? SourceHead, bool UpToDate) GetVersionInfo()

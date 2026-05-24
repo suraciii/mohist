@@ -6,6 +6,7 @@ import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
 import { useLiveTask } from '../hooks/useSSE'
+import { useProject } from '../context/ProjectContext'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -92,6 +93,7 @@ export function ReviewApprovalPanel({
   const review = parseReviewOutput(output)
   const classified = classifyResult(review.result)
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const { rebaseConflict } = useLiveTask()
 
   const [reportModalOpen, setReportModalOpen] = useState(false)
@@ -102,7 +104,7 @@ export function ReviewApprovalPanel({
   const [actionError, setActionError] = useState<string | null>(null)
 
   const approveMutation = useMutation({
-    mutationFn: () => api.approveIssue(issueNumber),
+    mutationFn: () => api.approveIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })

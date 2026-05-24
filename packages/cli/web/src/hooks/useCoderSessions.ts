@@ -3,12 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { onAgentEvent } from '../lib/agent-events'
 import type { CoderSessionSummary } from '../lib/types'
+import { useProject } from '../context/ProjectContext'
 
 export function useCoderSessions(issueNumber: number) {
+  const { projectId } = useProject()
   const { data: sessions = [], isLoading } = useQuery({
-    queryKey: ['issues', issueNumber, 'coder-sessions'],
-    queryFn: () => api.getCoderSessions(issueNumber),
-    enabled: issueNumber > 0,
+    queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
+    queryFn: () => api.getCoderSessions(issueNumber, projectId),
+    enabled: issueNumber > 0 && !!projectId,
     staleTime: 30 * 1000,
   })
 
@@ -20,7 +22,7 @@ export function useCoderSessions(issueNumber: number) {
 
   useEffect(() => {
     initializedRef.current = false
-  }, [issueNumber])
+  }, [issueNumber, projectId])
 
   useEffect(() => {
     if (isLoading || !sessions) return

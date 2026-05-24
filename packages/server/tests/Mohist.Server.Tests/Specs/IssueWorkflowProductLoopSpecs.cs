@@ -25,53 +25,52 @@ public class IssueWorkflowProductLoopSpecs
     {
         var projectName = $"project-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-product-loop", baseBranch = "main" });
-        await _client.PostOkAsync($"/api/projects/{projectName}/use");
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", stageModels = new Dictionary<string, string> { ["plan"] = "anthropic/claude" } });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", stageModels = new Dictionary<string, string> { ["plan"] = "anthropic/claude" }, projectId = project.Id });
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start");
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
         _runnerId = "product-loop-runner";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
-        var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events");
+        var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
         Assert.Contains(startEvents, e => e.Type == "issue_created");
         Assert.Contains(startEvents, e => e.Type == "issue_started");
         Assert.Contains(startEvents, e => e.Type == "workflow_started");
 
-        var initialTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline");
+        var initialTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
         Assert.Contains(initialTimeline.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
 
-        await DrainUntilApprovalAsync(issue.Number, "plan");
+        await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
 
-        var planTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline");
+        var planTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
         var planStage = Assert.Single(planTimeline.Stages, s => s.Stage == "plan");
         Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "completed");
         Assert.Equal("awaiting", planStage.Approval?.Status);
 
-        var planLogs = await _client.GetDataAsync<WorkflowLogDto[]>($"/api/issues/{issue.Number}/logs");
+        var planLogs = await _client.GetDataAsync<WorkflowLogDto[]>($"/api/issues/{issue.Number}/logs?projectId={project.Id}");
         Assert.Contains(planLogs, e => e.EventType == "workflow_task_completed");
         Assert.Contains(planLogs, e => e.EventType == "workflow_check_passed");
 
-        var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}");
+        var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.Equal("plan", listedAtApproval.Stage);
         Assert.Equal("awaiting", listedAtApproval.ApprovalState?.Status);
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve");
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
 
-        await DrainUntilApprovalAsync(issue.Number, "check");
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve");
+        await DrainUntilApprovalAsync(project.Id, issue.Number, "check");
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
 
-        await DrainUntilDoneAsync(issue.Number);
+        await DrainUntilDoneAsync(project.Id, issue.Number);
 
-        var completed = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}");
+        var completed = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.Equal("done", completed.Stage);
         Assert.Equal("completed", completed.Status);
     }
 
-    private async Task DrainUntilApprovalAsync(int issueNumber, string stage)
+    private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)
     {
         for (var i = 0; i < 100; i++)
         {
-            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status");
+            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status?projectId={projectId}");
             if (status.Workflow?.Status == "AwaitingApproval" && status.Workflow.CurrentStage == stage)
                 return;
             await CompleteNextWorkAsync();
@@ -80,11 +79,11 @@ public class IssueWorkflowProductLoopSpecs
         Assert.Fail($"Workflow did not reach approval at stage {stage}");
     }
 
-    private async Task DrainUntilDoneAsync(int issueNumber)
+    private async Task DrainUntilDoneAsync(string projectId, int issueNumber)
     {
         for (var i = 0; i < 100; i++)
         {
-            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status");
+            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status?projectId={projectId}");
             if (status.Workflow?.Status == "Passed")
                 return;
             await CompleteNextWorkAsync();

@@ -7,6 +7,7 @@ import type { Issue, StageExecution, StageTaskResult, StageTaskState, StageCheck
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
+import { useProject } from '../context/ProjectContext'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -421,6 +422,7 @@ function InlineApproval({
   nextAction?: string | null
 }) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const [feedback, setFeedback] = useState('')
   const [messageText, setMessageText] = useState('')
   const [showSendMessage, setShowSendMessage] = useState(false)
@@ -436,7 +438,7 @@ function InlineApproval({
   const classified = useMemo(() => classifyResult(review.result), [review.result])
 
   const approveMutation = useMutation({
-    mutationFn: () => api.approveIssue(issueNumber),
+    mutationFn: () => api.approveIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -445,7 +447,7 @@ function InlineApproval({
   })
 
   const rejectMutation = useMutation({
-    mutationFn: () => api.rejectIssue(issueNumber, { message: feedback.trim() || undefined }),
+    mutationFn: () => api.rejectIssue(issueNumber, { message: feedback.trim() || undefined }, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -455,7 +457,7 @@ function InlineApproval({
   })
 
   const sendMessageMutation = useMutation({
-    mutationFn: (message: string) => api.sendMessage(issueNumber, message),
+    mutationFn: (message: string) => api.sendMessage(issueNumber, message, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -850,9 +852,10 @@ function SpecialStatePanel({
   readOnly: boolean
 }) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
 
   const startMutation = useMutation({
-    mutationFn: () => api.startIssue(issueNumber),
+    mutationFn: () => api.startIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -860,7 +863,7 @@ function SpecialStatePanel({
   })
 
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeIssue(issueNumber),
+    mutationFn: () => api.resumeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })

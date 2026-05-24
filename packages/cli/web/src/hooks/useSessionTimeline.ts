@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { useProject } from '../context/ProjectContext'
 import { onAgentEvent } from '../lib/agent-events'
 import type {
   ToolCallEntry,
@@ -224,12 +225,13 @@ export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
 }
 
 export function useSessionTimeline(issueNumber: number, session?: CoderSessionItem) {
+  const { projectId } = useProject()
   const shouldFetchLogs = !session
 
   const { data: logs = [], isLoading: loadingLogs } = useQuery({
-    queryKey: ['workflow-logs', issueNumber],
-    queryFn: () => api.getWorkflowLogs(issueNumber),
-    enabled: issueNumber > 0 && shouldFetchLogs,
+    queryKey: ['workflow-logs', issueNumber, projectId],
+    queryFn: () => api.getWorkflowLogs(issueNumber, projectId),
+    enabled: issueNumber > 0 && shouldFetchLogs && !!projectId,
   })
 
   const sessionRef = useRef(session)

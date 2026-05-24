@@ -5,6 +5,7 @@ import type { Issue, AgentStatus } from '../lib/types'
 import type { SortMode } from '../lib/board-query'
 import { api } from '../lib/api'
 import { IssueCard } from './IssueCard'
+import { useProject } from '../context/ProjectContext'
 
 const DONE_COLLAPSE_LIMIT = 5
 
@@ -20,6 +21,7 @@ interface Props {
 
 export function StageColumn({ label, issues, agentStatus, isDone, archivedCount = 0, sort, onSortChange }: Props) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const [expanded, setExpanded] = useState(false)
 
   const totalCount = issues.length
@@ -30,7 +32,7 @@ export function StageColumn({ label, issues, agentStatus, isDone, archivedCount 
     : issues
 
   const archiveAllMutation = useMutation({
-    mutationFn: () => api.archiveAllCompleted(),
+    mutationFn: () => api.archiveAllCompleted(projectId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })
