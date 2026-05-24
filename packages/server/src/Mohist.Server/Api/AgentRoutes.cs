@@ -1,11 +1,14 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
+using Mohist.Server.Project.Grains;
 using Mohist.Server.Workflow.Projection;
 
 namespace Mohist.Server.Api;
 
 public static class AgentRoutes
 {
+    private const string ProjectKey = "projects";
+
     public static WebApplication MapAgentRoutes(this WebApplication app)
     {
         var group = app.MapGroup("/api/agent");
@@ -55,7 +58,8 @@ public static class AgentRoutes
 
     private static async Task<string?> ResolveProjectIdAsync(IGrainFactory grains)
     {
-        var registry = grains.GetGrain<Project.Grains.IProjectRegistryGrain>("project-registry");
-        return (await registry.GetCurrentAsync())?.Id;
+        var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+        var projects = await projectsGrain.GetAllAsync();
+        return projects.Count == 1 ? projects[0].Id : null;
     }
 }

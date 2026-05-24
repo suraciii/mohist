@@ -6,32 +6,32 @@ namespace Mohist.Server.Api;
 
 public static class WorkspaceRoutes
 {
-    private const string ProjectRegistryKey = "project-registry";
+    private const string ProjectKey = "projects";
 
     public static WebApplication MapWorkspaceRoutes(this WebApplication app)
     {
         var issues = app.MapGroup("/api/issues/{number:int}");
 
-        issues.MapGet("/worktree-status", async (int number, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/worktree-status", async (int number, string? projectId, IGitService git, IGrainFactory grains) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var status = await git.GetWorktreeStatusAsync(project.Path, project.Name, number, project.BaseBranch);
             return ApiResults.Ok(status);
         });
 
-        issues.MapGet("/diff", async (int number, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/diff", async (int number, string? projectId, IGitService git, IGrainFactory grains) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var branchExists = await git.BranchExistsAsync(project.Path, $"mo/issue-{number}");
@@ -59,13 +59,13 @@ public static class WorkspaceRoutes
             });
         });
 
-        issues.MapGet("/commits", async (int number, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/commits", async (int number, string? projectId, IGitService git, IGrainFactory grains) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var head = $"mo/issue-{number}";
@@ -103,13 +103,13 @@ public static class WorkspaceRoutes
             });
         });
 
-        issues.MapGet("/commits/{hash}/diff", async (int number, string hash, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/commits/{hash}/diff", async (int number, string hash, string? projectId, IGitService git, IGrainFactory grains) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var head = $"mo/issue-{number}";
@@ -122,13 +122,13 @@ public static class WorkspaceRoutes
                 : ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff });
         });
 
-        issues.MapGet("/file-content", async (int number, string path, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/file-content", async (int number, string path, string? projectId, IGitService git, IGrainFactory grains) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
             var baseContent = await git.GetFileContentAsync(project.Path, project.BaseBranch, path);
@@ -137,9 +137,9 @@ public static class WorkspaceRoutes
             return ApiResults.Ok(new { @base = baseContent, head = headContent });
         });
 
-        issues.MapPost("/cleanup", async (int number, IGrainFactory grains) =>
+        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
@@ -158,10 +158,11 @@ public static class WorkspaceRoutes
         return app;
     }
 
-    private static async Task<string?> ResolveProjectIdAsync(IGrainFactory grains)
+    private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
     {
-        var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-        var current = await registry.GetCurrentAsync();
-        return current?.Id;
+        if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
+        var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+        var projects = await projectsGrain.GetAllAsync();
+        return projects.Count == 1 ? projects[0].Id : null;
     }
 }

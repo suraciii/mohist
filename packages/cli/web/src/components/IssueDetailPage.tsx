@@ -18,6 +18,7 @@ import { SessionList } from './SessionList'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
 import { statusBadge, statusLabel } from '../lib/status-badge'
+import { useProject } from '../context/ProjectContext'
 
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 
@@ -63,6 +64,7 @@ export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const issueNumber = parseInt(number ?? '0', 10)
   const [editOpen, setEditOpen] = useState(false)
   const [commentText, setCommentText] = useState('')
@@ -115,7 +117,7 @@ export function IssueDetailPage() {
   const showCheckRepairActions = false
 
   const startMutation = useMutation({
-    mutationFn: () => api.startIssue(issueNumber),
+    mutationFn: () => api.startIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -128,7 +130,7 @@ export function IssueDetailPage() {
   })
 
   const addPrerequisiteMutation = useMutation({
-    mutationFn: (prerequisiteNumber: number) => api.addPrerequisite(issueNumber, prerequisiteNumber),
+    mutationFn: (prerequisiteNumber: number) => api.addPrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -136,7 +138,7 @@ export function IssueDetailPage() {
   })
 
   const removePrerequisiteMutation = useMutation({
-    mutationFn: (prerequisiteNumber: number) => api.removePrerequisite(issueNumber, prerequisiteNumber),
+    mutationFn: (prerequisiteNumber: number) => api.removePrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -144,14 +146,14 @@ export function IssueDetailPage() {
   })
 
   const closeMutation = useMutation({
-    mutationFn: () => api.closeIssue(issueNumber),
+    mutationFn: () => api.closeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })
 
   const forceStopMutation = useMutation({
-    mutationFn: () => api.forceStopIssue(issueNumber),
+    mutationFn: () => api.forceStopIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -160,14 +162,14 @@ export function IssueDetailPage() {
   })
 
   const reopenMutation = useMutation({
-    mutationFn: () => api.reopenIssue(issueNumber),
+    mutationFn: () => api.reopenIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })
 
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeIssue(issueNumber),
+    mutationFn: () => api.resumeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -175,7 +177,7 @@ export function IssueDetailPage() {
   })
 
   const retryMutation = useMutation({
-    mutationFn: () => api.retryIssue(issueNumber),
+    mutationFn: () => api.retryIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -183,7 +185,7 @@ export function IssueDetailPage() {
   })
 
   const rerunMutation = useMutation({
-    mutationFn: () => api.rerunIssue(issueNumber),
+    mutationFn: () => api.rerunIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -191,7 +193,7 @@ export function IssueDetailPage() {
   })
 
   const addCommentMutation = useMutation({
-    mutationFn: (body: string) => api.addComment(issueNumber, body),
+    mutationFn: (body: string) => api.addComment(issueNumber, body, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       setCommentText('')
@@ -202,7 +204,7 @@ export function IssueDetailPage() {
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
   const deleteCommentMutation = useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(issueNumber, commentId),
+    mutationFn: (commentId: string) => api.deleteComment(issueNumber, commentId, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       setDeletingCommentId(null)

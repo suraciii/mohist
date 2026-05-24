@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { api } from '../../lib/api'
 import type { FileBlock } from '../../lib/diffModel'
 import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../../lib/diffModel'
+import { useProject } from '../../context/ProjectContext'
 
 interface FullFilePaneProps {
   block: FileBlock | null
@@ -21,6 +22,7 @@ export function FullFilePane({ block, issueNumber, threshold = DEFAULT_LARGE_DIF
   const [content, setContent] = useState<FileContent | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { projectId } = useProject()
   const containerRef = useRef<HTMLDivElement>(null)
   const classified = block ? classifyFile(block, threshold) : null
   const showCollapsedPlaceholder = !!classified?.isCollapsed && !renderAnyway
@@ -44,7 +46,7 @@ export function FullFilePane({ block, issueNumber, threshold = DEFAULT_LARGE_DIF
     setLoading(true)
     setError(null)
 
-    api.getFileContent(issueNumber, path)
+    api.getFileContent(issueNumber, path, projectId)
       .then((data) => {
         setContent(data)
         setLoading(false)
@@ -53,7 +55,7 @@ export function FullFilePane({ block, issueNumber, threshold = DEFAULT_LARGE_DIF
         setError(err instanceof Error ? err.message : 'Failed to load file content')
         setLoading(false)
       })
-  }, [block, issueNumber, showCollapsedPlaceholder])
+  }, [block, issueNumber, projectId, showCollapsedPlaceholder])
 
   if (!block) {
     return (

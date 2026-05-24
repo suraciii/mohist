@@ -33,6 +33,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T
 }
 
+function withProject(path: string, projectId?: string | null): string {
+  if (!projectId) return path
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}projectId=${encodeURIComponent(projectId)}`
+}
+
 export { ApiError }
 
 export const api = {
@@ -47,65 +53,65 @@ export const api = {
     return request<import('./types').Issue[]>(`/issues${qs ? `?${qs}` : ''}`)
   },
 
-  getIssue: (number: number) =>
-    request<import('./types').Issue>(`/issues/${number}`),
+  getIssue: (number: number, projectId?: string | null) =>
+    request<import('./types').Issue>(withProject(`/issues/${number}`, projectId)),
 
-  createIssue: (data: { title: string; body?: string; labels?: string[]; model?: string; priority?: string }) =>
+  createIssue: (data: { title: string; body?: string; labels?: string[]; model?: string; priority?: string; projectId?: string }) =>
     request<import('./types').Issue>('/issues', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null; stageModels?: Record<string, string> | null; priority?: string | null }) =>
-    request<import('./types').Issue>(`/issues/${number}`, {
+  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) =>
+    request<import('./types').Issue>(withProject(`/issues/${number}`, projectId), {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
-  startIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/start`, { method: 'POST' }),
+  startIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/start`, projectId), { method: 'POST' }),
 
-  closeIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/close`, { method: 'POST' }),
+  closeIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/close`, projectId), { method: 'POST' }),
 
-  reopenIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/reopen`, { method: 'POST' }),
+  reopenIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/reopen`, projectId), { method: 'POST' }),
 
-  resumeIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/resume`, { method: 'POST' }),
+  resumeIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/resume`, projectId), { method: 'POST' }),
 
-  retryIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/retry`, { method: 'POST' }),
+  retryIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/retry`, projectId), { method: 'POST' }),
 
-  approveIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; context: string | null; message: string }>(`/issues/${number}/approve`, { method: 'POST' }),
+  approveIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; context: string | null; message: string }>(withProject(`/issues/${number}/approve`, projectId), { method: 'POST' }),
 
-  rejectIssue: (number: number, data: { message?: string }) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/reject`, {
+  rejectIssue: (number: number, data: { message?: string }, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/reject`, projectId), {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  getIssueDiff: (number: number) =>
-    request<import('./types').IssueDiffResponse>(`/issues/${number}/diff`),
+  getIssueDiff: (number: number, projectId?: string | null) =>
+    request<import('./types').IssueDiffResponse>(withProject(`/issues/${number}/diff`, projectId)),
 
-  getIssueCommits: (number: number) =>
-    request<import('./types').IssueCommitsResponse>(`/issues/${number}/commits`),
+  getIssueCommits: (number: number, projectId?: string | null) =>
+    request<import('./types').IssueCommitsResponse>(withProject(`/issues/${number}/commits`, projectId)),
 
-  getCommitDiff: (number: number, hash: string) =>
-    request<import('./types').CommitDiffResponse>(`/issues/${number}/commits/${hash}/diff`),
+  getCommitDiff: (number: number, hash: string, projectId?: string | null) =>
+    request<import('./types').CommitDiffResponse>(withProject(`/issues/${number}/commits/${hash}/diff`, projectId)),
 
-  getFileContent: (number: number, filePath: string) =>
-    request<{ base: string; head: string }>(`/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`),
+  getFileContent: (number: number, filePath: string, projectId?: string | null) =>
+    request<{ base: string; head: string }>(withProject(`/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`, projectId)),
 
-  addComment: (issueNumber: number, body: string) =>
-    request<import('./types').Comment>(`/issues/${issueNumber}/comments`, {
+  addComment: (issueNumber: number, body: string, projectId?: string | null) =>
+    request<import('./types').Comment>(withProject(`/issues/${issueNumber}/comments`, projectId), {
       method: 'POST',
       body: JSON.stringify({ body }),
     }),
 
-  deleteComment: (issueNumber: number, commentId: string) =>
-    request<{ message: string }>(`/issues/${issueNumber}/comments/${commentId}`, {
+  deleteComment: (issueNumber: number, commentId: string, projectId?: string | null) =>
+    request<{ message: string }>(withProject(`/issues/${issueNumber}/comments/${commentId}`, projectId), {
       method: 'DELETE',
     }),
 
@@ -118,8 +124,8 @@ export const api = {
       body: JSON.stringify({ answer }),
     }),
 
-  sendMessage: (issueNumber: number, message: string) =>
-    request<{ message: string }>(`/issues/${issueNumber}/messages`, {
+  sendMessage: (issueNumber: number, message: string, projectId?: string | null) =>
+    request<{ message: string }>(withProject(`/issues/${issueNumber}/messages`, projectId), {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
@@ -128,8 +134,9 @@ export const api = {
 
   getAgentStatus: () => request<import('./types').AgentStatus>('/agent/status'),
 
-  getAgentSessions: (params?: { status?: string; limit?: number }) => {
+  getAgentSessions: (params?: { status?: string; limit?: number; projectId?: string | null }) => {
     const search = new URLSearchParams()
+    if (params?.projectId) search.set('projectId', params.projectId)
     if (params?.status) search.set('status', params.status)
     if (params?.limit != null) search.set('limit', String(params.limit))
     const qs = search.toString()
@@ -164,7 +171,7 @@ export const api = {
 
   getHomeDir: () => request<string>('/fs/home'),
 
-  getStatus: () => request<{
+  getStatus: (projectId?: string | null) => request<{
     name: string
     path: string
     issues: number
@@ -175,18 +182,18 @@ export const api = {
     gitHash: string | null
     sourceHead: string | null
     upToDate: boolean
-  }>('/status'),
+  }>(withProject('/status', projectId)),
 
   getAvailableModels: () => request<import('./types').ModelProvider[]>('/providers/models'),
 
-  getAgentSession: (number: number) =>
-    request<import('./types').AgentSessionMessageItem[]>(`/issues/${number}/agent-session`),
+  getAgentSession: (number: number, projectId?: string | null) =>
+    request<import('./types').AgentSessionMessageItem[]>(withProject(`/issues/${number}/agent-session`, projectId)),
 
-  getCoderSessions: (number: number) =>
-    request<import('./types').CoderSessionSummary[]>(`/issues/${number}/coder-sessions`),
+  getCoderSessions: (number: number, projectId?: string | null) =>
+    request<import('./types').CoderSessionSummary[]>(withProject(`/issues/${number}/coder-sessions`, projectId)),
 
-  getCoderSessionDetail: (number: number, sessionId: string) =>
-    request<import('./types').CoderSessionDetail>(`/issues/${number}/coder-sessions/${sessionId}`),
+  getCoderSessionDetail: (number: number, sessionId: string, projectId?: string | null) =>
+    request<import('./types').CoderSessionDetail>(withProject(`/issues/${number}/coder-sessions/${sessionId}`, projectId)),
 
   getCurrentProject: async () => {
     const res = await fetch(`${BASE}/projects/current`, {
@@ -199,15 +206,15 @@ export const api = {
     return json.data
   },
 
-  getWorkflowLogs: (number: number) =>
-    request<import('./types').WorkflowLogItem[]>(`/issues/${number}/logs`),
+  getWorkflowLogs: (number: number, projectId?: string | null) =>
+    request<import('./types').WorkflowLogItem[]>(withProject(`/issues/${number}/logs`, projectId)),
 
-  getWorkflowTimeline: (number: number) =>
-    request<import('./types').WorkflowTimeline>(`/issues/${number}/workflow/timeline`),
+  getWorkflowTimeline: (number: number, projectId?: string | null) =>
+    request<import('./types').WorkflowTimeline>(withProject(`/issues/${number}/workflow/timeline`, projectId)),
 
-  rebaseIssue: async (number: number) => {
+  rebaseIssue: async (number: number, projectId?: string | null) => {
     try {
-      return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(`/issues/${number}/rebase`, { method: 'POST' })
+      return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(withProject(`/issues/${number}/rebase`, projectId), { method: 'POST' })
     } catch (err) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
         return err.data as { rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }
@@ -216,11 +223,11 @@ export const api = {
     }
   },
 
-  rerunIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/rerun`, { method: 'POST' }),
+  rerunIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/rerun`, projectId), { method: 'POST' }),
 
-  forceStopIssue: (number: number) =>
-    request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/force-stop`, { method: 'POST' }),
+  forceStopIssue: (number: number, projectId?: string | null) =>
+    request<{ ok: boolean; issueNumber: number }>(withProject(`/issues/${number}/force-stop`, projectId), { method: 'POST' }),
 
   getConfig: () => request<import('./types').GeneralConfig>('/config'),
 
@@ -239,7 +246,7 @@ export const api = {
     return request<import('./types').LogTailResult>(`/logs/tail${qs ? `?${qs}` : ''}`)
   },
 
-  getWorktreeStatus: (number: number) =>
+  getWorktreeStatus: (number: number, projectId?: string | null) =>
     request<{
       exists: boolean
       branch?: string
@@ -248,16 +255,16 @@ export const api = {
       behind?: number
       rebaseInProgress?: boolean
       conflictingFiles?: string[]
-    }>(`/issues/${number}/worktree-status`),
+    }>(withProject(`/issues/${number}/worktree-status`, projectId)),
 
-  archiveIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string; warning?: string }>(`/issues/${number}/archive`, { method: 'POST' }),
+  archiveIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string; warning?: string }>(withProject(`/issues/${number}/archive`, projectId), { method: 'POST' }),
 
-  unarchiveIssue: (number: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/unarchive`, { method: 'POST' }),
+  unarchiveIssue: (number: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/unarchive`, projectId), { method: 'POST' }),
 
-  archiveAllCompleted: () =>
-    request<{ archived: number; skipped: number; skippedNumbers: number[]; message: string }>('/issues/archive-completed', { method: 'POST' }),
+  archiveAllCompleted: (projectId?: string | null) =>
+    request<{ archived: number; skipped: number; skippedNumbers: number[]; message: string }>(withProject('/issues/archive-completed', projectId), { method: 'POST' }),
 
   getOpencodeModel: () =>
     request<{ model: string | null }>('/opencode-model'),
@@ -322,14 +329,14 @@ export const api = {
   rebuildSystem: () =>
     request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
-  addPrerequisite: (number: number, prerequisiteNumber: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/prerequisites`, {
+  addPrerequisite: (number: number, prerequisiteNumber: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/prerequisites`, projectId), {
       method: 'POST',
       body: JSON.stringify({ prerequisiteNumber }),
     }),
 
-  removePrerequisite: (number: number, prerequisiteNumber: number) =>
-    request<{ issue: import('./types').Issue; message: string }>(`/issues/${number}/prerequisites/${prerequisiteNumber}`, {
+  removePrerequisite: (number: number, prerequisiteNumber: number, projectId?: string | null) =>
+    request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/prerequisites/${prerequisiteNumber}`, projectId), {
       method: 'DELETE',
     }),
 
@@ -347,27 +354,27 @@ export const api = {
     return request<import('./types').EpicDetail>(`/epics/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`)
   },
 
-  createEpic: (data: { title: string; description: string; priority: string }) =>
+  createEpic: (data: { title: string; description: string; priority: string; projectId?: string }) =>
     request<import('./types').Epic>('/epics', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  addEpicIssue: (epicId: string, issueId: string) =>
-    request<{ epicId: string; issueId: string }>(`/epics/${encodeURIComponent(epicId)}/issues`, {
+  addEpicIssue: (epicId: string, issueId: string, projectId?: string | null) =>
+    request<{ epicId: string; issueId: string }>(withProject(`/epics/${encodeURIComponent(epicId)}/issues`, projectId), {
       method: 'POST',
       body: JSON.stringify({ issueId }),
     }),
 
-  removeEpicIssue: (epicId: string, issueId: string) =>
-    request<{ epicId: string; issueId: string }>(`/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`, {
+  removeEpicIssue: (epicId: string, issueId: string, projectId?: string | null) =>
+    request<{ epicId: string; issueId: string }>(withProject(`/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`, projectId), {
       method: 'DELETE',
     }),
 
-  markEpicDone: (id: string) =>
-    request<import('./types').Epic>(`/epics/${encodeURIComponent(id)}/done`, { method: 'POST' }),
+  markEpicDone: (id: string, projectId?: string | null) =>
+    request<import('./types').Epic>(withProject(`/epics/${encodeURIComponent(id)}/done`, projectId), { method: 'POST' }),
 
-  closeEpic: (id: string) =>
-    request<import('./types').Epic>(`/epics/${encodeURIComponent(id)}/close`, { method: 'POST' }),
+  closeEpic: (id: string, projectId?: string | null) =>
+    request<import('./types').Epic>(withProject(`/epics/${encodeURIComponent(id)}/close`, projectId), { method: 'POST' }),
 
   }

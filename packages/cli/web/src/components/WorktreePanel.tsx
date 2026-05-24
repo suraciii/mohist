@@ -4,6 +4,7 @@ import { api, ApiError } from '../lib/api'
 import { useWorktreeStatus } from '../hooks/useQueries'
 import { onRebaseEvent } from '../lib/rebase-events'
 import { useLiveTask } from '../hooks/useSSE'
+import { useProject } from '../context/ProjectContext'
 
 interface WorktreePanelProps {
   issueNumber: number
@@ -28,6 +29,7 @@ const STEP_LABELS: Record<RebaseStep, string> = {
 
 export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreePanelProps) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const { data: status, isLoading } = useWorktreeStatus(issueNumber, true)
   const { rebaseConflict } = useLiveTask()
   const [rebaseResult, setRebaseResult] = useState<RebaseResult | null>(null)
@@ -60,7 +62,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
   }, [issueNumber])
 
   const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber),
+    mutationFn: () => api.rebaseIssue(issueNumber, projectId),
     onSuccess: (data) => {
       if (data.status === 'resolving-conflicts') {
         setRebaseResult({ type: 'info', message: 'Resolving conflicts...' })

@@ -5,22 +5,22 @@ namespace Mohist.Server.Api;
 
 public static class WorkflowEventRoutes
 {
-    private const string ProjectRegistryKey = "project-registry";
+    private const string ProjectKey = "projects";
 
     public static WebApplication MapWorkflowEventRoutes(this WebApplication app)
     {
-        app.MapGet("/api/issues/{number:int}/events", async (int number, int? limit, IGrainFactory grains, IEventStore events) =>
+        app.MapGet("/api/issues/{number:int}/events", async (int number, string? projectId, int? limit, IGrainFactory grains, IEventStore events) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var list = await events.ListIssueEventsAsync(pid, number, limit ?? 200);
             return ApiResults.Ok(list);
         });
 
-        app.MapGet("/api/issues/{number:int}/logs", async (int number, int? limit, IGrainFactory grains, IEventStore events) =>
+        app.MapGet("/api/issues/{number:int}/logs", async (int number, string? projectId, int? limit, IGrainFactory grains, IEventStore events) =>
         {
-            var pid = await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var list = await events.ListIssueEventsAsync(pid, number, limit ?? 200);
@@ -41,7 +41,7 @@ public static class WorkflowEventRoutes
 
         app.MapGet("/api/events/recent", async (string? projectId, int? limit, IGrainFactory grains, IEventStore events) =>
         {
-            var pid = !string.IsNullOrWhiteSpace(projectId) ? projectId : await ResolveProjectIdAsync(grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var list = await events.ListRecentAsync(pid, limit ?? 200);
@@ -51,10 +51,11 @@ public static class WorkflowEventRoutes
         return app;
     }
 
-    private static async Task<string?> ResolveProjectIdAsync(IGrainFactory grains)
+    private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
     {
-        var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-        var current = await registry.GetCurrentAsync();
-        return current?.Id;
+        if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
+        var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+        var projects = await projectsGrain.GetAllAsync();
+        return projects.Count == 1 ? projects[0].Id : null;
     }
 }

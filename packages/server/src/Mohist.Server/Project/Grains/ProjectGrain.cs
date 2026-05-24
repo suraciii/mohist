@@ -3,14 +3,13 @@ using Mohist.Server.Storage;
 
 namespace Mohist.Server.Project.Grains;
 
-public class ProjectRegistryGrain : Grain, IProjectRegistryGrain
+public class ProjectGrain : Grain, IProjectGrain
 {
     private readonly Dictionary<string, ProjectInfo> _projects = new(StringComparer.OrdinalIgnoreCase);
-    private string? _currentProjectName;
-    private readonly IStateStore<ProjectRegistryState> _store;
-    private readonly ILogger<ProjectRegistryGrain> _log;
+    private readonly IStateStore<ProjectState> _store;
+    private readonly ILogger<ProjectGrain> _log;
 
-    public ProjectRegistryGrain(IStateStore<ProjectRegistryState> store, ILogger<ProjectRegistryGrain> log)
+    public ProjectGrain(IStateStore<ProjectState> store, ILogger<ProjectGrain> log)
     {
         _store = store;
         _log = log;
@@ -24,7 +23,6 @@ public class ProjectRegistryGrain : Grain, IProjectRegistryGrain
         if (state is null) return;
         foreach (var (name, project) in state.Projects)
             _projects[name] = project;
-        _currentProjectName = state.CurrentProjectName;
     }
 
     public Task<ProjectInfo?> GetByNameAsync(string name)
@@ -79,30 +77,10 @@ public class ProjectRegistryGrain : Grain, IProjectRegistryGrain
     public async Task<bool> DeleteAsync(string name)
     {
         var removed = _projects.Remove(name);
-        if (removed && string.Equals(_currentProjectName, name, StringComparison.OrdinalIgnoreCase))
-            _currentProjectName = null;
         if (removed)
             await SaveAsync();
         return removed;
     }
 
-    public Task<ProjectInfo?> GetCurrentAsync()
-    {
-        if (_currentProjectName is null)
-            return Task.FromResult<ProjectInfo?>(null);
-        _projects.TryGetValue(_currentProjectName, out var project);
-        return Task.FromResult(project);
-    }
-
-    public async Task<ProjectInfo?> SetCurrentAsync(string name)
-    {
-        if (!_projects.TryGetValue(name, out var project))
-            return null;
-        _currentProjectName = name;
-        await SaveAsync();
-        _log.LogInformation("Current project set to {Name}", name);
-        return project;
-    }
-
-    private Task SaveAsync() => _store.SaveAsync(GrainKey, new ProjectRegistryState(new Dictionary<string, ProjectInfo>(_projects, StringComparer.OrdinalIgnoreCase), _currentProjectName));
+    private Task SaveAsync() => _store.SaveAsync(GrainKey, new ProjectState(new Dictionary<string, ProjectInfo>(_projects, StringComparer.OrdinalIgnoreCase)));
 }

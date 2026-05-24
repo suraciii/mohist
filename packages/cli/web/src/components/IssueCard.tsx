@@ -6,6 +6,7 @@ import { Stage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
+import { useProject } from '../context/ProjectContext'
 
 export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check])
 
@@ -114,6 +115,7 @@ function IntegrationBadge({ blockedReason }: { blockedReason?: string | null }) 
 
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const isAgentRunning = agentStatus.activeAgents?.some(
     (a) => a.issueNumber === issue.number,
   ) ?? false
@@ -123,7 +125,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const isInterrupted = issue.status === IssueStatus.Interrupted
 
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeIssue(issue.number),
+    mutationFn: () => api.resumeIssue(issue.number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -131,7 +133,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   })
 
   const rerunMutation = useMutation({
-    mutationFn: () => api.rerunIssue(issue.number),
+    mutationFn: () => api.rerunIssue(issue.number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -139,7 +141,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   })
 
   const archiveMutation = useMutation({
-    mutationFn: () => api.archiveIssue(issue.number),
+    mutationFn: () => api.archiveIssue(issue.number, projectId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })

@@ -4,7 +4,7 @@ namespace Mohist.Server.Api;
 
 public static class ProjectRoutes
 {
-    private const string RegistryKey = "project-registry";
+    private const string ProjectKey = "projects";
 
     public static WebApplication MapProjectRoutes(this WebApplication app)
     {
@@ -12,22 +12,20 @@ public static class ProjectRoutes
 
         group.MapGet("/", async (IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
-            var projects = await registry.GetAllAsync();
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var projects = await projectsGrain.GetAllAsync();
             return ApiResults.Ok(projects);
         });
 
-        group.MapGet("/current", async (IGrainFactory grains) =>
+        group.MapGet("/current", () =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
-            var project = await registry.GetCurrentAsync();
-            return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("No current project");
+            return ApiResults.NotFound("Current project is selected by the client");
         });
 
         group.MapGet("/{name}", async (string name, IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
-            var project = await registry.GetByNameAsync(name);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByNameAsync(name);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
@@ -36,11 +34,10 @@ public static class ProjectRoutes
             if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Path))
                 return ApiResults.BadRequest("name and path are required");
 
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
             try
             {
-                var project = await registry.CreateAsync(req.Name, req.Path, req.BaseBranch);
-                await registry.SetCurrentAsync(project.Name);
+                var project = await projectsGrain.CreateAsync(req.Name, req.Path, req.BaseBranch);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
@@ -51,22 +48,22 @@ public static class ProjectRoutes
 
         group.MapPatch("/{name}", async (string name, UpdateProjectRequest req, IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
-            var project = await registry.UpdateAsync(name, req.BaseBranch);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.UpdateAsync(name, req.BaseBranch);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
         group.MapPost("/{name}/use", async (string name, IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
-            var project = await registry.SetCurrentAsync(name);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByNameAsync(name);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
         group.MapDelete("/{name}", async (string name, IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IProjectRegistryGrain>(RegistryKey);
-            var deleted = await registry.DeleteAsync(name);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var deleted = await projectsGrain.DeleteAsync(name);
             return deleted ? ApiResults.Ok() : ApiResults.NotFound("Project not found");
         });
 

@@ -11,7 +11,7 @@ namespace Mohist.Server.Api;
 
 public static class CompatibilityRoutes
 {
-    private const string ProjectRegistryKey = "project-registry";
+    private const string ProjectKey = "projects";
 
     public static WebApplication MapCompatibilityRoutes(this WebApplication app)
     {
@@ -68,9 +68,9 @@ public static class CompatibilityRoutes
         app.MapPost("/api/questions/{id}/reply", (string id) => ApiResults.NotFound($"Question {id} not found"));
         app.MapPost("/api/questions/{id}/expire", (string id) => ApiResults.NotFound($"Question {id} not found"));
 
-        app.MapPost("/api/issues/{number:int}/messages", async (int number, MessageRequest req, IGrainFactory grains, IEventStore events) =>
+        app.MapPost("/api/issues/{number:int}/messages", async (int number, string? projectId, MessageRequest req, IGrainFactory grains, IEventStore events) =>
         {
-            var pid = await ResolveProjectIdAsync(null, grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
             var issue = await ResolveIssueAsync(pid, number, grains);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -88,10 +88,10 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(new { message = "Message recorded" });
         });
 
-        app.MapPost("/api/issues/{number:int}/comments", async (int number, CommentRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus) =>
+        app.MapPost("/api/issues/{number:int}/comments", async (int number, string? projectId, CommentRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus) =>
         {
             if (string.IsNullOrWhiteSpace(req.Body)) return ApiResults.BadRequest("body is required");
-            var pid = await ResolveProjectIdAsync(null, grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
             var issue = await ResolveIssueAsync(pid, number, grains);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -113,9 +113,9 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(dto);
         });
 
-        app.MapDelete("/api/issues/{number:int}/comments/{commentId}", async (int number, string commentId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) =>
+        app.MapDelete("/api/issues/{number:int}/comments/{commentId}", async (int number, string commentId, string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) =>
         {
-            var pid = await ResolveProjectIdAsync(null, grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
             await using var db = await dbFactory.CreateDbContextAsync();
             var comment = await db.IssueComments.FirstOrDefaultAsync(c => c.ProjectId == pid && c.IssueNumber == number && c.Id == commentId);
@@ -125,9 +125,9 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(new { message = "Comment deleted" });
         });
 
-        app.MapPost("/api/issues/{number:int}/prerequisites", async (int number, PrerequisiteRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
+        app.MapPost("/api/issues/{number:int}/prerequisites", async (int number, string? projectId, PrerequisiteRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(null, grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
             var issue = await ResolveIssueAsync(pid, number, grains);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -142,15 +142,15 @@ public static class CompatibilityRoutes
                 db.IssuePrerequisites.Add(new IssuePrerequisiteEntry { ProjectId = pid, IssueNumber = number, PrerequisiteNumber = req.PrerequisiteNumber });
                 await db.SaveChangesAsync();
             }
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
             return ApiResults.Ok(new { issue = await issuesQuery.GetAsync(pid, number, project), message = "Prerequisite added" });
         });
 
-        app.MapDelete("/api/issues/{number:int}/prerequisites/{prerequisiteNumber:int}", async (int number, int prerequisiteNumber, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
+        app.MapDelete("/api/issues/{number:int}/prerequisites/{prerequisiteNumber:int}", async (int number, int prerequisiteNumber, string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(null, grains);
+            var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
             await using var db = await dbFactory.CreateDbContextAsync();
             var row = await db.IssuePrerequisites.FindAsync(pid, number, prerequisiteNumber);
@@ -159,8 +159,8 @@ public static class CompatibilityRoutes
                 db.IssuePrerequisites.Remove(row);
                 await db.SaveChangesAsync();
             }
-            var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-            var project = await registry.GetByIdAsync(pid);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
             return ApiResults.Ok(new { issue = await issuesQuery.GetAsync(pid, number, project), message = "Prerequisite removed" });
         });
@@ -190,8 +190,9 @@ public static class CompatibilityRoutes
     private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
     {
         if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
-        var registry = grains.GetGrain<IProjectRegistryGrain>(ProjectRegistryKey);
-        return (await registry.GetCurrentAsync())?.Id;
+        var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+        var projects = await projectsGrain.GetAllAsync();
+        return projects.Count == 1 ? projects[0].Id : null;
     }
 
     private static async Task<IssueInfo?> ResolveIssueAsync(string projectId, int number, IGrainFactory grains)

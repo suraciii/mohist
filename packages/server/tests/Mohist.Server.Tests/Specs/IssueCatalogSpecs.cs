@@ -16,9 +16,8 @@ public class IssueCatalogSpecs : IClassFixture<WorkflowGrainFixture>
 
     private async Task<string> SetupProjectAsync()
     {
-        var registry = _grains.GetGrain<IProjectRegistryGrain>(Guid.NewGuid().ToString());
-        var project = await registry.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
-        await registry.SetCurrentAsync(project.Name);
+        var projects = _grains.GetGrain<IProjectGrain>(Guid.NewGuid().ToString());
+        var project = await projects.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
         return project.Id;
     }
 
