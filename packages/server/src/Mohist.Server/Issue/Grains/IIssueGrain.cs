@@ -16,10 +16,6 @@ public interface IIssueGrain : IGrainWithStringKey
     Task ReopenAsync();
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
     Task<IssueInfo> GetInfoAsync();
-    Task SetStageAsync(string stage);
-    Task SetRuntimeStatusAsync(string status, string? reason = null);
-    Task SetApprovalStateAsync(ApprovalState? state);
-    Task SetMergeStateAsync(string? state);
     Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection);
 }
 
