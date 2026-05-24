@@ -18,10 +18,6 @@ import type { WorkflowRunService } from './workflow-run-service';
 import type { IssuePrerequisiteService } from './issue-prerequisite-service';
 import { WorktreeManager } from '../git/worktree-manager';
 import { isCurrentStageApproval } from '../workflow/issue-lifecycle';
-import { WorkflowRuntime } from '@mohist/workflow';
-import { WorkflowStoreAdapter } from '../workflow/runtime/store';
-import { createMohistTaskHandlers, createMohistCheckHandlers, createMohistTaskLoaders } from '../workflow/runtime/handlers';
-import { MOHIST_DEFAULT_WORKFLOW_DEFINITION } from '../workflow/runtime/definition';
 
 export type TaskType = QueueTaskType;
 
@@ -194,8 +190,7 @@ export class AgentRunnerService {
 
     if (this.workflowRunService) {
       try {
-        // TODO: Implement interrupt via new WorkflowRuntime
-        log.info('Force stop: workflow interrupt not yet implemented in new runtime', { issueId });
+        log.info('Force stop: TypeScript workflow interrupt removed; .NET workflow service owns interruption', { issueId });
       } catch (e) {
         log.warn('Failed to interrupt work attempts during force stop', {
           issueId,
@@ -375,8 +370,7 @@ export class AgentRunnerService {
   private recoverSingleIssue(issue: Issue): void {
     if (!this.issueRepo) return;
     try {
-      // TODO: Recovery logic using new WorkflowStoreAdapter will be implemented later
-      // For now, skip active run check and preserve existing issue state
+      // The .NET workflow service owns persisted run recovery; the legacy TS server only reconciles issue state.
       if (issue.status === IssueStatus.Completed || issue.stage === Stage.Done) {
         log.info('Completed issue needs no recovery action', {
           issueNumber: issue.number,
@@ -788,10 +782,6 @@ export class AgentRunnerService {
       return;
     }
 
-    if (this.workflowRunService) {
-      log.info('Using MOHIST_DEFAULT_WORKFLOW_DEFINITION for issue', { issueNumber: issue.number });
-    }
-
     const acpOptions: AgentSessionOptions = { cwd: worktreePath };
     await this.runPipelineToCompletion(task, issue, issue.projectId, this.issueRepo, worktreePath, acpOptions);
   }
@@ -848,13 +838,13 @@ export class AgentRunnerService {
 
   private canResumeBlockedIssue(issue: Issue): boolean {
     if (issue.status !== IssueStatus.Blocked) return false;
-    // TODO: Implement recovery projection via new WorkflowRuntime
+    // Workflow recovery is owned by the .NET workflow service.
     return false;
   }
 
   private canRetryBlockedIssue(issue: Issue): boolean {
     if (issue.status !== IssueStatus.Blocked) return false;
-    // TODO: Implement retry availability check via new WorkflowRuntime
+    // Workflow retryability is owned by the .NET workflow service.
     return false;
   }
 
@@ -867,11 +857,15 @@ export class AgentRunnerService {
     _acpOptions: AgentSessionOptions,
   ): Promise<void> {
     this.eventBus.emit('agent_started', { issueId: issue.id, projectId });
-    log.info('Pipeline started via new workflow runtime', { issueNumber: issue.number, taskType: task.taskType, taskId: task.id });
+    log.warn('TypeScript workflow runtime has been removed; pipeline execution is owned by .NET Mohist.Server', {
+      issueNumber: issue.number,
+      taskType: task.taskType,
+      taskId: task.id,
+      worktreePath,
+    });
 
     const abortController = new AbortController();
     this.abortControllers.set(issue.id, abortController);
-    const startTime = Date.now();
 
     try {
       try {
@@ -883,93 +877,7 @@ export class AgentRunnerService {
         });
       }
 
-      if (!this.workflowRunService) {
-        this.completeTask(task.id, 'failed', 'WorkflowRunService not available');
-        return;
-      }
-
-      const db = this.workflowRunService.getDatabaseManager();
-      const store = new WorkflowStoreAdapter(db);
-
-      // Load workflow definition from workspace or use default
-      // TODO: implement proper definition loading from workspace config
-      const definition = MOHIST_DEFAULT_WORKFLOW_DEFINITION;
-
-      const handlerCtx = {
-        worktreePath,
-        issue,
-        projectId,
-        eventBus: this.eventBus,
-      };
-
-      const runtime = new WorkflowRuntime({
-        store,
-        tasks: createMohistTaskHandlers(handlerCtx),
-        checks: createMohistCheckHandlers(handlerCtx),
-        taskLoaders: createMohistTaskLoaders(handlerCtx),
-      });
-
-      // Try to load existing workflow run, or create new one
-      const runId = `wr_${issue.projectId}_${issue.number}_${Date.now()}`;
-      let runner = await runtime.load(runId);
-      if (!runner) {
-        runner = await runtime.create({
-          id: runId,
-          definition,
-        });
-      }
-
-      // Set abort signal
-      runner.withSignal(abortController.signal);
-
-      // Start or resume execution
-      if (runner.status === 'pending') {
-        await runner.start();
-      } else {
-        await runner.resume();
-      }
-
-      const duration = Date.now() - startTime;
-      const latestIssue = issueRepo.findById(issue.id);
-      // TODO: isPaused should check for approval state properly - currently 'paused' is used for both signal pause and approval wait
-      const isPaused = runner.status === 'paused' && latestIssue?.approvalState?.status === 'awaiting';
-
-      log.info('Pipeline run completed', {
-        issueNumber: issue.number,
-        elapsedMs: duration,
-        completed: runner.status === 'completed',
-        paused: isPaused,
-        status: runner.status,
-      });
-
-      if (isPaused) {
-        this.eventBus.emit('agent_paused', {
-          issueId: issue.id,
-          projectId,
-          issueNumber: issue.number,
-        });
-        log.info('Pipeline paused at approval, marking task completed', {
-          issueNumber: issue.number,
-          stage: runner.currentStage,
-          taskId: task.id,
-        });
-        this.completeTask(task.id, 'completed', 'awaiting_approval');
-        return;
-      }
-
-      if (runner.status === 'completed') {
-        this.eventBus.emit('agent_completed', { issueId: issue.id, projectId, issueNumber: issue.number });
-        this.completeTask(task.id, 'completed', 'success');
-      } else {
-        const failure = runner.failure;
-        const failureMessage = failure?.message ?? failure?.reason ?? 'Pipeline execution failed';
-        const failureSummary = `[${runner.currentStage}] ${failureMessage}`;
-        this.handlePipelineFailure(issue, issueRepo, projectId, failureSummary);
-        this.completeTask(task.id, 'failed', failureSummary);
-      }
-
-      const failureMessage = runner.failure?.message ?? runner.failure?.reason ?? 'Pipeline execution failed';
-      const failureSummary = `[${runner.currentStage}] ${failureMessage}`;
+      const failureSummary = 'TypeScript workflow runtime has been removed; use the .NET Mohist.Server workflow API and Mohist.Runner execution plane.';
       this.handlePipelineFailure(issue, issueRepo, projectId, failureSummary);
       this.completeTask(task.id, 'failed', failureSummary);
     } catch (err) {
