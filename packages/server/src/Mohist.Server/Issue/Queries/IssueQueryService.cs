@@ -68,22 +68,6 @@ public class IssueQueryService
         return await EnrichAsync(db, list);
     }
 
-    public async Task<Domain.Issue?> GetDomainAsync(string projectId, int number)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var key = $"{projectId}:{number}";
-        var row = await db.GrainStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
-        return row is null ? null : JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
-    }
-
-    public async Task<IssueStartEligibility> GetStartEligibilityAsync(string projectId, int number)
-    {
-        var issue = await GetAsync(projectId, number);
-        return issue?.StartEligibility ?? IssueStartEligibility.Ready();
-    }
-
     public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null) => new()
     {
         Id = issue.Id,
@@ -107,6 +91,7 @@ public class IssueQueryService
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         WorkflowRunId = issue.WorkflowRunId,
+        PrerequisiteNumbers = issue.PrerequisiteNumbers,
     };
 
     public static IssueReadModel ToReadModel(IssueInfo issue) => new()
@@ -132,6 +117,7 @@ public class IssueQueryService
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         WorkflowRunId = issue.WorkflowRunId,
+        PrerequisiteNumbers = issue.PrerequisiteNumbers,
     };
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
@@ -156,9 +142,20 @@ public class IssueQueryService
             }
         }
 
-        var prereqRows = await db.IssuePrerequisites.AsNoTracking()
+        var persistedRows = await db.IssuePrerequisites.AsNoTracking()
             .Where(p => p.ProjectId == projectId && numbers.Contains(p.IssueNumber))
             .ToListAsync();
+        var prereqRows = issues
+            .SelectMany(issue => issue.PrerequisiteNumbers.Select(prerequisiteNumber => new IssuePrerequisiteEntry
+            {
+                ProjectId = projectId,
+                IssueNumber = issue.Number,
+                PrerequisiteNumber = prerequisiteNumber,
+            }))
+            .Concat(persistedRows)
+            .GroupBy(p => new { p.IssueNumber, p.PrerequisiteNumber })
+            .Select(group => group.First())
+            .ToList();
         var prereqNumbers = prereqRows.Select(p => p.PrerequisiteNumber).Distinct().ToArray();
         var prereqIssues = issues.Where(i => prereqNumbers.Contains(i.Number)).ToDictionary(i => i.Number);
         var missingPrereqNumbers = prereqNumbers.Where(number => !prereqIssues.ContainsKey(number)).ToArray();

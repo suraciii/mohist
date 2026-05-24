@@ -31,6 +31,10 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null)
     {
         EnsureIssue();
+        var eligibility = await GetStartEligibilityAsync();
+        if (!eligibility.Startable)
+            throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
+
         _issue!.SetStage(IssueStage.Plan);
         _issue.SetRuntimeStatus(IssueRuntimeStatus.Active);
         var wrId = $"wr_{Guid.NewGuid():N}";
@@ -236,8 +240,50 @@ public class IssueGrain : Grain, IIssueGrain
             ConflictRetryCount = _issue.ConflictRetryCount,
             BlockedReason = _issue.BlockedReason,
             WorkflowRunId = _issue.WorkflowRunId,
+            PrerequisiteNumbers = _issue.PrerequisiteNumbers,
         };
         return Task.FromResult(info);
+    }
+
+    public async Task AddPrerequisiteAsync(int prerequisiteNumber)
+    {
+        EnsureIssue();
+        if (prerequisiteNumber != _issue!.Number)
+            _ = await LoadIssueSummaryAsync(prerequisiteNumber) ?? throw new InvalidOperationException($"Issue #{prerequisiteNumber} not found");
+
+        _issue.AddPrerequisite(prerequisiteNumber);
+        await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_prerequisite_added", "updated", $"Prerequisite #{prerequisiteNumber} added", new { prerequisiteNumber });
+    }
+
+    public async Task RemovePrerequisiteAsync(int prerequisiteNumber)
+    {
+        EnsureIssue();
+        _issue!.RemovePrerequisite(prerequisiteNumber);
+        await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_prerequisite_removed", "updated", $"Prerequisite #{prerequisiteNumber} removed", new { prerequisiteNumber });
+    }
+
+    public async Task<IssueStartEligibility> GetStartEligibilityAsync()
+    {
+        EnsureIssue();
+        var waiting = new List<IssuePrerequisiteSummary>();
+        foreach (var prerequisiteNumber in _issue!.PrerequisiteNumbers)
+        {
+            var summary = await LoadIssueSummaryAsync(prerequisiteNumber);
+            if (summary is not null && !summary.Delivered)
+                waiting.Add(summary);
+        }
+
+        return waiting.Count == 0
+            ? IssueStartEligibility.Ready()
+            : new IssueStartEligibility
+            {
+                Startable = false,
+                Reason = "waiting-for-delivery",
+                Message = $"Waiting for #{waiting[0].Number}",
+                WaitingForDelivery = waiting.ToArray(),
+            };
     }
 
     public async Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection)
@@ -310,6 +356,31 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null)
             throw new InvalidOperationException($"Issue '{GrainKey}' not found");
     }
+
+    private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)
+    {
+        if (_issue is null) return null;
+        try
+        {
+            var info = await GrainFactory.GetGrain<IIssueGrain>($"{_issue.ProjectId}:{issueNumber}").GetInfoAsync();
+            return ToPrerequisiteSummary(info);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueInfo issue) => new()
+    {
+        IssueId = issue.Id,
+        Number = issue.Number,
+        Title = issue.Title,
+        Delivered = issue.Stage == "done" || issue.Status == "completed" || issue.MergeState == "merged",
+        Stage = issue.Stage,
+        Status = issue.Status,
+        MergeState = issue.MergeState,
+    };
 
     private static string Slug(string value)
     {

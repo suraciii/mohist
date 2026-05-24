@@ -16,6 +16,9 @@ public interface IIssueGrain : IGrainWithStringKey
     Task ReopenAsync();
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
     Task<IssueInfo> GetInfoAsync();
+    Task AddPrerequisiteAsync(int prerequisiteNumber);
+    Task RemovePrerequisiteAsync(int prerequisiteNumber);
+    Task<IssueStartEligibility> GetStartEligibilityAsync();
     Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection);
 }
 

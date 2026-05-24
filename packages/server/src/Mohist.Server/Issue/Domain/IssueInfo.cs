@@ -24,6 +24,7 @@ public class IssueInfo
     [Id(18)] public int? ConflictRetryCount { get; set; }
     [Id(19)] public string? BlockedReason { get; set; }
     [Id(20)] public string? WorkflowRunId { get; set; }
+    [Id(21)] public int[] PrerequisiteNumbers { get; set; } = [];
 }
 
 [GenerateSerializer]
