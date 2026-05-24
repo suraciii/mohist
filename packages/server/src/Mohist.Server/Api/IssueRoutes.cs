@@ -48,8 +48,11 @@ public static class IssueRoutes
             var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
             if (await projectsGrain.GetByIdAsync(pid) is null) return ApiResults.NotFound("Project not found");
 
-            var catalog = grains.GetGrain<IIssueCatalogGrain>(pid);
-            var issue = await catalog.CreateAsync(req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels);
+            var counter = grains.GetGrain<IIssueCounterGrain>(pid);
+            var number = await counter.NextAsync();
+            var issueGrain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            await issueGrain.HydrateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels);
+            var issue = await issueGrain.GetInfoAsync();
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
 
