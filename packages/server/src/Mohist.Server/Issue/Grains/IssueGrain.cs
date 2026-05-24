@@ -45,12 +45,12 @@ public class IssueGrain : Grain, IIssueGrain
         var projectName = project?.Name ?? _issue.ProjectId;
         var projectPath = project?.Path ?? ".";
         var baseBranch = project?.BaseBranch ?? "main";
-        var issueContext = new WorkflowIssueContext(projectId, _issue.Id, _issue.Number, projectName, projectPath, baseBranch);
+        var correlation = new WorkflowCorrelationContext(projectId, "issue", _issue.Id, _issue.Number);
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(
             MohistPipeline.Definition,
-            issueContext,
+            correlation,
             new WorkflowStartInput(BuildWorkflowVariables(wrId, _issue, projectId, projectName, projectPath, baseBranch)));
 
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
@@ -130,8 +130,8 @@ public class IssueGrain : Grain, IIssueGrain
             _issue.Id,
             _issue.Number,
             _issue.Title,
-            _issue.Stage.ToString().ToLower(),
-            _issue.RuntimeStatus.ToString().ToLower(),
+            ResolveWorkflowStage(wfStatus, _issue.Stage.ToString().ToLower()),
+            ResolveWorkflowRuntimeStatus(wfStatus, _issue.RuntimeStatus.ToString().ToLower()),
             wrId,
             wfStatus?.ChangeDir,
             null,
@@ -224,55 +224,6 @@ public class IssueGrain : Grain, IIssueGrain
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
-    public async Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection)
-    {
-        EnsureIssue();
-        var previousStage = _issue!.Stage;
-        var previousStatus = _issue.RuntimeStatus;
-        var previousApproval = _issue.ApprovalState;
-
-        if (Enum.TryParse<IssueStage>(projection.Stage, true, out var stage))
-            _issue.SetStage(stage);
-        if (Enum.TryParse<IssueRuntimeStatus>(projection.RuntimeStatus, true, out var status))
-            _issue!.SetRuntimeStatus(status, projection.BlockedReason);
-        _issue!.SetApprovalState(projection.ApprovalState);
-        if (projection.Completed)
-            _issue.SetRuntimeStatus(IssueRuntimeStatus.Completed);
-
-        await _issueStore.SaveAsync(GrainKey, _issue!);
-        await AppendProjectionEventsAsync(previousStage, previousStatus, previousApproval, projection.Completed);
-    }
-
-    private async Task AppendProjectionEventsAsync(IssueStage previousStage, IssueRuntimeStatus previousStatus, ApprovalState? previousApproval, bool completed)
-    {
-        if (_issue is null) return;
-
-        if (_issue.Stage != previousStage)
-            await AppendIssueEventAsync("issue_stage_changed", _issue.Stage.ToString().ToLower(), $"Issue moved to {_issue.Stage.ToString().ToLower()}", new { from = previousStage.ToString().ToLower(), to = _issue.Stage.ToString().ToLower() });
-
-        if (_issue.RuntimeStatus != previousStatus)
-            await AppendIssueEventAsync("issue_runtime_status_changed", _issue.RuntimeStatus.ToString().ToLower(), $"Issue is {_issue.RuntimeStatus.ToString().ToLower()}", new { from = previousStatus.ToString().ToLower(), to = _issue.RuntimeStatus.ToString().ToLower(), reason = _issue.BlockedReason });
-
-        var approval = _issue.ApprovalState;
-        if (approval?.Status != previousApproval?.Status || approval?.Stage != previousApproval?.Stage)
-        {
-            if (approval is not null)
-            {
-                var type = approval.Status switch
-                {
-                    "awaiting" => "issue_approval_requested",
-                    "approved" => "issue_approval_approved",
-                    "rejected" => "issue_approval_rejected",
-                    _ => $"issue_approval_{approval.Status}",
-                };
-                await AppendIssueEventAsync(type, approval.Status, $"Issue approval {approval.Status}", approval);
-            }
-        }
-
-        if (completed)
-            await AppendIssueEventAsync("issue_completed", "completed", "Issue completed");
-    }
-
     private Task AppendIssueEventAsync(string type, string? status, string? message, object? payload = null)
     {
         if (_issue is null) return Task.CompletedTask;
@@ -318,6 +269,22 @@ public class IssueGrain : Grain, IIssueGrain
         Stage = issue.Stage,
         Status = issue.Status,
         MergeState = issue.MergeState,
+    };
+
+    private static string ResolveWorkflowStage(WorkflowStatusSnapshot? workflow, string fallback) => workflow?.Status switch
+    {
+        "Passed" => "done",
+        null => fallback,
+        _ => workflow.CurrentStage ?? fallback,
+    };
+
+    private static string ResolveWorkflowRuntimeStatus(WorkflowStatusSnapshot? workflow, string fallback) => workflow?.Status switch
+    {
+        "Passed" => "completed",
+        "Failed" => "blocked",
+        "Paused" => "paused",
+        null => fallback,
+        _ => "active",
     };
 
     private static string BuildWorkflowVariables(

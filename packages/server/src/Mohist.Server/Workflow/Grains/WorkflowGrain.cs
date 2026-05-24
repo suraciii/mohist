@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Mohist.Server.Events;
-using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Domain.Definition;
@@ -15,7 +14,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private List<StageDefinition>? _stageDefinitions;
     private WorkLease? _lease;
     private WorkDispatch? _lastDispatch;
-    private WorkflowIssueContext? _issueContext;
+    private WorkflowCorrelationContext? _correlation;
     private WorkflowExecutionContext? _variables;
     private readonly IStateStore<WorkflowGrainState> _stateStore;
     private readonly IEventBus _eventBus;
@@ -40,18 +39,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _stageDefinitions = state.StageDefinitions;
         _lease = state.Lease;
         _lastDispatch = state.LastDispatch;
-        _issueContext = state.IssueContext;
+        _correlation = state.Correlation;
         _variables = state.Variables;
         if (state.Run is not null && _stageDefinitions is not null)
             _run = WorkflowRun.Restore(_stageDefinitions, state.Run);
     }
 
-    public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowIssueContext? issue = null, WorkflowStartInput? input = null)
+    public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null)
     {
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
-        if (issue is not null)
-            _issueContext = issue;
+        if (correlation is not null)
+            _correlation = correlation;
 
         if (_run is null && _stageDefinitions is not null)
             _run = new WorkflowRun(GrainKey, _stageDefinitions);
@@ -76,7 +75,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run.Start();
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("resumed");
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed");
     }
 
@@ -96,7 +95,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("approved");
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved");
         await ReleaseFromBacklogIfTerminalAsync();
     }
@@ -110,7 +109,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run.Reject(new ApprovalInput(output));
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStage.Stage, reason);
         EmitStageChanged("rejected", reason);
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", reason ?? "Workflow approval rejected");
         await ReleaseFromBacklogIfTerminalAsync();
     }
@@ -121,7 +120,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         ClearLease();
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
         await RegisterToBacklogAsync();
     }
@@ -132,7 +131,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         ClearLease();
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
         await RegisterToBacklogAsync();
     }
@@ -189,7 +188,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 break;
         }
 
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
     }
@@ -212,7 +211,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         ClearLease();
         _run!.FailInFlightWork(lease.WorkType, reason);
 
-        await PersistAndProjectAsync();
+        await PersistAsync();
         await AppendWorkflowEventAsync("workflow_work_failed", "failed", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
         await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
@@ -401,7 +400,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             WorkType: workType,
             Stage: stage,
             Title: title,
-            Issue: _issueContext is not null ? new WorkIssueRef(_issueContext.ProjectId, _issueContext.IssueId, _issueContext.IssueNumber) : null);
+            Issue: _correlation?.OwnerType == "issue" && _correlation.ProjectId is not null && _correlation.OwnerId is not null && _correlation.OwnerNumber is not null
+                ? new WorkIssueRef(_correlation.ProjectId, _correlation.OwnerId, _correlation.OwnerNumber.Value)
+                : null);
         _lease = new WorkLease(workId, workType, stage, logicalId, runnerId);
         _lastDispatch = dispatch;
         return dispatch;
@@ -684,15 +685,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         string? RunnerId = null,
         object? Payload = null)
     {
-        var context = _issueContext;
+        var context = _correlation;
         if (context is null || _run is null) return Task.CompletedTask;
 
         return _events.AppendAsync(new EventInput(
-            context.ProjectId,
-            context.IssueNumber,
+            context.ProjectId ?? "",
+            context.OwnerNumber ?? 0,
             "workflow",
             type,
-            IssueId: context.IssueId,
+            IssueId: context.OwnerType == "issue" ? context.OwnerId : null,
             WorkflowRunId: GrainKey,
             Stage: _run.CurrentStage.Stage,
             TaskId: TaskId,
@@ -708,54 +709,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run?.Snapshot(),
         _lease,
         _lastDispatch,
-        _issueContext,
+        _correlation,
         _variables));
-
-    private async Task PersistAndProjectAsync()
-    {
-        await PersistAsync();
-        await ProjectIssueStateAsync();
-    }
-
-    private async Task ProjectIssueStateAsync()
-    {
-        if (_run is null) return;
-        if (_issueContext is null) return;
-
-        var issue = GrainFactory.GetGrain<IIssueGrain>($"{_issueContext.ProjectId}:{_issueContext.IssueNumber}");
-        await issue.ProjectWorkflowStateAsync(ToProjection());
-    }
-
-    private WorkflowIssueProjection ToProjection()
-    {
-        var approval = _run!.CurrentStage.Approval is not null
-            ? new Issue.Domain.ApprovalState
-            {
-                Stage = _run.CurrentStage.Stage,
-                Status = _run.CurrentStage.Approval.Status,
-                OutputJson = _run.CurrentStage.Approval.Output?.ToString(),
-                RequestedAt = _run.CurrentStage.Approval.RequestedAt,
-                RespondedAt = _run.CurrentStage.Approval.RespondedAt,
-            }
-            : null;
-
-        var runtimeStatus = _run.Status switch
-        {
-            WorkflowRunStatus.Failed => "blocked",
-            WorkflowRunStatus.Paused => "paused",
-            WorkflowRunStatus.Passed => "completed",
-            _ => "active",
-        };
-
-        var stage = _run.Status == WorkflowRunStatus.Passed ? "done" : _run.CurrentStage.Stage;
-
-        return new WorkflowIssueProjection(
-            stage,
-            runtimeStatus,
-            _run.Status == WorkflowRunStatus.Failed ? _run.Failure?.Message : null,
-            approval,
-            _run.Status == WorkflowRunStatus.Passed);
-    }
 
 }
 
@@ -765,5 +720,5 @@ public sealed record WorkflowGrainState(
     [property: Id(1)] WorkflowRunSnapshot? Run,
     [property: Id(2)] WorkLease? Lease,
     [property: Id(3)] WorkDispatch? LastDispatch,
-    [property: Id(4)] WorkflowIssueContext? IssueContext,
+    [property: Id(4)] WorkflowCorrelationContext? Correlation,
     [property: Id(5)] WorkflowExecutionContext? Variables);
