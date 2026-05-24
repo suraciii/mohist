@@ -41,7 +41,11 @@ public class WorkflowGrainFixture : IAsyncLifetime
     }
 }
 
-public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
+[CollectionDefinition("WorkflowGrain", DisableParallelization = true)]
+public class WorkflowGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
+
+[Collection("WorkflowGrain")]
+public abstract class WorkflowGrainSpecs
 {
     protected readonly WorkflowGrainFixture _fixture;
     protected string? _workflowId;
@@ -71,23 +75,29 @@ public abstract class WorkflowGrainSpecs : IClassFixture<WorkflowGrainFixture>
 
     protected async Task<IWorkflowGrain> StartWorkflowAsync(WorkflowDefinitionInput definition, string? id = null)
     {
+        await ClearBacklogAsync();
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
         var workflowId = id ?? $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
 
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await runner.AssignWorkflowAsync(workflowId);
         await workflow.StartAsync(definition);
         return workflow;
     }
 
     protected async Task<IWorkflowGrain> StartWorkflowWithoutRunnerAsync(WorkflowDefinitionInput definition, string? id = null)
     {
+        await ClearBacklogAsync();
         var workflow = await CreateWorkflowAsync(id);
         await workflow.StartAsync(definition);
         return workflow;
+    }
+
+    protected async Task ClearBacklogAsync()
+    {
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        await backlog.ClearAsync();
     }
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()

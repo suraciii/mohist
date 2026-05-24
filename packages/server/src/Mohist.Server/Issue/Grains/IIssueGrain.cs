@@ -59,6 +59,13 @@ public sealed record WorkflowIssueContext(
     [property: Id(5)] string BaseBranch);
 
 [GenerateSerializer]
+public sealed record WorkflowIssueSeed(
+    [property: Id(0)] string Title,
+    [property: Id(1)] string Body,
+    [property: Id(2)] string? Model,
+    [property: Id(3)] Dictionary<string, string>? StageModels);
+
+[GenerateSerializer]
 public sealed record IssuePrerequisiteResult(
     [property: Id(0)] bool Success,
     [property: Id(1)] string Code,
