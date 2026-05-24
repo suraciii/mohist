@@ -240,43 +240,6 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.FromResult(info);
     }
 
-    public async Task SetStageAsync(string stage)
-    {
-        EnsureIssue();
-        if (Enum.TryParse<IssueStage>(stage, true, out var s))
-            _issue!.SetStage(s);
-        await _issueStore.SaveAsync(GrainKey, _issue!);
-        await AppendIssueEventAsync("issue_stage_changed", _issue!.Stage.ToString().ToLower(), "Issue stage changed");
-    }
-
-    public async Task SetRuntimeStatusAsync(string status, string? reason = null)
-    {
-        EnsureIssue();
-        if (Enum.TryParse<IssueRuntimeStatus>(status, true, out var s))
-            _issue!.SetRuntimeStatus(s, reason);
-        await _issueStore.SaveAsync(GrainKey, _issue!);
-        await AppendIssueEventAsync("issue_runtime_status_changed", _issue!.RuntimeStatus.ToString().ToLower(), reason ?? "Issue runtime status changed");
-    }
-
-    public async Task SetApprovalStateAsync(ApprovalState? state)
-    {
-        EnsureIssue();
-        _issue!.SetApprovalState(state);
-        await _issueStore.SaveAsync(GrainKey, _issue!);
-        if (state is not null)
-            await AppendIssueEventAsync($"issue_approval_{state.Status}", state.Status, $"Issue approval {state.Status}", state);
-    }
-
-    public async Task SetMergeStateAsync(string? state)
-    {
-        EnsureIssue();
-        if (state == null)
-            _issue!.SetMergeState(null);
-        else if (Enum.TryParse<MergeState>(state, true, out var s))
-            _issue!.SetMergeState(s);
-        await _issueStore.SaveAsync(GrainKey, _issue!);
-    }
-
     public async Task ProjectWorkflowStateAsync(WorkflowIssueProjection projection)
     {
         EnsureIssue();
