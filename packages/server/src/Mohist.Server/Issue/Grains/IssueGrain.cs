@@ -1,8 +1,6 @@
-using System.Text.Json;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Storage;
-using Mohist.Server.Variables.Grains;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Grains;
@@ -127,26 +125,6 @@ public class IssueGrain : Grain, IIssueGrain
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         var wfStatus = await wfGrain.GetStatusAsync();
 
-        var scope = GrainFactory.GetGrain<IVariableScopeGrain>(wrId);
-        var variables = await scope.SnapshotAsync(new VariableSnapshotRequest(wrId, "", "", null, null));
-
-        string? changeDir = null;
-        string? workspacePath = null;
-        try
-        {
-            using var doc = JsonDocument.Parse(variables);
-            if (doc.RootElement.TryGetProperty("artifacts", out var artifacts) &&
-                artifacts.TryGetProperty("changeDir", out var cd))
-                changeDir = cd.GetString();
-            if (doc.RootElement.TryGetProperty("workspace", out var ws) &&
-                ws.TryGetProperty("path", out var wp))
-                workspacePath = wp.GetString();
-        }
-        catch (JsonException ex)
-        {
-            _log.LogDebug(ex, "Issue {Key} workflow variables were not valid JSON", GrainKey);
-        }
-
         return new IssueWorkflowStatus(
             _issue.Id,
             _issue.Number,
@@ -154,8 +132,8 @@ public class IssueGrain : Grain, IIssueGrain
             _issue.Stage.ToString().ToLower(),
             _issue.RuntimeStatus.ToString().ToLower(),
             wrId,
-            changeDir,
-            workspacePath,
+            wfStatus?.ChangeDir,
+            null,
             wfStatus);
     }
 

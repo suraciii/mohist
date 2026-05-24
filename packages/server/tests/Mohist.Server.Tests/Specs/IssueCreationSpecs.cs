@@ -3,7 +3,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Variables.Grains;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -125,7 +125,7 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
     }
 
     [Fact]
-    public async Task StartWorkflow_WithProjectContext_AddsProjectVariables()
+    public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Context", model: "openai/gpt-4o", stageModels: new Dictionary<string, string> { ["plan"] = "anthropic/claude" });
@@ -137,14 +137,16 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.DoesNotContain(project.Id, wrId);
         Assert.False(wrId.EndsWith($"_{created.Number}", StringComparison.Ordinal));
 
-        var scope = _grains.GetGrain<IVariableScopeGrain>(wrId);
-        var snapshot = await scope.SnapshotAsync(new VariableSnapshotRequest(wrId, "", ""));
+        var wf = _grains.GetGrain<IWorkflowGrain>(wrId);
+        var work = await wf.GetWorkAsync("runner-variable-test");
 
-        Assert.Contains("/tmp/my-project", snapshot);
-        Assert.Contains("My Project", snapshot);
-        Assert.Contains("trunk", snapshot);
-        Assert.Contains("openai/gpt-4o", snapshot);
-        Assert.Contains("anthropic/claude", snapshot);
+        Assert.NotNull(work);
+        Assert.NotNull(work.Variables);
+        Assert.Contains("/tmp/my-project", work.Variables);
+        Assert.Contains("My Project", work.Variables);
+        Assert.Contains("trunk", work.Variables);
+        Assert.Contains("openai/gpt-4o", work.Variables);
+        Assert.Contains("anthropic/claude", work.Variables);
     }
 
     [Fact]

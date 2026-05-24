@@ -1,14 +1,14 @@
 using System.Text.Json;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Variables.Grains;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
-public class VariableScopeSpecs : WorkflowGrainSpecs
+public class WorkflowVariableSpecs : WorkflowGrainSpecs
 {
-    public VariableScopeSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+    public WorkflowVariableSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
     public async Task WorkflowDispatchKeepsTemplates()
@@ -28,18 +28,35 @@ public class VariableScopeSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task VariableScopeAddsDispatchVariables()
+    public async Task WorkflowDispatchIncludesExecutionAndDispatchContexts()
     {
-        var scope = Grains.GetGrain<IVariableScopeGrain>($"scope-{Guid.NewGuid():N}");
-        await scope.SetContextAsync("issue", """{ "number": 42 }""");
+        await ClearBacklogAsync();
+        _runnerId = await RegisterRunnerAsync();
+        var workflowId = $"wr_{Guid.NewGuid():N}";
+        _workflowId = workflowId;
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.StartAsync(
+            new WorkflowDefinitionInput([
+                new StageDefinitionInput("build",
+                    [new("task-1", "Task 1", "spec/task")],
+                    [])
+            ]),
+            new WorkflowIssueContext("project-1", "issue-1", 42, "Mohist", "/tmp/mohist", "main"),
+            new WorkflowStartInput(new WorkflowIssueSeed("Add search", "Body", "openai/gpt-4o", new Dictionary<string, string> { ["build"] = "anthropic/claude" })));
 
-        var snapshot = await scope.SnapshotAsync(new VariableSnapshotRequest("wr-1", "task-1.1", "task", "build", "Task 1"));
+        var (work, _) = await PollWorkAnyAsync();
 
-        using var document = JsonDocument.Parse(snapshot);
-        Assert.Equal(42, document.RootElement.GetProperty("issue").GetProperty("number").GetInt32());
-        Assert.Equal("wr-1", document.RootElement.GetProperty("workflow").GetProperty("runId").GetString());
+        Assert.NotNull(work.Variables);
+        using var document = JsonDocument.Parse(work.Variables);
+        Assert.Equal(_workflowId, document.RootElement.GetProperty("workflow").GetProperty("runId").GetString());
         Assert.Equal("build", document.RootElement.GetProperty("stage").GetProperty("name").GetString());
-        Assert.Equal("task-1.1", document.RootElement.GetProperty("work").GetProperty("id").GetString());
+        Assert.Equal(work.WorkId, document.RootElement.GetProperty("work").GetProperty("id").GetString());
+        Assert.Equal("task", document.RootElement.GetProperty("work").GetProperty("type").GetString());
+        Assert.Equal(42, document.RootElement.GetProperty("issue").GetProperty("number").GetInt32());
+        Assert.Equal("Mohist", document.RootElement.GetProperty("project").GetProperty("name").GetString());
+        Assert.Equal("openspec/changes/42-add-search", document.RootElement.GetProperty("artifacts").GetProperty("changeDir").GetString());
+        Assert.True(document.RootElement.TryGetProperty("vars", out _));
+        Assert.False(document.RootElement.GetProperty("vars").TryGetProperty("planHealthCommand", out _));
     }
 
     [Fact]

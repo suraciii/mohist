@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Variables.Grains;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -93,6 +92,6 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.Equal("Running", status.Status);
         Assert.DoesNotContain("Issue", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
         Assert.DoesNotContain("Worktree", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
-        Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
+        Assert.Null(status.ChangeDir);
     }
 }

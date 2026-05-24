@@ -108,11 +108,11 @@ public static class MohistPipeline
         "mohist/health-gate",
         name switch
         {
-            "health:plan" => """{"command":"${{ vars.planHealthCommand }}","timeout":300000}""",
-            "health:build" => """{"command":"${{ vars.buildHealthCommand }}","timeout":300000}""",
-            "health:check" => """{"command":"${{ vars.checkHealthCommand }}","timeout":300000}""",
-            "health:integrate" => """{"command":"${{ vars.integrateHealthCommand }}","timeout":300000}""",
-            _ => """{"command":"${{ vars.checkHealthCommand }}","timeout":300000}"""
+            "health:plan" => """{"command":"npm ci && npm run typecheck","timeout":300000}""",
+            "health:build" => """{"command":"npm ci && npm run build","timeout":300000}""",
+            "health:check" => """{"command":"npm ci && npm run build && npm test","timeout":300000}""",
+            "health:integrate" => """{"command":"npm ci && npm run build && npm test","timeout":300000}""",
+            _ => """{"command":"npm ci && npm run build && npm test","timeout":300000}"""
         },
         retryLimit,
         retryTask);

@@ -19,6 +19,11 @@ public class WorkspaceManager : IWorkspaceManager
 
     public async Task<WorkspaceInfo> EnsureAsync(Dictionary<string, JsonElement?> variables, CancellationToken ct)
     {
+        return await EnsureAsync(new VariableBag(variables), ct);
+    }
+
+    public async Task<WorkspaceInfo> EnsureAsync(VariableBag variables, CancellationToken ct)
+    {
         var workspacePath = ResolveExistingWorkspace(variables);
         if (workspacePath is not null)
             return new WorkspaceInfo(workspacePath, null, ResolveChangeDir(variables, workspacePath));
@@ -47,22 +52,13 @@ public class WorkspaceManager : IWorkspaceManager
         return new WorkspaceInfo(workspacePath, ResolveBranch(variables), changeDir);
     }
 
-    private static string? ResolveExistingWorkspace(Dictionary<string, JsonElement?> variables)
+    private static string? ResolveExistingWorkspace(VariableBag variables)
     {
-        if (variables.TryGetValue("workspace", out var ws) &&
-            ws is not null &&
-            ws.Value.TryGetProperty("path", out var pathProp) &&
-            pathProp.ValueKind == JsonValueKind.String)
-        {
-            var path = pathProp.GetString();
-            if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
-                return path;
-        }
-
-        return null;
+        var path = variables.String("workspace.path");
+        return !string.IsNullOrWhiteSpace(path) && Directory.Exists(path) ? path : null;
     }
 
-    private string ResolveProjectWorktree(Dictionary<string, JsonElement?> variables, CancellationToken ct)
+    private string ResolveProjectWorktree(VariableBag variables, CancellationToken ct)
     {
         var projectId = ResolveString(variables, "project.id") ?? "default";
         var issueNumber = ResolveIssueNumber(variables) ?? 0;
@@ -74,13 +70,13 @@ public class WorkspaceManager : IWorkspaceManager
         return path;
     }
 
-    private static string? ResolveBranch(Dictionary<string, JsonElement?> variables)
+    private static string? ResolveBranch(VariableBag variables)
     {
         var issueNumber = ResolveIssueNumber(variables) ?? 0;
         return issueNumber is > 0 ? BranchName(issueNumber) : null;
     }
 
-    private static string? ResolveChangeDir(Dictionary<string, JsonElement?> variables, string workspacePath)
+    private static string? ResolveChangeDir(VariableBag variables, string workspacePath)
     {
         var changeDir = ResolveString(variables, "artifacts.changeDir");
         if (string.IsNullOrWhiteSpace(changeDir)) return null;
@@ -104,29 +100,9 @@ public class WorkspaceManager : IWorkspaceManager
         }
     }
 
-    private static string? ResolveString(Dictionary<string, JsonElement?> variables, string path)
-    {
-        var parts = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0 || !variables.TryGetValue(parts[0], out var current) || current is null)
-            return null;
+    private static string? ResolveString(VariableBag variables, string path) => variables.String(path);
 
-        var element = current.Value;
-        for (var i = 1; i < parts.Length; i++)
-        {
-            if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(parts[i], out element))
-                return null;
-        }
-
-        return element.ValueKind switch
-        {
-            JsonValueKind.String => element.GetString(),
-            JsonValueKind.Number => element.GetRawText(),
-            JsonValueKind.Null => null,
-            _ => element.ToString()
-        };
-    }
-
-    private static int? ResolveIssueNumber(Dictionary<string, JsonElement?> variables)
+    private static int? ResolveIssueNumber(VariableBag variables)
     {
         var issueNumberStr = ResolveString(variables, "issue.number");
         return int.TryParse(issueNumberStr, out var n) ? n : null;
