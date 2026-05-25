@@ -92,7 +92,16 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         await StartWorkflowAsync(Mohist.Server.Issue.Domain.MohistPipeline.Definition);
 
         var (proposal, r1) = await PollWorkAnyAsync();
-        Assert.Contains("${{ artifacts.changeDir }}", proposal.With);
+        Assert.DoesNotContain("changeDir", proposal.With);
+        Assert.NotNull(proposal.With);
+        using (var proposalWith = JsonDocument.Parse(proposal.With))
+        {
+            Assert.False(proposalWith.RootElement.TryGetProperty("changeDir", out _));
+            Assert.False(proposalWith.RootElement.TryGetProperty("openspecChangeDir", out _));
+            Assert.Equal("proposal", proposalWith.RootElement.GetProperty("task").GetString());
+            Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalWith.RootElement.GetProperty("requireFiles")[0].GetProperty("path").GetString());
+            Assert.False(proposalWith.RootElement.TryGetProperty("requireMarkers", out _));
+        }
         await ReportAsync(r1, proposal.WorkId, "completed");
 
         var (specs, r2) = await PollWorkAnyAsync();
@@ -110,6 +119,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var (check, _) = await PollWorkAnyAsync();
         Assert.Equal("checks", check.WorkType);
         Assert.StartsWith("checks-", check.WorkId);
+        Assert.Contains("${{ openspecChangeDir }}", check.With);
+        Assert.DoesNotContain("${{ artifacts.changeDir }}", check.With);
     }
 
     [Fact]
@@ -144,5 +155,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Contains("proposal", proposal.WorkId);
         Assert.Contains("\"stage\":\"plan\"", proposal.With);
         Assert.Contains("\"task\":\"proposal\"", proposal.With);
+        Assert.DoesNotContain("changeDir", proposal.With);
+        Assert.Contains("\"requireFiles\"", proposal.With);
+        Assert.Contains("${{ openspecChangeDir }}/proposal.md", proposal.With);
     }
 }

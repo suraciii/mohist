@@ -20,20 +20,20 @@ public class AgentAction : IAction
     {
         var stage = JsonInputs.String(context.With, "stage") ?? context.Stage;
         var task = JsonInputs.String(context.With, "task") ?? context.WorkId;
-        var changeDir = ResolveChangeDir(context);
+        var requirements = AgentCompletionRequirements.From(context.With, context.WorkDir);
 
         if (string.IsNullOrWhiteSpace(stage))
             return new ActionResult("failure", "Agent action requires 'stage'");
         if (string.IsNullOrWhiteSpace(task))
             return new ActionResult("failure", "Agent action requires 'task'");
 
-        var prompt = AgentPromptRenderer.Render(new AgentPromptContext(stage, task, changeDir, context.WorkDir, context.Variables));
+        var prompt = AgentPromptRenderer.Render(new AgentPromptContext(stage, task, requirements, context.WorkDir, context.Variables));
         var model = AgentPromptRenderer.ResolveModel(context.Variables, stage);
 
         var request = new AgentExecutionRequest(
             stage,
             task,
-            changeDir,
+            requirements.ChangeDir,
             context.WorkDir,
             prompt,
             model,
@@ -59,7 +59,7 @@ public class AgentAction : IAction
             kind = "agent",
             stage,
             task,
-            changeDir,
+            changeDir = requirements.ChangeDir,
             result.Stdout,
             result.Stderr,
         });
@@ -73,16 +73,64 @@ public class AgentAction : IAction
             : new ActionResult("failure", result.Stderr ?? result.Stdout ?? $"Agent exited with code {result.ExitCode}", output, result.ExitCode);
     }
 
-    private static string? ResolveChangeDir(ActionContext context)
+}
+
+public sealed record AgentCompletionRequirements(
+    IReadOnlyList<RequiredFile> Files,
+    IReadOnlyList<RequiredMarker> Markers)
+{
+    public string? ChangeDir => Files.Concat(Markers.Select(m => new RequiredFile(m.Path)))
+        .Select(r => Path.GetDirectoryName(r.Path))
+        .Where(path => !string.IsNullOrWhiteSpace(path))
+        .OrderBy(path => path!.Length)
+        .FirstOrDefault();
+
+    public static AgentCompletionRequirements From(Dictionary<string, JsonElement?>? with, string workDir)
     {
-        var changeDir = JsonInputs.String(context.With, "changeDir");
-        if (string.IsNullOrWhiteSpace(changeDir)) return null;
-        return Path.IsPathRooted(changeDir) ? changeDir : Path.GetFullPath(Path.Combine(context.WorkDir, changeDir));
+        var files = ReadArray(with, "requireFiles")
+            .Select(item => ReadPath(item, workDir))
+            .Where(path => path is not null)
+            .Select(path => new RequiredFile(path!))
+            .ToList();
+        var markers = ReadArray(with, "requireMarkers")
+            .Select(item => ReadMarker(item, workDir))
+            .Where(marker => marker is not null)
+            .Cast<RequiredMarker>()
+            .ToList();
+        return new AgentCompletionRequirements(files, markers);
     }
 
-    private static string BuildPrompt(string stage, string task, string? changeDir) =>
-        AgentPromptRenderer.Render(new AgentPromptContext(stage, task, changeDir, Directory.GetCurrentDirectory(), null));
+    public static AgentCompletionRequirements Empty { get; } = new([], []);
+
+    private static IEnumerable<JsonElement> ReadArray(Dictionary<string, JsonElement?>? with, string name)
+    {
+        if (with is null || !with.TryGetValue(name, out var element) || element?.ValueKind != JsonValueKind.Array)
+            return [];
+        return element.Value.EnumerateArray().Select(item => item.Clone()).ToList();
+    }
+
+    private static string? ReadPath(JsonElement item, string workDir)
+    {
+        if (!item.TryGetProperty("path", out var value) || value.ValueKind != JsonValueKind.String)
+            return null;
+        var path = value.GetString();
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(workDir, path));
+    }
+
+    private static RequiredMarker? ReadMarker(JsonElement item, string workDir)
+    {
+        var path = ReadPath(item, workDir);
+        if (path is null) return null;
+        if (!item.TryGetProperty("marker", out var markerValue) || markerValue.ValueKind != JsonValueKind.String)
+            return null;
+        var marker = markerValue.GetString();
+        return string.IsNullOrWhiteSpace(marker) ? null : new RequiredMarker(path, marker!);
+    }
 }
+
+public sealed record RequiredFile(string Path);
+public sealed record RequiredMarker(string Path, string Marker);
 
 public interface IAgentExecutor
 {

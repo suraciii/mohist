@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Domain;
@@ -17,11 +18,11 @@ public static class MohistPipeline
     private static StageDefinitionInput Plan => new(
         "plan",
         [
-            new TaskDefinitionInput("proposal", "Generate proposal", Agent, AgentWith("plan", "proposal")),
-            new TaskDefinitionInput("specs", "Write specs", Agent, AgentWith("plan", "specs")),
-            new TaskDefinitionInput("design", "Create design", Agent, AgentWith("plan", "design")),
-            new TaskDefinitionInput("tasks", "Generate tasks", Agent, AgentWith("plan", "tasks")),
-            new TaskDefinitionInput("self-review", "Self review", Agent, AgentWith("plan", "self-review")),
+            new TaskDefinitionInput("proposal", "Generate proposal", Agent, AgentWith("plan", "proposal", requiredPath: "proposal.md")),
+            new TaskDefinitionInput("specs", "Write specs", Agent, AgentWith("plan", "specs", requiredPath: "specs")),
+            new TaskDefinitionInput("design", "Create design", Agent, AgentWith("plan", "design", requiredPath: "design.md")),
+            new TaskDefinitionInput("tasks", "Generate tasks", Agent, AgentWith("plan", "tasks", requiredPath: "tasks.json")),
+            new TaskDefinitionInput("self-review", "Self review", Agent, AgentWith("plan", "self-review", requiredPath: "self-review.md", markerPath: "self-review.md", marker: "PASS")),
         ],
         [
             ArtifactExists("proposal-complete", "Proposal complete", "proposal.md"),
@@ -44,7 +45,7 @@ public static class MohistPipeline
         TasksFromUses: "mohist/openspec-tasks",
         TasksFromWith: """
         {
-          "path": "${{ artifacts.changeDir }}/tasks.json"
+          "path": "${{ openspecChangeDir }}/tasks.json"
         }
         """);
 
@@ -79,7 +80,7 @@ public static class MohistPipeline
         "core/artifact-exists",
         $$$"""
         {
-          "path": "${{ artifacts.changeDir }}/{{{path}}}"
+          "path": "${{ openspecChangeDir }}/{{{path}}}"
         }
         """);
 
@@ -95,7 +96,7 @@ public static class MohistPipeline
             "core/marker",
             $$$"""
             {
-              "path": "${{ artifacts.changeDir }}/{{{path}}}",
+              "path": "${{ openspecChangeDir }}/{{{path}}}",
               "expect": "{{{expect}}}"
             }
             """,
@@ -117,17 +118,26 @@ public static class MohistPipeline
         retryLimit,
         retryTask);
 
-    private static string AgentWith(string stage, string task) => $$$"""
+    private static string AgentWith(string stage, string task, string? requiredPath = null, string? markerPath = null, string? marker = null)
     {
-      "stage": "{{{stage}}}",
-      "task": "{{{task}}}",
-      "changeDir": "${{ artifacts.changeDir }}"
+        var input = new Dictionary<string, object?>
+        {
+            ["stage"] = stage,
+            ["task"] = task
+        };
+
+        if (!string.IsNullOrWhiteSpace(requiredPath))
+            input["requireFiles"] = new[] { new Dictionary<string, string> { ["path"] = $"${{{{ openspecChangeDir }}}}/{requiredPath}" } };
+
+        if (!string.IsNullOrWhiteSpace(markerPath) && !string.IsNullOrWhiteSpace(marker))
+            input["requireMarkers"] = new[] { new Dictionary<string, string> { ["path"] = $"${{{{ openspecChangeDir }}}}/{markerPath}", ["marker"] = marker } };
+
+        return JsonSerializer.Serialize(input, WorkflowVariableJson.Options);
     }
-    """;
 
     private static string ChangeDirWith() => """
     {
-      "changeDir": "${{ artifacts.changeDir }}"
+      "changeDir": "${{ openspecChangeDir }}"
     }
     """;
 }

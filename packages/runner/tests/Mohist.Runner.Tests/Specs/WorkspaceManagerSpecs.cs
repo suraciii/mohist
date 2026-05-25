@@ -45,13 +45,13 @@ public class WorkspaceManagerSpecs
         using var temp = new TempDir();
         var ws = new WorkspaceManager(SpecHelpers.Logger<WorkspaceManager>(), temp.Path);
         var variables = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
-        {"project":{"id":"test"},"issue":{"number":42},"artifacts":{"changeDir":"openspec/changes/42-search"}}
+        {"project":{"id":"test"},"issue":{"number":42},"openspecChangeDir":"openspec/changes/issue-42"}
         """)!;
 
         var info = await ws.EnsureAsync(variables, CancellationToken.None);
 
         Assert.NotNull(info.ChangeDir);
-        Assert.EndsWith(Path.Combine("openspec", "changes", "42-search"), info.ChangeDir);
+        Assert.EndsWith(Path.Combine("openspec", "changes", "issue-42"), info.ChangeDir);
         Assert.True(Directory.Exists(info.ChangeDir));
         Assert.True(Directory.Exists(Path.Combine(info.ChangeDir, "specs")));
     }
@@ -68,7 +68,7 @@ public class WorkspaceManagerSpecs
         {
           "project": { "id": "proj-1", "name": "My Project", "path": {{JsonSerializer.Serialize(project.Path)}}, "baseBranch": "main" },
           "issue": { "number": 42 },
-          "artifacts": { "changeDir": "openspec/changes/42-test" }
+          "openspecChangeDir": "openspec/changes/issue-42"
         }
         """)!;
 
@@ -77,7 +77,7 @@ public class WorkspaceManagerSpecs
         Assert.Equal("mo/issue-42", info.Branch);
         Assert.True(Directory.Exists(info.Path));
         Assert.True(Directory.Exists(Path.Combine(info.Path, ".git")) || File.Exists(Path.Combine(info.Path, ".git")));
-        Assert.True(Directory.Exists(Path.Combine(info.Path, "openspec", "changes", "42-test", "specs")));
+        Assert.True(Directory.Exists(Path.Combine(info.Path, "openspec", "changes", "issue-42", "specs")));
     }
 
     [Fact]

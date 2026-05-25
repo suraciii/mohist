@@ -483,7 +483,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var status = element.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "fail" : "fail";
         var message = element.TryGetProperty("message", out var msgProp) ? msgProp.GetString() : null;
-        JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp : null;
+        JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp.Clone() : null;
 
         return new CheckResult(name!, status, message, output);
     }

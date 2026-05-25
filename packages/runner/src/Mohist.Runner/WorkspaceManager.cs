@@ -78,7 +78,7 @@ public class WorkspaceManager : IWorkspaceManager
 
     private static string? ResolveChangeDir(VariableBag variables, string workspacePath)
     {
-        var changeDir = ResolveString(variables, "artifacts.changeDir");
+        var changeDir = ResolveString(variables, "openspecChangeDir");
         if (string.IsNullOrWhiteSpace(changeDir)) return null;
 
         var fullPath = Path.Combine(workspacePath, changeDir!);

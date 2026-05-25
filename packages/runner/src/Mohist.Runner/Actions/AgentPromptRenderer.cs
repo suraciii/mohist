@@ -14,9 +14,7 @@ public static class AgentPromptRenderer
         var projectPath = variables.String("project.path") ?? context.WorkDir;
         var model = ResolveModel(context.Variables, context.Stage);
 
-        var changeDir = context.ChangeDir is null
-            ? "No change artifact directory was provided."
-            : $"Change artifact directory: {context.ChangeDir}";
+        var requirements = FormatRequirements(context.Requirements);
         var modelLine = string.IsNullOrWhiteSpace(model) ? "Model: default runner model" : $"Model: {model}";
 
         return $$"""
@@ -36,9 +34,10 @@ public static class AgentPromptRenderer
         - Stage: {{context.Stage}}
         - Task: {{context.Task}}
         - Work directory: {{context.WorkDir}}
-        - {{changeDir}}
 
-        {{StageContract(context.Stage, context.Task, context.ChangeDir)}}
+        {{requirements}}
+
+        {{StageContract(context.Stage, context.Task, context.Requirements.ChangeDir)}}
 
         ## Rules
         - Complete only this workflow task.
@@ -104,6 +103,19 @@ public static class AgentPromptRenderer
     private static string PathFor(string? changeDir, string path) =>
         string.IsNullOrWhiteSpace(changeDir) ? path : Path.Combine(changeDir, path);
 
+    private static string FormatRequirements(AgentCompletionRequirements requirements)
+    {
+        if (requirements.Files.Count == 0 && requirements.Markers.Count == 0)
+            return "## Completion Requirements\nNo explicit completion requirements were declared.";
+
+        var lines = new List<string> { "## Completion Requirements" };
+        foreach (var file in requirements.Files)
+            lines.Add($"- Required file: {file.Path}");
+        foreach (var marker in requirements.Markers)
+            lines.Add($"- Required marker in {marker.Path}: {marker.Marker}");
+        return string.Join(Environment.NewLine, lines);
+    }
+
     public static string? ResolveModel(Dictionary<string, JsonElement?>? variables, string stage) =>
         ResolveModel(new VariableBag(variables), stage);
 
@@ -115,6 +127,6 @@ public static class AgentPromptRenderer
 public sealed record AgentPromptContext(
     string Stage,
     string Task,
-    string? ChangeDir,
+    AgentCompletionRequirements Requirements,
     string WorkDir,
     Dictionary<string, JsonElement?>? Variables);

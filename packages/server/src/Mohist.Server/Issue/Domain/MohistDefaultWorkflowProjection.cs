@@ -32,7 +32,7 @@ public static class MohistDefaultWorkflowProjection
                 fallbackBlockedReason,
                 null,
                 attention,
-                ChangeDir(issueNumber, issueTitle),
+                ChangeDir(issueNumber),
                 issueStatus == "done");
         }
 
@@ -44,7 +44,7 @@ public static class MohistDefaultWorkflowProjection
             attention?.Message ?? (workflow.Status == "Failed" ? workflow.Failure?.Message : fallbackBlockedReason),
             approval,
             attention,
-            ChangeDir(issueNumber, issueTitle),
+            ChangeDir(issueNumber),
             workflow.Status == "Passed");
     }
 
@@ -71,17 +71,9 @@ public static class MohistDefaultWorkflowProjection
         };
     }
 
-    public static string ChangeDir(int issueNumber, string issueTitle) =>
-        $"openspec/changes/{issueNumber}-{Slug(issueTitle)}";
+    public static string ChangeName(int issueNumber) => $"issue-{issueNumber}";
 
-    private static string Slug(string value)
-    {
-        var chars = value.ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray();
-        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
-    }
+    public static string ChangeDir(int issueNumber) => $"openspec/changes/{ChangeName(issueNumber)}";
 }
 
 public sealed record MohistDefaultWorkflowState(
