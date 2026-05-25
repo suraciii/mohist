@@ -18,6 +18,11 @@ type RebaseResult = {
   conflicts?: string[]
 }
 
+type CleanupResult = {
+  type: 'success' | 'info' | 'error'
+  message: string
+}
+
 type RebaseStep = 'fetching' | 'checking' | 'rebasing' | 'verifying'
 
 const STEP_LABELS: Record<RebaseStep, string> = {
@@ -33,6 +38,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
   const { data: status, isLoading } = useWorktreeStatus(issueNumber, true)
   const { rebaseConflict } = useLiveTask()
   const [rebaseResult, setRebaseResult] = useState<RebaseResult | null>(null)
+  const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null)
   const [rebaseStep, setRebaseStep] = useState<RebaseStep | null>(null)
 
   useEffect(() => {
@@ -75,7 +81,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
       }
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['worktree-status', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
     },
     onError: (error: Error) => {
       if (error instanceof ApiError && error.data && typeof error.data === 'object') {
@@ -89,6 +95,22 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
     },
   })
 
+  const cleanupMutation = useMutation({
+    mutationFn: () => api.cleanupIssueWorktree(issueNumber, projectId),
+    onSuccess: (data) => {
+      setCleanupResult({
+        type: data.removed ? 'success' : 'info',
+        message: data.message,
+      })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
+    },
+    onError: (error: Error) => {
+      setCleanupResult({ type: 'error', message: error.message })
+    },
+  })
+
   if (!status?.exists) return null
   if (isLoading) return null
 
@@ -98,13 +120,14 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
   const isConflictResolving = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving'
   const isConflictFailed = rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'failed'
   const isRebasing = rebaseMutation.isPending || status.rebaseInProgress === true || isConflictResolving
+  const canCleanup = isDone && !isAgentRunning && !isRebasing
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
       <h2 className="text-sm font-semibold text-gray-700 mb-1">Worktree</h2>
       {isDone && (
         <p className="text-xs text-gray-400 mb-2">
-          Retained for review/traceability. Archiving will remove this worktree.
+          Retained for review/traceability. Archiving also removes this worktree.
         </p>
       )}
 
@@ -187,6 +210,16 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
         </div>
       )}
 
+      {cleanupResult && (
+        <div className={`mb-3 rounded-md px-3 py-2 text-xs ${
+          cleanupResult.type === 'success' ? 'bg-green-50 text-green-700' :
+          cleanupResult.type === 'error' ? 'bg-red-50 text-red-700' :
+          'bg-blue-50 text-blue-700'
+        }`}>
+          {cleanupResult.message}
+        </div>
+      )}
+
       <button
         onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
         disabled={isRebasing}
@@ -210,6 +243,16 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
           'Rebase onto master'
         )}
       </button>
+
+      {isDone && (
+        <button
+          onClick={() => { setCleanupResult(null); cleanupMutation.mutate() }}
+          disabled={!canCleanup || cleanupMutation.isPending}
+          className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+        >
+          {cleanupMutation.isPending ? 'Removing worktree...' : isAgentRunning ? 'Remove after completion' : 'Remove worktree'}
+        </button>
+      )}
     </div>
   )
 }

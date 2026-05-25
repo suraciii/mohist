@@ -236,6 +236,13 @@ export const api = {
       conflictingFiles?: string[]
     }>(withProject(`/issues/${number}/worktree-status`, projectId)),
 
+  cleanupIssueWorktree: (number: number, projectId?: string | null) =>
+    request<{
+      removed: boolean
+      message: string
+      resources: Array<{ type: string; status: string; path?: string | null; reason?: string | null }>
+    }>(withProject(`/issues/${number}/cleanup`, projectId), { method: 'POST' }),
+
   archiveIssue: (number: number, projectId?: string | null) =>
     request<{ issue: import('./types').Issue; message: string; warning?: string }>(withProject(`/issues/${number}/archive`, projectId), { method: 'POST' }),
 

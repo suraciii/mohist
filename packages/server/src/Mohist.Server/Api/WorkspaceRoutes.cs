@@ -1,6 +1,7 @@
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Workspace;
+using Mohist.Server.Workflow.Projection;
 
 namespace Mohist.Server.Api;
 
@@ -137,17 +138,38 @@ public static class WorkspaceRoutes
             return ApiResults.Ok(new { @base = baseContent, head = headContent });
         });
 
-        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
-                var info = await grain.GetInfoAsync();
-                // TODO: actually remove worktree
-                return ApiResults.Ok(new { message = $"Issue #{number} worktree cleanup queued" });
+                await grain.GetInfoAsync();
+                var workflow = await grain.GetWorkflowStatusAsync();
+                if (IsWorkflowActive(workflow))
+                {
+                    return ApiResults.Conflict("Cannot remove a worktree while the issue workflow is active", "worktree_active");
+                }
+
+                var activeAgents = await projection.ListActiveAgentsAsync(pid);
+                if (activeAgents.Any(a => a.IssueNumber == number))
+                {
+                    return ApiResults.Conflict("Cannot remove a worktree while an agent is running", "worktree_agent_running");
+                }
+
+                var removal = await git.RemoveWorktreeAsync(project.Path, project.Name, number);
+                if (removal.Status == "failed")
+                {
+                    return ApiResults.Conflict(removal.Message, "worktree_cleanup_failed", removal);
+                }
+
+                return ApiResults.Ok(ToCleanupResponse(removal));
             }
             catch (InvalidOperationException)
             {
@@ -157,6 +179,29 @@ public static class WorkspaceRoutes
 
         return app;
     }
+
+    private static bool IsWorkflowActive(IssueWorkflowStatus? workflow)
+    {
+        var status = workflow?.Workflow?.Status;
+        return string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "AwaitingApproval", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static object ToCleanupResponse(WorktreeRemovalResult removal) => new
+    {
+        removed = removal.Removed,
+        message = removal.Message,
+        resources = new[]
+        {
+            new
+            {
+                type = "worktree",
+                status = removal.Status,
+                path = removal.Path,
+                reason = removal.Reason,
+            },
+        },
+    };
 
     private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
     {

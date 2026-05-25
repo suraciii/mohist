@@ -88,7 +88,7 @@ public class GitService : IGitService
     public async Task<WorkspaceStatus> GetWorktreeStatusAsync(string projectPath, string projectName, int issueNumber, string baseBranch)
     {
         var branchName = $"mo/issue-{issueNumber}";
-        var worktreePath = Path.Combine(projectPath, "..", $".mohist-worktrees/{projectName}/{issueNumber}");
+        var worktreePath = GetIssueWorktreePath(projectPath, projectName, issueNumber);
 
         if (!Directory.Exists(worktreePath))
             return new WorkspaceStatus { Exists = false };
@@ -120,7 +120,43 @@ public class GitService : IGitService
         };
     }
 
-    private static async Task<(string Output, int ExitCode)> RunGitAsync(string workingDir, string command, params string[] args)
+    public async Task<WorktreeRemovalResult> RemoveWorktreeAsync(string projectPath, string projectName, int issueNumber)
+    {
+        var worktreePath = GetIssueWorktreePath(projectPath, projectName, issueNumber);
+        if (!Directory.Exists(worktreePath))
+        {
+            return new WorktreeRemovalResult(
+                Removed: false,
+                Status: "missing",
+                Path: worktreePath,
+                Reason: "worktree_missing",
+                Message: "Worktree already removed");
+        }
+
+        var result = await RunGitAsync(projectPath, "worktree", "remove", "--force", worktreePath);
+        if (result.ExitCode == 0 || !Directory.Exists(worktreePath))
+        {
+            return new WorktreeRemovalResult(
+                Removed: true,
+                Status: "removed",
+                Path: worktreePath,
+                Reason: null,
+                Message: "Worktree removed");
+        }
+
+        var error = string.IsNullOrWhiteSpace(result.Error) ? result.Output.Trim() : result.Error.Trim();
+        return new WorktreeRemovalResult(
+            Removed: false,
+            Status: "failed",
+            Path: worktreePath,
+            Reason: "git_worktree_remove_failed",
+            Message: string.IsNullOrWhiteSpace(error) ? "Failed to remove worktree" : error);
+    }
+
+    private static string GetIssueWorktreePath(string projectPath, string projectName, int issueNumber)
+        => Path.GetFullPath(Path.Combine(projectPath, "..", ".mohist-worktrees", projectName, issueNumber.ToString()));
+
+    private static async Task<(string Output, string Error, int ExitCode)> RunGitAsync(string workingDir, string command, params string[] args)
     {
         var psi = new ProcessStartInfo("git", [command, ..args])
         {
@@ -131,11 +167,12 @@ public class GitService : IGitService
         };
 
         using var process = Process.Start(psi);
-        if (process == null) return ("", -1);
+        if (process == null) return ("", "", -1);
 
-        var output = await process.StandardOutput.ReadToEndAsync();
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        return (output, process.ExitCode);
+        return (await outputTask, await errorTask, process.ExitCode);
     }
 
     private static Dictionary<string, string> SplitDiffByFile(string diff)
@@ -179,6 +216,7 @@ public interface IGitService
     Task<string?> GetCommitDiffAsync(string repoPath, string hash);
     Task<string?> GetFileContentAsync(string repoPath, string branch, string filePath);
     Task<WorkspaceStatus> GetWorktreeStatusAsync(string projectPath, string projectName, int issueNumber, string baseBranch);
+    Task<WorktreeRemovalResult> RemoveWorktreeAsync(string projectPath, string projectName, int issueNumber);
 }
 
 public class GitDiffResult
@@ -191,3 +229,4 @@ public class GitDiffResult
 
 public record DiffFile(string File, int Additions, int Deletions, string Diff, bool IsBinary);
 public record GitCommit(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
+public record WorktreeRemovalResult(bool Removed, string Status, string? Path, string? Reason, string Message);

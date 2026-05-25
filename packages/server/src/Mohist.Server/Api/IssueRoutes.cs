@@ -3,6 +3,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Sessions;
+using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
 
@@ -146,16 +147,28 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/archive", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/archive", async (int number, string? projectId, IGrainFactory grains, IGitService git) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
 
             var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
                 await grain.ArchiveAsync();
-                return ApiResults.Ok();
+                var cleanup = await git.RemoveWorktreeAsync(project.Path, project.Name, number);
+                return ApiResults.Ok(new
+                {
+                    message = cleanup.Removed
+                        ? "Issue archived and worktree removed"
+                        : "Issue archived",
+                    cleanup,
+                    warning = cleanup.Status == "failed" ? cleanup.Message : null,
+                });
             }
             catch (InvalidOperationException ex)
             {
@@ -180,19 +193,33 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/archive-completed", async (string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        issues.MapPost("/archive-completed", async (string? projectId, IGrainFactory grains, IssueQueryService issuesQuery, IGitService git) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var all = await issuesQuery.ListAsync(pid, all: true);
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var all = await issuesQuery.ListAsync(pid, project, all: true);
             var completed = all.Where(i => i.Stage == "done" && i.ArchivedAt == null).ToList();
             var skipped = all.Where(i => i.Stage != "done" && i.ArchivedAt == null).ToList();
+            var cleanupFailed = 0;
 
             foreach (var issue in completed)
             {
                 var grain = grains.GetGrain<IIssueGrain>($"{pid}:{issue.Number}");
-                try { await grain.ArchiveAsync(); } catch { /* skip if already archived */ }
+                try
+                {
+                    await grain.ArchiveAsync();
+                    var cleanup = await git.RemoveWorktreeAsync(project.Path, project.Name, issue.Number);
+                    if (cleanup.Status == "failed") cleanupFailed++;
+                }
+                catch
+                {
+                    /* skip if already archived */
+                }
             }
 
             return ApiResults.Ok(new
@@ -200,6 +227,7 @@ public static class IssueRoutes
                 archived = completed.Count,
                 skipped = skipped.Count,
                 skippedNumbers = skipped.Select(s => s.Number).ToList(),
+                cleanupFailed,
                 message = $"Archived {completed.Count} completed issues, skipped {skipped.Count}"
             });
         });
