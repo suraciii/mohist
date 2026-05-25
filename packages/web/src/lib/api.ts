@@ -115,15 +115,6 @@ export const api = {
       method: 'DELETE',
     }),
 
-  getQuestions: (issueId: string) =>
-    request<import('./types').Question[]>(`/questions?issueId=${encodeURIComponent(issueId)}`),
-
-  replyQuestion: (questionId: string, answer: string) =>
-    request<import('./types').Question>(`/questions/${questionId}/reply`, {
-      method: 'POST',
-      body: JSON.stringify({ answer }),
-    }),
-
   sendMessage: (issueNumber: number, message: string, projectId?: string | null) =>
     request<{ message: string }>(withProject(`/issues/${issueNumber}/messages`, projectId), {
       method: 'POST',
@@ -186,25 +177,11 @@ export const api = {
 
   getAvailableModels: () => request<import('./types').ModelProvider[]>('/providers/models'),
 
-  getAgentSession: (number: number, projectId?: string | null) =>
-    request<import('./types').AgentSessionMessageItem[]>(withProject(`/issues/${number}/agent-session`, projectId)),
-
   getCoderSessions: (number: number, projectId?: string | null) =>
     request<import('./types').CoderSessionSummary[]>(withProject(`/issues/${number}/coder-sessions`, projectId)),
 
   getCoderSessionDetail: (number: number, sessionId: string, projectId?: string | null) =>
     request<import('./types').CoderSessionDetail>(withProject(`/issues/${number}/coder-sessions/${sessionId}`, projectId)),
-
-  getCurrentProject: async () => {
-    const res = await fetch(`${BASE}/projects/current`, {
-      headers: { 'Content-Type': 'application/json' },
-    })
-    const json: ApiResponse<import('./types').Project> = await res.json()
-    if (!json.success) {
-      return null
-    }
-    return json.data
-  },
 
   getWorkflowLogs: (number: number, projectId?: string | null) =>
     request<import('./types').WorkflowLogItem[]>(withProject(`/issues/${number}/logs`, projectId)),
@@ -275,9 +252,6 @@ export const api = {
       body: JSON.stringify({ model }),
     }),
 
-  getOpencodeModels: () =>
-    request<string[]>('/opencode/models'),
-
   getModel: () =>
     request<{ model: string | null }>('/model'),
 
@@ -325,9 +299,6 @@ export const api = {
 
   getSystemInfo: () =>
     request<import('./types').SystemInfo>('/system/info'),
-
-  rebuildSystem: () =>
-    request<{ success: boolean }>('/settings/system/rebuild', { method: 'POST' }),
 
   addPrerequisite: (number: number, prerequisiteNumber: number, projectId?: string | null) =>
     request<{ issue: import('./types').Issue; message: string }>(withProject(`/issues/${number}/prerequisites`, projectId), {

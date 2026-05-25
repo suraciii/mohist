@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
-import { useIssues, useArchivedIssues, useProjects, useCurrentProject, useAgentStatus } from './hooks/useQueries'
+import { useIssues, useArchivedIssues, useProjects, useAgentStatus } from './hooks/useQueries'
 import { LiveTaskProvider } from './hooks/useSSE'
 import { ProjectProvider, useProject } from './context/ProjectContext'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -77,7 +77,6 @@ function AppContent() {
   const location = useLocation()
 
   const { data: projects } = useProjects()
-  const { data: currentProject } = useCurrentProject()
   const [createIssueOpen, setCreateIssueOpen] = useState(false)
 
   useEffect(() => {
@@ -87,12 +86,10 @@ function AppContent() {
   }, [projects, setProjects])
 
   useEffect(() => {
-    if (currentProject) {
-      setProjectId(currentProject.id)
-    } else if (projects && projects.length > 0 && !projectId) {
+    if (projects && projects.length > 0 && !projectId) {
       setProjectId(projects[0].id)
     }
-  }, [currentProject, projects, projectId, setProjectId])
+  }, [projects, projectId, setProjectId])
 
   return (
     <LiveTaskProvider>

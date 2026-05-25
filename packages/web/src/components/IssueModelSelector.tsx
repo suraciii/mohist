@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { Popover, Transition } from '@headlessui/react'
 import fuzzysort from 'fuzzysort'
-import { useOpencodeModels, useOpencodeModel } from '../hooks/useQueries'
+import { useAvailableModelIds, useOpencodeModel } from '../hooks/useQueries'
 import { api } from '../lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect } from './ModelSelect'
@@ -93,7 +93,7 @@ function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEn
 
 export function IssueModelSelector({ issueNumber, currentModel, currentStageModels }: Props) {
   const queryClient = useQueryClient()
-  const { data: opencodeModels, isLoading, error } = useOpencodeModels()
+  const { data: availableModelIds, isLoading, error } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
   const [searchQuery, setSearchQuery] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
@@ -110,7 +110,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     }
   }, [currentStageModels])
 
-  const allModels: string[] = opencodeModels ?? []
+  const allModels: string[] = availableModelIds ?? []
   const recentModelIds = getRecent()
   const recentModels = recentModelIds.filter(id => allModels.includes(id))
 

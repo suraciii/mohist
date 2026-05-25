@@ -61,13 +61,6 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(await GetAgentRuntimeAsync(svc));
         });
 
-        app.MapPost("/api/settings/system/rebuild", () => ApiResults.Ok(new { success = true }));
-
-        app.MapGet("/api/questions", () => ApiResults.Ok(Array.Empty<object>()));
-        app.MapGet("/api/questions/{id}", (string id) => ApiResults.NotFound($"Question {id} not found"));
-        app.MapPost("/api/questions/{id}/reply", (string id) => ApiResults.NotFound($"Question {id} not found"));
-        app.MapPost("/api/questions/{id}/expire", (string id) => ApiResults.NotFound($"Question {id} not found"));
-
         app.MapPost("/api/issues/{number:int}/messages", async (int number, string? projectId, MessageRequest req, IGrainFactory grains, IEventStore events) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);

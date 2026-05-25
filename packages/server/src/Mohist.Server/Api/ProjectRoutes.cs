@@ -17,11 +17,6 @@ public static class ProjectRoutes
             return ApiResults.Ok(projects);
         });
 
-        group.MapGet("/current", () =>
-        {
-            return ApiResults.NotFound("Current project is selected by the client");
-        });
-
         group.MapGet("/{name}", async (string name, IGrainFactory grains) =>
         {
             var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);

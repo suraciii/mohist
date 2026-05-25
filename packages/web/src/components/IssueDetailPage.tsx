@@ -13,7 +13,6 @@ import { IssueModelSelector } from './IssueModelSelector'
 import { BranchBar } from './BranchBar'
 import { PipelineView } from './PipelineView'
 import { MergeStatePanel } from './MergeStatePanel'
-import { QuestionPanel } from './QuestionPanel'
 import { SessionList } from './SessionList'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
@@ -916,10 +915,6 @@ export function IssueDetailPage() {
                     </div>
                   )}
                 </div>
-              )}
-
-              {isAgentRunningOnThis && (
-                <QuestionPanel issueId={issue.id} />
               )}
 
               {!isBacklog && (

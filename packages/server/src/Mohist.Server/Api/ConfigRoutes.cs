@@ -49,8 +49,6 @@ public static class ConfigRoutes
             return ApiResults.Ok(new { req.StageModels });
         });
 
-        app.MapGet("/api/opencode/models", () => ApiResults.Ok(Array.Empty<string>()));
-
         var config = app.MapGroup("/api/config");
 
         config.MapGet("/", async (ConfigService svc) =>
