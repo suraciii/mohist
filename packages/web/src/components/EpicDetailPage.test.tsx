@@ -47,7 +47,7 @@ const epic = {
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
   progress: {
-    deliveredCount: 1,
+    completedCount: 1,
     totalIssueCount: 2,
     blockedIssues: ['issue-2'],
     activeIssues: [],

@@ -34,7 +34,7 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (issue.approvalState?.status === 'awaiting') {
     return 'approval'
   }
-  if (issue.startEligibility?.waitingForDelivery?.length) {
+  if (issue.startEligibility?.waitingForCompletion?.length) {
     return 'waiting'
   }
   if (isAgentRunning) {
@@ -295,7 +295,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           </div>
         )}
 
-        {issue.startEligibility?.waitingForDelivery?.length && !isClosed && (
+        {issue.startEligibility?.waitingForCompletion?.length && !isClosed && (
           <div className="mt-2">
             <p
               className="text-xs text-amber-600"
@@ -305,9 +305,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
               }}
-              title={issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForDelivery[0].number}`}
+              title={issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`}
             >
-              {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForDelivery[0].number}`}
+              {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`}
             </p>
           </div>
         )}

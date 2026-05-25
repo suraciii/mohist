@@ -73,11 +73,11 @@ public class WebCompatibilitySpecs
         var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{dependent.Number}?projectId={project.Id}");
 
         Assert.False(detail.StartEligibility.Startable);
-        Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Delivered);
+        Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
     }
 
     [Fact]
-    public async Task StartIssue_WithUndeliveredPrerequisite_IsRejectedByWorkflowGate()
+    public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-gate-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var prereq = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Gate prereq", projectId = project.Id });
@@ -128,7 +128,7 @@ public class WebCompatibilitySpecs
     private sealed record WorkflowProfileDto(string Id, string DisplayName, string Description, bool IsDefault);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
-    private sealed record PrerequisiteDto(int Number, bool Delivered);
+    private sealed record PrerequisiteDto(int Number, bool Completed);
     private sealed record StartEligibilityDto(bool Startable);
     private sealed record PrimaryEpicDto(string Id, string Title);
     private sealed record LogLevelDto(string Level);

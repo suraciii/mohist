@@ -36,7 +36,7 @@ public class IssuePrerequisiteSummary
     [Id(0)] public string IssueId { get; set; } = null!;
     [Id(1)] public int Number { get; set; }
     [Id(2)] public string Title { get; set; } = null!;
-    [Id(3)] public bool Delivered { get; set; }
+    [Id(3)] public bool Completed { get; set; }
     [Id(4)] public string Stage { get; set; } = null!;
     [Id(5)] public string Status { get; set; } = null!;
 }
@@ -47,21 +47,21 @@ public class IssueStartEligibility
     [Id(0)] public bool Startable { get; set; }
     [Id(1)] public string Reason { get; set; } = "ready";
     [Id(2)] public string? Message { get; set; }
-    [Id(3)] public IssuePrerequisiteSummary[] WaitingForDelivery { get; set; } = [];
+    [Id(3)] public IssuePrerequisiteSummary[] WaitingForCompletion { get; set; } = [];
 
     public static IssueStartEligibility Ready() => new() { Startable = true };
 
     public static IssueStartEligibility FromPrerequisites(IssuePrerequisiteSummary[] prerequisites)
     {
-        var waiting = prerequisites.Where(p => !p.Delivered).ToArray();
+        var waiting = prerequisites.Where(p => !p.Completed).ToArray();
         return waiting.Length == 0
             ? Ready()
             : new IssueStartEligibility
             {
                 Startable = false,
-                Reason = "waiting-for-delivery",
+                Reason = "waiting-for-completion",
                 Message = $"Waiting for #{waiting[0].Number}",
-                WaitingForDelivery = waiting,
+                WaitingForCompletion = waiting,
             };
     }
 }

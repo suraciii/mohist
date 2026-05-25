@@ -24,7 +24,7 @@ public class EpicIssueEntry
 public sealed record EpicDto(string Id, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
 
 public sealed record EpicProgressDto(
-    int DeliveredCount,
+    int CompletedCount,
     int TotalIssueCount,
     IReadOnlyList<string> BlockedIssues,
     IReadOnlyList<string> ActiveIssues,
