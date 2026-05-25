@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { waitFor } from './test-utils'
+import { TEST_PROJECT, waitFor } from './test-utils'
 import { renderHook } from '@testing-library/react'
 import { useCoderSessions } from '../src/hooks/useCoderSessions'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ProjectProvider } from '../src/context/ProjectContext'
 import type { ReactNode } from 'react'
 import type { CoderSessionItem } from '../src/lib/types'
 
@@ -36,7 +37,11 @@ function renderHookWithProviders<T>(callback: () => T, options?: { initialProps?
   queryClients.push(queryClient)
   return renderHook(callback, {
     wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          {children}
+        </ProjectProvider>
+      </QueryClientProvider>
     ),
     ...options,
   })

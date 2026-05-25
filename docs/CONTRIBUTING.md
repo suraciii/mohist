@@ -17,13 +17,10 @@
 git clone https://github.com/owner/mohist.git
 cd mohist
 
-# 工作目录
-cd packages/cli
-
 # 安装依赖
 npm install
 
-# 构建（含 backend + web UI）
+# 构建（含 Web UI + .NET Server）
 npm run build
 ```
 
@@ -42,20 +39,10 @@ npm run build
 3. **运行测试**
    ```bash
    npm test
-   npm run test:web      # Web UI 测试
+   npm --prefix packages/web run test:run      # Web UI 测试
    ```
 
-4. **代码检查**
-   ```bash
-   npm run lint
-   ```
-
-5. **类型检查**
-   ```bash
-   npm run typecheck
-   ```
-
-6. **提交**
+4. **提交**
    ```bash
    git add .
    git commit -m "feat: add your feature"
@@ -142,13 +129,13 @@ describe('MyComponent', () => {
 ### Web UI 测试
 
 ```bash
-npm run test:web
+npm --prefix packages/web run test:run
 ```
 
 ### 阶段状态专项测试
 
 ```bash
-npm run test:stage-state
+dotnet test packages/server/Mohist.sln --filter "Stage"
 ```
 
 ## Commit 规范

@@ -258,26 +258,17 @@ Web UI 中 `Settings → Agent` 可配置：
 ## 开发
 
 ```bash
-# 工作目录
-cd packages/cli
-
 # 安装依赖
 npm install
 
-# 构建（backend + web）
+# 构建（web + .NET server）
 npm run build
 
 # 运行测试
 npm test
 
 # Web UI 测试
-npm run test:web
-
-# 代码检查
-npm run lint
-
-# 类型检查
-npm run typecheck
+npm --prefix packages/web run test:run
 
 # Web UI 开发模式
 npm run dev:web

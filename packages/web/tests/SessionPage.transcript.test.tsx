@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { baseRender, screen, fireEvent, waitFor, act } from './test-utils'
+import { TEST_PROJECT, baseRender, screen, fireEvent, waitFor, act } from './test-utils'
 import { SessionPage } from '../src/components/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ProjectProvider } from '../src/context/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
 import { dispatchAgentEvent } from '../src/lib/agent-events'
@@ -79,7 +80,9 @@ function renderWithQueryClient(ui: React.ReactElement) {
   queryClients.push(queryClient)
   return baseRender(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }

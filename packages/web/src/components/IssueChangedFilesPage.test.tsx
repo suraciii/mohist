@@ -454,7 +454,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       fireEvent.change(modeSelect, { target: { value: 'full' } })
       await waitFor(() => {
         expect(screen.queryByText(/Large diff/)).toBeNull()
-        expect(getFileContent).toHaveBeenCalledWith(123, 'src/large.txt')
+        expect(getFileContent).toHaveBeenCalledWith(123, 'src/large.txt', null)
       })
     })
   })

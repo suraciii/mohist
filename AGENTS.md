@@ -8,7 +8,10 @@ mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLit
 
 | 目录 | 职责 | 内容 |
 |------|------|------|
-| `packages/cli/` | 核心实现 | CLI + Server + Agent Runner + Web UI |
+| `packages/server/` | 新后端核心实现 | ASP.NET Core + Orleans + Issue/Workflow API |
+| `packages/runner/` | Runner 实现 | shared runner host、action catalog、agent/process/check actions |
+| `packages/web/` | Web UI | React + Vite + Tailwind + TanStack Query |
+| `packages/cli/` | 旧版实现（待清理） | 旧 Node CLI/Hono server/runtime，不再作为新功能落点 |
 | `prd/` | 产品文档 | 产品定位、功能规划、用户故事 |
 | `prd/backlog/` | 产品待办 | 从设计讨论中搁置延后的事项，按类别分组，标注所属 Milestone |
 | `design/` | 技术设计 | 架构设计、技术规格、流程设计 |
@@ -20,37 +23,25 @@ mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLit
 ## 核心实现结构
 
 ```
-packages/cli/
-├── bin/                        # CLI 入口 (mo / mo-server)
-├── src/
-│   ├── agent-runtime/          # Agent 运行时管理
-│   ├── agent-skills/           # Skill 调度和执行
-│   ├── agents/                 # Agent 提示词和配置
-│   │   └── prompts/            # 阶段 prompt (plan/build/check/review 等)
-│   │       └── artifacts/      # 产物模板 (proposal/specs/design/tasks 等)
-│   ├── api/                    # REST API 路由 (issues/projects/config/providers 等)
-│   ├── artifacts/              # 产物读写服务
-│   ├── cli/                    # CLI 命令实现
-│   ├── config/                 # 配置管理
-│   ├── db/                     # SQLite 数据层
-│   ├── git/                    # Git 操作 (worktree/diff/merge/commit)
-│   ├── openspec/               # OpenSpec 集成 (规格同步/变更归档)
-│   ├── project/                # 项目管理
-│   ├── server/                 # HTTP Server (Hono)
-│   ├── services/               # 业务逻辑层
-│   ├── tools/                  # 工具集合
-│   ├── types/                  # TypeScript 类型定义
-│   ├── util/                   # 通用工具
-│   ├── utils/                  # 工具函数
-│   └── workflow/               # 工作流引擎 (Plan/Build/Check/Integrate runners)
-├── web/                        # Web UI (React + Vite + Tailwind + TanStack Query)
-│   └── src/
-│       ├── components/         # 页面组件 (看板/详情/活动/设置/日志/归档)
-│       ├── hooks/              # React hooks (含 useSSE 实时事件)
-│       ├── lib/                # API 客户端、类型定义
-│       └── context/            # React context (ProjectContext 等)
-├── tests/                      # 后端测试
-└── dist/                       # 编译输出
+packages/server/
+├── src/Mohist.Server/
+│   ├── Api/                    # REST API 路由
+│   ├── Issue/                  # Issue domain/grains/queries/workflow profiles
+│   ├── Workflow/               # WorkflowGrain + workflow domain
+│   ├── Runner/                 # Runner grains + embedded runner bridge
+│   ├── Sessions/               # Agent session telemetry
+│   ├── Storage/                # EF Core state store
+│   └── Hosting/                # Server/service/web registration
+└── tests/Mohist.Server.Tests/  # 后端 spec/集成测试
+
+packages/runner/
+├── src/Mohist.Runner/          # shared runner library
+├── src/Mohist.Runner.Cli/      # standalone runner CLI
+└── tests/Mohist.Runner.Tests/
+
+packages/web/
+├── src/                        # React Web UI
+└── tests/                      # Web UI tests
 ```
 
 ## 工作流阶段
@@ -77,16 +68,15 @@ Explore 不再是 Mohist runtime 内置功能。探索/需求澄清通过 `mo sk
 
 ```bash
 # 开发
-cd packages/cli && npm run build
-cd packages/cli && npm test
+npm run build
+npm test
+npm run build:web
 
 # 运行 Server
-cd packages/cli && npm run server
+npm run dev:server
 
-# CLI 使用
-node bin/mo server start
-node bin/mo issue list
-node bin/mo issue start 1
+# Web UI 开发模式
+npm run dev:web
 ```
 
 ## 数据存储

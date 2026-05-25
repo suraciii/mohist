@@ -10,7 +10,7 @@ public static class MohistWebRegistration
         if (webRoot is null)
         {
             app.MapGet("/", () => Results.Text(
-                "Mohist Web UI is not built. Run `npm --prefix packages/cli/web run build` or set Mohist:WebRoot.",
+                "Mohist Web UI is not built. Run `npm run build:web` or set Mohist:WebRoot.",
                 "text/plain"));
             return app;
         }
@@ -46,7 +46,7 @@ public static class MohistWebRegistration
         var dir = AppContext.BaseDirectory;
         while (!string.IsNullOrWhiteSpace(dir))
         {
-            var candidate = Path.Combine(dir, "packages", "cli", "web", "dist");
+            var candidate = Path.Combine(dir, "packages", "web", "dist");
             if (File.Exists(Path.Combine(candidate, "index.html")))
                 return candidate;
 
