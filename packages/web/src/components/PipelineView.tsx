@@ -424,8 +424,6 @@ function InlineApproval({
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const [feedback, setFeedback] = useState('')
-  const [messageText, setMessageText] = useState('')
-  const [showSendMessage, setShowSendMessage] = useState(false)
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [instructionsExpanded, setInstructionsExpanded] = useState(false)
   const [instructionsText, setInstructionsText] = useState('')
@@ -456,14 +454,17 @@ function InlineApproval({
     },
   })
 
-  const sendMessageMutation = useMutation({
-    mutationFn: (message: string) => api.sendMessage(issueNumber, message, projectId),
+  const sendBackMutation = useMutation({
+    mutationFn: (message: string) => api.rejectIssue(issueNumber, { message }, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      setMessageText('')
-      setShowSendMessage(false)
+      queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+      setInstructionsText('')
+      setInstructionsExpanded(false)
+      setNotesText('')
+      setNotesExpanded(false)
     },
   })
 
@@ -478,23 +479,23 @@ function InlineApproval({
           : '- Issues identified in this dimension'
         return `### ${dim.name}\n${issues}`
       })
-      sendMessageMutation.mutate(`Please fix the following issues:\n\n${parts.join('\n\n')}`)
+      sendBackMutation.mutate(`Please fix the following issues:\n\n${parts.join('\n\n')}`)
     } else if (review.reviewReport) {
-      sendMessageMutation.mutate(`Please fix the following issues:\n\n${review.reviewReport}`)
+      sendBackMutation.mutate(`Please fix the following issues:\n\n${review.reviewReport}`)
     } else {
-      sendMessageMutation.mutate('The review found issues that need to be addressed. Please review and fix all problems.')
+      sendBackMutation.mutate('The review found issues that need to be addressed. Please review and fix all problems.')
     }
-  }, [review, sendMessageMutation])
+  }, [review, sendBackMutation])
 
   const handleSendWithInstructions = useCallback(() => {
     if (!instructionsText.trim()) return
-    sendMessageMutation.mutate(instructionsText.trim())
-  }, [instructionsText, sendMessageMutation])
+    sendBackMutation.mutate(instructionsText.trim())
+  }, [instructionsText, sendBackMutation])
 
   const handleSendBackWithNotes = useCallback(() => {
     if (!notesText.trim()) return
-    sendMessageMutation.mutate(notesText.trim())
-  }, [notesText, sendMessageMutation])
+    sendBackMutation.mutate(notesText.trim())
+  }, [notesText, sendBackMutation])
 
   const handleApproveAnyway = useCallback(() => {
     approveMutation.mutate()
@@ -604,10 +605,10 @@ function InlineApproval({
         <div className="space-y-2">
           <button
             onClick={handleSendBackForFixes}
-            disabled={sendMessageMutation.isPending}
+            disabled={sendBackMutation.isPending}
             className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
           >
-            {sendMessageMutation.isPending ? 'Sending...' : 'Send back for fixes'}
+            {sendBackMutation.isPending ? 'Sending back...' : 'Send back for fixes'}
           </button>
 
           <div>
@@ -628,10 +629,10 @@ function InlineApproval({
                 />
                 <button
                   onClick={handleSendWithInstructions}
-                  disabled={!instructionsText.trim() || sendMessageMutation.isPending}
+                  disabled={!instructionsText.trim() || sendBackMutation.isPending}
                   className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  {sendMessageMutation.isPending ? 'Sending...' : 'Send with instructions'}
+                  {sendBackMutation.isPending ? 'Sending back...' : 'Send with instructions'}
                 </button>
               </div>
             )}
@@ -675,10 +676,10 @@ function InlineApproval({
                 />
                 <button
                   onClick={handleSendBackWithNotes}
-                  disabled={!notesText.trim() || sendMessageMutation.isPending}
+                  disabled={!notesText.trim() || sendBackMutation.isPending}
                   className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
-                  {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
+                  {sendBackMutation.isPending ? 'Sending back...' : 'Send back'}
                 </button>
               </div>
             )}
@@ -686,58 +687,9 @@ function InlineApproval({
         </div>
       )}
 
-      {(approveMutation.error || rejectMutation.error || sendMessageMutation.error) && (
+      {(approveMutation.error || rejectMutation.error || sendBackMutation.error) && (
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          {approveMutation.error?.message || rejectMutation.error?.message || sendMessageMutation.error?.message}
-        </div>
-      )}
-
-      {!hasApprovalOutput && (
-        <div className="border-t border-amber-200 pt-3">
-          {!showSendMessage ? (
-            <button
-              onClick={() => setShowSendMessage(true)}
-              className="text-xs text-blue-600 hover:text-blue-800 transition-colors"
-            >
-              Send a message to the agent instead
-            </button>
-          ) : (
-            <div className="space-y-2">
-              <h4 className="text-xs font-semibold text-blue-800">Send Message</h4>
-              <p className="text-xs text-blue-600">
-                Send a free-text message to the agent. The agent will decide the next step based on your message.
-              </p>
-              <textarea
-                value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
-                placeholder="Type a message to the agent..."
-                rows={2}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-              />
-              <div className="flex items-center justify-between">
-                {sendMessageMutation.error && (
-                  <span className="text-xs text-red-500">
-                    {sendMessageMutation.error.message}
-                  </span>
-                )}
-                <div className="ml-auto flex gap-2">
-                  <button
-                    onClick={() => setShowSendMessage(false)}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => sendMessageMutation.mutate(messageText)}
-                    disabled={!messageText.trim() || sendMessageMutation.isPending}
-                    className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                  >
-                    {sendMessageMutation.isPending ? 'Sending...' : 'Send'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {approveMutation.error?.message || rejectMutation.error?.message || sendBackMutation.error?.message}
         </div>
       )}
     </div>

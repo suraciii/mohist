@@ -32,6 +32,7 @@ public class ApiContractSpecs
     [InlineData("/api/questions/question-1/reply")]
     [InlineData("/api/questions/question-1/expire")]
     [InlineData("/api/settings/system/rebuild")]
+    [InlineData("/api/issues/1/messages")]
     public async Task RemovedLegacyApiPost_WhenRequested_ReturnsNotFound(string path)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(path, new { });

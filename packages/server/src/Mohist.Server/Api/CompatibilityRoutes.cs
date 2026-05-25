@@ -61,26 +61,6 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(await GetAgentRuntimeAsync(svc));
         });
 
-        app.MapPost("/api/issues/{number:int}/messages", async (int number, string? projectId, MessageRequest req, IGrainFactory grains, IEventStore events) =>
-        {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var issue = await ResolveIssueAsync(pid, number, grains);
-            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-            if (!string.IsNullOrWhiteSpace(req.Message))
-            {
-                await events.AppendAsync(new EventInput(
-                    ProjectId: pid,
-                    IssueId: issue.Id,
-                    IssueNumber: number,
-                    Category: "issue",
-                    Type: "issue_message_added",
-                    Payload: new Dictionary<string, object?> { ["message"] = req.Message }));
-            }
-            return ApiResults.Ok(new { message = "Message recorded" });
-        });
-
         app.MapPost("/api/issues/{number:int}/comments", async (int number, string? projectId, CommentRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus) =>
         {
             if (string.IsNullOrWhiteSpace(req.Body)) return ApiResults.BadRequest("body is required");
@@ -211,6 +191,5 @@ public static class CompatibilityRoutes
 
 public record LogLevelRequest(string Level);
 public record AgentRuntimeRequest(int? Timeout, int? StageTimeout, int? TaskTimeout, int? MaxConcurrent, int? MaxGracePeriods, int? PollInterval);
-public record MessageRequest(string? Message);
 public record CommentRequest(string? Body);
 public record PrerequisiteRequest(int PrerequisiteNumber);

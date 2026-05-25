@@ -128,23 +128,6 @@ export function useDeleteProject() {
   })
 }
 
-export function useSendMessage(issueNumber: number) {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation({
-    mutationFn: (message: string) => api.sendMessage(issueNumber, message, projectId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
-      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      toast.success('Message sent')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
 export function useUseProject() {
   const queryClient = useQueryClient()
   return useMutation({

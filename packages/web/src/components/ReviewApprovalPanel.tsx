@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { useSendMessage } from '../hooks/useQueries'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -114,53 +113,53 @@ export function ReviewApprovalPanel({
     },
   })
 
-  const sendMessageMutation = useSendMessage(issueNumber)
+  const sendBackMutation = useMutation({
+    mutationFn: (message: string) => api.rejectIssue(issueNumber, { message }, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+    },
+  })
 
   const handleSendBackForFixes = useCallback(() => {
     setActionError(null)
     const message = buildIssueSummary(review)
-    sendMessageMutation.mutate(message, {
-      onError: (err: Error) => {
-        setActionError(err.message)
-      },
-    })
-  }, [review, sendMessageMutation])
+    sendBackMutation.mutate(message)
+  }, [review, sendBackMutation])
 
   const handleSendWithInstructions = useCallback(() => {
     if (!instructionsText.trim()) return
     setActionError(null)
     const message = buildInstructionMessage(instructionsText.trim(), review)
-    sendMessageMutation.mutate(message, {
+    sendBackMutation.mutate(message, {
       onSuccess: () => {
         setInstructionsText('')
         setInstructionsExpanded(false)
       },
-      onError: (err: Error) => {
-        setActionError(err.message)
-      },
     })
-  }, [instructionsText, review, sendMessageMutation])
+  }, [instructionsText, review, sendBackMutation])
 
   const handleSendBackWithNotes = useCallback(() => {
     if (!notesText.trim()) return
     setActionError(null)
-    sendMessageMutation.mutate(notesText.trim(), {
+    sendBackMutation.mutate(notesText.trim(), {
       onSuccess: () => {
         setNotesText('')
         setNotesExpanded(false)
       },
-      onError: (err: Error) => {
-        setActionError(err.message)
-      },
     })
-  }, [notesText, sendMessageMutation])
+  }, [notesText, sendBackMutation])
 
   const handleApproveAnyway = useCallback(() => {
     setActionError(null)
     approveMutation.mutate()
   }, [approveMutation])
 
-  const isSending = sendMessageMutation.isPending
+  const isSending = sendBackMutation.isPending
 
   return (
     <div>
@@ -278,7 +277,7 @@ export function ReviewApprovalPanel({
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
               )}
-              {isSending ? 'Sending...' : 'Send back for fixes'}
+              {isSending ? 'Sending back...' : 'Send back for fixes'}
             </button>
 
             <div>
@@ -302,7 +301,7 @@ export function ReviewApprovalPanel({
                     disabled={!instructionsText.trim() || isSending}
                     className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
-                    {isSending ? 'Sending...' : 'Send with instructions'}
+                    {isSending ? 'Sending back...' : 'Send with instructions'}
                   </button>
                 </div>
               )}
@@ -367,7 +366,7 @@ export function ReviewApprovalPanel({
                     disabled={!notesText.trim() || isSending}
                     className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
-                    {isSending ? 'Sending...' : 'Send'}
+                    {isSending ? 'Sending back...' : 'Send back'}
                   </button>
                 </div>
               )}
