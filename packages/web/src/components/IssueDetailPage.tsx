@@ -230,6 +230,7 @@ export function IssueDetailPage() {
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent
+  const runnerUnavailable = agentStatus?.runnerAvailable === false
   const isBacklog = issue.stage === Stage.Backlog
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -628,19 +629,28 @@ export function IssueDetailPage() {
                           {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`}
                         </div>
                       ) : (
-                        <button
-                          onClick={() => startMutation.mutate()}
-                          disabled={isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
-                          className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                        >
-                          {startMutation.isPending
-                            ? 'Starting...'
-                            : isAgentRunningOnThis
-                              ? 'Agent running...'
-                              : isCapacityFull
-                                ? 'Capacity full...'
-                                : 'Start'}
-                        </button>
+                        <div className="space-y-2">
+                          {runnerUnavailable && (
+                            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                              {agentStatus?.runnerMessage ?? 'No runner is connected. Start a runner before starting workflow work.'}
+                            </div>
+                          )}
+                          <button
+                            onClick={() => startMutation.mutate()}
+                            disabled={runnerUnavailable || isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
+                            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                          >
+                            {startMutation.isPending
+                              ? 'Starting...'
+                              : runnerUnavailable
+                                ? 'Runner unavailable'
+                                : isAgentRunningOnThis
+                                  ? 'Agent running...'
+                                  : isCapacityFull
+                                    ? 'Capacity full...'
+                                    : 'Start'}
+                          </button>
+                        </div>
                       )}
                     </>
                   )}

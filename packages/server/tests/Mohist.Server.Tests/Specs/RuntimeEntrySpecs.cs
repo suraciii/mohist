@@ -1,4 +1,6 @@
 using System.Net;
+using Microsoft.Extensions.Configuration;
+using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -27,14 +29,52 @@ public class RuntimeEntrySpecs
     [Fact]
     public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
-        await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        try
+        {
+            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
+
+            Assert.False(status.Running);
+            Assert.True(status.RunnerAvailable);
+            Assert.False(status.EmbeddedRunnerEnabled);
+            Assert.Null(status.RunnerMessage);
+            Assert.Equal(0, status.Capacity.Active);
+            Assert.True(status.Capacity.Max > 0);
+            Assert.Contains(status.Runners, r => r.Id == "runtime-test-runner");
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync("/api/runner/runtime-test-runner/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task AgentStatus_WhenEmbeddedRunnerDisabledAndNoRunnerConnected_ReportsUnavailableRuntime()
+    {
+        await UnregisterAllRunnersAsync();
 
         var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
 
         Assert.False(status.Running);
-        Assert.Equal(0, status.Capacity.Active);
-        Assert.True(status.Capacity.Max > 0);
-        Assert.Contains(status.Runners, r => r.Id == "runtime-test-runner");
+        Assert.False(status.RunnerAvailable);
+        Assert.False(status.EmbeddedRunnerEnabled);
+        Assert.Contains("No runner is connected", status.RunnerMessage);
+    }
+
+    [Fact]
+    public void EmbeddedRunner_IsEnabledByDefaultForLocalProduct()
+    {
+        var config = new ConfigurationBuilder().Build();
+
+        Assert.True(EmbeddedRunnerService.IsEnabled(config));
+    }
+
+    private async Task UnregisterAllRunnersAsync()
+    {
+        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
+        foreach (var runner in status.Runners)
+            await _fixture.Client.PostAsync($"/api/runner/{runner.Id}/unregister", null);
     }
 
     [Fact]
@@ -45,7 +85,7 @@ public class RuntimeEntrySpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private sealed record AgentStatusDto(bool Running, RunnerDto[] Runners, AgentCapacityDto Capacity);
+    private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity);
     private sealed record AgentCapacityDto(int Active, int Max);
-    private sealed record RunnerDto(string Id);
+    private sealed record RunnerDto(string Id, string? Kind = null);
 }

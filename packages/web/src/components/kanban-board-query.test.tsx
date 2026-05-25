@@ -339,6 +339,27 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     expect(screen.getAllByText('Build').length).toBeGreaterThan(0)
   })
 
+  it('shows runner unavailable banner when no runner is connected', () => {
+    const queryClient = new QueryClient()
+    const agentStatus: AgentStatus = {
+      ...mockAgentStatus,
+      runnerAvailable: false,
+      embeddedRunnerEnabled: false,
+      runnerMessage: 'No runner is connected. Enable the embedded runner or start Mohist.Runner.',
+      runners: [],
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <KanbanBoard issues={makeIssues(1)} agentStatus={agentStatus} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
+  })
+
   it('displays filtered issue count after priority filter applied', () => {
     const issues = [
       makeIssue({ number: 1, stage: Stage.Backlog, priority: 'p0' }),

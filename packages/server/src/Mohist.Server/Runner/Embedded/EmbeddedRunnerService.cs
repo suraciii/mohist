@@ -20,7 +20,7 @@ public sealed class EmbeddedRunnerService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_configuration.GetValue<bool>("Mohist:EmbeddedRunner:Enabled"))
+        if (!IsEnabled(_configuration))
             return;
 
         await using var scope = _services.CreateAsyncScope();
@@ -49,4 +49,7 @@ public sealed class EmbeddedRunnerService : BackgroundService
         _log.LogInformation("Starting embedded runner {RunnerId}", runnerId);
         await host.RunAsync(stoppingToken);
     }
+
+    public static bool IsEnabled(IConfiguration configuration) =>
+        configuration.GetValue<bool?>("Mohist:EmbeddedRunner:Enabled") ?? true;
 }
