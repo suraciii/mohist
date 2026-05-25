@@ -54,6 +54,41 @@ public class CliCompatibilitySpecs
         Assert.Contains("ok", result.Stdout, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task CliInstallCommands_WriteSystemdUserUnits()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mohist-cli-install-{Guid.NewGuid():N}");
+        var unitDir = Path.Combine(root, "units");
+        var repoRoot = Path.Combine(root, "repo");
+        Directory.CreateDirectory(repoRoot);
+
+        try
+        {
+            var server = await RunCliAsync("server", "install", "--dry-run", "--unit-dir", unitDir, "--repo-root", repoRoot, "--listen-url", "http://127.0.0.1:4567");
+            Assert.Equal(0, server.ExitCode);
+            var serverUnit = await File.ReadAllTextAsync(Path.Combine(unitDir, "mohist.service"));
+            Assert.Contains("Description=Mohist Server", serverUnit);
+            Assert.Contains("ExecStart=dotnet run --project", serverUnit);
+            Assert.Contains("Mohist.Server.csproj", serverUnit);
+            Assert.Contains("http://127.0.0.1:4567", serverUnit);
+            Assert.Contains("SuccessExitStatus=0 143", serverUnit);
+
+            var runnerRoot = Path.Combine(root, "runner-root");
+            var runner = await RunCliAsync("runner", "install", "--dry-run", "--unit-dir", unitDir, "--repo-root", repoRoot, "--server-url", "http://127.0.0.1:4567", "--runner-root", runnerRoot);
+            Assert.Equal(0, runner.ExitCode);
+            var runnerUnit = await File.ReadAllTextAsync(Path.Combine(unitDir, "mohist-runner.service"));
+            Assert.Contains("Description=Mohist Runner", runnerUnit);
+            Assert.Contains("Mohist.Runner.Cli.csproj", runnerUnit);
+            Assert.Contains("Environment=\"ServerUrl=http://127.0.0.1:4567\"", runnerUnit);
+            Assert.Contains($"Environment=\"RunnerRoot={runnerRoot}\"", runnerUnit);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
     private async Task<CliResult> RunCliAsync(params string[] args)
     {
         using var stdout = new StringWriter();
