@@ -6,6 +6,7 @@ using Mohist.Server.Sessions;
 using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
+using System.Text.Json;
 
 namespace Mohist.Server.Api;
 
@@ -281,6 +282,33 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
+        issues.MapPost("/{number:int}/rebase", async (int number, string? projectId, RebaseRequest? req, IGrainFactory grains) =>
+        {
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
+
+            var baseBranch = string.IsNullOrWhiteSpace(req?.BaseBranch) ? "main" : req!.BaseBranch!;
+            var taskId = $"rebase-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+            var task = new RuntimeTaskInput(
+                taskId,
+                $"Rebase onto {baseBranch}",
+                "mohist/rebase",
+                BuildRebaseTaskWith(baseBranch, req?.ConflictResolver));
+
+            var added = await grains.GetGrain<IWorkflowGrain>(wrId).AddTaskAsync(task);
+            return ApiResults.Ok(new
+            {
+                rebased = false,
+                status = "queued",
+                message = "Rebase task queued",
+                workflowRunId = wrId,
+                taskId = added.TaskId,
+                stage = added.Stage,
+                baseBranch,
+            });
+        });
+
         issues.MapPost("/{number:int}/approve", async (int number, string? projectId, IGrainFactory grains) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
@@ -354,6 +382,41 @@ public static class IssueRoutes
             return (pid, null);
         }
     }
+
+    private static string BuildRebaseTaskWith(string baseBranch, RuntimeTaskRequest? conflictResolver)
+    {
+        var with = new Dictionary<string, object?>
+        {
+            ["baseBranch"] = baseBranch,
+        };
+
+        var resolver = conflictResolver ?? DefaultConflictResolver();
+        if (resolver is not null)
+        {
+            with["conflictResolver"] = new
+            {
+                id = string.IsNullOrWhiteSpace(resolver.Id) ? "resolve-rebase-conflicts" : resolver.Id,
+                title = string.IsNullOrWhiteSpace(resolver.Title) ? "Resolve rebase conflicts" : resolver.Title,
+                uses = string.IsNullOrWhiteSpace(resolver.Uses) ? "mohist/agent" : resolver.Uses,
+                with = resolver.With ?? DefaultConflictResolverWith(),
+            };
+        }
+
+        return JsonSerializer.Serialize(with, WorkflowVariableJson.Options);
+    }
+
+    private static RuntimeTaskRequest DefaultConflictResolver() => new(
+        Id: "resolve-rebase-conflicts",
+        Title: "Resolve rebase conflicts",
+        Uses: "mohist/agent",
+        With: DefaultConflictResolverWith());
+
+    private static Dictionary<string, object?> DefaultConflictResolverWith() => new()
+    {
+        ["stage"] = "maintenance",
+        ["task"] = "resolve-rebase-conflicts",
+        ["description"] = "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes.",
+    };
 }
 
 public record CreateIssueRequest(
@@ -375,3 +438,11 @@ public record UpdateIssueRequest(
     Dictionary<string, string>? StageModels = null);
 
 public record RejectRequest(string? Reason);
+
+public sealed record RebaseRequest(string? BaseBranch = null, RuntimeTaskRequest? ConflictResolver = null);
+
+public sealed record RuntimeTaskRequest(
+    string? Id = null,
+    string? Title = null,
+    string? Uses = null,
+    Dictionary<string, object?>? With = null);

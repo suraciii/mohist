@@ -159,6 +159,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
+    public async Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task)
+    {
+        EnsureRun();
+        if (string.IsNullOrWhiteSpace(task.Id))
+            throw new InvalidOperationException("Runtime task requires id");
+        if (string.IsNullOrWhiteSpace(task.Title))
+            throw new InvalidOperationException("Runtime task requires title");
+
+        var statusBefore = _run.Status;
+        var with = ParseWith(task.With);
+        _run.AddRuntimeTask(new LoadedTaskInput(task.Id, task.Title, task.Uses, with), task.Stage);
+
+        var stage = _run.CurrentStage.Stage;
+        _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
+
+        await PersistAsync();
+        await AppendWorkflowEventAsync("workflow_task_added", "added", $"Workflow task added: {task.Title}", TaskId: task.Id, Payload: task);
+        await RegisterToBacklogAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
+        return new RuntimeTaskAddedResult(GrainKey, stage, task.Id);
+    }
+
     public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
     {
         if (_run is null) return null;
@@ -437,9 +459,56 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private void ProcessTaskResult(WorkDispatchResult result)
     {
         if (result.Status == "completed")
+        {
             _run.CompleteTask();
+        }
         else
-            _run.FailTask(new TaskResult("failed", result.Message));
+        {
+            if (TryAddRequestedTask(result))
+                _run.CompleteTask();
+            else
+                _run.FailTask(new TaskResult("failed", result.Message));
+        }
+    }
+
+    private bool TryAddRequestedTask(WorkDispatchResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.Output)) return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(result.Output);
+            if (!TryParseRequestedTask(document.RootElement, out var task)) return false;
+            _run.AddRuntimeTask(task);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryParseRequestedTask(JsonElement root, out LoadedTaskInput task)
+    {
+        task = default!;
+        if (!root.TryGetProperty("requestedTask", out var requested) || requested.ValueKind != JsonValueKind.Object)
+            return false;
+
+        var id = requested.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+        if (string.IsNullOrWhiteSpace(id)) return false;
+
+        var title = requested.TryGetProperty("title", out var titleProp)
+            ? titleProp.GetString()
+            : id;
+        var uses = requested.TryGetProperty("uses", out var usesProp)
+            ? usesProp.GetString()
+            : null;
+        var with = requested.TryGetProperty("with", out var withProp) && withProp.ValueKind == JsonValueKind.Object
+            ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withProp.GetRawText())
+            : null;
+
+        task = new LoadedTaskInput(id!, title ?? id!, uses, with);
+        return true;
     }
 
     private async Task ProcessCheckResultAsync(WorkDispatchResult result)

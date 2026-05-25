@@ -193,10 +193,10 @@ export const api = {
 
   rebaseIssue: async (number: number, projectId?: string | null) => {
     try {
-      return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }>(withProject(`/issues/${number}/rebase`, projectId), { method: 'POST' })
+      return await request<{ rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'queued' | 'resolving-conflicts'; workflowRunId?: string; taskId?: string; stage?: string; baseBranch?: string }>(withProject(`/issues/${number}/rebase`, projectId), { method: 'POST' })
     } catch (err) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
-        return err.data as { rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'resolving-conflicts' }
+        return err.data as { rebased: boolean; rePlan?: boolean; conflicts?: string[]; buildPassed?: boolean; message: string; status?: 'queued' | 'resolving-conflicts'; workflowRunId?: string; taskId?: string; stage?: string; baseBranch?: string }
       }
       throw err
     }

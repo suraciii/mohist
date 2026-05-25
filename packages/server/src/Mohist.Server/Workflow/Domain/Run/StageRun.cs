@@ -98,7 +98,19 @@ public class StageRun
         if (_initialized) return;
         tasks ??= [];
 
+        var pendingRuntimeTasks = _tasks
+            .Where(t => t.Status == TaskRunStatus.Pending)
+            .Select(t => new LoadedTaskInput(t.DefinitionId, t.Title, t.Uses, t.WithInput))
+            .ToList();
+        if (pendingRuntimeTasks.Count > 0)
+        {
+            _tasks.Clear();
+            _taskAttempts.Clear();
+        }
+
         foreach (var t in tasks)
+            AddTask(t);
+        foreach (var t in pendingRuntimeTasks)
             AddTask(t);
 
         foreach (var c in _staticChecks)
@@ -225,6 +237,16 @@ public class StageRun
 
     public void InjectRetryTask(string checkName, LoadedTaskInput task)
     {
+        AddTask(task);
+    }
+
+    public void AddRuntimeTask(LoadedTaskInput task)
+    {
+        Failure = null;
+        if (Approval?.Status == "awaiting")
+            Approval = null;
+        if (!_started)
+            Start();
         AddTask(task);
     }
 

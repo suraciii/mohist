@@ -171,6 +171,14 @@ public class WorkflowRun
     public void FailCheck(CheckResult result) => CurrentStage.FailCheck(result);
     public void ClearStageFailure() => CurrentStage.Failure = null;
     public void InjectRetryTask(string checkName, LoadedTaskInput task) => CurrentStage.InjectRetryTask(checkName, task);
+    public void AddRuntimeTask(LoadedTaskInput task, string? stage = null)
+    {
+        if (!string.IsNullOrWhiteSpace(stage) && stage != CurrentStage.Stage)
+            throw new WorkflowDomainException($"Cannot add runtime task to stage {stage}; current stage is {CurrentStage.Stage}");
+
+        CurrentStage.AddRuntimeTask(task);
+        _paused = false;
+    }
     public int RetryCountForCheck(string checkName) => CurrentStage.RetryCountForCheck(checkName);
     public void Approve(ApprovalInput? input = null)
     {

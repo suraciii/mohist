@@ -101,6 +101,14 @@ public static class AgentPromptRenderer
         Verify and repair the current implementation as requested by this task.
         If producing a review result, write it to {{PathFor(changeDir, "review.md")}} with a final <promise>PASS</promise> or <promise>FAIL</promise> marker.
         """,
+        (_, "resolve-rebase-conflicts") => """
+        ## Output Contract: Resolve Rebase Conflicts
+        Resolve the active git rebase in the work directory.
+        Inspect `git status`, edit every conflicted file, stage resolved files, and run `git rebase --continue`.
+        If rebase reveals another conflict, repeat until the rebase completes.
+        Do not start a new rebase and do not abort unless the conflict cannot be resolved safely.
+        Before finishing, verify there are no unmerged files and no rebase operation remains in progress.
+        """,
         _ => "## Output Contract\nComplete the requested workflow task and write any required artifacts to the change directory when one is provided."
     };
 

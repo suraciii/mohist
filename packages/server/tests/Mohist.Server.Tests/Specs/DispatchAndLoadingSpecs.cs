@@ -153,6 +153,89 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task RunningWorkflow_CanAcceptRuntimeTaskBeforeChecks()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, task.WorkId, "completed");
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("runtime-1", "Runtime 1", "spec/runtime", """{"value":"one"}"""));
+
+        var (runtimeTask, runtimeRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("runtime-1.", runtimeTask.WorkId);
+        Assert.Equal("spec/runtime", runtimeTask.Uses);
+        Assert.Contains("one", runtimeTask.With);
+
+        await ReportAsync(runtimeRunnerId, runtimeTask.WorkId, "completed");
+        var (check, checkRunnerId) = await PollWorkAnyAsync();
+        Assert.Equal("checks", check.WorkType);
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+    }
+
+    [Fact]
+    public async Task RuntimeTaskAddedBeforeStageMaterializes_DoesNotReplaceDefinedTasks()
+    {
+        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("runtime-1", "Runtime 1", "spec/runtime"));
+
+        _runnerId = await RegisterRunnerAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
+        await runner.AssignWorkflowAsync(_workflowId!);
+
+        var first = await runner.PollAsync();
+        Assert.NotNull(first);
+        Assert.StartsWith("task-1.", first.WorkId);
+        await runner.ReportAsync(first.WorkId, new WorkDispatchResult("completed"));
+
+        var second = await runner.PollAsync();
+        Assert.NotNull(second);
+        Assert.StartsWith("runtime-1.", second.WorkId);
+    }
+
+    [Fact]
+    public async Task FailedTaskWithRequestedTask_QueuesRequestedTaskInsteadOfFailingWorkflow()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new("rebase", "Rebase", "mohist/rebase")],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var (rebase, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, rebase.WorkId, new WorkDispatchResult("failed", "conflict", Output: """
+        {
+          "kind": "rebase",
+          "status": "conflict",
+          "requestedTask": {
+            "id": "resolve-rebase-conflicts",
+            "title": "Resolve rebase conflicts",
+            "uses": "mohist/agent",
+            "with": {
+              "stage": "maintenance",
+              "task": "resolve-rebase-conflicts"
+            }
+          }
+        }
+        """));
+
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
+        Assert.Equal("Running", status!.Status);
+
+        var (resolver, resolverRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("resolve-rebase-conflicts.", resolver.WorkId);
+        Assert.Equal("mohist/agent", resolver.Uses);
+        Assert.Contains("resolve-rebase-conflicts", resolver.With);
+
+        await ReportAsync(resolverRunnerId, resolver.WorkId, "completed");
+        var (check, checkRunnerId) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+    }
+
+    [Fact]
     public async Task StageWithDynamicTasks_LoadFails_WorkflowFails()
     {
         await StartWorkflowAsync(new WorkflowDefinitionInput(
