@@ -113,6 +113,25 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task MohistPipelineUsesCoreActionsForGenericChecks()
+    {
+        await StartWorkflowAsync(Mohist.Server.Issue.Domain.MohistPipeline.Definition);
+
+        for (var i = 0; i < 5; i++)
+        {
+            var (task, runnerId) = await PollWorkAnyAsync();
+            await ReportAsync(runnerId, task.WorkId, "completed");
+        }
+
+        var (check, _) = await PollWorkAnyAsync();
+
+        Assert.Equal("checks", check.WorkType);
+        Assert.Contains("core/artifact-exists", check.With);
+        Assert.Contains("core/marker", check.With);
+        Assert.Contains("core/health-gate", check.With);
+    }
+
+    [Fact]
     public async Task MohistPipelineDispatchesAgentWorkWithoutExecutingAgent()
     {
         await StartWorkflowAsync(Mohist.Server.Issue.Domain.MohistPipeline.Definition);

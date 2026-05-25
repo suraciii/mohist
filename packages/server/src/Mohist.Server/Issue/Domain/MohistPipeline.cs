@@ -76,7 +76,7 @@ public static class MohistPipeline
     private static CheckDefinitionInput ArtifactExists(string name, string title, string path) => new(
         name,
         title,
-        "mohist/artifact-exists",
+        "core/artifact-exists",
         $$$"""
         {
           "path": "${{ artifacts.changeDir }}/{{{path}}}"
@@ -92,7 +92,7 @@ public static class MohistPipeline
         TaskDefinitionInput retryTask) => new(
             name,
             title,
-            "mohist/marker",
+            "core/marker",
             $$$"""
             {
               "path": "${{ artifacts.changeDir }}/{{{path}}}",
@@ -105,7 +105,7 @@ public static class MohistPipeline
     private static CheckDefinitionInput HealthGate(string name, string title, int retryLimit = 0, TaskDefinitionInput? retryTask = null) => new(
         name,
         title,
-        "mohist/health-gate",
+        "core/health-gate",
         name switch
         {
             "health:plan" => """{"command":"npm ci && npm run typecheck","timeout":300000}""",
