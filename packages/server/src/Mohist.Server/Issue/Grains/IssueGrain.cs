@@ -125,15 +125,22 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         var wfStatus = await wfGrain.GetStatusAsync();
+        var projection = MohistDefaultWorkflowProjection.Project(
+            _issue.Number,
+            _issue.Title,
+            _issue.Stage.ToString().ToLower(),
+            _issue.RuntimeStatus.ToString().ToLower(),
+            _issue.BlockedReason,
+            wfStatus);
 
         return new IssueWorkflowStatus(
             _issue.Id,
             _issue.Number,
             _issue.Title,
-            ResolveWorkflowStage(wfStatus, _issue.Stage.ToString().ToLower()),
-            ResolveWorkflowRuntimeStatus(wfStatus, _issue.RuntimeStatus.ToString().ToLower()),
+            projection.Stage,
+            projection.RuntimeStatus,
             wrId,
-            wfStatus?.ChangeDir,
+            projection.ChangeDir,
             null,
             wfStatus);
     }
@@ -271,22 +278,6 @@ public class IssueGrain : Grain, IIssueGrain
         MergeState = issue.MergeState,
     };
 
-    private static string ResolveWorkflowStage(WorkflowStatusSnapshot? workflow, string fallback) => workflow?.Status switch
-    {
-        "Passed" => "done",
-        null => fallback,
-        _ => workflow.CurrentStage ?? fallback,
-    };
-
-    private static string ResolveWorkflowRuntimeStatus(WorkflowStatusSnapshot? workflow, string fallback) => workflow?.Status switch
-    {
-        "Passed" => "completed",
-        "Failed" => "blocked",
-        "Paused" => "paused",
-        null => fallback,
-        _ => "active",
-    };
-
     private static string BuildWorkflowVariables(
         string workflowRunId,
         Issue.Domain.Issue issue,
@@ -300,20 +291,11 @@ public class IssueGrain : Grain, IIssueGrain
             ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
             ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
             ["project"] = JsonSerializer.SerializeToElement(new { id = projectId, name = projectName, path = projectPath, baseBranch, defaultBranch = baseBranch }, WorkflowVariableJson.Options),
-            ["artifacts"] = JsonSerializer.SerializeToElement(new { changeDir = $"openspec/changes/{issue.Number}-{Slug(issue.Title)}" }, WorkflowVariableJson.Options),
+            ["artifacts"] = JsonSerializer.SerializeToElement(new { changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number, issue.Title) }, WorkflowVariableJson.Options),
             ["model"] = JsonSerializer.SerializeToElement(new { @default = issue.Model ?? "", stage = issue.StageModels ?? new Dictionary<string, string>() }, WorkflowVariableJson.Options),
             ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>(), WorkflowVariableJson.Options),
         };
         return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
-    }
-
-    private static string Slug(string value)
-    {
-        var chars = value.ToLowerInvariant()
-            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
-            .ToArray();
-        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(slug) ? "issue" : slug;
     }
 
 }
