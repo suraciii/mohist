@@ -1,9 +1,19 @@
 using System.Diagnostics;
+using Mohist.Runner;
 
 namespace Mohist.Server.Workspace;
 
 public class GitService : IGitService
 {
+    private readonly string _runnerRoot;
+
+    public GitService(string? runnerRoot = null)
+    {
+        _runnerRoot = runnerRoot is null
+            ? MohistWorkspaceLayout.DefaultRunnerRoot()
+            : Path.GetFullPath(runnerRoot);
+    }
+
     public async Task<bool> BranchExistsAsync(string repoPath, string branchName)
     {
         var result = await RunGitAsync(repoPath, "rev-parse", "--verify", $"refs/heads/{branchName}");
@@ -88,9 +98,9 @@ public class GitService : IGitService
     public async Task<WorkspaceStatus> GetWorktreeStatusAsync(string projectPath, string projectName, int issueNumber, string baseBranch)
     {
         var branchName = $"mo/issue-{issueNumber}";
-        var worktreePath = GetIssueWorktreePath(projectPath, projectName, issueNumber);
+        var worktreePath = GetExistingIssueWorktreePath(projectPath, projectName, issueNumber);
 
-        if (!Directory.Exists(worktreePath))
+        if (worktreePath is null)
             return new WorkspaceStatus { Exists = false };
 
         var exists = await BranchExistsAsync(projectPath, branchName);
@@ -122,8 +132,9 @@ public class GitService : IGitService
 
     public async Task<WorktreeRemovalResult> RemoveWorktreeAsync(string projectPath, string projectName, int issueNumber)
     {
-        var worktreePath = GetIssueWorktreePath(projectPath, projectName, issueNumber);
-        if (!Directory.Exists(worktreePath))
+        var worktreePath = GetIssueWorktreePath(projectName, issueNumber);
+        var existingWorktreePath = GetExistingIssueWorktreePath(projectPath, projectName, issueNumber);
+        if (existingWorktreePath is null)
         {
             return new WorktreeRemovalResult(
                 Removed: false,
@@ -133,13 +144,13 @@ public class GitService : IGitService
                 Message: "Worktree already removed");
         }
 
-        var result = await RunGitAsync(projectPath, "worktree", "remove", "--force", worktreePath);
-        if (result.ExitCode == 0 || !Directory.Exists(worktreePath))
+        var result = await RunGitAsync(projectPath, "worktree", "remove", "--force", existingWorktreePath);
+        if (result.ExitCode == 0 || !Directory.Exists(existingWorktreePath))
         {
             return new WorktreeRemovalResult(
                 Removed: true,
                 Status: "removed",
-                Path: worktreePath,
+                Path: existingWorktreePath,
                 Reason: null,
                 Message: "Worktree removed");
         }
@@ -148,13 +159,25 @@ public class GitService : IGitService
         return new WorktreeRemovalResult(
             Removed: false,
             Status: "failed",
-            Path: worktreePath,
+            Path: existingWorktreePath,
             Reason: "git_worktree_remove_failed",
             Message: string.IsNullOrWhiteSpace(error) ? "Failed to remove worktree" : error);
     }
 
-    private static string GetIssueWorktreePath(string projectPath, string projectName, int issueNumber)
-        => Path.GetFullPath(Path.Combine(projectPath, "..", ".mohist-worktrees", projectName, issueNumber.ToString()));
+    private string GetIssueWorktreePath(string projectName, int issueNumber)
+        => MohistWorkspaceLayout.IssueWorktreePath(_runnerRoot, projectName, issueNumber);
+
+    private static string GetLegacyIssueWorktreePath(string projectPath, string projectName, int issueNumber)
+        => MohistWorkspaceLayout.LegacyIssueWorktreePath(projectPath, projectName, issueNumber);
+
+    private string? GetExistingIssueWorktreePath(string projectPath, string projectName, int issueNumber)
+    {
+        var worktreePath = GetIssueWorktreePath(projectName, issueNumber);
+        if (Directory.Exists(worktreePath)) return worktreePath;
+
+        var legacyWorktreePath = GetLegacyIssueWorktreePath(projectPath, projectName, issueNumber);
+        return Directory.Exists(legacyWorktreePath) ? legacyWorktreePath : null;
+    }
 
     private static async Task<(string Output, string Error, int ExitCode)> RunGitAsync(string workingDir, string command, params string[] args)
     {

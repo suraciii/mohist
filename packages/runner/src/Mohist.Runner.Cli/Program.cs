@@ -10,6 +10,8 @@ var builder = Host.CreateApplicationBuilder(args);
 
 var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:3456";
 var runnerId = builder.Configuration["RunnerId"] ?? $"runner-{Environment.MachineName}-{Environment.ProcessId}";
+var runnerRoot = builder.Configuration["RunnerRoot"]
+    ?? builder.Configuration["Mohist:RunnerRoot"];
 
 builder.Services.AddHttpClient<IServerConnection>((sp, client) =>
 {
@@ -44,7 +46,7 @@ builder.Services.AddSingleton<IAgentExecutor>(sp =>
 builder.Services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
 builder.Services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
 builder.Services.AddSingleton<IWorkspaceManager>(sp =>
-    new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>()));
+    new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>(), runnerRoot));
 builder.Services.AddSingleton<IWorkExecutor, WorkExecutor>();
 builder.Services.AddSingleton<RunnerHost>();
 

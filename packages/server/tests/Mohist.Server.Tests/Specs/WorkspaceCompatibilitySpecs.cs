@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Mohist.Runner;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -8,9 +9,11 @@ namespace Mohist.Server.Tests.Specs;
 public class WorkspaceCompatibilitySpecs
 {
     private readonly HttpClient _client;
+    private readonly MohistIntegrationFixture _fixture;
 
     public WorkspaceCompatibilitySpecs(MohistIntegrationFixture fixture)
     {
+        _fixture = fixture;
         _client = fixture.Client;
     }
 
@@ -39,7 +42,7 @@ public class WorkspaceCompatibilitySpecs
         var projectName = $"workspace-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = repo.Path, baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Cleanup issue", projectId = project.Id });
-        var worktreePath = GetWorktreePath(repo.Path, projectName, issue.Number);
+        var worktreePath = MohistWorkspaceLayout.IssueWorktreePath(_fixture.RunnerRoot, projectName, issue.Number);
 
         Directory.CreateDirectory(Path.GetDirectoryName(worktreePath)!);
         await RunGitAsync(repo.Path, "worktree", "add", "-b", $"mo/issue-{issue.Number}", worktreePath, "main");
@@ -50,6 +53,25 @@ public class WorkspaceCompatibilitySpecs
         Assert.True(cleanup.Removed);
         Assert.Equal("Worktree removed", cleanup.Message);
         Assert.False(Directory.Exists(worktreePath));
+    }
+
+    [Fact]
+    public async Task WorktreeCleanup_WhenLegacyWorktreeExists_RemovesLegacyWorktree()
+    {
+        using var repo = await CreateGitRepositoryAsync();
+        var projectName = $"workspace-{Guid.NewGuid():N}";
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = repo.Path, baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Legacy cleanup issue", projectId = project.Id });
+        var legacyWorktreePath = MohistWorkspaceLayout.LegacyIssueWorktreePath(repo.Path, projectName, issue.Number);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(legacyWorktreePath)!);
+        await RunGitAsync(repo.Path, "worktree", "add", "-b", $"mo/issue-{issue.Number}", legacyWorktreePath, "main");
+        Assert.True(Directory.Exists(legacyWorktreePath));
+
+        var cleanup = await _client.PostDataAsync<CleanupDto>($"/api/issues/{issue.Number}/cleanup?projectId={project.Id}");
+
+        Assert.True(cleanup.Removed);
+        Assert.False(Directory.Exists(legacyWorktreePath));
     }
 
     [Fact]
@@ -80,9 +102,6 @@ public class WorkspaceCompatibilitySpecs
         await RunGitAsync(path, "commit", "-m", "initial");
         return new TempRepository(root, path);
     }
-
-    private static string GetWorktreePath(string repoPath, string projectName, int issueNumber)
-        => Path.GetFullPath(Path.Combine(repoPath, "..", ".mohist-worktrees", projectName, issueNumber.ToString()));
 
     private static async Task RunGitAsync(string workingDir, params string[] args)
     {

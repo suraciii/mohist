@@ -74,6 +74,7 @@ public class WorkspaceManagerSpecs
 
         var info = await ws.EnsureAsync(variables, CancellationToken.None);
 
+        Assert.Equal(MohistWorkspaceLayout.IssueWorktreePath(runnerRoot.Path, "My Project", 42), info.Path);
         Assert.Equal("mo/issue-42", info.Branch);
         Assert.True(Directory.Exists(info.Path));
         Assert.True(Directory.Exists(Path.Combine(info.Path, ".git")) || File.Exists(Path.Combine(info.Path, ".git")));
