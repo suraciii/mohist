@@ -8,8 +8,8 @@ describe('deriveToolCallTitle', () => {
 
   it('derives filename from JSON file_path for read tool', () => {
     expect(
-      deriveToolCallTitle('read', 'read', '{"file_path":"packages/cli/src/server.ts"}')
-    ).toBe('server.ts')
+      deriveToolCallTitle('read', 'read', '{"file_path":"packages/server/src/Mohist.Server/Program.cs"}')
+    ).toBe('Program.cs')
   })
 
   it('derives command from JSON command for bash tool', () => {

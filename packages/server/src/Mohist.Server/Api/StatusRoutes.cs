@@ -38,7 +38,7 @@ public static class StatusRoutes
 
             var current = await ResolveProjectAsync(projectId, projectsGrain);
             if (current is null)
-                return ApiResults.BadRequest("No active project. Use: mo project use <name>");
+                return ApiResults.BadRequest("No active project. Pass projectId or create/select a project in the web UI.");
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Status == "active").ToList();

@@ -22,17 +22,18 @@ description: 作为 Mohist 的 Product Owner 进行产品巡检和运行监控�
 先确认当前 Mohist 是否健康、有哪些活跃工作、用户可能正在关注什么：
 
 ```bash
-node packages/cli/bin/mo server status
-node packages/cli/bin/mo status
-node packages/cli/bin/mo issue list
+curl -sf http://localhost:3456/api/health
+curl -sf "http://localhost:3456/api/status?all=true"
+curl -sf "http://localhost:3456/api/issues?all=true"
 ```
 
 如果需要判断运行态，不只看 issue status。结合：
 
-- `mo issue show <number>`
-- `mo issue logs <number>`
-- `/api/issues/<number>` 或相关 API
-- `~/.mohist/mohist.db` 中的 issue、stage execution、coder session、workflow log
+- `/api/issues/<number>`
+- `/api/issues/<number>/workflow/status`
+- `/api/issues/<number>/workflow/timeline`
+- `/api/issues/<number>/logs`
+- `~/.mohist/mohist.db` 中的 issue、coder session、workflow log
 - 系统进程和端口占用
 - WebUI 实际页面表现
 
@@ -68,8 +69,8 @@ node packages/cli/bin/mo issue list
 创建前先查重：
 
 ```bash
-node packages/cli/bin/mo issue list
-node packages/cli/bin/mo issue show <number>
+curl -sf "http://localhost:3456/api/issues?all=true"
+curl -sf "http://localhost:3456/api/issues/<number>"
 ```
 
 判断重复时比较：
@@ -87,8 +88,10 @@ node packages/cli/bin/mo issue show <number>
 创建 issue 前先确认 server 健康。优先使用 lowercase priority，例如 `p1`。
 
 ```bash
-node packages/cli/bin/mo server status
-node packages/cli/bin/mo issue create "<title>" --body "<body>" --label bug --label ux --priority p1
+curl -sf http://localhost:3456/api/health
+curl -sf -X POST http://localhost:3456/api/issues \
+  -H 'content-type: application/json' \
+  -d '{"title":"<title>","body":"<body>","labels":["bug","ux"],"priority":"p1","projectId":"<projectId>"}'
 ```
 
 长正文避免 shell quoting 问题；必要时用安全的本地命令传 literal body，不要让反引号、管道符或 Markdown 破坏 CLI 参数。
@@ -177,7 +180,7 @@ Refactor issue 应使用：
 
 ## Collaboration With Other Mohist Skills
 
-- 需要 CLI 操作时，遵循 `mohist` skill 的命令习惯，优先用 `node packages/cli/bin/mo`。
+- 需要 Mohist 操作时，遵循当前 .NET server/API 路径；旧 Node CLI 已移除。
 - 需要产品探索时，借用 `mohist-explore` 的用户旅程视角，但本 skill 比 explore 更强调运行监控、证据闭环和最终 issue 质量。
 - 需要 WebUI 观察时，使用 agent-browser 实际访问页面，不要只从代码推测。
 
