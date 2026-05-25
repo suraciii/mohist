@@ -48,7 +48,11 @@ public class DefaultWorkflowIntegrationSpecs
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
 
         await using var scope = _fixture.Services.CreateAsyncScope();
-        await using var runnerServices = RunnerServices(repo.Path, issue.Number, changeDir);
+        await using var runnerServices = RunnerServices(
+            repo.Path,
+            issue.Number,
+            changeDir,
+            scope.ServiceProvider.GetRequiredService<Sessions.AgentSessionService>());
         var runnerId = $"default-workflow-runner-{Guid.NewGuid():N}";
         var connection = new EmbeddedRunnerConnection(
             _fixture.Grains,
@@ -75,6 +79,7 @@ public class DefaultWorkflowIntegrationSpecs
             await WaitForWorkflowAsync(project.Id, issue.Number, "AwaitingApproval", "plan");
             await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
             await WaitForWorkflowAsync(project.Id, issue.Number, "AwaitingApproval", "check");
+            await AssertProductSurfaceDuringWorkflowAsync(project.Id, issue.Number);
             await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
             await WaitForWorkflowAsync(project.Id, issue.Number, "Completed", null);
         }
@@ -98,9 +103,69 @@ public class DefaultWorkflowIntegrationSpecs
             path => path.EndsWith($"issue-{issue.Number}", StringComparison.Ordinal));
         Assert.Equal("main", await GitOutputAsync(repo.Path, "branch", "--show-current"));
 
+        var timeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
+        Assert.Equal("Completed", timeline.Status);
+        Assert.Contains(timeline.Stages, s => s.Stage == "plan" && s.Approval?.Status == "approved");
+        Assert.Contains(timeline.Stages, s => s.Stage == "check" && s.Approval?.Status == "approved");
+        Assert.Contains(timeline.Stages, s => s.Stage == "integrate" && s.Tasks.Any(t => t.Uses == "mohist/merge" && t.Status == "completed"));
+
+        var diff = await _client.GetDataAsync<IssueDiffDto>($"/api/issues/{issue.Number}/diff?projectId={project.Id}");
+        Assert.True(diff.Available);
+        Assert.Equal($"mo/issue-{issue.Number}", diff.Head);
+        Assert.Contains(diff.Files, f => f.File == "feature.txt");
+        Assert.Contains(diff.Files, f => f.File == "specs/feature/spec.md");
+
+        var worktree = await _client.GetDataAsync<WorktreeStatusDto>($"/api/issues/{issue.Number}/worktree-status?projectId={project.Id}");
+        Assert.False(worktree.Exists);
+
+        var sessions = await _client.GetDataAsync<CoderSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
+        Assert.Contains(sessions, s => s.Stage == "plan" && s.Status == "completed");
+        Assert.Contains(sessions, s => s.Stage == "build" && s.Status == "completed");
+
+        var detail = await _client.GetDataAsync<CoderSessionDetailDto>($"/api/issues/{issue.Number}/coder-sessions/{sessions[0].Id}?projectId={project.Id}");
+        Assert.Equal("completed", detail.Status);
+        Assert.NotNull(detail.Metadata);
+
         var events = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
         Assert.Contains(events, e => e.Type == "workflow_completed");
         Assert.Contains(events, e => e.Type == "issue_completed");
+
+        var logs = await _client.GetDataAsync<WorkflowLogDto[]>($"/api/issues/{issue.Number}/logs?projectId={project.Id}");
+        Assert.Contains(logs, e => e.EventType == "workflow_task_completed");
+        Assert.Contains(logs, e => e.EventType == "issue_completed");
+
+        var activity = await _client.GetDataAsync<AgentActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        Assert.True(activity.Summary.Completed >= sessions.Length);
+        Assert.Contains(activity.Sessions, s => s.IssueNumber == issue.Number && s.Status == "completed");
+    }
+
+    private async Task AssertProductSurfaceDuringWorkflowAsync(string projectId, int issueNumber)
+    {
+        var timeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issueNumber}/workflow/timeline?projectId={projectId}");
+        Assert.Equal("AwaitingApproval", timeline.Status);
+        Assert.Equal("check", timeline.CurrentStage);
+        Assert.Contains(timeline.Stages, s => s.Stage == "build" && s.Tasks.Any(t => t.Status == "completed"));
+        Assert.Contains(timeline.Stages, s => s.Stage == "check" && s.Approval?.Status == "awaiting");
+
+        var worktree = await _client.GetDataAsync<WorktreeStatusDto>($"/api/issues/{issueNumber}/worktree-status?projectId={projectId}");
+        Assert.True(worktree.Exists);
+        Assert.Equal($"mo/issue-{issueNumber}", worktree.Branch);
+
+        var diff = await _client.GetDataAsync<IssueDiffDto>($"/api/issues/{issueNumber}/diff?projectId={projectId}");
+        Assert.True(diff.Available);
+        Assert.Contains(diff.Files, f => f.File == "feature.txt");
+
+        var commits = await _client.GetDataAsync<IssueCommitsDto>($"/api/issues/{issueNumber}/commits?projectId={projectId}");
+        Assert.True(commits.Available);
+        Assert.NotEmpty(commits.Commits);
+
+        var sessions = await _client.GetDataAsync<CoderSessionSummaryDto[]>($"/api/issues/{issueNumber}/coder-sessions?projectId={projectId}");
+        Assert.Contains(sessions, s => s.Stage == "plan" && s.Status == "completed");
+        Assert.Contains(sessions, s => s.Stage == "build" && s.Status == "completed");
+
+        var activity = await _client.GetDataAsync<AgentActivityDto>($"/api/agent/activity?projectId={projectId}");
+        Assert.True(activity.Summary.Completed > 0);
+        Assert.Contains(activity.Waiting, w => w.IssueNumber == issueNumber && w.Stage == "check");
     }
 
     private async Task WaitForWorkflowAsync(string projectId, int issueNumber, string status, string? stage)
@@ -117,12 +182,12 @@ public class DefaultWorkflowIntegrationSpecs
         Assert.Fail($"Workflow did not reach {status}/{stage ?? "*"}; current={final.Workflow?.Status}/{final.Workflow?.CurrentStage}; failure={final.Workflow?.Failure?.Message}");
     }
 
-    private static ServiceProvider RunnerServices(string repoPath, int issueNumber, string changeDir)
+    private static ServiceProvider RunnerServices(string repoPath, int issueNumber, string changeDir, Sessions.AgentSessionService sessions)
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IAgentExecutor>(new DefaultWorkflowFakeAgentExecutor(repoPath, issueNumber, changeDir));
-        services.AddSingleton<ISessionTelemetrySink, NullSessionTelemetrySink>();
+        services.AddSingleton<ISessionTelemetrySink>(new EmbeddedSessionTelemetrySink(sessions));
         services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
         services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
         return services.BuildServiceProvider();
@@ -266,6 +331,24 @@ public class DefaultWorkflowIntegrationSpecs
     private sealed record WorkflowStatusDto(string Status, string? CurrentStage, FailureDto? Failure);
     private sealed record FailureDto(string? Message);
     private sealed record EventDto(string Type);
+    private sealed record WorkflowLogDto(string EventType);
+    private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
+    private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? Approval);
+    private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
+    private sealed record ApprovalDto(string Status);
+    private sealed record WorktreeStatusDto(bool Exists, string? Branch, string? BaseBranch, int Ahead, int Behind, bool RebaseInProgress, string[] ConflictingFiles);
+    private sealed record IssueDiffDto(bool Available, string? Reason, string? Base, string? Head, DiffSummaryDto? Summary, DiffFileDto[] Files);
+    private sealed record DiffSummaryDto(int FilesChanged, int Commits, int Additions, int Deletions);
+    private sealed record DiffFileDto(string File, int Additions, int Deletions, string Diff, bool IsBinary);
+    private sealed record IssueCommitsDto(bool Available, string? Reason, CommitDto[] Commits);
+    private sealed record CommitDto(string Hash, string ShortHash, string Message, string Author, string Date);
+    private sealed record CoderSessionSummaryDto(string Id, string SessionId, string ExecutionId, string? Title, string Status, string CreatedAt, string? CompletedAt, string? Model, string? Provider, string? Stage, string? TaskDescription, string? LastDataAt, string? Summary, string? TranscriptPath, string? FailureReason);
+    private sealed record CoderSessionDetailDto(string Id, string SessionId, string ExecutionId, string? Title, string Status, string CreatedAt, string? CompletedAt, string? Model, string? Provider, string? Stage, string? TaskDescription, object? Metadata);
+    private sealed record AgentActivityDto(AgentActivitySummaryDto Summary, AgentActivityCardDto[] Sessions, AgentActivityWaitingCardDto[] Waiting);
+    private sealed record AgentActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, AgentActivitySlotUsageDto Slots);
+    private sealed record AgentActivitySlotUsageDto(int Active, int Max);
+    private sealed record AgentActivityCardDto(int IssueNumber, string Status);
+    private sealed record AgentActivityWaitingCardDto(int IssueNumber, string? Stage);
 
     private sealed class TestTempDir : IDisposable
     {
