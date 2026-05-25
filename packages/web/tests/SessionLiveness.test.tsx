@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { screen, waitFor, baseRender, renderHook, act } from './test-utils'
+import { TEST_PROJECT, screen, waitFor, baseRender, renderHook, act } from './test-utils'
 import { SessionHeader, getSessionStatusLabel } from '../src/components/SessionHeader'
 import { dispatchAgentEvent } from '../src/lib/agent-events'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ProjectProvider } from '../src/context/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
 import type { CoderSessionItem } from '../src/lib/types'
@@ -41,7 +42,9 @@ function renderWithProviders(ui: React.ReactElement) {
   queryClients.push(queryClient)
   return baseRender(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+        <MemoryRouter>{ui}</MemoryRouter>
+      </ProjectProvider>
     </QueryClientProvider>,
   )
 }
@@ -51,7 +54,11 @@ function renderHookWithProviders<T>(callback: () => T) {
   queryClients.push(queryClient)
   return renderHook(callback, {
     wrapper: ({ children }: { children: React.ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <ProjectProvider initialProjectId={TEST_PROJECT.id} initialProjects={[TEST_PROJECT]}>
+          {children}
+        </ProjectProvider>
+      </QueryClientProvider>
     ),
   })
 }

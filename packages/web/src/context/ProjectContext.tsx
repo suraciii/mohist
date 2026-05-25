@@ -9,11 +9,29 @@ interface ProjectContextValue {
   currentProject: Project | null
 }
 
-const ProjectContext = createContext<ProjectContextValue | null>(null)
+const defaultProjectContext: ProjectContextValue = {
+  projectId: null,
+  setProjectId: () => {},
+  projects: [],
+  setProjects: () => {},
+  currentProject: null,
+}
 
-export function ProjectProvider({ children }: { children: ReactNode }) {
-  const [projectId, setProjectIdState] = useState<string | null>(null)
-  const [projects, setProjects] = useState<Project[]>([])
+const ProjectContext = createContext<ProjectContextValue>(defaultProjectContext)
+
+interface ProjectProviderProps {
+  children: ReactNode
+  initialProjectId?: string | null
+  initialProjects?: Project[]
+}
+
+export function ProjectProvider({
+  children,
+  initialProjectId = null,
+  initialProjects = [],
+}: ProjectProviderProps) {
+  const [projectId, setProjectIdState] = useState<string | null>(initialProjectId)
+  const [projects, setProjects] = useState<Project[]>(initialProjects)
 
   const setProjectId = useCallback((id: string | null) => {
     setProjectIdState(id)
@@ -31,9 +49,5 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 }
 
 export function useProject() {
-  const ctx = useContext(ProjectContext)
-  if (!ctx) {
-    throw new Error('useProject must be used within a ProjectProvider')
-  }
-  return ctx
+  return useContext(ProjectContext)
 }

@@ -6,11 +6,12 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w packages/cli",
-    "test": "npm run test -w packages/cli",
-    "lint": "npm run lint -w packages/cli",
-    "typecheck": "npm run typecheck -w packages/cli",
-    "dev": "npm run build && concurrently -n server,web -c blue,green \"npm run start:server -w packages/cli\" \"npm run dev:web -w packages/cli\""
+    "build": "npm run build -w packages/web && dotnet build packages/server/Mohist.sln",
+    "test": "dotnet test packages/server/Mohist.sln && dotnet test packages/runner/tests/Mohist.Runner.Tests/Mohist.Runner.Tests.csproj",
+    "build:web": "npm run build -w packages/web",
+    "dev:web": "npm run dev -w packages/web",
+    "dev:server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
