@@ -296,6 +296,16 @@ function NeedsAttentionSummary({
   )
 }
 
+function RunnerUnavailableBanner({ agentStatus }: { agentStatus: AgentStatus }) {
+  if (agentStatus.runnerAvailable !== false) return null
+
+  return (
+    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+      {agentStatus.runnerMessage ?? 'No runner is connected. Start a runner before starting workflow work.'}
+    </div>
+  )
+}
+
 function getSearchParams(): string {
   return typeof window !== 'undefined' ? window.location.search : ''
 }
@@ -363,6 +373,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
+      <RunnerUnavailableBanner agentStatus={agentStatus} />
       <NeedsAttentionSummary items={attentionItems} />
       <FilterBar
         state={localState}

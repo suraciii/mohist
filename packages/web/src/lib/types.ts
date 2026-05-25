@@ -194,6 +194,10 @@ export interface AgentStatus {
   issueId: string | null
   issueNumber: number | null
   activeAgents: ActiveAgentInfo[]
+  runnerAvailable?: boolean
+  embeddedRunnerEnabled?: boolean
+  runnerMessage?: string | null
+  runners?: Array<{ id: string; kind?: string | null }>
   capacity: {
     active: number
     max: number

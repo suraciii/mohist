@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Sessions;
 using Mohist.Server.Config.Domain;
 using Mohist.Server.Project.Grains;
@@ -14,13 +15,15 @@ public static class AgentRoutes
     {
         var group = app.MapGroup("/api/agent");
 
-        group.MapGet("/status", async (IGrainFactory grains, WorkflowProjectionService projection, ConfigService config) =>
+        group.MapGet("/status", async (IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
         {
             var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
             var runnerIds = await registry.ListRunnerIdsAsync();
             var projectId = await ResolveProjectIdAsync(grains);
             var activeAgents = await projection.ListActiveAgentsAsync(projectId);
             var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
+            var embeddedRunnerEnabled = EmbeddedRunnerService.IsEnabled(configuration);
+            var runnerAvailable = runnerIds.Count > 0;
 
             return ApiResults.Ok(new
             {
@@ -29,7 +32,14 @@ public static class AgentRoutes
                 issueNumber = activeAgents.FirstOrDefault()?.IssueNumber,
                 activeAgents,
                 capacity = new { active = activeAgents.Count, max = maxConcurrentAgents },
-                runners = runnerIds.Select(id => new { id }).ToArray(),
+                runnerAvailable,
+                embeddedRunnerEnabled,
+                runnerMessage = runnerAvailable
+                    ? null
+                    : embeddedRunnerEnabled
+                        ? "Embedded runner is starting or not connected yet."
+                        : "No runner is connected. Enable the embedded runner or start Mohist.Runner.",
+                runners = runnerIds.Select(id => new { id, kind = id.StartsWith("embedded-", StringComparison.OrdinalIgnoreCase) ? "embedded" : "external" }).ToArray(),
             });
         });
 
