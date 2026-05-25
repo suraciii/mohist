@@ -244,8 +244,6 @@ public static class IssueRoutes
             return detail is null ? ApiResults.NotFound($"Coder session {sessionId} not found") : ApiResults.Ok(detail);
         });
 
-        issues.MapGet("/{number:int}/agent-session", () => ApiResults.Ok(Array.Empty<object>()));
-
         issues.MapPost("/{number:int}/resume", async (int number, string? projectId, IGrainFactory grains) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);

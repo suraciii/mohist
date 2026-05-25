@@ -44,7 +44,7 @@ vi.mock('../src/hooks/useQueries', async () => {
     useUpdateOpencodeModel: vi.fn(),
     useStageModels: vi.fn(),
     useSetStageModels: vi.fn(),
-    useOpencodeModels: vi.fn(),
+    useAvailableModelIds: vi.fn(),
     useLogLevel: vi.fn(),
     useSetLogLevel: vi.fn(),
     useSystemInfo: vi.fn(),
@@ -69,7 +69,7 @@ const {
   useUpdateOpencodeModel,
   useStageModels,
   useSetStageModels,
-  useOpencodeModels,
+  useAvailableModelIds,
   useLogLevel,
   useSetLogLevel,
   useSystemInfo,
@@ -150,7 +150,7 @@ beforeEach(() => {
     mutate: vi.fn(),
     isPending: false,
   })
-  ;(useOpencodeModels as ReturnType<typeof vi.fn>).mockReturnValue({
+  ;(useAvailableModelIds as ReturnType<typeof vi.fn>).mockReturnValue({
     data: ['openai/gpt-4', 'anthropic/claude-3-opus'],
     isLoading: false,
     error: null,

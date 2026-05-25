@@ -12,14 +12,6 @@ export function useProjects() {
   })
 }
 
-export function useCurrentProject() {
-  return useQuery({
-    queryKey: ['current-project'],
-    queryFn: () => api.getCurrentProject(),
-    retry: false,
-  })
-}
-
 export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   return useQuery({
     queryKey: ['issues', params],
@@ -95,14 +87,6 @@ export function useAgentSessions(params?: { status?: string; limit?: number }) {
     queryKey: ['agent-sessions', params, projectId],
     queryFn: () => api.getAgentSessions({ ...params, projectId }),
     enabled: !!projectId,
-  })
-}
-
-export function useQuestions(issueId: string) {
-  return useQuery({
-    queryKey: ['questions', issueId],
-    queryFn: () => api.getQuestions(issueId),
-    enabled: !!issueId,
   })
 }
 
@@ -386,17 +370,22 @@ export function useUpdateOpencodeModel() {
   })
 }
 
-export function useOpencodeModels() {
+export function useAvailableModelIds() {
   return useQuery<string[]>({
-    queryKey: ['opencode-models'],
-    queryFn: () => api.getOpencodeModels(),
+    queryKey: ['model-ids'],
+    queryFn: async () => {
+      const providers = await api.getAvailableModels()
+      return providers.flatMap((provider) => provider.models.map((model) => model.id))
+    },
   })
 }
 
 export function useRebuildSystem() {
   const queryClient = useQueryClient()
   return useMutation<{ success: boolean }, Error, void>({
-    mutationFn: () => api.rebuildSystem(),
+    mutationFn: async () => {
+      throw new Error('Server rebuild is not managed by Mohist Web')
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['status'] })
       toast.success('Rebuild started')

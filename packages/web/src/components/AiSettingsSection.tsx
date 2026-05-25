@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useUpdateOpencodeModel, useStageModels, useSetStageModels, useOpencodeModels } from '../hooks/useQueries'
+import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useUpdateOpencodeModel, useStageModels, useSetStageModels, useAvailableModelIds } from '../hooks/useQueries'
 import { useModels } from '../hooks/useModels'
 import type { Provider } from '../lib/provider-api'
 import type { Model } from '../lib/types'
@@ -160,7 +160,7 @@ export function AiSettingsSection() {
   const { data: modelProviders } = useModels()
   const { data: modelData } = useModel()
   const setModel = useSetModel()
-  const { data: opencodeModelsList } = useOpencodeModels()
+  const { data: availableModelIds } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
   const { data: stageModelsData } = useStageModels()
@@ -213,11 +213,11 @@ export function AiSettingsSection() {
   }, [modelProviders])
 
   const coderModels = useMemo(() => {
-    if (!opencodeModelsList) return []
-    return opencodeModelsList
+    if (!availableModelIds) return []
+    return availableModelIds
       .map((id): Model => ({ id, name: id.split('/').pop() || id, badges: [], contextWindow: 0 }))
       .sort((a, b) => a.id.localeCompare(b.id))
-  }, [opencodeModelsList])
+  }, [availableModelIds])
 
   const handleConfirmDisconnect = () => {
     if (confirmRemove) {

@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Popover, Transition } from '@headlessui/react'
 import { Dialog } from './Dialog'
 import { api } from '../lib/api'
-import { useLabels, useOpencodeModels } from '../hooks/useQueries'
+import { useLabels, useAvailableModelIds } from '../hooks/useQueries'
 import { useProject } from '../context/ProjectContext'
 import { getPriorityStyle } from '../lib/label-colors'
 
@@ -47,12 +47,12 @@ function XIcon({ className }: { className?: string }) {
 }
 
 function ModelPresetSelect({ value, onChange, onClear }: { value: string | null; onChange: (id: string) => void; onClear: () => void }) {
-  const { data: opencodeModels, isLoading } = useOpencodeModels()
+  const { data: availableModelIds, isLoading } = useAvailableModelIds()
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  const allModels: string[] = opencodeModels ?? []
+  const allModels: string[] = availableModelIds ?? []
 
   const filtered = useMemo(() => {
     if (!search.trim()) return allModels

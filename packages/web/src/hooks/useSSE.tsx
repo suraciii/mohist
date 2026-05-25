@@ -152,10 +152,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           }
           case 'question_asked':
           case 'question_answered': {
-            const { issueId } = parsed as EventMap['question_asked']
-            if (issueId) {
-              queryClient.invalidateQueries({ queryKey: ['questions', issueId] })
-            }
+            queryClient.invalidateQueries({ queryKey: ['agent-status'] })
             break
           }
           case 'merge_queued':

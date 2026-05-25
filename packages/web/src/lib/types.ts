@@ -168,16 +168,6 @@ export interface Comment {
   createdAt: string
 }
 
-export interface Question {
-  id: string
-  issueId: string
-  question: string
-  answer?: string
-  status: 'pending' | 'answered' | 'expired'
-  createdAt: string
-  answeredAt?: string
-}
-
 export interface ApiResponse<T = unknown> {
   success: boolean
   data?: T
