@@ -353,7 +353,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private async Task ReleaseFromBacklogIfTerminalAsync()
     {
         if (_run is null) return;
-        if (_run.Status is WorkflowRunStatus.Passed or WorkflowRunStatus.Failed)
+        if (_run.Status is WorkflowRunStatus.Completed or WorkflowRunStatus.Failed)
         {
             var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
             await backlog.ReleaseAsync(GrainKey);
@@ -689,7 +689,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return Task.CompletedTask;
         return _run.Status switch
         {
-            WorkflowRunStatus.Passed => AppendWorkflowEventAsync("workflow_completed", "completed", "Workflow completed"),
+            WorkflowRunStatus.Completed => AppendWorkflowEventAsync("workflow_completed", "completed", "Workflow completed"),
             WorkflowRunStatus.Failed => AppendWorkflowEventAsync("workflow_failed", "failed", _run.Failure?.Message ?? "Workflow failed", Payload: _run.Failure),
             WorkflowRunStatus.AwaitingApproval => AppendWorkflowEventAsync("workflow_approval_requested", "awaiting", "Workflow approval requested"),
             _ => Task.CompletedTask,
@@ -699,7 +699,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private async Task DispatchCompletedHookIfNeededAsync(WorkflowRunStatus? statusBefore)
     {
         if (_run is null) return;
-        if (statusBefore == WorkflowRunStatus.Passed || _run.Status != WorkflowRunStatus.Passed) return;
+        if (statusBefore == WorkflowRunStatus.Completed || _run.Status != WorkflowRunStatus.Completed) return;
 
         var status = await GetStatusAsync();
         if (status is null) return;

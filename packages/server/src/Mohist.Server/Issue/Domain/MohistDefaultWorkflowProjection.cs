@@ -36,7 +36,7 @@ public static class MohistDefaultWorkflowProjection
                 issueStatus == "done");
         }
 
-        var projectedStatus = workflow.Status == "Passed" ? "done" : issueStatus;
+        var projectedStatus = workflow.Status == "Completed" ? "done" : issueStatus;
 
         return new MohistDefaultWorkflowState(
             projectedStatus,
@@ -45,7 +45,7 @@ public static class MohistDefaultWorkflowProjection
             approval,
             attention,
             ChangeDir(issueNumber),
-            workflow.Status == "Passed");
+            workflow.Status == "Completed");
     }
 
     private static IssueAttention? ProjectAttention(IssueAttention? issueAttention, WorkflowStatusSnapshot? workflow)

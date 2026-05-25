@@ -131,7 +131,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         await workflow.ReportResultAsync(RunnerId, workId, result);
 
         var status = await workflow.GetStatusAsync();
-        if (status?.Status is "Passed" or "Failed")
+        if (status?.Status is "Completed" or "Failed")
         {
             _assignedWorkflows.Remove(wfId);
             var staleKeys = _workToWorkflow

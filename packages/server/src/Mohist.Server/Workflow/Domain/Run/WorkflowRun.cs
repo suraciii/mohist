@@ -24,7 +24,7 @@ public class WorkflowRun
             if (CurrentStage.Status == StageRunStatus.Failed) return WorkflowRunStatus.Failed;
             if (_paused) return WorkflowRunStatus.Paused;
             if (CurrentStage.Status == StageRunStatus.AwaitingApproval) return WorkflowRunStatus.AwaitingApproval;
-            if (CurrentStage.Status == StageRunStatus.Passed && IsLastDefinitionStage(CurrentStage)) return WorkflowRunStatus.Passed;
+            if (CurrentStage.Status == StageRunStatus.Completed && IsLastDefinitionStage(CurrentStage)) return WorkflowRunStatus.Completed;
             return WorkflowRunStatus.Running;
         }
     }
@@ -198,7 +198,7 @@ public class WorkflowRun
 
     private void Advance()
     {
-        while (CurrentStage.Status == StageRunStatus.Passed)
+        while (CurrentStage.Status == StageRunStatus.Completed)
         {
             var defIndex = _definitionStages.FindIndex(d => d.Stage == CurrentStage.Stage);
             var nextDefIndex = defIndex + 1;

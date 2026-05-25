@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Passed, Failed }
+public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Completed, Failed }
 
 public sealed record WorkLease(
     string WorkId,
@@ -11,7 +11,7 @@ public sealed record WorkLease(
     string Stage,
     string LogicalId,
     string? RunnerId = null);
-public enum StageRunStatus { Pending, Running, AwaitingApproval, Passed, Failed }
+public enum StageRunStatus { Pending, Running, AwaitingApproval, Completed, Failed }
 public enum TaskRunStatus { Pending, Running, Completed, Failed }
 public enum CheckRunStatus { Pending, Passed, Failed }
 public enum FailureReason { TaskFailed, CheckUnrepaired, ApprovalRejected }

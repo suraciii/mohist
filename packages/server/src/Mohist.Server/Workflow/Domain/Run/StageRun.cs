@@ -32,7 +32,7 @@ public class StageRun
             if (IsComplete)
             {
                 if (RequiresApproval && Approval?.Status != "approved") return StageRunStatus.Running;
-                return StageRunStatus.Passed;
+                return StageRunStatus.Completed;
             }
             return StageRunStatus.Running;
         }
