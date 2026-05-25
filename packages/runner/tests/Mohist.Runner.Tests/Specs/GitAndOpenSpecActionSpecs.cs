@@ -141,6 +141,69 @@ public class GitAndOpenSpecActionSpecs
         Assert.Equal("mo/issue-1", await GitOutputAsync(worktreePath, "branch", "--show-current"));
     }
 
+    [Fact]
+    public async Task Rebase_WithConflictResolver_ReportsRequestedResolverTask()
+    {
+        using var repo = new TempDir();
+        await InitRepositoryAsync(repo.Path);
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "base\n");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "base file");
+
+        await RunGitAsync(repo.Path, "checkout", "-b", "feature");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "feature\n");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "feature change");
+
+        await RunGitAsync(repo.Path, "checkout", "main");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "main\n");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "main change");
+
+        await RunGitAsync(repo.Path, "checkout", "feature");
+
+        var result = await new RebaseAction().ExecuteAsync(
+            SpecHelpers.Context(repo.Path, "task", "mohist/rebase", new
+            {
+                baseBranch = "main",
+                conflictResolver = new
+                {
+                    id = "resolve-rebase-conflicts",
+                    uses = "mohist/agent",
+                    with = new
+                    {
+                        task = "resolve-rebase-conflicts"
+                    }
+                }
+            }));
+
+        Assert.Equal("failure", result.Status);
+        using var document = JsonDocument.Parse(result.Output!);
+        Assert.Equal("rebase", document.RootElement.GetProperty("kind").GetString());
+        Assert.Equal("conflict", document.RootElement.GetProperty("status").GetString());
+        Assert.Contains("file.txt", document.RootElement.GetProperty("conflicts").EnumerateArray().Select(x => x.GetString()));
+        var requestedTask = document.RootElement.GetProperty("requestedTask");
+        Assert.Equal("resolve-rebase-conflicts", requestedTask.GetProperty("id").GetString());
+        Assert.Equal("mohist/agent", requestedTask.GetProperty("uses").GetString());
+        Assert.Equal("resolve-rebase-conflicts", requestedTask.GetProperty("with").GetProperty("task").GetString());
+    }
+
+    [Fact]
+    public void AgentPrompt_ForRebaseConflictResolver_RequiresContinuingTheRebase()
+    {
+        var prompt = AgentPromptRenderer.Render(new AgentPromptContext(
+            "maintenance",
+            "resolve-rebase-conflicts",
+            AgentCompletionRequirements.Empty,
+            "/tmp/work",
+            null,
+            null));
+
+        Assert.Contains("Resolve the active git rebase", prompt);
+        Assert.Contains("git rebase --continue", prompt);
+        Assert.Contains("no unmerged files", prompt);
+    }
+
     private static async Task InitRepositoryAsync(string path)
     {
         await RunGitAsync(path, "init", "-b", "main");

@@ -11,6 +11,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task RejectAsync(string? reason = null);
     Task RetryAsync();
     Task RerunAsync();
+    Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
     Task<WorkDispatch?> GetWorkAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
     Task FailInFlightWorkAsync(string runnerId, string reason);
@@ -46,6 +47,20 @@ public sealed record TaskDefinitionInput(
     string Title,
     string? Uses = null,
     string? With = null);
+
+[GenerateSerializer]
+public sealed record RuntimeTaskInput(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string Title,
+    [property: Id(2)] string? Uses = null,
+    [property: Id(3)] string? With = null,
+    [property: Id(4)] string? Stage = null);
+
+[GenerateSerializer]
+public sealed record RuntimeTaskAddedResult(
+    [property: Id(0)] string WorkflowRunId,
+    [property: Id(1)] string Stage,
+    [property: Id(2)] string TaskId);
 
 [GenerateSerializer]
 public sealed record CheckDefinitionInput(

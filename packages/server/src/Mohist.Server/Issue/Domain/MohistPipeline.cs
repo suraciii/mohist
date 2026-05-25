@@ -57,8 +57,7 @@ public static class MohistPipeline
                 new TaskDefinitionInput("fix-check-health", "Fix check health", Agent, AgentWith("check", "fix-check-health"))),
             Marker("review-passed", "Review passed", "review.md", "PASS", 2,
                 new TaskDefinitionInput("fix-review-findings", "Fix review findings", Agent, AgentWith("check", "fix-review-findings"))),
-            new CheckDefinitionInput("merge-ready", "Merge ready", "mohist/merge-ready", RetryLimit: 1,
-                RetryTask: new TaskDefinitionInput("fix-merge-readiness", "Fix merge readiness", "mohist/rebase")),
+            new CheckDefinitionInput("merge-ready", "Merge ready", "mohist/merge-ready"),
         ],
         RequiresApproval: true);
 
