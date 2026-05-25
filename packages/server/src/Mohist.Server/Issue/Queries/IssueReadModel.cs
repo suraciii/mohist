@@ -21,7 +21,6 @@ public class IssueReadModel
     public string UpdatedAt { get; set; } = "";
     public string? ArchivedAt { get; set; }
     public ApprovalState? ApprovalState { get; set; }
-    public string? MergeState { get; set; }
     public int? RetryCount { get; set; }
     public int? ConflictRetryCount { get; set; }
     public string? BlockedReason { get; set; }

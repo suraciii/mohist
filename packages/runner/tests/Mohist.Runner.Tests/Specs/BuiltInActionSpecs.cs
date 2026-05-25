@@ -62,7 +62,7 @@ public class BuiltInActionSpecs
     }
 
     [Fact]
-    public async Task HealthGate_CommandFails_FailsWithEvidence()
+    public async Task HealthGate_CommandFails_ReturnsCommandOutput()
     {
         using var temp = new TempDir();
 

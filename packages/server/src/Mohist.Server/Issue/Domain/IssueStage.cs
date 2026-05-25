@@ -1,17 +1,5 @@
 namespace Mohist.Server.Issue.Domain;
 
-public enum MergeState
-{
-    Pending,
-    Rebasing,
-    Merging,
-    Merged,
-    BuildFailed,
-    Conflict,
-    Resolving,
-    Blocked
-}
-
 [GenerateSerializer]
 public class ApprovalState
 {

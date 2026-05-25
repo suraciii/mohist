@@ -39,7 +39,7 @@ public class MergeAction : IAction
             strategy,
             workDir = mergeWorkDir,
             sourceCommitted = sourceCommit.CombinedOutput,
-            landedSha = head?.Success == true ? head.Stdout.Trim() : null,
+            commit = head?.Success == true ? head.Stdout.Trim() : null,
             output = result.CombinedOutput,
         });
 
@@ -56,7 +56,7 @@ public class MergeAction : IAction
             source,
             target,
             strategy,
-            landedSha = (string?)null,
+            commit = (string?)null,
             output = result.CombinedOutput,
         });
         return new ActionResult("failure", result.CombinedOutput, output, result.ExitCode);
