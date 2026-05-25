@@ -9,7 +9,7 @@ test/agentic/
 ├── README.md
 ├── AGENTS.md
 ├── shared/                           # Shared infrastructure
-│   ├── Containerfile                 # Base container (Node.js + mohist build)
+│   ├── Containerfile                 # Base container (.NET SDK + Web UI build)
 │   └── entrypoint.sh                 # Server startup
 └── verify-<feature>/                 # Per-test
     ├── TESTPLAN.md                   # Agent-readable test plan (natural language + @ references)
@@ -29,7 +29,7 @@ test/agentic/
 TESTPLAN.md 是 **agent 阅读并执行的测试计划**。
 
 - 以自然语言描述每个 Phase 的步骤和预期结果
-- Agent 自行执行简单命令（`mo issue create`、`curl`、`which` 等）
+- Agent 自行执行简单命令（`curl`、API calls、`which` 等）
 - 只在需要复杂确定性操作时，用 `@scripts/<name>.sh` 调用辅助脚本
 
 Example:
@@ -46,7 +46,7 @@ Example:
 每个脚本只做 **一件事**，命名自解释：
 
 ```bash
-scripts/restart-server.sh   # 停止 mo-server，重启，等待健康检查通过
+scripts/restart-server.sh   # 停止 Mohist.Server，重启，等待健康检查通过
 ```
 
 脚本应幂等、有明确退出码（0=成功，1=失败）、输出简明状态信息。

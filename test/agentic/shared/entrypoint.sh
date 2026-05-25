@@ -4,7 +4,7 @@ set -e
 export HOME="/home/motest"
 
 echo "=== mohist Test Environment ==="
-echo "Node: $(node --version), git: $(git --version)"
+echo ".NET: $(dotnet --version), Node: $(node --version), git: $(git --version)"
 
 MAX_RESTARTS=3
 restart_count=0
@@ -15,8 +15,8 @@ trap 'shutdown=1; kill $stashed_pid 2>/dev/null' TERM INT
 
 start_server() {
     echo "Starting mohist server..."
-    cd /app/workspace
-    mo-server </dev/null >>/home/motest/.mohist/logs/server.log 2>&1 &
+    cd /opt/mohist-src
+    dotnet run --no-build --project packages/server/src/Mohist.Server/Mohist.Server.csproj --urls http://0.0.0.0:3456 </dev/null >>/home/motest/.mohist/logs/server.log 2>&1 &
     SERVER_PID=$!
     stashed_pid=$SERVER_PID
 }

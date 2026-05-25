@@ -18,17 +18,15 @@ stages:
 
 agent:
   context: |
-    Tech stack: TypeScript (target ES2022, strict mode), Node.js >=18, SQLite via better-sqlite3, Hono HTTP framework, Vitest for testing, Commander.js for CLI.
-    Build: cd packages/cli && npm run build (tsc + copy prompt/template assets)
-    Test: cd packages/cli && npm test (vitest run)
-    Typecheck: cd packages/cli && npx tsc --noEmit
-    Lint: cd packages/cli && npm run lint
-    Directory layout: packages/cli/src/ is the monorepo core (cli/, server/, agent/, services/, db/, api/, workflow/, providers/).
-    Agent runner spawns `opencode agent --local` subprocesses. Prompt assembly is in agents/agent-prompt-schema.ts and openspec/context-assembler.ts.
+    Tech stack: ASP.NET Core + Orleans backend, shared .NET runner, React/Vite Web UI.
+    Build: npm run build (web build + dotnet build packages/server/Mohist.sln)
+    Test: npm test (server + runner tests); npm --prefix packages/web run test:run for Web UI tests.
+    Directory layout: packages/server/ is the backend, packages/runner/ is shared runner code, packages/web/ is React UI.
+    Agent execution is owned by Mohist.Runner and exposed to the server through embedded runner hosting.
   rules:
     build:
       - Keep changes scoped to the task description — do not refactor unrelated code
-      - Run typecheck (npx tsc --noEmit) after every change
+      - Run the relevant build/test command after every change
       - Run tests (npm test) to verify nothing is broken
       - Do not add comments unless explicitly requested
       - Follow existing code conventions and import patterns from surrounding files

@@ -11,7 +11,6 @@ mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLit
 | `packages/server/` | 新后端核心实现 | ASP.NET Core + Orleans + Issue/Workflow API |
 | `packages/runner/` | Runner 实现 | shared runner host、action catalog、agent/process/check actions |
 | `packages/web/` | Web UI | React + Vite + Tailwind + TanStack Query |
-| `packages/cli/` | 旧版实现（待清理） | 旧 Node CLI/Hono server/runtime，不再作为新功能落点 |
 | `prd/` | 产品文档 | 产品定位、功能规划、用户故事 |
 | `prd/backlog/` | 产品待办 | 从设计讨论中搁置延后的事项，按类别分组，标注所属 Milestone |
 | `design/` | 技术设计 | 架构设计、技术规格、流程设计 |
@@ -90,7 +89,7 @@ npm run dev:web
 
 ## 探索讨论记录
 
-探索讨论由外部 agent skill 完成。需要保留结论时，外部 agent 可将提炼后的发现记录到 `.mohist/explores/` 或 `talks/`，也可以通过 `mo issue create` 创建 Mohist issue。Mohist server 不保存 Explore session/chat runtime。
+探索讨论由外部 agent skill 完成。需要保留结论时，外部 agent 可将提炼后的发现记录到 `.mohist/explores/` 或 `talks/`，也可以通过当前 Issue API 创建 Mohist issue。Mohist server 不保存 Explore session/chat runtime。
 
 ## Web UI
 
@@ -154,7 +153,7 @@ npm run dev:web
 | 工作流引擎 | 旧 TypeScript workflow runtime（已移除） | Orleans Grain 状态机 (每个 issue = 一个 Grain) |
 | Agent 进程管理 | spawn `opencode agent` 子进程 | Orleans Grain 管理 Agent 生命周期 |
 | 事件推送 | 内存 EventBus + SSE | Orleans Stream + SSE |
-| 存储 | SQLite (better-sqlite3) | SQLite / PostgreSQL (via Entity Framework Core) |
+| 存储 | 旧 Node SQLite 访问层 | SQLite / PostgreSQL (via Entity Framework Core) |
 
 ### 重构策略
 
