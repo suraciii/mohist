@@ -51,7 +51,7 @@ public static class MohistPipeline
 
     private static StageDefinitionInput Check => new(
         "check",
-        [new TaskDefinitionInput("ai-review", "AI review", "mohist/check/ai-review", AgentWith("check", "ai-review"))],
+        [new TaskDefinitionInput("ai-review", "AI review", "mohist/check/ai-review", ChangeDirWith())],
         [
             HealthGate("health:check", "Check health gate", 1,
                 new TaskDefinitionInput("fix-check-health", "Fix check health", Agent, AgentWith("check", "fix-check-health"))),
@@ -67,7 +67,7 @@ public static class MohistPipeline
         [
             new TaskDefinitionInput("integrate:spec-sync", "Sync specs", "mohist/openspec-sync", ChangeDirWith()),
             new TaskDefinitionInput("integrate:archive-change", "Archive change", "mohist/archive-change", ChangeDirWith()),
-            new TaskDefinitionInput("integrate:merge", "Merge branch", "mohist/merge"),
+            new TaskDefinitionInput("integrate:merge", "Merge branch", "mohist/merge", MergeWith()),
         ],
         [
             HealthGate("health:integrate", "Post-delivery health check", 1,
@@ -138,6 +138,15 @@ public static class MohistPipeline
     private static string ChangeDirWith() => """
     {
       "changeDir": "${{ openspecChangeDir }}"
+    }
+    """;
+
+    private static string MergeWith() => """
+    {
+      "source": "mo/issue-${{ issue.number }}",
+      "target": "${{ project.baseBranch }}",
+      "strategy": "squash",
+      "message": "Complete issue #${{ issue.number }}"
     }
     """;
 }
