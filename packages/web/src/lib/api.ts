@@ -115,12 +115,6 @@ export const api = {
       method: 'DELETE',
     }),
 
-  sendMessage: (issueNumber: number, message: string, projectId?: string | null) =>
-    request<{ message: string }>(withProject(`/issues/${issueNumber}/messages`, projectId), {
-      method: 'POST',
-      body: JSON.stringify({ message }),
-    }),
-
   getLabels: () => request<string[]>('/labels'),
 
   getAgentStatus: () => request<import('./types').AgentStatus>('/agent/status'),
