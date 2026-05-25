@@ -61,7 +61,6 @@ public sealed record WorkflowStatusSnapshot(
     string WorkflowRunId,
     string Status,
     string? CurrentStage,
-    string? ChangeDir,
     List<StageStatusSnapshot> Stages,
     PendingWorkSnapshot? PendingWork,
     FailureStatusSnapshot? Failure,

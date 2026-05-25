@@ -263,17 +263,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run.Id,
             _run.Status.ToString(),
             _run.CurrentStage.Stage,
-            ContextString("artifacts", "changeDir"),
             stages,
             pending,
             failure,
             actions));
-    }
-
-    private string? ContextString(string section, string property)
-    {
-        if (_variables is null) return null;
-        return _variables.String(section, property);
     }
 
     private List<TaskStatusSnapshot> SnapshotTasks(StageRunState stage)

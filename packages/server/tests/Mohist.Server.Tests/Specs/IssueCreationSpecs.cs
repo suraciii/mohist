@@ -150,6 +150,22 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
     }
 
     [Fact]
+    public async Task IssueWorkflowStatus_ProjectsDefaultChangeDirOutsideWorkflowStatus()
+    {
+        var project = await SetupProjectAsync();
+        var created = await CreateIssueAsync(project.Id, "Add Search");
+
+        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        await grain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+
+        var status = await grain.GetWorkflowStatusAsync();
+
+        Assert.NotNull(status);
+        Assert.Equal($"openspec/changes/{created.Number}-add-search", status.ChangeDir);
+        Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
+    }
+
+    [Fact]
     public async Task DifferentProjects_IndependentNumbering()
     {
         var project1 = await SetupProjectAsync();

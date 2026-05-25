@@ -45,13 +45,19 @@ public class IssueQueryService
             .AsNoTracking()
             .Where(row => row.Type == _issueType && EF.Functions.Like(row.Key, projectId + ":%"))
             .ToListAsync();
-        var query = rows
+        var list = rows
             .Select(row => JsonSerializer.Deserialize<Domain.Issue>(row.JsonState))
             .Where(issue => issue is not null)
             .Cast<Domain.Issue>()
             .Where(issue => issue.ProjectId == projectId)
             .Select(issue => ToReadModel(ToInfo(issue, project)))
-            .AsEnumerable();
+            .OrderBy(i => i.Number)
+            .ToList();
+
+        foreach (var issue in list)
+            await ApplyWorkflowProjectionAsync(issue);
+
+        var query = list.AsEnumerable();
 
         if (archived == true)
             query = query.Where(i => i.ArchivedAt != null);
@@ -67,10 +73,7 @@ public class IssueQueryService
         if (!string.IsNullOrEmpty(priority))
             query = query.Where(i => string.Equals(i.Priority, priority, StringComparison.OrdinalIgnoreCase));
 
-        var list = query.OrderBy(i => i.Number).ToList();
-        foreach (var issue in list)
-            await ApplyWorkflowProjectionAsync(issue);
-        return await EnrichAsync(db, list);
+        return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
     }
 
     private async Task<IssueReadModel> ToReadModelAsync(Domain.Issue issue, ProjectInfo? project = null)
@@ -140,35 +143,19 @@ public class IssueQueryService
         var status = await workflow.GetStatusAsync();
         if (status is null) return;
 
-        issue.Stage = ResolveWorkflowStage(status, issue.Stage);
-        issue.Status = ResolveWorkflowRuntimeStatus(status, issue.Status);
-        issue.BlockedReason = status.Status == "Failed" ? status.Failure?.Message : issue.BlockedReason;
-        issue.ApprovalState = status.Stages
-            .Select(s => s.Approval is null ? null : new ApprovalState
-            {
-                Stage = s.Stage,
-                Status = s.Approval.Status,
-                OutputJson = s.Approval.Output,
-                RequestedAt = s.Approval.RequestedAt,
-                RespondedAt = s.Approval.RespondedAt,
-            })
-            .Where(a => a is not null)
-            .LastOrDefault();
+        var projection = MohistDefaultWorkflowProjection.Project(
+            issue.Number,
+            issue.Title,
+            issue.Stage,
+            issue.Status,
+            issue.BlockedReason,
+            status);
+
+        issue.Stage = projection.Stage;
+        issue.Status = projection.RuntimeStatus;
+        issue.BlockedReason = projection.BlockedReason;
+        issue.ApprovalState = projection.ApprovalState;
     }
-
-    private static string ResolveWorkflowStage(WorkflowStatusSnapshot workflow, string fallback) => workflow.Status switch
-    {
-        "Passed" => "done",
-        _ => workflow.CurrentStage ?? fallback,
-    };
-
-    private static string ResolveWorkflowRuntimeStatus(WorkflowStatusSnapshot workflow, string fallback) => workflow.Status switch
-    {
-        "Passed" => "completed",
-        "Failed" => "blocked",
-        "Paused" => "paused",
-        _ => "active",
-    };
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
     {
