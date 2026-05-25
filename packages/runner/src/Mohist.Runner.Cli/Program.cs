@@ -41,6 +41,8 @@ builder.Services.AddSingleton<RunnerHostOptions>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IAgentExecutor>(sp =>
     new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>()));
+builder.Services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
+builder.Services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
 builder.Services.AddSingleton<IWorkspaceManager>(sp =>
     new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>()));
 builder.Services.AddSingleton<IWorkExecutor, WorkExecutor>();

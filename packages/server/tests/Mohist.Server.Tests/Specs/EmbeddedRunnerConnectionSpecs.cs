@@ -171,6 +171,8 @@ public class EmbeddedRunnerConnectionSpecs
         services.AddLogging();
         services.AddSingleton<IAgentExecutor>(new FakeAgentExecutor(projectRoot));
         services.AddSingleton<ISessionTelemetrySink, NullSessionTelemetrySink>();
+        services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
+        services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
         return services.BuildServiceProvider();
     }
 

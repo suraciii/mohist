@@ -35,6 +35,8 @@ public static class MohistServiceRegistration
         services.AddSingleton<IGitService, GitService>();
         services.AddSingleton<IAgentExecutor>(sp =>
             new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>()));
+        services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
+        services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
         services.AddSingleton<IWorkspaceManager>(sp =>
             new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>()));
         services.AddScoped<ISessionTelemetrySink, EmbeddedSessionTelemetrySink>();

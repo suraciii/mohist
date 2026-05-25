@@ -9,11 +9,19 @@ public class AgentAction : IAction
 {
     private readonly IAgentExecutor _executor;
     private readonly ISessionTelemetrySink _telemetry;
+    private readonly IAgentCompletionVerifier _completionVerifier;
+    private readonly IAgentSessionRepairer _repairer;
 
-    public AgentAction(IAgentExecutor executor, ISessionTelemetrySink? telemetry = null)
+    public AgentAction(
+        IAgentExecutor executor,
+        ISessionTelemetrySink? telemetry = null,
+        IAgentCompletionVerifier? completionVerifier = null,
+        IAgentSessionRepairer? repairer = null)
     {
         _executor = executor;
         _telemetry = telemetry ?? new NullSessionTelemetrySink();
+        _completionVerifier = completionVerifier ?? new AgentCompletionVerifier();
+        _repairer = repairer ?? new NoopAgentSessionRepairer();
     }
 
     public async Task<ActionResult> ExecuteAsync(ActionContext context)
@@ -54,6 +62,25 @@ public class AgentAction : IAction
                 }))], context.CancellationToken);
 
         var result = await _executor.ExecuteAsync(request);
+
+        var status = result.ExitCode == 0 ? "completed" : "failed";
+        var verification = status == "completed"
+            ? await _completionVerifier.VerifyAsync(requirements, context.CancellationToken)
+            : AgentCompletionVerificationResult.Success;
+
+        if (status == "completed" && !verification.Satisfied)
+        {
+            var repair = await _repairer.RepairAsync(request, verification, context.CancellationToken);
+            if (repair.Attempted)
+            {
+                result = repair.Result ?? result;
+                status = result.ExitCode == 0 ? "completed" : "failed";
+                verification = status == "completed"
+                    ? await _completionVerifier.VerifyAsync(requirements, context.CancellationToken)
+                    : verification;
+            }
+        }
+
         var output = JsonSerializer.Serialize(new
         {
             kind = "agent",
@@ -62,17 +89,26 @@ public class AgentAction : IAction
             changeDir = requirements.ChangeDir,
             result.Stdout,
             result.Stderr,
+            completion = verification.ToOutput(),
         });
 
-        var status = result.ExitCode == 0 ? "completed" : "failed";
-        if (context.Session is not null)
-            await _telemetry.CompletedAsync(context.Session, new SessionCompleted(status, result.Stderr, result.ExitCode), context.CancellationToken);
+        if (status == "completed" && !verification.Satisfied)
+            status = "failed";
 
-        return result.ExitCode == 0
+        if (context.Session is not null)
+            await _telemetry.CompletedAsync(context.Session, new SessionCompleted(status, CompletionMessage(result, verification), result.ExitCode), context.CancellationToken);
+
+        return status == "completed"
             ? new ActionResult("success", $"Agent task completed: {stage}/{task}", output, result.ExitCode)
-            : new ActionResult("failure", result.Stderr ?? result.Stdout ?? $"Agent exited with code {result.ExitCode}", output, result.ExitCode);
+            : new ActionResult("failure", CompletionMessage(result, verification), output, result.ExitCode);
     }
 
+    private static string CompletionMessage(AgentExecutionResult result, AgentCompletionVerificationResult verification)
+    {
+        if (!verification.Satisfied)
+            return verification.Message;
+        return result.Stderr ?? result.Stdout ?? $"Agent exited with code {result.ExitCode}";
+    }
 }
 
 public sealed record AgentCompletionRequirements(
@@ -131,6 +167,82 @@ public sealed record AgentCompletionRequirements(
 
 public sealed record RequiredFile(string Path);
 public sealed record RequiredMarker(string Path, string Marker);
+
+public interface IAgentCompletionVerifier
+{
+    Task<AgentCompletionVerificationResult> VerifyAsync(AgentCompletionRequirements requirements, CancellationToken ct);
+}
+
+public sealed record MissingRequiredFile(string Path);
+public sealed record MissingRequiredMarker(string Path, string Marker);
+
+public sealed record AgentCompletionVerificationResult(
+    IReadOnlyList<MissingRequiredFile> MissingFiles,
+    IReadOnlyList<MissingRequiredMarker> MissingMarkers)
+{
+    public static AgentCompletionVerificationResult Success { get; } = new([], []);
+
+    public bool Satisfied => MissingFiles.Count == 0 && MissingMarkers.Count == 0;
+
+    public string Message
+    {
+        get
+        {
+            if (Satisfied) return "Agent completion requirements satisfied";
+            var parts = new List<string>();
+            parts.AddRange(MissingFiles.Select(file => $"missing file: {file.Path}"));
+            parts.AddRange(MissingMarkers.Select(marker => $"missing marker in {marker.Path}: {marker.Marker}"));
+            return "Agent completion requirements were not satisfied: " + string.Join("; ", parts);
+        }
+    }
+
+    public object ToOutput() => new
+    {
+        satisfied = Satisfied,
+        missingFiles = MissingFiles,
+        missingMarkers = MissingMarkers,
+    };
+}
+
+public class AgentCompletionVerifier : IAgentCompletionVerifier
+{
+    public async Task<AgentCompletionVerificationResult> VerifyAsync(AgentCompletionRequirements requirements, CancellationToken ct)
+    {
+        var missingFiles = requirements.Files
+            .Where(file => !File.Exists(file.Path) && !Directory.Exists(file.Path))
+            .Select(file => new MissingRequiredFile(file.Path))
+            .ToList();
+
+        var missingMarkers = new List<MissingRequiredMarker>();
+        foreach (var marker in requirements.Markers)
+        {
+            if (!File.Exists(marker.Path))
+            {
+                missingMarkers.Add(new MissingRequiredMarker(marker.Path, marker.Marker));
+                continue;
+            }
+
+            var content = await File.ReadAllTextAsync(marker.Path, ct);
+            if (!content.Contains(marker.Marker, StringComparison.Ordinal))
+                missingMarkers.Add(new MissingRequiredMarker(marker.Path, marker.Marker));
+        }
+
+        return new AgentCompletionVerificationResult(missingFiles, missingMarkers);
+    }
+}
+
+public interface IAgentSessionRepairer
+{
+    Task<AgentRepairResult> RepairAsync(AgentExecutionRequest request, AgentCompletionVerificationResult verification, CancellationToken ct);
+}
+
+public sealed record AgentRepairResult(bool Attempted, AgentExecutionResult? Result = null);
+
+public sealed class NoopAgentSessionRepairer : IAgentSessionRepairer
+{
+    public Task<AgentRepairResult> RepairAsync(AgentExecutionRequest request, AgentCompletionVerificationResult verification, CancellationToken ct) =>
+        Task.FromResult(new AgentRepairResult(false));
+}
 
 public interface IAgentExecutor
 {

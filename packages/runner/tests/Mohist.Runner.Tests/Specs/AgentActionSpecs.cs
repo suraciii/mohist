@@ -10,7 +10,12 @@ public class AgentActionSpecs
     public async Task AgentAction_WithFakeExecutor_BuildsRequestAndCompletes()
     {
         using var temp = new TempDir();
-        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"));
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"), request =>
+        {
+            var proposal = Path.Combine(request.WorkDir, "openspec", "changes", "issue-1", "proposal.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(proposal)!);
+            File.WriteAllText(proposal, "<mohist:proposal>PASS</mohist:proposal>");
+        });
         var action = new AgentAction(executor);
 
         var result = await action.ExecuteAsync(SpecHelpers.Context(
@@ -38,6 +43,89 @@ public class AgentActionSpecs
         Assert.Contains("Output Contract: Proposal", executor.Request.Prompt);
         Assert.Contains("proposal.md", executor.Request.Prompt);
         Assert.Contains("agent", result.Output);
+    }
+
+    [Fact]
+    public async Task AgentAction_ExitZeroButMissingRequiredFile_FailsCompletionContract()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"));
+        var action = new AgentAction(executor);
+
+        var result = await action.ExecuteAsync(SpecHelpers.Context(
+            temp.Path,
+            "task",
+            "mohist/agent",
+            new
+            {
+                stage = "plan",
+                task = "proposal",
+                requireFiles = new[] { new { path = "openspec/changes/issue-1/proposal.md" } }
+            }));
+
+        Assert.Equal("failure", result.Status);
+        Assert.Contains("missing file", result.Message);
+        Assert.Contains("proposal.md", result.Message);
+        Assert.Contains("\"satisfied\":false", result.Output);
+    }
+
+    [Fact]
+    public async Task AgentAction_ExitZeroButMissingRequiredMarker_FailsCompletionContract()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"), request =>
+        {
+            var proposal = Path.Combine(request.WorkDir, "openspec", "changes", "issue-1", "proposal.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(proposal)!);
+            File.WriteAllText(proposal, "draft");
+        });
+        var action = new AgentAction(executor);
+
+        var result = await action.ExecuteAsync(SpecHelpers.Context(
+            temp.Path,
+            "task",
+            "mohist/agent",
+            new
+            {
+                stage = "plan",
+                task = "proposal",
+                requireMarkers = new[] { new { path = "openspec/changes/issue-1/proposal.md", marker = "<mohist:proposal>PASS</mohist:proposal>" } }
+            }));
+
+        Assert.Equal("failure", result.Status);
+        Assert.Contains("missing marker", result.Message);
+        Assert.Contains("<mohist:proposal>PASS</mohist:proposal>", result.Message);
+    }
+
+    [Fact]
+    public async Task AgentAction_WhenCompletionFails_RepairerCanSatisfyRequirements()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"));
+        var repairer = new FakeRepairer(request =>
+        {
+            var proposal = Path.Combine(request.WorkDir, "openspec", "changes", "issue-1", "proposal.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(proposal)!);
+            File.WriteAllText(proposal, "<mohist:proposal>PASS</mohist:proposal>");
+            return new AgentExecutionResult(0, "repaired");
+        });
+        var action = new AgentAction(executor, repairer: repairer);
+
+        var result = await action.ExecuteAsync(SpecHelpers.Context(
+            temp.Path,
+            "task",
+            "mohist/agent",
+            new
+            {
+                stage = "plan",
+                task = "proposal",
+                requireFiles = new[] { new { path = "openspec/changes/issue-1/proposal.md" } },
+                requireMarkers = new[] { new { path = "openspec/changes/issue-1/proposal.md", marker = "<mohist:proposal>PASS</mohist:proposal>" } }
+            }));
+
+        Assert.Equal("success", result.Status);
+        Assert.Equal(1, repairer.RepairCount);
+        Assert.Contains("\"satisfied\":true", result.Output);
     }
 
     [Fact]
@@ -159,10 +247,12 @@ public class AgentActionSpecs
     private sealed class FakeAgentExecutor : IAgentExecutor
     {
         private readonly AgentExecutionResult _result;
+        private readonly Action<AgentExecutionRequest>? _onExecute;
 
-        public FakeAgentExecutor(AgentExecutionResult result)
+        public FakeAgentExecutor(AgentExecutionResult result, Action<AgentExecutionRequest>? onExecute = null)
         {
             _result = result;
+            _onExecute = onExecute;
         }
 
         public AgentExecutionRequest? Request { get; private set; }
@@ -170,7 +260,26 @@ public class AgentActionSpecs
         public Task<AgentExecutionResult> ExecuteAsync(AgentExecutionRequest request)
         {
             Request = request;
+            _onExecute?.Invoke(request);
             return Task.FromResult(_result);
+        }
+    }
+
+    private sealed class FakeRepairer : IAgentSessionRepairer
+    {
+        private readonly Func<AgentExecutionRequest, AgentExecutionResult> _repair;
+
+        public FakeRepairer(Func<AgentExecutionRequest, AgentExecutionResult> repair)
+        {
+            _repair = repair;
+        }
+
+        public int RepairCount { get; private set; }
+
+        public Task<AgentRepairResult> RepairAsync(AgentExecutionRequest request, AgentCompletionVerificationResult verification, CancellationToken ct)
+        {
+            RepairCount++;
+            return Task.FromResult(new AgentRepairResult(true, _repair(request)));
         }
     }
 
