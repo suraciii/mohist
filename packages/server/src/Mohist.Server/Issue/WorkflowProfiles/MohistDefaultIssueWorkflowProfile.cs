@@ -9,6 +9,9 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
 {
     public string Id => IssueWorkflowProfiles.DefaultId;
+    public string DisplayName => "Mohist Default";
+    public string Description => "Plan, build, check, and integrate an issue using OpenSpec artifacts.";
+    public bool IsDefault => true;
     public WorkflowDefinitionInput Definition => MohistPipeline.Definition;
 
     public string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project)
