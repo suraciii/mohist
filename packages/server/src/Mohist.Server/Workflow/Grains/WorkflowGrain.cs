@@ -4,6 +4,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Hooks;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -19,13 +20,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly IStateStore<WorkflowGrainState> _stateStore;
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
+    private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
     private readonly ILogger<WorkflowGrain> _log;
 
-    public WorkflowGrain(IStateStore<WorkflowGrainState> stateStore, IEventBus eventBus, IEventStore events, ILogger<WorkflowGrain> log)
+    public WorkflowGrain(
+        IStateStore<WorkflowGrainState> stateStore,
+        IEventBus eventBus,
+        IEventStore events,
+        IEnumerable<IWorkflowCompletionHook> completionHooks,
+        ILogger<WorkflowGrain> log)
     {
         _stateStore = stateStore;
         _eventBus = eventBus;
         _events = events;
+        _completionHooks = completionHooks;
         _log = log;
     }
 
@@ -47,6 +55,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null)
     {
+        var statusBefore = _run?.Status;
+
         if (definition is not null)
             _stageDefinitions = MapStageDefinitions(definition);
         if (correlation is not null)
@@ -67,42 +77,50 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_started", "started", "Workflow started");
         await RegisterToBacklogAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task ResumeAsync()
     {
         EnsureRun();
+        var statusBefore = _run.Status;
         _run.Start();
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("resumed");
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed");
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task PauseAsync(string? reason = null)
     {
         EnsureRun();
+        var statusBefore = _run.Status;
         _run.Pause();
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused");
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task ApproveAsync()
     {
         EnsureRun();
+        var statusBefore = _run.Status;
         _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("approved");
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved");
         await ReleaseFromBacklogIfTerminalAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task RejectAsync(string? reason = null)
     {
         EnsureRun();
+        var statusBefore = _run.Status;
         var output = reason is not null
             ? JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(reason))
             : (JsonElement?)null;
@@ -112,28 +130,33 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", reason ?? "Workflow approval rejected");
         await ReleaseFromBacklogIfTerminalAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task RetryAsync()
     {
         EnsureRun();
+        var statusBefore = _run.Status;
         ClearLease();
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
         await RegisterToBacklogAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task RerunAsync()
     {
         EnsureRun();
+        var statusBefore = _run.Status;
         ClearLease();
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
         await RegisterToBacklogAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
@@ -165,6 +188,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
+        var statusBefore = _run?.Status;
         ClearLease();
 
         switch (lease.WorkType)
@@ -191,6 +215,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await PersistAsync();
         await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public async Task FailInFlightWorkAsync(string runnerId, string reason)
@@ -208,6 +233,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogWarning("Workflow {Id} failing in-flight work {WorkId} ({WorkType}): {Reason}",
             GrainKey, lease.WorkId, lease.WorkType, reason);
 
+        var statusBefore = _run?.Status;
         ClearLease();
         _run!.FailInFlightWork(lease.WorkType, reason);
 
@@ -215,6 +241,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await AppendWorkflowEventAsync("workflow_work_failed", "failed", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
         await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
+        await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
     public Task<WorkflowStatusSnapshot?> GetStatusAsync()
@@ -667,6 +694,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             WorkflowRunStatus.AwaitingApproval => AppendWorkflowEventAsync("workflow_approval_requested", "awaiting", "Workflow approval requested"),
             _ => Task.CompletedTask,
         };
+    }
+
+    private async Task DispatchCompletedHookIfNeededAsync(WorkflowRunStatus? statusBefore)
+    {
+        if (_run is null) return;
+        if (statusBefore == WorkflowRunStatus.Passed || _run.Status != WorkflowRunStatus.Passed) return;
+
+        var status = await GetStatusAsync();
+        if (status is null) return;
+
+        var context = new WorkflowCompletionHookContext(GrainKey, _correlation, status);
+        foreach (var hook in _completionHooks)
+        {
+            try
+            {
+                await hook.OnCompletedAsync(context);
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Workflow {WorkflowRunId} completion hook {Hook} failed", GrainKey, hook.GetType().Name);
+            }
+        }
     }
 
     private Task AppendWorkflowEventAsync(
