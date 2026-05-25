@@ -8,18 +8,12 @@ export interface AttentionItem {
   detail?: string
 }
 
-const INTEGRATE_FAILURE_MERGE_STATES = new Set(['blocked', 'build-failed', 'conflict'])
-
 function isIntegrateFailure(issue: Issue): boolean {
   return (
     issue.stage === Stage.Integrate
     && (
       issue.status === IssueStatus.Blocked
       || issue.status === IssueStatus.Interrupted
-      || (
-        typeof issue.mergeState === 'string'
-        && INTEGRATE_FAILURE_MERGE_STATES.has(issue.mergeState)
-      )
     )
   )
 }
@@ -53,14 +47,6 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
         issueNumber: issue.number,
         issueId: issue.id,
         label: 'Interrupted',
-        detail: issue.title,
-      })
-    } else if (issue.mergeState === 'blocked') {
-      seen.add(issue.id)
-      items.push({
-        issueNumber: issue.number,
-        issueId: issue.id,
-        label: 'Needs action',
         detail: issue.title,
       })
     } else if (issue.status === IssueStatus.Blocked) {

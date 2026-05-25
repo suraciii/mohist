@@ -10,14 +10,6 @@ import { useProject } from '../context/ProjectContext'
 
 export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check])
 
-const MERGE_STATE_LABELS: Record<string, string> = {
-  '': 'Not merged',
-  'build-failed': 'Failed',
-  conflict: 'Conflict',
-  pending: 'Pending',
-  merging: 'Merging',
-}
-
 interface Props {
   issue: Issue
   agentStatus: AgentStatus
@@ -56,18 +48,15 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
 
 function Badge({
   type,
-  mergeState,
   driftDecision,
 }: {
   type: Exclude<BadgeType, 'closed' | null>
-  mergeState?: string | null
   driftDecision?: string | null
 }) {
   if (type === 'conflict') {
-    const label = MERGE_STATE_LABELS[mergeState ?? ''] ?? mergeState ?? 'Failed'
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-white bg-red-500 px-1.5 py-0.5 rounded">
-        {label}
+        Failed
       </span>
     )
   }
@@ -195,7 +184,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               <IntegrationBadge blockedReason={issue.blockedReason} />
             )}
             {badge && badge !== 'closed' && badge !== 'running' && (
-              <Badge type={badge} mergeState={issue.mergeState} driftDecision={issue.drift?.decision ?? undefined} />
+              <Badge type={badge} driftDecision={issue.drift?.decision ?? undefined} />
             )}
             {showArchiveButton && issue.status === IssueStatus.Completed && (
               <button

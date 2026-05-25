@@ -250,7 +250,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             if (eventName === 'base_drift_detected') {
               const driftEvt = d as EventMap['base_drift_detected']
               if (driftEvt.decision === 'needs-attention') {
-                toast.warning(`Issue #${driftEvt.issueNumber} has stale evidence — rebase or rerun checks`)
+                toast.warning(`Issue #${driftEvt.issueNumber} needs attention before continuing`)
               }
             }
             break

@@ -46,7 +46,7 @@ describe('WorkflowConvergencePanel', () => {
     expect(container.firstChild).toBeNull()
   })
 
-  describe('blocked workflow displays convergence evidence', () => {
+  describe('blocked workflow displays convergence state', () => {
     it('shows failed check name and blocked reason', () => {
       const convergence = makeConvergence({
         failedCheck: 'review-passed',
