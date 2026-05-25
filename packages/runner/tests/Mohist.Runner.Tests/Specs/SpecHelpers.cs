@@ -8,7 +8,7 @@ namespace Mohist.Runner.Tests.Specs;
 
 internal static class SpecHelpers
 {
-    public static ActionContext Context(string workDir, string type, string uses, object? with = null, object? variables = null)
+    public static ActionContext Context(string workDir, string type, string uses, object? with = null, object? variables = null, string? stage = "build")
     {
         var input = with is null
             ? null
@@ -17,10 +17,10 @@ internal static class SpecHelpers
             ? null
             : JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(JsonSerializer.Serialize(variables));
 
-        return new ActionContext("wr-1", "work-1", type, "build", "Work", uses, input, vars, workDir, CancellationToken.None);
+        return new ActionContext("wr-1", "work-1", type, stage, "Work", uses, input, vars, workDir, CancellationToken.None);
     }
 
-    public static WorkItem Work(string type, string uses = "spec/action", object? with = null, object? variables = null)
+    public static WorkItem Work(string type, string uses = "spec/action", object? with = null, object? variables = null, string? stage = "build")
     {
         var input = with is null
             ? null
@@ -29,7 +29,7 @@ internal static class SpecHelpers
             ? null
             : JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(JsonSerializer.Serialize(variables));
 
-        return new WorkItem("wr-1", $"{type}-1", type, "build", "Work", uses, input, vars);
+        return new WorkItem("wr-1", $"{type}-1", type, stage, "Work", uses, input, vars);
     }
 
     public static ILogger<T> Logger<T>() => NullLogger<T>.Instance;

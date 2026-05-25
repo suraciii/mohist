@@ -73,6 +73,19 @@ public class WorkResultNormalizationSpecs
         Assert.Equal("fail", result.Status);
     }
 
+    [Fact]
+    public async Task AnyStageName_DispatchesByUsesOnly()
+    {
+        var action = new CaptureAction("success");
+        var executor = CreateExecutor(action);
+
+        var result = await executor.ExecuteAsync(SpecHelpers.Work("task", "spec/action", stage: "deploy-production"), CancellationToken.None);
+
+        Assert.Equal("completed", result.Status);
+        Assert.Equal("deploy-production", action.Context!.Stage);
+        Assert.Equal("spec/action", action.Context.Uses);
+    }
+
     private static Task<WorkItemResult> ExecuteAsync(string workType, string actionStatus)
     {
         var executor = CreateExecutor(new FakeAction(actionStatus));
@@ -100,6 +113,24 @@ public class WorkResultNormalizationSpecs
 
         public Task<ActionResult> ExecuteAsync(ActionContext context)
         {
+            return Task.FromResult(new ActionResult(_status, "ok", "{}"));
+        }
+    }
+
+    private sealed class CaptureAction : IAction
+    {
+        private readonly string _status;
+
+        public CaptureAction(string status)
+        {
+            _status = status;
+        }
+
+        public ActionContext? Context { get; private set; }
+
+        public Task<ActionResult> ExecuteAsync(ActionContext context)
+        {
+            Context = context;
             return Task.FromResult(new ActionResult(_status, "ok", "{}"));
         }
     }
