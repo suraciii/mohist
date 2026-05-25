@@ -51,7 +51,7 @@ public static class IssueRoutes
             var counter = grains.GetGrain<IIssueCounterGrain>(pid);
             var number = await counter.NextAsync();
             var issueGrain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
-            await issueGrain.HydrateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels);
+            await issueGrain.HydrateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels, req.WorkflowProfileId);
             var issue = await issueGrain.GetInfoAsync();
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
@@ -337,6 +337,7 @@ public record CreateIssueRequest(
     string? Priority = null,
     string? Model = null,
     Dictionary<string, string>? StageModels = null,
+    string? WorkflowProfileId = null,
     string? ProjectId = null);
 
 public record UpdateIssueRequest(

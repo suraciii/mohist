@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Config.Domain;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Sessions;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
@@ -21,6 +22,7 @@ public static class MohistServiceRegistration
 
         services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
         services.AddScoped<IssueQueryService>();
+        services.AddSingleton<IssueWorkflowProfileRegistry>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionService>();
         services.AddScoped<WorkflowProjectionService>();

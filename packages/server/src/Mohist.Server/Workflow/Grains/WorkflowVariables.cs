@@ -51,7 +51,7 @@ public sealed record WorkflowDispatchContext(
     [property: Id(4)] string? Title,
     [property: Id(5)] int Attempt);
 
-internal static class WorkflowVariableJson
+public static class WorkflowVariableJson
 {
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {

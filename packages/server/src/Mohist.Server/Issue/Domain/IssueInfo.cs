@@ -1,5 +1,7 @@
 namespace Mohist.Server.Issue.Domain;
 
+using Mohist.Server.Issue.WorkflowProfiles;
+
 [GenerateSerializer]
 public class IssueInfo
 {
@@ -25,6 +27,7 @@ public class IssueInfo
     [Id(19)] public string? BlockedReason { get; set; }
     [Id(20)] public string? WorkflowRunId { get; set; }
     [Id(21)] public int[] PrerequisiteNumbers { get; set; } = [];
+    [Id(22)] public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
 }
 
 [GenerateSerializer]

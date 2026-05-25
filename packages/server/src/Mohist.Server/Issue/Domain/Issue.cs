@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Mohist.Server.Issue.WorkflowProfiles;
 
 namespace Mohist.Server.Issue.Domain;
 
@@ -27,6 +28,7 @@ public class Issue
     [Id(18), JsonInclude] public int ConflictRetryCount { get; private set; }
     [Id(19), JsonInclude] public string? BlockedReason { get; private set; }
     [Id(20), JsonInclude] public int[] PrerequisiteNumbers { get; private set; } = [];
+    [Id(21), JsonInclude] public string WorkflowProfileId { get; private set; } = IssueWorkflowProfiles.DefaultId;
 
     public Issue(
         string id,
@@ -37,7 +39,8 @@ public class Issue
         string[]? labels = null,
         string priority = "p2",
         string? model = null,
-        Dictionary<string, string>? stageModels = null)
+        Dictionary<string, string>? stageModels = null,
+        string? workflowProfileId = null)
     {
         Id = id;
         ProjectId = projectId;
@@ -48,6 +51,7 @@ public class Issue
         Priority = priority;
         Model = model;
         StageModels = stageModels;
+        WorkflowProfileId = string.IsNullOrWhiteSpace(workflowProfileId) ? IssueWorkflowProfiles.DefaultId : workflowProfileId;
         CreatedAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
     }

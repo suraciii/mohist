@@ -40,6 +40,17 @@ public class WebCompatibilitySpecs
     }
 
     [Fact]
+    public async Task CreateIssue_WithWorkflowProfileId_RoundTripsProfileId()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-profile-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/default" });
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+
+        Assert.Equal("mohist/default", detail.WorkflowProfileId);
+    }
+
+    [Fact]
     public async Task Prerequisites_ProjectIntoStartEligibility()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -101,7 +112,7 @@ public class WebCompatibilitySpecs
         Assert.Equal(epic.Id, issueDetail.PrimaryEpic?.Id);
     }
 
-    private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, StartEligibilityDto StartEligibility, PrimaryEpicDto? PrimaryEpic);
+    private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, StartEligibilityDto StartEligibility, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
     private sealed record PrerequisiteDto(int Number, bool Delivered);

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Grains;
@@ -12,12 +13,14 @@ public class IssueQueryService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
+    private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly string _issueType = typeof(Domain.Issue).FullName!;
 
-    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IGrainFactory grains)
+    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IGrainFactory grains, IssueWorkflowProfileRegistry profiles)
     {
         _dbFactory = dbFactory;
         _grains = grains;
+        _profiles = profiles;
     }
 
     public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
@@ -106,6 +109,7 @@ public class IssueQueryService
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         WorkflowRunId = issue.WorkflowRunId,
+        WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
     };
 
@@ -132,6 +136,7 @@ public class IssueQueryService
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         WorkflowRunId = issue.WorkflowRunId,
+        WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
     };
 
@@ -143,13 +148,7 @@ public class IssueQueryService
         var status = await workflow.GetStatusAsync();
         if (status is null) return;
 
-        var projection = MohistDefaultWorkflowProjection.Project(
-            issue.Number,
-            issue.Title,
-            issue.Stage,
-            issue.Status,
-            issue.BlockedReason,
-            status);
+        var projection = _profiles.Get(issue.WorkflowProfileId).Project(issue, status);
 
         issue.Stage = projection.Stage;
         issue.Status = projection.RuntimeStatus;
