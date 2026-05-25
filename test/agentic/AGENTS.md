@@ -6,7 +6,7 @@
 test/agentic/
 ├── shared/              # Shared infrastructure
 │   ├── Containerfile    # Base container
-│   └── entrypoint.sh    # Starts mo-server
+│   └── entrypoint.sh    # Starts Mohist.Server
 └── verify-<feature>/
     ├── TESTPLAN.md      # Agent-readable test plan
     └── scripts/         # Helper scripts (one script, one job)

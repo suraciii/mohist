@@ -239,20 +239,20 @@ Web UI 中 `Settings → Agent` 可配置：
 │                        Web UI (React)                        │
 │                     localhost:3456                            │
 ├──────────────────────────────────────────────────────────────┤
-│                      HTTP API (Hono)                         │
-│                   60+ REST 端点 + SSE 流                      │
+│           HTTP API (ASP.NET Core Minimal API)                │
+│                    REST 端点 + SSE 流                         │
 ├──────────────────────────────────────────────────────────────┤
 │                    Services 业务逻辑层                         │
 ├──────────────┬──────────────────┬────────────────────────────┤
-│ Agent Runner │  Workflow Engine │  Merge Queue               │
+│ Mohist.Runner│  Orleans Grains  │  Merge Queue               │
 │ (opencode)   │  (状态机)         │  (快进合并)                 │
 ├──────────────┴──────────────────┴────────────────────────────┤
 │                      SQLite 数据层                            │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **Fat Server**: 所有业务逻辑、agent 执行、状态管理在服务端
-- **Thin CLI**: 通过 HTTP API 与服务端通信
+- **Server-first**: 业务逻辑、workflow 状态管理和 runner 调度在服务端
+- **Web UI**: 通过 HTTP API 与服务端通信
 - **SSE 实时推送**: 49 种事件类型，agent 进度实时可见
 
 ## 开发

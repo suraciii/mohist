@@ -1,5 +1,9 @@
 # Test Plan: E2E Walkthrough
 
+> Legacy CLI-era plan. The old Node `mo` CLI has been removed during the .NET
+> migration; this plan must be rewritten to use the current HTTP API/Web UI and
+> Mohist.Runner-backed workflow before it is used as an acceptance test.
+
 ## Context
 
 在容器隔离环境中走完整 mohist 工作流。

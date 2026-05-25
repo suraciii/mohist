@@ -1,5 +1,9 @@
 # Test Plan: M1 Infrastructure (Layer A)
 
+> Legacy CLI-era plan. The old Node `mo`/`mo-server` package has been removed
+> during the .NET migration; this plan must be rewritten to drive the current
+> HTTP API and Mohist.Server entrypoint before it is used as an acceptance test.
+
 ## Context
 
 验证 mohist M1 基础设施层在干净容器中的端到端流程。
