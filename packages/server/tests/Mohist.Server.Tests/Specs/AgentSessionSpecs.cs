@@ -54,6 +54,16 @@ public class AgentSessionSpecs
 
         var current = await _client.GetDataAsync<AgentSessionInfoDto[]>($"/api/agent/sessions?projectId={project.Id}");
         Assert.Contains(current, s => s.SessionId == session.Id);
+
+        var activity = await _client.GetDataAsync<AgentActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
+        Assert.Equal(issue.Number, card.IssueNumber);
+        Assert.Equal("Build session management", card.IssueTitle);
+        Assert.Equal("completed", card.Status);
+        Assert.Equal("hello from agent\n", card.LastActivity?.Text);
+        Assert.Equal("text", card.LastActivity?.Kind);
+        Assert.Equal(1, activity.Summary.Completed);
+        Assert.Equal(0, activity.Summary.Active);
     }
 
     private async Task<WorkDispatchDto> PollUntilAgentWorkAsync()
@@ -102,4 +112,10 @@ public class AgentSessionSpecs
     private sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto TaskProgress, string LastActivityAt);
     private sealed record ActiveWorkItemDto(string Type, string Id, string Title);
     private sealed record TaskProgressDto(int Completed, int Total);
+    private sealed record AgentActivityDto(AgentActivitySummaryDto Summary, AgentActivitySessionDto[] Sessions, AgentActivityWaitingDto[] Waiting);
+    private sealed record AgentActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, AgentActivitySlotUsageDto Slots);
+    private sealed record AgentActivitySlotUsageDto(int Active, int Max);
+    private sealed record AgentActivitySessionDto(int IssueNumber, string IssueTitle, string SessionId, string Status, AgentActivityPreviewDto? LastActivity);
+    private sealed record AgentActivityPreviewDto(string Kind, string Text, string CreatedAt);
+    private sealed record AgentActivityWaitingDto(int IssueNumber, string IssueTitle, string Label);
 }

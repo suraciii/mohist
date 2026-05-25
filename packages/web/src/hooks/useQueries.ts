@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
-import type { AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
+import type { AgentActivity, AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
 import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
 import { useProject } from '../context/ProjectContext'
 
@@ -87,6 +87,16 @@ export function useAgentSessions(params?: { status?: string; limit?: number }) {
     queryKey: ['agent-sessions', params, projectId],
     queryFn: () => api.getAgentSessions({ ...params, projectId }),
     enabled: !!projectId,
+  })
+}
+
+export function useAgentActivity(params?: { limit?: number }) {
+  const { projectId } = useProject()
+  return useQuery<AgentActivity>({
+    queryKey: ['agent-activity', params, projectId],
+    queryFn: () => api.getAgentActivity({ ...params, projectId }),
+    enabled: !!projectId,
+    refetchInterval: 5000,
   })
 }
 

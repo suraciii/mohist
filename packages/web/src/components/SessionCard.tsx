@@ -161,7 +161,23 @@ export function WaitingCard({ card }: WaitingCardProps) {
             {card.label}
           </span>
           <span className="text-xs font-mono text-gray-400">#{card.issueNumber}</span>
+          {card.issueStage && (
+            <span className="text-[10px] text-gray-400">{card.issueStage}</span>
+          )}
         </div>
+
+        <h3
+          className="text-sm font-medium text-gray-900 mb-1"
+          style={{
+            display: '-webkit-box',
+            WebkitLineClamp: 1,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+          title={card.issueTitle}
+        >
+          {card.issueTitle}
+        </h3>
 
         {card.questionPreview && (
           <p

@@ -49,7 +49,7 @@ export function ActivityPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {activeCards.map((card) => (
-                  <ActiveSessionCard key={card.issueNumber} card={card} now={now} />
+                  <ActiveSessionCard key={card.sessionId} card={card} now={now} />
                 ))}
               </div>
             )}
@@ -62,7 +62,7 @@ export function ActivityPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {waitingCards.map((card) => (
-                  <WaitingCard key={card.issueNumber} card={card} />
+                  <WaitingCard key={card.issueId} card={card} />
                 ))}
               </div>
             )}
@@ -75,7 +75,7 @@ export function ActivityPage() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {recentCards.map((card) => (
-                  <RecentCard key={`${card.issueNumber}-${card.completedAt ?? card.createdAt}`} card={card} />
+                  <RecentCard key={card.sessionId} card={card} />
                 ))}
               </div>
             )}

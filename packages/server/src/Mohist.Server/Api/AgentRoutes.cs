@@ -41,6 +41,13 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(pid, status, limit ?? 50));
         });
 
+        group.MapGet("/activity", async (string? projectId, int? limit, IGrainFactory grains, AgentActivityService activity, CancellationToken ct) =>
+        {
+            var pid = projectId ?? await ResolveProjectIdAsync(grains);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            return ApiResults.Ok(await activity.GetAsync(pid, limit, ct));
+        });
+
         group.MapGet("/session-status", () => ApiResults.Ok(new
         {
             sessionId = (string?)null,

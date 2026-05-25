@@ -36,6 +36,8 @@ export const AGENT_DETAIL_EVENTS: AgentEventName[] = [
   'coder_recovery_status',
   'coder_session_started',
   'coder_session_completed',
+  'coder_session_failed',
+  'coder_session_cancelled',
   'coder_session_status_changed',
   'agent_paused',
   'question_asked',
