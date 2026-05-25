@@ -90,7 +90,7 @@ public class DefaultWorkflowIntegrationSpecs
 
         var mainFiles = await GitOutputAsync(repo.Path, "ls-tree", "-r", "--name-only", "main");
         Assert.True(File.Exists(Path.Combine(repo.Path, "feature.txt")), $"main tree:\n{mainFiles}");
-        Assert.Equal("delivered", await File.ReadAllTextAsync(Path.Combine(repo.Path, "feature.txt")));
+        Assert.Equal("completed", await File.ReadAllTextAsync(Path.Combine(repo.Path, "feature.txt")));
         Assert.True(File.Exists(Path.Combine(repo.Path, "specs", "feature", "spec.md")));
         Assert.Contains("Requirement", await File.ReadAllTextAsync(Path.Combine(repo.Path, "specs", "feature", "spec.md")));
         Assert.Contains(
@@ -167,7 +167,7 @@ public class DefaultWorkflowIntegrationSpecs
                     await WriteAsync(request.WorkDir, "self-review.md", "PASS\n");
                     break;
                 case var task when request.Stage == "build" && task.StartsWith("build-feature", StringComparison.Ordinal):
-                    await File.WriteAllTextAsync(Path.Combine(request.WorkDir, "feature.txt"), "delivered", request.CancellationToken);
+                    await File.WriteAllTextAsync(Path.Combine(request.WorkDir, "feature.txt"), "completed", request.CancellationToken);
                     await GitAsync(request.WorkDir, request.CancellationToken, "add", ".");
                     await GitAsync(request.WorkDir, request.CancellationToken, "commit", "-m", $"issue {_issueNumber} implementation");
                     break;

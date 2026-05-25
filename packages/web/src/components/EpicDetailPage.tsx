@@ -140,7 +140,7 @@ export function EpicDetailPage() {
   }
 
   const progressPercent = epic.progress.totalIssueCount > 0
-    ? (epic.progress.deliveredCount / epic.progress.totalIssueCount) * 100
+    ? (epic.progress.completedCount / epic.progress.totalIssueCount) * 100
     : 0
   const epicId = epic.id
 
@@ -204,7 +204,7 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-gray-50 p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Progress</div>
             <div className="mt-2 text-2xl font-semibold text-gray-900">
-              {epic.progress.deliveredCount} / {epic.progress.totalIssueCount}
+              {epic.progress.completedCount} / {epic.progress.totalIssueCount}
             </div>
             <div className="mt-3 h-2 rounded-full bg-gray-200">
               <div className="h-2 rounded-full bg-blue-600" style={{ width: `${progressPercent}%` }} />

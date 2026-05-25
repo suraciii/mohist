@@ -169,18 +169,18 @@ public static class EpicRoutes
 
     private static EpicProgressDto BuildProgress(IReadOnlyList<LinkedIssueDto> linked)
     {
-        var delivered = linked.Where(IsDelivered).ToList();
-        var next = linked.FirstOrDefault(i => !IsDelivered(i));
+        var completed = linked.Where(IsCompleted).ToList();
+        var next = linked.FirstOrDefault(i => !IsCompleted(i));
         return new EpicProgressDto(
-            delivered.Count,
+            completed.Count,
             linked.Count,
             linked.Where(i => i.Status == "blocked").Select(i => i.Id).ToArray(),
-            linked.Where(i => i.Status == "active" && !IsDelivered(i)).Select(i => i.Id).ToArray(),
+            linked.Where(i => i.Status == "active" && !IsCompleted(i)).Select(i => i.Id).ToArray(),
             next is null ? null : new EpicNextIssueDto(next.Id, next.Number, next.Title),
-            linked.Count > 0 && delivered.Count == linked.Count);
+            linked.Count > 0 && completed.Count == linked.Count);
     }
 
-    private static bool IsDelivered(LinkedIssueDto issue) => issue.Stage == "done" || issue.Status == "completed";
+    private static bool IsCompleted(LinkedIssueDto issue) => issue.Stage == "done" || issue.Status == "completed";
 
     private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
     {

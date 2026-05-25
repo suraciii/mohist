@@ -61,7 +61,7 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
         <div className="flex items-center justify-between text-sm mb-1">
           <span className="text-gray-500">Progress</span>
           <span className="font-medium text-gray-900">
-            {progress.deliveredCount} / {progress.totalIssueCount} delivered
+            {progress.completedCount} / {progress.totalIssueCount} completed
           </span>
         </div>
         <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -69,7 +69,7 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
             className="bg-blue-600 h-1.5 rounded-full transition-all"
             style={{
               width: progress.totalIssueCount > 0
-                ? `${(progress.deliveredCount / progress.totalIssueCount) * 100}%`
+                ? `${(progress.completedCount / progress.totalIssueCount) * 100}%`
                 : '0%'
             }}
           />

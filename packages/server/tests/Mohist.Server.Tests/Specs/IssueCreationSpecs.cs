@@ -215,7 +215,7 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
 
         Assert.Contains(prereq.Number, info.PrerequisiteNumbers);
         Assert.False(eligibility.Startable);
-        Assert.Contains(eligibility.WaitingForDelivery, p => p.Number == prereq.Number);
+        Assert.Contains(eligibility.WaitingForCompletion, p => p.Number == prereq.Number);
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkflowAsync());
     }
 
@@ -236,7 +236,7 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         var eligibility = await dependentGrain.GetStartEligibilityAsync();
 
         Assert.True(eligibility.Startable);
-        Assert.Empty(eligibility.WaitingForDelivery);
+        Assert.Empty(eligibility.WaitingForCompletion);
     }
 
 }

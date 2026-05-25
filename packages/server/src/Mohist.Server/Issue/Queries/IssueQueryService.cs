@@ -272,7 +272,7 @@ public class IssueQueryService
         IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
-        Delivered = issue.Stage == "done" || issue.Status == "completed",
+        Completed = issue.Stage == "done" || issue.Status == "completed",
         Stage = issue.Stage,
         Status = issue.Status,
     };

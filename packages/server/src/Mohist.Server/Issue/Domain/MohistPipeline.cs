@@ -70,7 +70,7 @@ public static class MohistPipeline
             new TaskDefinitionInput("integrate:merge", "Merge branch", "mohist/merge", MergeWith()),
         ],
         [
-            HealthGate("health:integrate", "Post-delivery health check", 1,
+            HealthGate("health:integrate", "Final workflow health check", 1,
                 new TaskDefinitionInput("fix-integrate-health", "Fix integrate health", Agent, AgentWith("integrate", "fix-integrate-health"))),
         ]);
 

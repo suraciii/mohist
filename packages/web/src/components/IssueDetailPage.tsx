@@ -623,9 +623,9 @@ export function IssueDetailPage() {
                 <div className="space-y-2">
                   {isBacklog && (
                     <>
-                      {issue.startEligibility?.waitingForDelivery?.length ? (
+                      {issue.startEligibility?.waitingForCompletion?.length ? (
                         <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-700">
-                          {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForDelivery[0].number}`}
+                          {issue.startEligibility.message ?? `Waiting for #${issue.startEligibility.waitingForCompletion[0].number}`}
                         </div>
                       ) : (
                         <button
@@ -819,9 +819,9 @@ export function IssueDetailPage() {
                         <span className="text-amber-700">
                           #{prereq.number} {prereq.title}
                         </span>
-                        {prereq.delivered ? (
+                        {prereq.completed ? (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 bg-green-100 px-1.5 py-0.5 rounded">
-                            Delivered
+                            Completed
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">

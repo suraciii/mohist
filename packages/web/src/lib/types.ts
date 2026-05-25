@@ -37,16 +37,16 @@ export interface IssuePrerequisiteSummary {
   issueId: string
   number: number
   title: string
-  delivered: boolean
+  completed: boolean
   stage: Stage
   status: IssueStatus
 }
 
 export interface IssueStartEligibility {
   startable: boolean
-  reason: 'ready' | 'not-startable-lifecycle' | 'waiting-for-delivery'
+  reason: 'ready' | 'not-startable-lifecycle' | 'waiting-for-completion'
   message?: string
-  waitingForDelivery: IssuePrerequisiteSummary[]
+  waitingForCompletion: IssuePrerequisiteSummary[]
 }
 
 export type WorkItemAttemptState = 'running' | 'completed' | 'failed' | 'interrupted'
@@ -133,7 +133,7 @@ export interface Epic {
 }
 
 export interface EpicProgress {
-  deliveredCount: number
+  completedCount: number
   totalIssueCount: number
   blockedIssues: string[]
   activeIssues: string[]

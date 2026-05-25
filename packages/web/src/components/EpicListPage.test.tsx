@@ -40,7 +40,7 @@ const epics = [
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     progress: {
-      deliveredCount: 1,
+      completedCount: 1,
       totalIssueCount: 3,
       blockedIssues: [],
       activeIssues: ['issue-2'],
@@ -57,7 +57,7 @@ const epics = [
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     progress: {
-      deliveredCount: 2,
+      completedCount: 2,
       totalIssueCount: 2,
       blockedIssues: [],
       activeIssues: [],
@@ -100,7 +100,7 @@ describe('EpicListPage', () => {
     expect(screen.getByRole('heading', { name: 'Active' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Done' })).toBeTruthy()
     expect(screen.getByText('Active Epic')).toBeTruthy()
-    expect(screen.getByText('1 / 3 delivered')).toBeTruthy()
+    expect(screen.getByText('1 / 3 completed')).toBeTruthy()
     expect(screen.getByText('#2')).toBeTruthy()
     expect(screen.getByText('Continue work')).toBeTruthy()
     expect(screen.getByText('Ready to mark done')).toBeTruthy()
