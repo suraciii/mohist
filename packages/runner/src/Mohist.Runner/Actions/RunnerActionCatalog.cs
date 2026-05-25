@@ -25,7 +25,9 @@ public static class RunnerActionCatalog
     {
         manager.Register(Agent, () => new AgentAction(
             services.GetRequiredService<IAgentExecutor>(),
-            services.GetRequiredService<ISessionTelemetrySink>()));
+            services.GetRequiredService<ISessionTelemetrySink>(),
+            services.GetRequiredService<IAgentCompletionVerifier>(),
+            services.GetRequiredService<IAgentSessionRepairer>()));
         manager.Register(AiReview, () => new AiReviewAction(services.GetRequiredService<IAgentExecutor>()));
 
         manager.Register(CoreProcess, () => new ProcessHandler(services.GetRequiredService<ILogger<ProcessHandler>>()));
