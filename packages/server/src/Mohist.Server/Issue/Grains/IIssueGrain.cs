@@ -7,6 +7,7 @@ public interface IIssueGrain : IGrainWithStringKey
 {
     Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null);
     Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null);
+    Task CompleteWorkflowAsync(string workflowRunId);
     Task CloseAsync();
     Task<string?> GetWorkflowRunIdAsync();
     Task UpdateAsync(string title, string? body);

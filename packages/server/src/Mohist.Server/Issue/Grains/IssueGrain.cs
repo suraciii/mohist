@@ -73,6 +73,17 @@ public class IssueGrain : Grain, IIssueGrain
         await AppendIssueEventAsync("issue_closed", "closed", "Issue closed");
     }
 
+    public async Task CompleteWorkflowAsync(string workflowRunId)
+    {
+        if (_issue is null) return;
+        if (_issue!.WorkflowRunId != workflowRunId) return;
+        if (_issue.Status == IssueStatus.Done) return;
+
+        _issue.Complete();
+        await _issueStore.SaveAsync(GrainKey, _issue);
+        await AppendIssueEventAsync("issue_completed", "completed", "Issue completed", new { workflowRunId });
+    }
+
     public Task<string?> GetWorkflowRunIdAsync()
     {
         EnsureIssue();

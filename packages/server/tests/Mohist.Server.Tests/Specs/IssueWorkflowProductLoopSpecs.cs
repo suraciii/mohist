@@ -66,6 +66,11 @@ public class IssueWorkflowProductLoopSpecs
         var completed = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.Equal("done", completed.Stage);
         Assert.Equal("completed", completed.Status);
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/archive?projectId={project.Id}");
+        var events = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
+        Assert.Contains(events, e => e.Type == "issue_completed");
+        Assert.Contains(events, e => e.Type == "issue_archived");
     }
 
     private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)

@@ -10,6 +10,7 @@ using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Sessions;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workspace;
 
@@ -27,6 +28,7 @@ public static class MohistServiceRegistration
         services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
         services.AddScoped<IssueQueryService>();
         services.AddSingleton<IssueWorkflowProfileRegistry>();
+        services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionService>();
         services.AddScoped<AgentActivityService>();
