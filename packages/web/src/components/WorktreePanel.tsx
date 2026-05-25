@@ -86,6 +86,10 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
     },
     onError: (error: Error) => {
+      if (error instanceof ApiError && error.code === 'rebase_already_pending') {
+        setRebaseResult({ type: 'queued', message: 'Rebase task already queued' })
+        return
+      }
       if (error instanceof ApiError && error.data && typeof error.data === 'object') {
         const d = error.data as { conflicts?: string[] }
         if (d.conflicts && d.conflicts.length > 0) {

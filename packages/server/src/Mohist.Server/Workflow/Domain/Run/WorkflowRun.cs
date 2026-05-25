@@ -171,12 +171,15 @@ public class WorkflowRun
     public void FailCheck(CheckResult result) => CurrentStage.FailCheck(result);
     public void ClearStageFailure() => CurrentStage.Failure = null;
     public void InjectRetryTask(string checkName, LoadedTaskInput task) => CurrentStage.InjectRetryTask(checkName, task);
-    public void AddRuntimeTask(LoadedTaskInput task, string? stage = null)
+    public bool HasIncompleteTaskUsing(string uses) => CurrentStage.HasIncompleteTaskUsing(uses);
+    public bool HasIncompleteTaskId(string id) => CurrentStage.HasIncompleteTaskId(id);
+
+    public void AddRuntimeTask(LoadedTaskInput task, string? stage = null, bool invalidateChecks = false)
     {
         if (!string.IsNullOrWhiteSpace(stage) && stage != CurrentStage.Stage)
             throw new WorkflowDomainException($"Cannot add runtime task to stage {stage}; current stage is {CurrentStage.Stage}");
 
-        CurrentStage.AddRuntimeTask(task);
+        CurrentStage.AddRuntimeTask(task, invalidateChecks);
         _paused = false;
     }
     public int RetryCountForCheck(string checkName) => CurrentStage.RetryCountForCheck(checkName);

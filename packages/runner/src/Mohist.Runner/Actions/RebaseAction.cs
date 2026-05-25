@@ -19,7 +19,7 @@ public class RebaseAction : IAction
 
         if (!result.Success && conflicts.Count > 0 && conflictResolver is { ValueKind: JsonValueKind.Object })
         {
-            var requestedTask = BuildRequestedTask(conflictResolver.Value, conflicts);
+            var requestedTask = BuildRequestedTask(conflictResolver.Value, conflicts, baseBranch);
             var conflictOutput = JsonSerializer.Serialize(new
             {
                 kind = "rebase",
@@ -61,7 +61,7 @@ public class RebaseAction : IAction
             .ToList();
     }
 
-    private static object BuildRequestedTask(JsonElement conflictResolver, List<string> conflicts)
+    private static object BuildRequestedTask(JsonElement conflictResolver, List<string> conflicts, string baseBranch)
     {
         var id = conflictResolver.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String
             ? idProp.GetString()
@@ -92,6 +92,16 @@ public class RebaseAction : IAction
             title,
             uses,
             with,
+            then = new
+            {
+                id = "verify-rebase",
+                title = "Verify rebase completed",
+                uses = "mohist/rebase-status",
+                with = new Dictionary<string, object?>
+                {
+                    ["baseBranch"] = baseBranch
+                }
+            },
         };
     }
 }
