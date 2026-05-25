@@ -26,6 +26,7 @@ internal sealed class MohistCli
     private readonly TextWriter _out;
     private readonly TextWriter _err;
     private readonly HttpClient _http;
+    private readonly SystemdServiceInstaller _systemd;
 
     public MohistCli(string[] args, TextWriter output, TextWriter error)
     {
@@ -37,14 +38,16 @@ internal sealed class MohistCli
             BaseAddress = new Uri(Environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
             Timeout = TimeSpan.FromSeconds(30),
         };
+        _systemd = new SystemdServiceInstaller(output, error);
     }
 
-    public MohistCli(string[] args, TextWriter output, TextWriter error, HttpClient http)
+    public MohistCli(string[] args, TextWriter output, TextWriter error, HttpClient http, SystemdServiceInstaller? systemd = null)
     {
         _args = args;
         _out = output;
         _err = error;
         _http = http;
+        _systemd = systemd ?? new SystemdServiceInstaller(output, error);
     }
 
     public async Task<int> RunAsync()
@@ -60,6 +63,7 @@ internal sealed class MohistCli
             return _args[0] switch
             {
                 "server" => await ServerAsync(_args[1..]),
+                "runner" => await RunnerAsync(_args[1..]),
                 "status" => await PrintGetAsync("/api/status" + Query(All: true)),
                 "project" => await ProjectAsync(_args[1..]),
                 "issue" => await IssueAsync(_args[1..]),
@@ -90,14 +94,30 @@ internal sealed class MohistCli
     {
         if (args.Length == 0 || IsHelp(args[0]))
         {
-            _out.WriteLine("Usage: mo server <status|health>");
+            _out.WriteLine("Usage: mo server <status|health|install>");
             return 0;
         }
 
         return args[0] switch
         {
             "status" or "health" => await PrintGetAsync("/api/health"),
+            "install" => await _systemd.InstallServerAsync(ServiceInstallOptions.From(args[1..])),
             _ => UsageError($"Unknown server command '{args[0]}'"),
+        };
+    }
+
+    private async Task<int> RunnerAsync(string[] args)
+    {
+        if (args.Length == 0 || IsHelp(args[0]))
+        {
+            _out.WriteLine("Usage: mo runner <install>");
+            return 0;
+        }
+
+        return args[0] switch
+        {
+            "install" => await _systemd.InstallRunnerAsync(ServiceInstallOptions.From(args[1..])),
+            _ => UsageError($"Unknown runner command '{args[0]}'"),
         };
     }
 
@@ -422,6 +442,8 @@ internal sealed class MohistCli
 
         Commands:
           mo server status
+          mo server install [--repo-root <path>] [--unit-dir <path>] [--listen-url <url>] [--dry-run]
+          mo runner install [--repo-root <path>] [--unit-dir <path>] [--server-url <url>] [--runner-root <path>] [--dry-run]
           mo status
           mo project list
           mo project create <name> [--path <path>] [--base-branch <branch>]

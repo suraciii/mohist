@@ -19,24 +19,24 @@ AI 驱动的开发工作流自动化工具，使用本地 SQLite 存储，通过
 ## 安装
 
 ```bash
-npm install -g mohist
+dotnet tool install --global Mohist.Cli
 ```
 
 依赖：
-- Node.js >= 18.0.0
+- .NET SDK >= 10.0
 - opencode CLI
 
 ## 快速开始
 
 ```bash
-# 1. 配置 AI provider
-mo providers login anthropic
+# 1. 安装并启动 Mohist Server
+mo server install
 
-# 2. 启动服务
-mo server start
+# 2. 安装并启动 Mohist Runner
+mo runner install
 
 # 3. 初始化项目
-mo init
+mo project create my-app --path .
 
 # 4. 创建并启动 Issue
 mo issue create "Add search feature" --body "用户需要搜索功能" --label enhancement --priority p1
@@ -54,14 +54,14 @@ mo issue approve 1
 
 | 命令 | 说明 |
 |------|------|
-| `mo server start` | 启动服务（daemon 模式） |
-| `mo server stop` | 停止服务 |
-| `mo server status` | 查看服务状态（PID、端口、运行时间、版本） |
-| `mo server restart` | 重启服务 |
-| `mo server logs [-n <行数>]` | 查看服务日志 |
-| `mo server update` | 重建并重启（源码模式） |
-| `mo server install` | 安装为 systemd 用户服务 |
-| `mo server uninstall` | 卸载 systemd 用户服务 |
+| `mo server status` | 查看 Server 健康状态 |
+| `mo server install [--repo-root <path>] [--unit-dir <path>] [--listen-url <url>] [--dry-run]` | 安装并启动 systemd 用户服务 |
+
+### Runner 管理 (`mo runner`)
+
+| 命令 | 说明 |
+|------|------|
+| `mo runner install [--repo-root <path>] [--unit-dir <path>] [--server-url <url>] [--runner-root <path>] [--dry-run]` | 安装并启动 Runner systemd 用户服务 |
 
 ### 项目管理 (`mo project`)
 
