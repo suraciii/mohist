@@ -156,6 +156,34 @@ public class AgentActionSpecs
     }
 
     [Fact]
+    public async Task AgentAction_WithTaskContext_RendersDescriptionAndAcceptanceCriteria()
+    {
+        using var temp = new TempDir();
+        var executor = new FakeAgentExecutor(new AgentExecutionResult(0, "done"));
+        var action = new AgentAction(executor);
+
+        var result = await action.ExecuteAsync(SpecHelpers.Context(
+            temp.Path,
+            "task",
+            "mohist/agent",
+            new
+            {
+                stage = "build",
+                task = "T-001",
+                description = "Add the feature flag service.",
+                acceptanceCriteria = new[] { "service is registered", "tests pass" }
+            }));
+
+        Assert.Equal("success", result.Status);
+        Assert.NotNull(executor.Request);
+        Assert.Contains("## Task Description", executor.Request.Prompt);
+        Assert.Contains("Add the feature flag service.", executor.Request.Prompt);
+        Assert.Contains("## Acceptance Criteria", executor.Request.Prompt);
+        Assert.Contains("service is registered", executor.Request.Prompt);
+        Assert.Contains("tests pass", executor.Request.Prompt);
+    }
+
+    [Fact]
     public async Task AgentAction_FakeExecutorFailure_FailsWithoutRealAgent()
     {
         using var temp = new TempDir();

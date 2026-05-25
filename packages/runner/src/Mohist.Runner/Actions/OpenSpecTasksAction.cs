@@ -30,7 +30,9 @@ public class OpenSpecTasksAction : IAction
             if (string.IsNullOrWhiteSpace(id)) continue;
 
             var title = ReadString(item, "title") ?? id;
-            tasks.Add(new LoadedTask(id, title, defaultUses, defaultWith));
+            var uses = ReadString(item, "uses") ?? defaultUses;
+            var with = MergeWith(defaultWith, item);
+            tasks.Add(new LoadedTask(id, title, uses, with));
         }
 
         var output = JsonSerializer.Serialize(new { tasks }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -57,6 +59,48 @@ public class OpenSpecTasksAction : IAction
             return null;
 
         return JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(value.GetRawText());
+    }
+
+    private static Dictionary<string, JsonElement?>? MergeWith(Dictionary<string, JsonElement?>? defaultWith, JsonElement task)
+    {
+        var merged = defaultWith is null
+            ? new Dictionary<string, JsonElement?>()
+            : defaultWith.ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        AddString(merged, task, "description");
+        AddElement(merged, task, "acceptanceCriteria", "acceptanceCriteria");
+        AddElement(merged, task, "dependsOn", "dependsOn");
+        AddString(merged, task, "priority");
+        AddString(merged, task, "mode");
+        AddString(merged, task, "type");
+        AddElement(merged, task, "output", "output");
+        AddElement(merged, task, "requireFiles", "requireFiles");
+        AddElement(merged, task, "requireMarkers", "requireMarkers");
+
+        if (task.TryGetProperty("with", out var withElement) && withElement.ValueKind == JsonValueKind.Object)
+        {
+            var taskWith = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withElement.GetRawText());
+            if (taskWith is not null)
+            {
+                foreach (var (key, value) in taskWith)
+                    merged[key] = value?.Clone();
+            }
+        }
+
+        return merged.Count == 0 ? null : merged;
+    }
+
+    private static void AddString(Dictionary<string, JsonElement?> target, JsonElement source, string name)
+    {
+        var value = ReadString(source, name);
+        if (!string.IsNullOrWhiteSpace(value))
+            target[name] = JsonSerializer.SerializeToElement(value);
+    }
+
+    private static void AddElement(Dictionary<string, JsonElement?> target, JsonElement source, string sourceName, string targetName)
+    {
+        if (source.TryGetProperty(sourceName, out var value) && value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+            target[targetName] = value.Clone();
     }
 
     private sealed record LoadedTask(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With);

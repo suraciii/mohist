@@ -35,7 +35,7 @@ public class AgentAction : IAction
         if (string.IsNullOrWhiteSpace(task))
             return new ActionResult("failure", "Agent action requires 'task'");
 
-        var prompt = AgentPromptRenderer.Render(new AgentPromptContext(stage, task, requirements, context.WorkDir, context.Variables));
+        var prompt = AgentPromptRenderer.Render(new AgentPromptContext(stage, task, requirements, context.WorkDir, context.Variables, context.With));
         var model = AgentPromptRenderer.ResolveModel(context.Variables, stage);
 
         var request = new AgentExecutionRequest(
