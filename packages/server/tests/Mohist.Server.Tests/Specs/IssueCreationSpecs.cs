@@ -122,7 +122,7 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
     }
 
     [Fact]
-    public async Task Close_ActiveIssue_ResetsToBacklog()
+    public async Task Close_ActiveIssue_CancelsIssueWithoutRewritingLifecycleToWorkflowStage()
     {
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Closable");
@@ -132,8 +132,8 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         await grain.CloseAsync();
 
         var info = await grain.GetInfoAsync();
-        Assert.Equal("backlog", info.Stage);
-        Assert.Equal("closed", info.Status);
+        Assert.Equal("cancelled", info.Stage);
+        Assert.Equal("cancelled", info.Status);
     }
 
     [Fact]

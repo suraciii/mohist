@@ -32,8 +32,8 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         MohistDefaultWorkflowProjection.Project(
             issue.Number,
             issue.Title,
-            issue.Stage.ToString().ToLower(),
-            issue.RuntimeStatus.ToString().ToLower(),
+            IssueDomainNames.Status(issue.Status),
+            issue.Attention,
             issue.BlockedReason,
             workflow);
 
@@ -42,7 +42,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             issue.Number,
             issue.Title,
             issue.Stage,
-            issue.Status,
+            issue.Attention,
             issue.BlockedReason,
             workflow);
 }

@@ -37,10 +37,8 @@ public class IssueGrain : Grain, IIssueGrain
         if (!eligibility.Startable)
             throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
 
-        _issue!.SetStage(IssueStage.Plan);
-        _issue.SetRuntimeStatus(IssueRuntimeStatus.Active);
         var wrId = $"wr_{Guid.NewGuid():N}";
-        _issue.SetWorkflowRunId(wrId);
+        _issue!.StartWorkflow(wrId);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
 
@@ -136,7 +134,7 @@ public class IssueGrain : Grain, IIssueGrain
             _issue.Id,
             _issue.Number,
             _issue.Title,
-            projection.Stage,
+            projection.IssueStatus,
             projection.RuntimeStatus,
             wrId,
             projection.ChangeDir,
@@ -173,8 +171,8 @@ public class IssueGrain : Grain, IIssueGrain
             Number = _issue.Number,
             Title = _issue.Title,
             Body = _issue.Body,
-            Stage = _issue.Stage.ToString().ToLower(),
-            Status = _issue.RuntimeStatus.ToString().ToLower(),
+            Stage = IssueDomainNames.Status(_issue.Status),
+            Status = IssueRuntimeSummary(_issue.Status, _issue.Attention),
             ProjectId = _issue.ProjectId,
             Labels = _issue.Labels,
             Priority = _issue.Priority,
@@ -188,6 +186,7 @@ public class IssueGrain : Grain, IIssueGrain
             RetryCount = _issue.RetryCount,
             ConflictRetryCount = _issue.ConflictRetryCount,
             BlockedReason = _issue.BlockedReason,
+            Attention = _issue.Attention,
             WorkflowRunId = _issue.WorkflowRunId,
             WorkflowProfileId = _issue.WorkflowProfileId,
             PrerequisiteNumbers = _issue.PrerequisiteNumbers,
@@ -242,7 +241,7 @@ public class IssueGrain : Grain, IIssueGrain
             type,
             IssueId: _issue.Id,
             WorkflowRunId: _issue.WorkflowRunId,
-            Stage: _issue.Stage.ToString().ToLower(),
+            Stage: IssueDomainNames.Status(_issue.Status),
             Status: status,
             Message: message,
             Payload: payload));
@@ -253,6 +252,16 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null)
             throw new InvalidOperationException($"Issue '{GrainKey}' not found");
     }
+
+    private static string IssueRuntimeSummary(IssueStatus status, IssueAttention? attention) =>
+        status switch
+        {
+            IssueStatus.Done => "completed",
+            IssueStatus.Cancelled => "cancelled",
+            _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
+            _ when attention is not null => "attention",
+            _ => "active",
+        };
 
     private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)
     {

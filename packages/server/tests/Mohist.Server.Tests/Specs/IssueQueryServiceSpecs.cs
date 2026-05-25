@@ -26,7 +26,7 @@ public class IssueQueryServiceSpecs
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var project = new ProjectInfo { Id = "proj-1", Name = "Project One", Path = "/tmp/project" };
         var issue = new Issue.Domain.Issue("issue_1", project.Id, 1, "Query me", labels: ["bug"], priority: "p1");
-        issue.SetStage(IssueStage.Plan);
+        issue.MarkReady();
         db.GrainStates.Add(new GrainState
         {
             Key = $"{project.Id}:1",
@@ -37,11 +37,11 @@ public class IssueQueryServiceSpecs
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
 
-        var list = await service.ListAsync(project.Id, project, stage: "plan", label: "bug");
+        var list = await service.ListAsync(project.Id, project, stage: "todo", label: "bug");
 
         var item = Assert.Single(list);
         Assert.Equal("Query me", item.Title);
-        Assert.Equal("plan", item.Stage);
+        Assert.Equal("todo", item.Stage);
         Assert.Equal("Project One", item.ProjectName);
     }
 }

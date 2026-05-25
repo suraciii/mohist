@@ -92,8 +92,8 @@ public class IssueQueryService
         Number = issue.Number,
         Title = issue.Title,
         Body = issue.Body,
-        Stage = issue.Stage.ToString().ToLower(),
-        Status = issue.RuntimeStatus.ToString().ToLower(),
+        Stage = IssueDomainNames.Status(issue.Status),
+        Status = IssueRuntimeSummary(issue.Status, issue.Attention),
         ProjectId = issue.ProjectId,
         ProjectName = project?.Name,
         Labels = issue.Labels,
@@ -108,6 +108,7 @@ public class IssueQueryService
         RetryCount = issue.RetryCount,
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
+        Attention = issue.Attention,
         WorkflowRunId = issue.WorkflowRunId,
         WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
@@ -135,6 +136,7 @@ public class IssueQueryService
         RetryCount = issue.RetryCount,
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
+        Attention = issue.Attention,
         WorkflowRunId = issue.WorkflowRunId,
         WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
@@ -150,11 +152,22 @@ public class IssueQueryService
 
         var projection = _profiles.Get(issue.WorkflowProfileId).Project(issue, status);
 
-        issue.Stage = projection.Stage;
+        issue.Stage = projection.IssueStatus;
         issue.Status = projection.RuntimeStatus;
         issue.BlockedReason = projection.BlockedReason;
         issue.ApprovalState = projection.ApprovalState;
+        issue.Attention = projection.Attention;
     }
+
+    private static string IssueRuntimeSummary(IssueStatus status, IssueAttention? attention) =>
+        status switch
+        {
+            IssueStatus.Done => "completed",
+            IssueStatus.Cancelled => "cancelled",
+            _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
+            _ when attention is not null => "attention",
+            _ => "active",
+        };
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
     {
