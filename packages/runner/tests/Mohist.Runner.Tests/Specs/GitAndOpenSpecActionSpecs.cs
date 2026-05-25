@@ -77,17 +77,81 @@ public class GitAndOpenSpecActionSpecs
         Assert.Equal("failure", result.Status);
     }
 
-    private static async Task InitRepositoryAsync(string path)
+    [Fact]
+    public async Task Merge_SquashesIssueBranchIntoBaseBranch()
     {
-        await RunAsync(path, "init", "-b", "main");
-        await RunAsync(path, "config", "user.email", "mohist@example.test");
-        await RunAsync(path, "config", "user.name", "Mohist Test");
-        await File.WriteAllTextAsync(Path.Combine(path, "README.md"), "hello");
-        await RunAsync(path, "add", ".");
-        await RunAsync(path, "commit", "-m", "initial");
+        using var repo = new TempDir();
+        await InitRepositoryAsync(repo.Path);
+        await RunGitAsync(repo.Path, "checkout", "-b", "mo/issue-1");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "feature.txt"), "delivered");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "issue work");
+        var issueHead = await GitOutputAsync(repo.Path, "rev-parse", "HEAD");
+        await RunGitAsync(repo.Path, "checkout", "main");
+
+        var result = await new MergeAction().ExecuteAsync(
+            SpecHelpers.Context(repo.Path, "task", "mohist/merge", new
+            {
+                source = "mo/issue-1",
+                target = "main",
+                strategy = "squash",
+                message = "Complete issue #1"
+            }));
+
+        Assert.Equal("success", result.Status);
+        Assert.True(File.Exists(Path.Combine(repo.Path, "feature.txt")));
+        Assert.Equal("main", await GitOutputAsync(repo.Path, "branch", "--show-current"));
+        Assert.NotEqual(issueHead, await GitOutputAsync(repo.Path, "rev-parse", "HEAD"));
+        using var document = JsonDocument.Parse(result.Output!);
+        Assert.Equal("main", document.RootElement.GetProperty("target").GetString());
+        Assert.Equal("mo/issue-1", document.RootElement.GetProperty("source").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("landedSha").GetString()));
     }
 
-    private static async Task RunAsync(string workDir, params string[] args)
+    [Fact]
+    public async Task Merge_WhenRunningFromIssueWorktree_MergesIntoProjectPath()
+    {
+        using var repo = new TempDir();
+        using var runnerRoot = new TempDir();
+        await InitRepositoryAsync(repo.Path);
+        var worktreePath = Path.Combine(runnerRoot.Path, "issue-1");
+        await RunGitAsync(repo.Path, "worktree", "add", "-b", "mo/issue-1", worktreePath, "main");
+        await File.WriteAllTextAsync(Path.Combine(worktreePath, "feature.txt"), "delivered");
+        await RunGitAsync(worktreePath, "add", ".");
+        await RunGitAsync(worktreePath, "commit", "-m", "issue work");
+        Directory.CreateDirectory(Path.Combine(worktreePath, "specs"));
+        await File.WriteAllTextAsync(Path.Combine(worktreePath, "specs", "feature.md"), "synced");
+
+        var result = await new MergeAction().ExecuteAsync(
+            SpecHelpers.Context(worktreePath, "task", "mohist/merge", new
+            {
+                source = "mo/issue-1",
+                target = "main",
+                strategy = "squash",
+                message = "Complete issue #1"
+            }, new Dictionary<string, object?>
+            {
+                ["project"] = new { path = repo.Path }
+            }));
+
+        Assert.Equal("success", result.Status);
+        Assert.True(File.Exists(Path.Combine(repo.Path, "feature.txt")));
+        Assert.True(File.Exists(Path.Combine(repo.Path, "specs", "feature.md")));
+        Assert.Equal("main", await GitOutputAsync(repo.Path, "branch", "--show-current"));
+        Assert.Equal("mo/issue-1", await GitOutputAsync(worktreePath, "branch", "--show-current"));
+    }
+
+    private static async Task InitRepositoryAsync(string path)
+    {
+        await RunGitAsync(path, "init", "-b", "main");
+        await RunGitAsync(path, "config", "user.email", "mohist@example.test");
+        await RunGitAsync(path, "config", "user.name", "Mohist Test");
+        await File.WriteAllTextAsync(Path.Combine(path, "README.md"), "hello");
+        await RunGitAsync(path, "add", ".");
+        await RunGitAsync(path, "commit", "-m", "initial");
+    }
+
+    private static async Task RunGitAsync(string workDir, params string[] args)
     {
         using var process = new Process();
         process.StartInfo = new ProcessStartInfo
@@ -109,4 +173,26 @@ public class GitAndOpenSpecActionSpecs
     private static string Quote(string value) => value.Any(char.IsWhiteSpace)
         ? $"\"{value.Replace("\"", "\\\"")}\""
         : value;
+
+    private static async Task<string> GitOutputAsync(string workDir, params string[] args)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = string.Join(" ", args.Select(Quote)),
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        process.Start();
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"git {string.Join(' ', args)} failed: {error}");
+        return output.Trim();
+    }
 }
