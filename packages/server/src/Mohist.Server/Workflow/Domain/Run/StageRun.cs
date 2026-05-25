@@ -240,14 +240,28 @@ public class StageRun
         AddTask(task);
     }
 
-    public void AddRuntimeTask(LoadedTaskInput task)
+    public bool HasIncompleteTaskUsing(string uses) =>
+        _tasks.Any(t => t.Uses == uses && t.Status is TaskRunStatus.Pending or TaskRunStatus.Running);
+
+    public bool HasIncompleteTaskId(string id) =>
+        _tasks.Any(t => t.DefinitionId == id && t.Status is TaskRunStatus.Pending or TaskRunStatus.Running);
+
+    public void AddRuntimeTask(LoadedTaskInput task, bool invalidateChecks = false)
     {
         Failure = null;
         if (Approval?.Status == "awaiting")
             Approval = null;
+        if (invalidateChecks)
+            ResetChecks();
         if (!_started)
             Start();
         AddTask(task);
+    }
+
+    public void ResetChecks()
+    {
+        foreach (var check in _checks)
+            check.Reset();
     }
 
     public int RetryCountForCheck(string checkName)

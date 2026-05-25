@@ -176,6 +176,37 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task RuntimeTaskWithInvalidateChecks_ReopensStageChecks()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: [new("check-1", "Check 1", "spec/check")],
+            requiresApproval: true));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, task.WorkId, "completed");
+        var (check, checkRunnerId) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+        var awaiting = await workflow.GetStatusAsync();
+        Assert.Equal("AwaitingApproval", awaiting!.Status);
+        Assert.Equal("Passed", awaiting.Stages[0].Checks[0].Status);
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
+
+        var afterAdd = await workflow.GetStatusAsync();
+        Assert.Equal("Running", afterAdd!.Status);
+        Assert.Equal("Pending", afterAdd.Stages[0].Checks[0].Status);
+
+        var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("rebase.", rebase.WorkId);
+        await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
+
+        var (rerunCheck, rerunCheckRunnerId) = await PollWorkAnyAsync();
+        Assert.Equal("checks", rerunCheck.WorkType);
+        await ReportChecksPassAsync(rerunCheckRunnerId, rerunCheck, "check-1");
+    }
+
+    [Fact]
     public async Task RuntimeTaskAddedBeforeStageMaterializes_DoesNotReplaceDefinedTasks()
     {
         var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(
@@ -217,6 +248,14 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             "with": {
               "stage": "maintenance",
               "task": "resolve-rebase-conflicts"
+            },
+            "then": {
+              "id": "verify-rebase",
+              "title": "Verify rebase completed",
+              "uses": "mohist/rebase-status",
+              "with": {
+                "baseBranch": "main"
+              }
             }
           }
         }
@@ -231,6 +270,11 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.Contains("resolve-rebase-conflicts", resolver.With);
 
         await ReportAsync(resolverRunnerId, resolver.WorkId, "completed");
+        var (verify, verifyRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("verify-rebase.", verify.WorkId);
+        Assert.Equal("mohist/rebase-status", verify.Uses);
+        await ReportAsync(verifyRunnerId, verify.WorkId, "completed");
+
         var (check, checkRunnerId) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(checkRunnerId, check, "check-1");
     }

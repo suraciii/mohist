@@ -186,6 +186,71 @@ public class GitAndOpenSpecActionSpecs
         Assert.Equal("resolve-rebase-conflicts", requestedTask.GetProperty("id").GetString());
         Assert.Equal("mohist/agent", requestedTask.GetProperty("uses").GetString());
         Assert.Equal("resolve-rebase-conflicts", requestedTask.GetProperty("with").GetProperty("task").GetString());
+        Assert.Equal("verify-rebase", requestedTask.GetProperty("then").GetProperty("id").GetString());
+        Assert.Equal("mohist/rebase-status", requestedTask.GetProperty("then").GetProperty("uses").GetString());
+    }
+
+    [Fact]
+    public async Task RebaseStatus_WhenBranchContainsBaseAndWorktreeClean_Passes()
+    {
+        using var repo = new TempDir();
+        await InitRepositoryAsync(repo.Path);
+        await RunGitAsync(repo.Path, "checkout", "-b", "feature");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "feature.txt"), "done");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "feature");
+
+        var result = await new RebaseStatusAction().ExecuteAsync(
+            SpecHelpers.Context(repo.Path, "task", "mohist/rebase-status", new { baseBranch = "main" }));
+
+        Assert.Equal("success", result.Status);
+        using var document = JsonDocument.Parse(result.Output!);
+        Assert.Equal("verified", document.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task RebaseStatus_AllowsOrdinaryUncommittedFiles()
+    {
+        using var repo = new TempDir();
+        await InitRepositoryAsync(repo.Path);
+        await RunGitAsync(repo.Path, "checkout", "-b", "feature");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "scratch.txt"), "not committed");
+
+        var result = await new RebaseStatusAction().ExecuteAsync(
+            SpecHelpers.Context(repo.Path, "task", "mohist/rebase-status", new { baseBranch = "main" }));
+
+        Assert.Equal("success", result.Status);
+    }
+
+    [Fact]
+    public async Task RebaseStatus_WhenWorktreeHasUnmergedFiles_Fails()
+    {
+        using var repo = new TempDir();
+        await InitRepositoryAsync(repo.Path);
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "base\n");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "base file");
+
+        await RunGitAsync(repo.Path, "checkout", "-b", "feature");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "feature\n");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "feature change");
+
+        await RunGitAsync(repo.Path, "checkout", "main");
+        await File.WriteAllTextAsync(Path.Combine(repo.Path, "file.txt"), "main\n");
+        await RunGitAsync(repo.Path, "add", ".");
+        await RunGitAsync(repo.Path, "commit", "-m", "main change");
+        await RunGitAsync(repo.Path, "checkout", "feature");
+        await RunGitAllowFailureAsync(repo.Path, "rebase", "main");
+
+        var result = await new RebaseStatusAction().ExecuteAsync(
+            SpecHelpers.Context(repo.Path, "task", "mohist/rebase-status", new { baseBranch = "main" }));
+
+        Assert.Equal("failure", result.Status);
+        using var document = JsonDocument.Parse(result.Output!);
+        Assert.Equal("failed", document.RootElement.GetProperty("status").GetString());
+        Assert.True(document.RootElement.GetProperty("rebaseInProgress").GetBoolean());
+        Assert.Contains("file.txt", document.RootElement.GetProperty("conflicts").EnumerateArray().Select(x => x.GetString()));
     }
 
     [Fact]
@@ -231,6 +296,23 @@ public class GitAndOpenSpecActionSpecs
         await process.WaitForExitAsync();
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"git {string.Join(' ', args)} failed");
+    }
+
+    private static async Task RunGitAllowFailureAsync(string workDir, params string[] args)
+    {
+        using var process = new Process();
+        process.StartInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = string.Join(" ", args.Select(Quote)),
+            WorkingDirectory = workDir,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        process.Start();
+        await process.WaitForExitAsync();
     }
 
     private static string Quote(string value) => value.Any(char.IsWhiteSpace)

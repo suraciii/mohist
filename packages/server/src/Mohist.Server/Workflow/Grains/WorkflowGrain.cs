@@ -169,7 +169,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var statusBefore = _run.Status;
         var with = ParseWith(task.With);
-        _run.AddRuntimeTask(new LoadedTaskInput(task.Id, task.Title, task.Uses, with), task.Stage);
+        _run.AddRuntimeTask(new LoadedTaskInput(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
         var stage = _run.CurrentStage.Stage;
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
@@ -179,6 +179,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await RegisterToBacklogAsync();
         await DispatchCompletedHookIfNeededAsync(statusBefore);
         return new RuntimeTaskAddedResult(GrainKey, stage, task.Id);
+    }
+
+    public Task<bool> HasIncompleteTaskUsingAsync(string uses)
+    {
+        EnsureRun();
+        return Task.FromResult(_run.HasIncompleteTaskUsing(uses));
+    }
+
+    public Task<bool> HasIncompleteTaskIdAsync(string id)
+    {
+        EnsureRun();
+        return Task.FromResult(_run.HasIncompleteTaskId(id));
     }
 
     public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
@@ -460,6 +472,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (result.Status == "completed")
         {
+            TryAddRequestedTaskFromCurrentTask();
             _run.CompleteTask();
         }
         else
@@ -488,6 +501,21 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
+    private bool TryAddRequestedTaskFromCurrentTask()
+    {
+        var with = _run.CurrentStage.CurrentTask?.WithInput;
+        if (with is null || !with.TryGetValue("requestedTask", out var requested) || requested is null)
+            return false;
+        if (requested.Value.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!TryParseRequestedTask(new Dictionary<string, JsonElement?> { ["requestedTask"] = requested }, out var task))
+            return false;
+
+        _run.AddRuntimeTask(task);
+        return true;
+    }
+
     private static bool TryParseRequestedTask(JsonElement root, out LoadedTaskInput task)
     {
         task = default!;
@@ -507,8 +535,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withProp.GetRawText())
             : null;
 
+        if (requested.TryGetProperty("then", out var thenProp) && thenProp.ValueKind == JsonValueKind.Object)
+        {
+            with ??= [];
+            with["requestedTask"] = thenProp.Clone();
+        }
+
         task = new LoadedTaskInput(id!, title ?? id!, uses, with);
         return true;
+    }
+
+    private static bool TryParseRequestedTask(Dictionary<string, JsonElement?> root, out LoadedTaskInput task)
+    {
+        task = default!;
+        if (!root.TryGetValue("requestedTask", out var requested) || requested is null)
+            return false;
+        return TryParseRequestedTask(JsonSerializer.SerializeToElement(new { requestedTask = requested.Value }), out task);
     }
 
     private async Task ProcessCheckResultAsync(WorkDispatchResult result)

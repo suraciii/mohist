@@ -23,6 +23,7 @@ public class RunnerActionCatalogSpecs
     [InlineData("mohist/openspec-tasks")]
     [InlineData("mohist/merge-ready")]
     [InlineData("mohist/rebase")]
+    [InlineData("mohist/rebase-status")]
     [InlineData("mohist/openspec-sync")]
     [InlineData("mohist/archive-change")]
     [InlineData("mohist/merge")]

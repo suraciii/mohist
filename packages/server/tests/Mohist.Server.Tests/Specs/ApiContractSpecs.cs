@@ -54,7 +54,7 @@ public class ApiContractSpecs
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();
 
         await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/start?projectId={projectId}", new { });
-        using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { baseBranch = "trunk" });
+        using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -62,5 +62,10 @@ public class ApiContractSpecs
         Assert.Equal("queued", data.GetProperty("status").GetString());
         Assert.Equal("trunk", data.GetProperty("baseBranch").GetString());
         Assert.StartsWith("rebase-", data.GetProperty("taskId").GetString());
+
+        using var duplicate = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        var duplicatePayload = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("rebase_already_pending", duplicatePayload.GetProperty("code").GetString());
     }
 }

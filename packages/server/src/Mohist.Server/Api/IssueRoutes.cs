@@ -288,15 +288,26 @@ public static class IssueRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
 
-            var baseBranch = string.IsNullOrWhiteSpace(req?.BaseBranch) ? "main" : req!.BaseBranch!;
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            var project = await projectsGrain.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var workflow = grains.GetGrain<IWorkflowGrain>(wrId);
+            if (await workflow.HasIncompleteTaskUsingAsync("mohist/rebase")
+                || await workflow.HasIncompleteTaskIdAsync("resolve-rebase-conflicts")
+                || await workflow.HasIncompleteTaskIdAsync("verify-rebase"))
+                return ApiResults.Conflict("Rebase task is already pending", "rebase_already_pending");
+
+            var baseBranch = string.IsNullOrWhiteSpace(req?.BaseBranch) ? project.BaseBranch : req!.BaseBranch!;
             var taskId = $"rebase-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             var task = new RuntimeTaskInput(
                 taskId,
                 $"Rebase onto {baseBranch}",
                 "mohist/rebase",
-                BuildRebaseTaskWith(baseBranch, req?.ConflictResolver));
+                BuildRebaseTaskWith(baseBranch, req?.ConflictResolver),
+                InvalidateChecks: true);
 
-            var added = await grains.GetGrain<IWorkflowGrain>(wrId).AddTaskAsync(task);
+            var added = await workflow.AddTaskAsync(task);
             return ApiResults.Ok(new
             {
                 rebased = false,

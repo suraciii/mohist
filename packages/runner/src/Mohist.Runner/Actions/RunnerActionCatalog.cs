@@ -17,6 +17,7 @@ public static class RunnerActionCatalog
     public const string MohistOpenSpecTasks = "mohist/openspec-tasks";
     public const string MohistMergeReady = "mohist/merge-ready";
     public const string MohistRebase = "mohist/rebase";
+    public const string MohistRebaseStatus = "mohist/rebase-status";
     public const string MohistOpenSpecSync = "mohist/openspec-sync";
     public const string MohistArchiveChange = "mohist/archive-change";
     public const string MohistMerge = "mohist/merge";
@@ -39,6 +40,7 @@ public static class RunnerActionCatalog
         manager.Register(MohistOpenSpecTasks, () => new OpenSpecTasksAction());
         manager.Register(MohistMergeReady, () => new MergeReadyAction());
         manager.Register(MohistRebase, () => new RebaseAction());
+        manager.Register(MohistRebaseStatus, () => new RebaseStatusAction());
         manager.Register(MohistOpenSpecSync, () => new OpenSpecSyncAction());
         manager.Register(MohistArchiveChange, () => new ArchiveChangeAction());
         manager.Register(MohistMerge, () => new MergeAction());
