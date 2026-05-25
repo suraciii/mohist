@@ -23,11 +23,11 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         return await projects.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
     }
 
-    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? model = null, Dictionary<string, string>? stageModels = null)
+    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? model = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var grain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await grain.HydrateAsync(projectId, number, title, body, labels, priority, model, stageModels);
+        await grain.HydrateAsync(projectId, number, title, body, labels, priority, model, stageModels, workflowProfileId);
         return await grain.GetInfoAsync();
     }
 
@@ -45,6 +45,29 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("active", issue.Status);
         Assert.Equal(project.Id, issue.ProjectId);
         Assert.StartsWith("issue_", issue.Id);
+        Assert.Equal("mohist/default", issue.WorkflowProfileId);
+    }
+
+    [Fact]
+    public async Task CreateIssue_WithWorkflowProfileId_PersistsProfileId()
+    {
+        var project = await SetupProjectAsync();
+
+        var issue = await CreateIssueAsync(project.Id, "Custom profile", workflowProfileId: "custom/profile");
+
+        Assert.Equal("custom/profile", issue.WorkflowProfileId);
+    }
+
+    [Fact]
+    public async Task StartWorkflow_WithUnknownProfile_FailsClearly()
+    {
+        var project = await SetupProjectAsync();
+        var issue = await CreateIssueAsync(project.Id, "Unknown profile", workflowProfileId: "missing/profile");
+        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkflowAsync());
+
+        Assert.Contains("Workflow profile 'missing/profile' not found", ex.Message);
     }
 
     [Fact]

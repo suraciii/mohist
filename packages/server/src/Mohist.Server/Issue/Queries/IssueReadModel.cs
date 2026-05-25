@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.WorkflowProfiles;
 
 namespace Mohist.Server.Issue.Queries;
 
@@ -25,6 +26,7 @@ public class IssueReadModel
     public int? ConflictRetryCount { get; set; }
     public string? BlockedReason { get; set; }
     public string? WorkflowRunId { get; set; }
+    public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];

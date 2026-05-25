@@ -1,5 +1,6 @@
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
 using System.Text.Json;
@@ -11,12 +12,14 @@ public class IssueGrain : Grain, IIssueGrain
     private Issue.Domain.Issue? _issue;
     private readonly IStateStore<Issue.Domain.Issue> _issueStore;
     private readonly IEventStore _events;
+    private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly ILogger<IssueGrain> _log;
 
-    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, IEventStore events, ILogger<IssueGrain> log)
+    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, IEventStore events, IssueWorkflowProfileRegistry profiles, ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
         _events = events;
+        _profiles = profiles;
         _log = log;
     }
 
@@ -46,12 +49,14 @@ public class IssueGrain : Grain, IIssueGrain
         var projectPath = project?.Path ?? ".";
         var baseBranch = project?.BaseBranch ?? "main";
         var correlation = new WorkflowCorrelationContext(projectId, "issue", _issue.Id, _issue.Number);
+        var projectContext = new WorkflowProjectContext(projectId, projectName, projectPath, baseBranch);
+        var profile = _profiles.Get(_issue.WorkflowProfileId);
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(
-            MohistPipeline.Definition,
+            profile.Definition,
             correlation,
-            new WorkflowStartInput(BuildWorkflowVariables(wrId, _issue, projectId, projectName, projectPath, baseBranch)));
+            new WorkflowStartInput(profile.BuildVariables(wrId, _issue, projectContext)));
 
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
@@ -125,13 +130,7 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         var wfStatus = await wfGrain.GetStatusAsync();
-        var projection = MohistDefaultWorkflowProjection.Project(
-            _issue.Number,
-            _issue.Title,
-            _issue.Stage.ToString().ToLower(),
-            _issue.RuntimeStatus.ToString().ToLower(),
-            _issue.BlockedReason,
-            wfStatus);
+        var projection = _profiles.Get(_issue.WorkflowProfileId).Project(_issue, wfStatus);
 
         return new IssueWorkflowStatus(
             _issue.Id,
@@ -145,7 +144,7 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, string>? stageModels = null)
+    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -159,7 +158,8 @@ public class IssueGrain : Grain, IIssueGrain
             labels,
             priority ?? "p2",
             model,
-            stageModels);
+            stageModels,
+            workflowProfileId);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
     }
@@ -189,6 +189,7 @@ public class IssueGrain : Grain, IIssueGrain
             ConflictRetryCount = _issue.ConflictRetryCount,
             BlockedReason = _issue.BlockedReason,
             WorkflowRunId = _issue.WorkflowRunId,
+            WorkflowProfileId = _issue.WorkflowProfileId,
             PrerequisiteNumbers = _issue.PrerequisiteNumbers,
         };
         return Task.FromResult(info);
@@ -277,26 +278,6 @@ public class IssueGrain : Grain, IIssueGrain
         Status = issue.Status,
         MergeState = issue.MergeState,
     };
-
-    private static string BuildWorkflowVariables(
-        string workflowRunId,
-        Issue.Domain.Issue issue,
-        string projectId,
-        string projectName,
-        string projectPath,
-        string baseBranch)
-    {
-        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
-        {
-            ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
-            ["project"] = JsonSerializer.SerializeToElement(new { id = projectId, name = projectName, path = projectPath, baseBranch, defaultBranch = baseBranch }, WorkflowVariableJson.Options),
-            ["artifacts"] = JsonSerializer.SerializeToElement(new { changeDir = MohistDefaultWorkflowProjection.ChangeDir(issue.Number, issue.Title) }, WorkflowVariableJson.Options),
-            ["model"] = JsonSerializer.SerializeToElement(new { @default = issue.Model ?? "", stage = issue.StageModels ?? new Dictionary<string, string>() }, WorkflowVariableJson.Options),
-            ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>(), WorkflowVariableJson.Options),
-        };
-        return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
-    }
 
 }
 
