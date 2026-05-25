@@ -130,7 +130,7 @@ export function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
   )
 }
 
-const PIPELINE_STAGES = [
+const WORKFLOW_STAGES = [
   { key: 'plan', label: 'Plan' },
   { key: 'build', label: 'Build' },
   { key: 'check', label: 'Check' },
@@ -138,13 +138,13 @@ const PIPELINE_STAGES = [
   { key: 'done', label: 'Done' },
 ]
 
-export function PipelineStatusTimeline({ currentStage }: { currentStage: string }) {
+export function WorkflowStatusTimeline({ currentStage }: { currentStage: string }) {
   const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate', 'done']
   const currentIndex = stageOrder.indexOf(currentStage)
 
   return (
     <div className="flex items-center gap-1 mb-4">
-      {PIPELINE_STAGES.map((stage, i) => {
+      {WORKFLOW_STAGES.map((stage, i) => {
         const stageIdx = stageOrder.indexOf(stage.key)
         const isCompleted = currentIndex > stageIdx
         const isCurrent = currentIndex === stageIdx
@@ -503,7 +503,7 @@ export function SessionTimeline({
       </div>
 
       <div className="px-3 py-3 space-y-2 max-h-[600px] overflow-y-auto">
-        <PipelineStatusTimeline currentStage={currentStage} />
+        <WorkflowStatusTimeline currentStage={currentStage} />
 
         {currentStage === 'plan' && planProgress && planProgress.steps.length > 0 && (
           <PlanProgressPanel planProgress={planProgress} />

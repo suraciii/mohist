@@ -11,7 +11,7 @@ import { WorkflowConvergencePanel } from './WorkflowConvergencePanel'
 import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
 import { BranchBar } from './BranchBar'
-import { PipelineView } from './PipelineView'
+import { WorkflowView } from './WorkflowView'
 import { SessionList } from './SessionList'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
@@ -305,7 +305,7 @@ export function IssueDetailPage() {
             )}
           </div>
 
-          <PipelineView issue={issue} />
+          <WorkflowView issue={issue} />
 
           {diffData?.available === true && (
             <div className="rounded-lg border border-gray-200 bg-white p-4 mb-6">
@@ -605,11 +605,11 @@ export function IssueDetailPage() {
               {issue.status === IssueStatus.Interrupted && (
                 <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
                   <h2 className="text-sm font-semibold text-orange-800 mb-2">
-                    Pipeline Interrupted
+                    Workflow Interrupted
                   </h2>
                   <p className="text-xs text-orange-600 mb-3">
-                    The pipeline was interrupted (e.g. server restart). Your progress has been preserved.
-                    Click &quot;Resume Pipeline&quot; below to continue from where it left off.
+                    The workflow was interrupted (e.g. server restart). Your progress has been preserved.
+                    Click &quot;Resume Workflow&quot; below to continue from where it left off.
                   </p>
                 </div>
               )}
