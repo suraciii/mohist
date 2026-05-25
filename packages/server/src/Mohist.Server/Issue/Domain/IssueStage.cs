@@ -1,25 +1,5 @@
 namespace Mohist.Server.Issue.Domain;
 
-public enum IssueStage
-{
-    Backlog,
-    Plan,
-    Build,
-    Check,
-    Integrate,
-    Done
-}
-
-public enum IssueRuntimeStatus
-{
-    Active,
-    Paused,
-    Blocked,
-    Interrupted,
-    Closed,
-    Completed
-}
-
 public enum MergeState
 {
     Pending,

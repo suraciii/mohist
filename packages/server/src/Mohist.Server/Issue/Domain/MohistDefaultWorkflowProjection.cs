@@ -7,32 +7,12 @@ public static class MohistDefaultWorkflowProjection
     public static MohistDefaultWorkflowState Project(
         int issueNumber,
         string issueTitle,
-        string fallbackStage,
-        string fallbackStatus,
+        string issueStatus,
+        IssueAttention? issueAttention,
         string? fallbackBlockedReason,
         WorkflowStatusSnapshot? workflow)
     {
-        if (workflow is null)
-        {
-            return new MohistDefaultWorkflowState(
-                fallbackStage,
-                fallbackStatus,
-                fallbackBlockedReason,
-                null,
-                ChangeDir(issueNumber, issueTitle),
-                fallbackStatus == "completed" || fallbackStage == "done");
-        }
-
-        var stage = workflow.Status == "Passed" ? "done" : workflow.CurrentStage ?? fallbackStage;
-        var runtimeStatus = workflow.Status switch
-        {
-            "Passed" => "completed",
-            "Failed" => "blocked",
-            "Paused" => "paused",
-            _ => "active",
-        };
-
-        var approval = workflow.Stages
+        var approval = workflow?.Stages
             .Select(s => s.Approval is null ? null : new ApprovalState
             {
                 Stage = s.Stage,
@@ -43,14 +23,52 @@ public static class MohistDefaultWorkflowProjection
             })
             .Where(a => a is not null)
             .LastOrDefault();
+        var attention = ProjectAttention(issueAttention, workflow);
+        if (workflow is null)
+        {
+            return new MohistDefaultWorkflowState(
+                issueStatus,
+                RuntimeStatus(issueStatus, attention),
+                fallbackBlockedReason,
+                null,
+                attention,
+                ChangeDir(issueNumber, issueTitle),
+                issueStatus == "done");
+        }
+
+        var projectedStatus = workflow.Status == "Passed" ? "done" : issueStatus;
 
         return new MohistDefaultWorkflowState(
-            stage,
-            runtimeStatus,
-            workflow.Status == "Failed" ? workflow.Failure?.Message : fallbackBlockedReason,
+            projectedStatus,
+            RuntimeStatus(projectedStatus, attention, workflow.Status),
+            attention?.Message ?? (workflow.Status == "Failed" ? workflow.Failure?.Message : fallbackBlockedReason),
             approval,
+            attention,
             ChangeDir(issueNumber, issueTitle),
             workflow.Status == "Passed");
+    }
+
+    private static IssueAttention? ProjectAttention(IssueAttention? issueAttention, WorkflowStatusSnapshot? workflow)
+    {
+        if (workflow?.Status == "AwaitingApproval")
+            return IssueAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
+        if (workflow?.Status == "Failed")
+            return IssueAttention.Blocked(workflow.WorkflowRunId, workflow.Failure?.Message ?? "Workflow failed");
+        return issueAttention;
+    }
+
+    private static string RuntimeStatus(string issueStatus, IssueAttention? attention, string? workflowStatus = null)
+    {
+        if (issueStatus == "done") return "completed";
+        if (issueStatus == "cancelled") return "cancelled";
+        if (attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed) return "blocked";
+        if (attention is not null) return "attention";
+        return workflowStatus switch
+        {
+            "Paused" => "paused",
+            "Failed" => "blocked",
+            _ => "active",
+        };
     }
 
     public static string ChangeDir(int issueNumber, string issueTitle) =>
@@ -67,9 +85,10 @@ public static class MohistDefaultWorkflowProjection
 }
 
 public sealed record MohistDefaultWorkflowState(
-    string Stage,
+    string IssueStatus,
     string RuntimeStatus,
     string? BlockedReason,
     ApprovalState? ApprovalState,
+    IssueAttention? Attention,
     string ChangeDir,
     bool Completed);

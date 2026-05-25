@@ -25,6 +25,7 @@ public class IssueReadModel
     public int? RetryCount { get; set; }
     public int? ConflictRetryCount { get; set; }
     public string? BlockedReason { get; set; }
+    public IssueAttention? Attention { get; set; }
     public string? WorkflowRunId { get; set; }
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public int[] PrerequisiteNumbers { get; set; } = [];

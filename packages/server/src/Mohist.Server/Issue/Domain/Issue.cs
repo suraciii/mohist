@@ -1,10 +1,11 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.WorkflowProfiles;
 
 namespace Mohist.Server.Issue.Domain;
 
 [GenerateSerializer]
-public class Issue
+public class Issue : IJsonOnDeserialized
 {
     [Id(0)]  public string Id { get; }
     [Id(1)]  public string ProjectId { get; }
@@ -20,8 +21,8 @@ public class Issue
     [Id(11), JsonInclude] public DateTime? ArchivedAt { get; private set; }
     [Id(12), JsonInclude] public string? WorkflowRunId { get; private set; }
 
-    [Id(13), JsonInclude] public IssueStage Stage { get; private set; } = IssueStage.Backlog;
-    [Id(14), JsonInclude] public IssueRuntimeStatus RuntimeStatus { get; private set; } = IssueRuntimeStatus.Active;
+    [Id(13), JsonInclude] public IssueStatus Status { get; private set; } = IssueStatus.Backlog;
+    [Id(14), JsonInclude] public IssueAttention? Attention { get; private set; }
     [Id(15), JsonInclude] public ApprovalState? ApprovalState { get; private set; }
     [Id(16), JsonInclude] public MergeState? MergeState { get; private set; }
     [Id(17), JsonInclude] public int RetryCount { get; private set; }
@@ -29,6 +30,12 @@ public class Issue
     [Id(19), JsonInclude] public string? BlockedReason { get; private set; }
     [Id(20), JsonInclude] public int[] PrerequisiteNumbers { get; private set; } = [];
     [Id(21), JsonInclude] public string WorkflowProfileId { get; private set; } = IssueWorkflowProfiles.DefaultId;
+
+    [Id(100), JsonPropertyName("Stage"), JsonInclude, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? LegacyStage { get; private set; }
+
+    [Id(101), JsonPropertyName("RuntimeStatus"), JsonInclude, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? LegacyRuntimeStatus { get; private set; }
 
     public Issue(
         string id,
@@ -67,25 +74,49 @@ public class Issue
         UpdatedAt = DateTime.UtcNow;
     }
 
-    public void SetWorkflowRunId(string wrId)
+    public void MarkReady()
     {
+        if (Status == IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{Number} is cancelled");
+        Status = IssueStatus.Todo;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void StartWorkflow(string wrId)
+    {
+        if (Status == IssueStatus.Cancelled || Status == IssueStatus.Done)
+            throw new InvalidOperationException($"Issue #{Number} is {Status}");
         WorkflowRunId = wrId;
+        Status = IssueStatus.InProgress;
+        Attention = null;
+        BlockedReason = null;
+        ApprovalState = null;
         UpdatedAt = DateTime.UtcNow;
     }
 
-    public void SetStage(IssueStage stage)
+    public void Complete()
     {
-        Stage = stage;
+        Status = IssueStatus.Done;
+        Attention = null;
+        BlockedReason = null;
+        ApprovalState = null;
         UpdatedAt = DateTime.UtcNow;
     }
 
-    public void SetRuntimeStatus(IssueRuntimeStatus status, string? reason = null)
+    public void RequestAttention(IssueAttention attention)
     {
-        RuntimeStatus = status;
-        if (status == IssueRuntimeStatus.Blocked)
-            BlockedReason = reason;
-        else if (status == IssueRuntimeStatus.Active || status == IssueRuntimeStatus.Completed)
+        Attention = attention;
+        if (attention.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed)
+            BlockedReason = attention.Message;
+        else
             BlockedReason = null;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void ClearAttention()
+    {
+        Attention = null;
+        BlockedReason = null;
         UpdatedAt = DateTime.UtcNow;
     }
 
@@ -132,8 +163,8 @@ public class Issue
 
     public void Archive()
     {
-        if (Stage != IssueStage.Done)
-            throw new InvalidOperationException($"Issue #{Number} is {Stage}, only Done can archive");
+        if (Status != IssueStatus.Done)
+            throw new InvalidOperationException($"Issue #{Number} is {Status}, only Done can archive");
         ArchivedAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
     }
@@ -146,21 +177,77 @@ public class Issue
 
     public void Close()
     {
-        if (Stage == IssueStage.Done || ArchivedAt != null)
+        if (Status == IssueStatus.Done || ArchivedAt != null)
             throw new InvalidOperationException($"Issue #{Number} cannot close");
-        RuntimeStatus = IssueRuntimeStatus.Closed;
-        Stage = IssueStage.Backlog;
+        Status = IssueStatus.Cancelled;
         WorkflowRunId = null;
+        Attention = null;
         ApprovalState = null;
         MergeState = null;
+        BlockedReason = null;
         UpdatedAt = DateTime.UtcNow;
     }
 
     public void Reopen()
     {
-        if (RuntimeStatus != IssueRuntimeStatus.Closed)
-            throw new InvalidOperationException($"Issue #{Number} is not closed");
-        RuntimeStatus = IssueRuntimeStatus.Active;
+        if (Status != IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{Number} is not cancelled");
+        Status = IssueStatus.Backlog;
         UpdatedAt = DateTime.UtcNow;
+    }
+
+    public void OnDeserialized()
+    {
+        if (LegacyStage is { } legacyStage)
+            Status = LegacyStatus(legacyStage);
+
+        if (LegacyRuntimeStatus is not { } legacyRuntimeStatus) return;
+
+        var runtime = LegacyName(legacyRuntimeStatus, ["active", "paused", "blocked", "interrupted", "closed", "completed"]);
+        if (runtime == "closed")
+        {
+            Status = IssueStatus.Cancelled;
+            Attention = null;
+            BlockedReason = null;
+        }
+        else if (runtime == "completed")
+        {
+            Status = IssueStatus.Done;
+            Attention = null;
+            BlockedReason = null;
+            ApprovalState = null;
+        }
+        else if (runtime == "blocked" && Attention is null)
+        {
+            Attention = IssueAttention.Blocked(WorkflowRunId, BlockedReason);
+        }
+
+        LegacyStage = null;
+        LegacyRuntimeStatus = null;
+    }
+
+    private static IssueStatus LegacyStatus(JsonElement value)
+    {
+        var stage = LegacyName(value, ["backlog", "plan", "build", "check", "integrate", "done"]);
+        return stage switch
+        {
+            "done" => IssueStatus.Done,
+            "backlog" => IssueStatus.Backlog,
+            _ => IssueStatus.InProgress,
+        };
+    }
+
+    private static string LegacyName(JsonElement value, string[] names)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var index) && index >= 0 && index < names.Length)
+            return names[index];
+        if (value.ValueKind == JsonValueKind.String)
+            return value.GetString()?.Replace("_", "", StringComparison.Ordinal).ToLowerInvariant() switch
+            {
+                "inprogress" => "in_progress",
+                { } name => name,
+                _ => names[0],
+            };
+        return names[0];
     }
 }

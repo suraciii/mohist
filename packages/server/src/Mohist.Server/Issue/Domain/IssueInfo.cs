@@ -28,6 +28,7 @@ public class IssueInfo
     [Id(20)] public string? WorkflowRunId { get; set; }
     [Id(21)] public int[] PrerequisiteNumbers { get; set; } = [];
     [Id(22)] public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
+    [Id(23)] public IssueAttention? Attention { get; set; }
 }
 
 [GenerateSerializer]

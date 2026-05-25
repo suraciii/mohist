@@ -51,7 +51,9 @@ public class IssueWorkflowProductLoopSpecs
         Assert.Contains(planLogs, e => e.EventType == "workflow_check_passed");
 
         var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
-        Assert.Equal("plan", listedAtApproval.Stage);
+        Assert.Equal("in_progress", listedAtApproval.Stage);
+        Assert.Equal("attention", listedAtApproval.Status);
+        Assert.Equal("review_required", listedAtApproval.Attention?.Reason);
         Assert.Equal("awaiting", listedAtApproval.ApprovalState?.Status);
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
@@ -160,8 +162,9 @@ public class IssueWorkflowProductLoopSpecs
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title, string Stage, string Status, ApprovalStateDto? ApprovalState);
+    private sealed record IssueDto(int Number, string Title, string Stage, string Status, ApprovalStateDto? ApprovalState, AttentionDto? Attention);
     private sealed record ApprovalStateDto(string Stage, string Status);
+    private sealed record AttentionDto(string Reason);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);
     private sealed record WorkflowStatusDto(string Status, string? CurrentStage);
     private sealed record EventDto(string Id, string Type, string Category, string? Status, string CreatedAt);
