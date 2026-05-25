@@ -918,8 +918,8 @@ export interface IntegrationFailureOutput {
 }
 
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
-export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
-export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
+export type StageCheckStatus = 'pending' | 'running' | 'completed' | 'passed' | 'failed' | 'error'
+export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'completed' | 'passed' | 'failed' | 'skipped'
 
 export type CheckRepairStatus = 'not-needed' | 'available' | 'pending' | 'running' | 'completed' | 'exhausted'
 

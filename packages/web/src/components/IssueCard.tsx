@@ -244,7 +244,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
         {isInterrupted && (
           <div className="mt-2 flex items-center justify-between">
             <span className="text-xs text-orange-600">
-              Pipeline was interrupted
+              Workflow was interrupted
             </span>
             <button
               onClick={(e) => {

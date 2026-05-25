@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
 import { Stage } from '../src/lib/types'
-import { PipelineStatusTimeline } from '../src/components/SessionTimeline'
+import { WorkflowStatusTimeline } from '../src/components/SessionTimeline'
 
 describe('Integrate stage rendering', () => {
-  describe('PipelineStatusTimeline', () => {
+  describe('WorkflowStatusTimeline', () => {
     it('should include Integrate between Check and Done in stage order', () => {
       const stageOrder = ['backlog', 'plan', 'build', 'check', 'integrate', 'done']
 
@@ -19,14 +19,14 @@ describe('Integrate stage rendering', () => {
 
     it('should render integrate stage in the timeline', () => {
       const { container } = render(
-        <PipelineStatusTimeline currentStage="check" />
+        <WorkflowStatusTimeline currentStage="check" />
       )
       expect(container.textContent).toContain('Integrate')
     })
 
     it('should show completed state for stages before current stage', () => {
       const { container } = render(
-        <PipelineStatusTimeline currentStage="integrate" />
+        <WorkflowStatusTimeline currentStage="integrate" />
       )
       const html = container.innerHTML
       expect(html).toContain('Plan')

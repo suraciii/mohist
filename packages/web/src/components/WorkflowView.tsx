@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { onAgentEvent } from '../lib/agent-events'
 import { Stage, IssueStatus } from '../lib/types'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../lib/types'
+import { useWorkflowTimeline } from '../hooks/useQueries'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
@@ -17,8 +18,8 @@ function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   return 'UNKNOWN'
 }
 
-const PIPELINE_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done] as const
-type PipelineStage = (typeof PIPELINE_STAGES)[number]
+const WORKFLOW_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done] as const
+type WorkflowStage = (typeof WORKFLOW_STAGES)[number]
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -29,18 +30,18 @@ function formatDuration(ms: number): string {
 }
 
 function getStageStatus(
-  stage: PipelineStage,
+  stage: WorkflowStage,
   stageStateMap: Map<string, StageStateRead>,
   issue: Issue,
 ): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
   const stageState = stageStateMap.get(stage)
-  const stageOrder = PIPELINE_STAGES.indexOf(stage)
-  const currentStageIdx = PIPELINE_STAGES.indexOf(issue.stage as PipelineStage)
+  const stageOrder = WORKFLOW_STAGES.indexOf(stage)
+  const currentStageIdx = WORKFLOW_STAGES.indexOf(issue.stage as WorkflowStage)
 
   if (stageState) {
     if (stageState.status === 'running') return 'running'
     if (stageState.status === 'awaiting-approval') return 'awaiting-approval'
-    if (stageState.status === 'passed') return 'completed'
+    if (stageState.status === 'completed' || stageState.status === 'passed') return 'completed'
     if (stageState.status === 'failed') return 'failed'
     if (stageState.status === 'skipped') return 'pending'
   }
@@ -54,11 +55,64 @@ function getStageStatus(
   return 'pending'
 }
 
-function getStageDuration(stage: PipelineStage, stageStateMap: Map<string, StageStateRead>): number | null {
+function getStageDuration(stage: WorkflowStage, stageStateMap: Map<string, StageStateRead>): number | null {
   const stageState = stageStateMap.get(stage)
-  if (!stageState || stageState.tasks.length === 0) return null
+  if (!stageState) return null
+  if (stageState.startedAt && stageState.completedAt) {
+    const started = new Date(stageState.startedAt).getTime()
+    const completed = new Date(stageState.completedAt).getTime()
+    if (!Number.isNaN(started) && !Number.isNaN(completed)) {
+      return Math.max(0, completed - started)
+    }
+  }
+  if (stageState.tasks.length === 0) return null
   const total = stageState.tasks.reduce((sum, t) => sum + (t.duration || 0), 0)
   return total > 0 ? total : null
+}
+
+function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflowTimeline>['data']): Map<string, StageStateRead> {
+  const map = new Map<string, StageStateRead>()
+  if (!timeline) return map
+
+  for (const stage of timeline.stages) {
+    map.set(stage.stage, {
+      stage: stage.stage,
+      status: stage.status,
+      tasks: stage.tasks.map((task, index) => ({
+        taskId: task.id,
+        title: task.title,
+        status: task.status,
+        order: index,
+        attempts: task.attempts,
+        duration: task.durationMs ?? 0,
+        artifacts: [],
+        output: task.message,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+        updatedAt: task.completedAt ?? task.startedAt ?? '',
+        reason: task.message ?? undefined,
+        origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
+      })),
+      checks: stage.checks.map((check) => ({
+        checkName: check.name,
+        title: check.title,
+        status: check.status as StageCheckState['status'],
+        message: check.message,
+        output: null,
+        runCount: 1,
+        lastRunAt: check.completedAt ?? check.startedAt,
+        origin: check.uses ? { source: 'runtime', uses: check.uses } : null,
+        updatedAt: check.completedAt ?? check.startedAt ?? '',
+      })),
+      approval: stage.approval,
+      attempts: 1,
+      startedAt: stage.startedAt,
+      completedAt: stage.completedAt,
+      updatedAt: stage.completedAt ?? stage.startedAt ?? '',
+    })
+  }
+
+  return map
 }
 
 function CheckmarkIcon({ className = 'h-5 w-5 text-green-500' }: { className?: string }) {
@@ -153,7 +207,7 @@ function StageBarCell({
   readOnly,
   onClick,
 }: {
-  stage: PipelineStage
+  stage: WorkflowStage
   status: string
   duration: number | null
   selected: boolean
@@ -195,14 +249,14 @@ function StageBar({
 }: {
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
-  selectedStage: PipelineStage
-  onSelectStage: (stage: PipelineStage) => void
+  selectedStage: WorkflowStage
+  onSelectStage: (stage: WorkflowStage) => void
   readOnly: boolean
   runningDurations: Map<string, number>
 }) {
   return (
     <div className="flex items-stretch gap-2">
-      {PIPELINE_STAGES.map((stage, idx) => {
+      {WORKFLOW_STAGES.map((stage, idx) => {
         const status = getStageStatus(stage, stageStateMap, issue)
         let duration = getStageDuration(stage, stageStateMap)
         if (status === 'running' && runningDurations.has(stage)) {
@@ -350,7 +404,7 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
   const healthOutput = check.output as { command?: string; duration?: number; summary?: string; logExcerpt?: string; enabled?: boolean; exitCode?: number; timedOut?: boolean } | undefined
 
   let icon: React.ReactNode
-  if (check.status === 'passed') {
+  if (check.status === 'completed' || check.status === 'passed') {
     icon = <CheckmarkIcon className="h-4 w-4 text-green-500 flex-shrink-0" />
   } else if (isFailed) {
     icon = <CrossIcon className="h-4 w-4 text-red-500 flex-shrink-0" />
@@ -413,7 +467,7 @@ function InlineApproval({
   approvalOutput,
 }: {
   issueNumber: number
-  stage: PipelineStage
+  stage: WorkflowStage
   readOnly: boolean
   approvalOutput?: Record<string, unknown>
 }) {
@@ -434,7 +488,7 @@ function InlineApproval({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
     },
   })
 
@@ -443,7 +497,7 @@ function InlineApproval({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'executions'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       setFeedback('')
     },
   })
@@ -691,7 +745,7 @@ function StepList({
   readOnly,
   liveElapsedByTask,
 }: {
-  stage: PipelineStage
+  stage: WorkflowStage
   stageStateMap: Map<string, StageStateRead>
   issue: Issue
   readOnly: boolean
@@ -845,10 +899,10 @@ function SpecialStatePanel({
       <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
         <div className="flex items-center gap-2">
           <InterruptedIcon />
-          <span className="text-sm font-semibold text-orange-800">Pipeline Interrupted</span>
+          <span className="text-sm font-semibold text-orange-800">Workflow Interrupted</span>
         </div>
         <p className="text-xs text-orange-600">
-          The pipeline was interrupted. Click &quot;Resume&quot; to continue from where it left off.
+          The workflow was interrupted. Click &quot;Resume&quot; to continue from where it left off.
         </p>
         <button
           onClick={() => resumeMutation.mutate()}
@@ -861,7 +915,7 @@ function SpecialStatePanel({
     )
   }
 
-return null
+  return null
 }
 
 export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairState }) {
@@ -1021,24 +1075,23 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   )
 }
 
-export function PipelineView({ issue }: { issue: Issue }) {
-  const stageStateMap = useMemo(() => {
-    return new Map<string, StageStateRead>()
-  }, [])
+export function WorkflowView({ issue }: { issue: Issue }) {
   const isClosed = issue.status === IssueStatus.Closed
   const isCompleted = issue.status === IssueStatus.Completed
   const isBacklog = issue.stage === Stage.Backlog
   const readOnly = isClosed
+  const { data: timeline } = useWorkflowTimeline(issue.number, !isBacklog)
+  const stageStateMap = useMemo(() => workflowTimelineToStageStateMap(timeline), [timeline])
 
-  const getDefaultStage = useCallback((): PipelineStage => {
+  const getDefaultStage = useCallback((): WorkflowStage => {
     if (isBacklog) return Stage.Plan
     if (isCompleted) return Stage.Done
-    const currentIdx = PIPELINE_STAGES.indexOf(issue.stage as PipelineStage)
-    if (currentIdx >= 0) return PIPELINE_STAGES[currentIdx]
+    const currentIdx = WORKFLOW_STAGES.indexOf(issue.stage as WorkflowStage)
+    if (currentIdx >= 0) return WORKFLOW_STAGES[currentIdx]
     return Stage.Plan
   }, [issue.stage, isBacklog, isCompleted])
 
-  const [selectedStage, setSelectedStage] = useState<PipelineStage>(getDefaultStage)
+  const [selectedStage, setSelectedStage] = useState<WorkflowStage>(getDefaultStage)
 
   useEffect(() => {
     setSelectedStage(getDefaultStage())
@@ -1117,7 +1170,7 @@ export function PipelineView({ issue }: { issue: Issue }) {
   }, [liveElapsed, stageStateMap])
 
   const handleSelectStage = useCallback(
-    (stage: PipelineStage) => {
+    (stage: WorkflowStage) => {
       if (readOnly) return
       setSelectedStage(stage)
     },
