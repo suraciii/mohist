@@ -40,7 +40,6 @@ export interface IssuePrerequisiteSummary {
   delivered: boolean
   stage: Stage
   status: IssueStatus
-  mergeState?: string | null
 }
 
 export interface IssueStartEligibility {
@@ -80,7 +79,6 @@ export interface Issue {
   projectPath?: string
   comments?: Comment[]
   approvalState?: ApprovalState
-  mergeState?: 'pending' | 'merging' | 'merged' | 'build-failed' | 'conflict' | 'rebasing' | 'resolving' | 'blocked' | null
   priority?: string | null
   model?: string | null
   stageModels?: Record<string, string> | null
@@ -347,7 +345,7 @@ export type EventMap = {
   integration_completed: { issueId: string; projectId: string; issueNumber: number; steps: Array<{ step: string; status: string; output?: unknown }> }
   integration_failed: { issueId: string; projectId: string; issueNumber: number; failingStep: string; error: string; output?: unknown }
   base_drift_detected: { issueId: string; projectId: string; issueNumber: number; baseBranch: string; observedBaseSha: string | null; currentBaseSha: string | null; decision: string }
-  rebase_opportunity: { issueId: string; projectId: string; issueNumber: number; decision: string; deferReason?: string; staleEvidence?: { review: boolean; mergeReady: boolean; approval: boolean } }
+  rebase_opportunity: { issueId: string; projectId: string; issueNumber: number; decision: string; deferReason?: string }
   user_attention_requested: { issueId: string; projectId: string; issueNumber: number; reason: string; nextAction: string }
 } & AgentDetailEventMap
 
@@ -649,18 +647,11 @@ export type RebaseDecision = 'skip' | 'suggest' | 'enqueue' | 'defer' | 'needs-a
 
 export type DeferReason = 'agent-running' | 'task-running' | 'waiting-for-task-boundary' | 'rebase-already-pending'
 
-export interface StaleEvidence {
-  review: boolean
-  mergeReady: boolean
-  approval: boolean
-}
-
 export interface BaseDriftInfo {
   drifted: boolean
   decision: RebaseDecision | null
   safeWindow: boolean | null
   deferReason: DeferReason | null
-  staleEvidence: StaleEvidence | null
   observedBaseSha: string | null
   currentBaseSha: string | null
   candidateHeadSha: string | null
@@ -926,26 +917,6 @@ export interface IntegrationFailureOutput {
   nextAction: string
 }
 
-export interface DoneEvidenceOutput {
-  reviewOutput?: Record<string, unknown>
-  specSyncSummary?: OpenSpecSyncOutput
-  archivePath?: string
-  mergeTruth?: {
-    targetBranch: string
-    baseSha: string
-    headSha: string
-    mergedSha?: string
-  }
-  finalHealthResult?: {
-    passed: boolean
-    command: string
-    duration: number
-    summary: string
-    exitCode?: number
-    timedOut?: boolean
-  }
-}
-
 export type StageTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 export type StageCheckStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error'
 export type StageStateStatus = 'pending' | 'running' | 'awaiting-approval' | 'passed' | 'failed' | 'skipped'
@@ -1027,7 +998,6 @@ export interface StageStateRead {
   completedAt: string | null
   updatedAt: string
   failure?: WorkflowFailureDetails | null
-  deliveryMetadata?: WorkflowDeliveryMetadata | null
   checkRepair?: CheckRepairState
 }
 
@@ -1124,35 +1094,6 @@ export interface WorkflowFailureDetails {
   causedBy?: WorkflowTaskCause | null
 }
 
-export interface WorkflowDeliveryMetadata {
-  specSync: { status: WorkflowTaskStatus; output: unknown } | null
-  archive: { status: WorkflowTaskStatus; output: unknown } | null
-  merge: {
-    status: WorkflowTaskStatus
-    output: unknown
-    targetBranch: string | null
-    baseSha: string | null
-    candidateHeadSha: string | null
-    landedSha: string | null
-    rebased: boolean | null
-  } | null
-  remotePr?: {
-    status: WorkflowTaskStatus
-    output: unknown
-    prUrl: string | null
-    base: string | null
-    branch: string | null
-    headSha: string | null
-  } | null
-  remoteMerge?: {
-    status: WorkflowTaskStatus | WorkflowCheckStatus
-    output: unknown
-    mergedSha: string | null
-  } | null
-  health: { status: WorkflowCheckStatus; message: string | null; output: unknown } | null
-  frozen: boolean
-}
-
 export interface WorkflowTask {
   id: string
   taskId: string
@@ -1194,7 +1135,6 @@ export interface WorkflowStageRun {
   approvalRespondedAt: string | null
   approval?: StageApprovalState | null
   failure?: WorkflowFailureDetails | null
-  deliveryMetadata?: WorkflowDeliveryMetadata | null
   attempts: number
   startedAt: string | null
   completedAt: string | null

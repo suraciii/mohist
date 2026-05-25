@@ -481,10 +481,10 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
     it('renders attention summary item with user-action label for integration failed issue', () => {
       const failedIssue = makeIssue({
         number: 206,
-        title: 'merge failed at squash',
+        title: 'integrate task failed',
         stage: Stage.Integrate,
-        status: IssueStatus.Active,
-        mergeState: 'build-failed',
+        status: IssueStatus.Blocked,
+        blockedReason: 'integration task failed',
       })
       const queryClient = new QueryClient()
 
@@ -529,13 +529,12 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(within(summary as HTMLElement).getByText(/#207/i)).toBeInTheDocument()
     })
 
-    it('renders integration failed label for integrate merge conflict state', () => {
+    it('renders integration failed label for interrupted integrate issue', () => {
       const failedIssue = makeIssue({
         number: 208,
-        title: 'integration merge conflict',
+        title: 'integration interrupted',
         stage: Stage.Integrate,
-        status: IssueStatus.Active,
-        mergeState: 'conflict',
+        status: IssueStatus.Interrupted,
       })
       const queryClient = new QueryClient()
 
@@ -554,60 +553,12 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(within(summary as HTMLElement).getByText(/#208/i)).toBeInTheDocument()
     })
 
-    it('renders integration failed label for integrate blocked merge state', () => {
-      const failedIssue = makeIssue({
-        number: 209,
-        title: 'integration blocked',
-        stage: Stage.Integrate,
-        status: IssueStatus.Active,
-        mergeState: 'blocked',
-      })
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={[failedIssue]} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
-
-      const summary = document.querySelector('.bg-amber-50')!
-      expect(summary).toBeTruthy()
-      expect(within(summary as HTMLElement).getByText(/Integration failed/i)).toBeInTheDocument()
-      expect(within(summary as HTMLElement).queryByText(/Needs action/i)).not.toBeInTheDocument()
-      expect(within(summary as HTMLElement).getByText(/#209/i)).toBeInTheDocument()
-    })
-
-    it('does not render attention summary item for completed workflow without local merge state', () => {
+    it('does not render attention summary item for completed workflow', () => {
       const doneUnmergedIssue = makeIssue({
         number: 42,
-        title: 'Completed but not merged',
+        title: 'Completed issue',
         stage: Stage.Done,
         status: IssueStatus.Completed,
-        mergeState: 'conflict',
-      })
-      const queryClient = new QueryClient()
-
-      render(
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <KanbanBoard issues={[doneUnmergedIssue]} agentStatus={mockAgentStatus} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      )
-
-      const summary = document.querySelector('.bg-amber-50')
-      expect(summary).toBeNull()
-    })
-
-    it('does not render attention summary item for done issue with null mergeState', () => {
-      const doneUnmergedIssue = makeIssue({
-        number: 43,
-        title: 'Completed but missing merge result',
-        stage: Stage.Done,
-        status: IssueStatus.Completed,
-        mergeState: null,
       })
       const queryClient = new QueryClient()
 
@@ -629,7 +580,6 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         title: 'Blocked completed issue',
         stage: Stage.Done,
         status: IssueStatus.Blocked,
-        mergeState: 'conflict',
         blockedReason: 'Manual intervention required',
       })
       const queryClient = new QueryClient()

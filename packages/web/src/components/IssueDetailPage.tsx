@@ -12,7 +12,6 @@ import { NotFoundPage } from './NotFoundPage'
 import { IssueModelSelector } from './IssueModelSelector'
 import { BranchBar } from './BranchBar'
 import { PipelineView } from './PipelineView'
-import { MergeStatePanel } from './MergeStatePanel'
 import { SessionList } from './SessionList'
 import { TaskProgressPanel } from './TaskProgressPanel'
 import { formatTime } from '../lib/format-time'
@@ -335,12 +334,6 @@ export function IssueDetailPage() {
                 <span className="text-gray-300">·</span>
                 <span className="text-green-600">+{diffData.summary.additions}</span>
                 <span className="text-red-500">-{diffData.summary.deletions}</span>
-                {issue.mergeState && (
-                  <>
-                    <span className="text-gray-300">·</span>
-                    <span className="text-xs text-gray-500">Merge: {issue.mergeState}</span>
-                  </>
-                )}
               </div>
               <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
                 <span>showing merge-base → {diffData.head}</span>
@@ -548,8 +541,8 @@ export function IssueDetailPage() {
               </div>
 
               {issue.drift?.drifted && (
-                <div className={`rounded-lg border p-4 ${issue.drift.staleEvidence ? 'border-orange-200 bg-orange-50' : 'border-amber-200 bg-amber-50'}`}>
-                  <h2 className={`text-sm font-semibold mb-2 ${issue.drift.staleEvidence ? 'text-orange-800' : 'text-amber-800'}`}>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                  <h2 className="text-sm font-semibold mb-2 text-amber-800">
                     Base Drift Detected
                   </h2>
                   <div className="space-y-1.5 text-xs">
@@ -595,14 +588,6 @@ export function IssueDetailPage() {
                     {issue.drift.nextAction && (
                       <div className="mt-2 pt-2 border-t border-orange-200 text-orange-700">
                         {issue.drift.nextAction}
-                      </div>
-                    )}
-                    {issue.drift.staleEvidence && (
-                      <div className="mt-2 pt-2 border-t border-orange-200">
-                        <span className="font-medium text-orange-800">Stale evidence: </span>
-                        {issue.drift.staleEvidence.review && <span className="text-orange-700">review </span>}
-                        {issue.drift.staleEvidence.mergeReady && <span className="text-orange-700">merge-ready </span>}
-                        {issue.drift.staleEvidence.approval && <span className="text-orange-700">approval </span>}
                       </div>
                     )}
                     {issue.drift.conflicts && issue.drift.conflicts.length > 0 && (
@@ -824,12 +809,6 @@ export function IssueDetailPage() {
                   </div>
                 </div>
               </div>
-
-              <MergeStatePanel
-                mergeState={issue.mergeState}
-                stage={issue.stage}
-                status={issue.status}
-              />
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
