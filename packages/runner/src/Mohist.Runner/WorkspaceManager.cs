@@ -11,10 +11,9 @@ public class WorkspaceManager : IWorkspaceManager
     public WorkspaceManager(ILogger<WorkspaceManager> log, string? runnerRoot = null)
     {
         _log = log;
-        _runnerRoot = runnerRoot ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".mohist",
-            "projects");
+        _runnerRoot = runnerRoot is null
+            ? MohistWorkspaceLayout.DefaultRunnerRoot()
+            : Path.GetFullPath(runnerRoot);
     }
 
     public async Task<WorkspaceInfo> EnsureAsync(Dictionary<string, JsonElement?> variables, CancellationToken ct)
@@ -111,7 +110,7 @@ public class WorkspaceManager : IWorkspaceManager
     private async Task<string> EnsureGitWorktreeAsync(string projectPath, string projectName, int issueNumber, string baseBranch, string branch, CancellationToken ct)
     {
         projectPath = Path.GetFullPath(projectPath);
-        var worktreePath = Path.Combine(_runnerRoot, Slug(projectName), "worktrees", $"issue-{issueNumber}");
+        var worktreePath = MohistWorkspaceLayout.IssueWorktreePath(_runnerRoot, projectName, issueNumber);
         if (Directory.Exists(worktreePath))
             return worktreePath;
 
@@ -140,10 +139,4 @@ public class WorkspaceManager : IWorkspaceManager
 
     private static string BranchName(int issueNumber) => $"mo/issue-{issueNumber}";
 
-    private static string Slug(string value)
-    {
-        var chars = value.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray();
-        var slug = string.Join('-', new string(chars).Split('-', StringSplitOptions.RemoveEmptyEntries));
-        return string.IsNullOrWhiteSpace(slug) ? "project" : slug;
-    }
 }

@@ -33,13 +33,14 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowProjectionService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddScoped<ConfigService>();
-        services.AddSingleton<IGitService, GitService>();
+        var runnerRoot = ResolveRunnerRoot(configuration);
+        services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<IAgentExecutor>(sp =>
             new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>()));
         services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
         services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
         services.AddSingleton<IWorkspaceManager>(sp =>
-            new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>()));
+            new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>(), runnerRoot));
         services.AddScoped<ISessionTelemetrySink, EmbeddedSessionTelemetrySink>();
         services.AddHostedService<EmbeddedRunnerService>();
 
@@ -71,5 +72,13 @@ public static class MohistServiceRegistration
         }
 
         return $"Data Source={dbPath}";
+    }
+
+    private static string? ResolveRunnerRoot(IConfiguration configuration)
+    {
+        var configured = configuration["Mohist:RunnerRoot"]
+            ?? Environment.GetEnvironmentVariable("MOHIST_RUNNER_ROOT")
+            ?? Environment.GetEnvironmentVariable("MOHIST_WORKSPACE_ROOT");
+        return string.IsNullOrWhiteSpace(configured) ? null : configured;
     }
 }
