@@ -17,16 +17,24 @@ public class AgentActionSpecs
             temp.Path,
             "task",
             "mohist/agent",
-            new { stage = "plan", task = "proposal", changeDir = "openspec/changes/1-test" }));
+            new
+            {
+                stage = "plan",
+                task = "proposal",
+                requireFiles = new[] { new { path = "openspec/changes/issue-1/proposal.md" } },
+                requireMarkers = new[] { new { path = "openspec/changes/issue-1/proposal.md", marker = "<mohist:proposal>PASS</mohist:proposal>" } }
+            }));
 
         Assert.Equal("success", result.Status);
         Assert.NotNull(executor.Request);
         Assert.Equal("plan", executor.Request.Stage);
         Assert.Equal("proposal", executor.Request.Task);
         Assert.Equal(temp.Path, executor.Request.WorkDir);
-        Assert.EndsWith(Path.Combine("openspec", "changes", "1-test"), executor.Request.ChangeDir);
+        Assert.EndsWith(Path.Combine("openspec", "changes", "issue-1"), executor.Request.ChangeDir);
         Assert.Contains("Stage: plan", executor.Request.Prompt);
         Assert.Contains("Task: proposal", executor.Request.Prompt);
+        Assert.Contains("Required file:", executor.Request.Prompt);
+        Assert.Contains("<mohist:proposal>PASS</mohist:proposal>", executor.Request.Prompt);
         Assert.Contains("Output Contract: Proposal", executor.Request.Prompt);
         Assert.Contains("proposal.md", executor.Request.Prompt);
         Assert.Contains("agent", result.Output);
@@ -43,7 +51,7 @@ public class AgentActionSpecs
             temp.Path,
             "task",
             "mohist/agent",
-            new { stage = "build", task = "T-001", changeDir = "openspec/changes/1-test" },
+            new { stage = "build", task = "T-001" },
             new
             {
                 issue = new { number = 7, title = "Add sessions", body = "Track agent activity" },

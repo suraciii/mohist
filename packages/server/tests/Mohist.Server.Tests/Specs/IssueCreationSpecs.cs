@@ -184,7 +184,7 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         var status = await grain.GetWorkflowStatusAsync();
 
         Assert.NotNull(status);
-        Assert.Equal($"openspec/changes/{created.Number}-add-search", status.ChangeDir);
+        Assert.Equal($"openspec/changes/issue-{created.Number}", status.ChangeDir);
         Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
     }
 
