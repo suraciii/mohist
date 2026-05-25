@@ -7,6 +7,7 @@ public static class AgentPromptRenderer
     public static string Render(AgentPromptContext context)
     {
         var variables = new VariableBag(context.Variables);
+        var with = new VariableBag(context.With);
         var issueTitle = variables.String("issue.title") ?? "Untitled issue";
         var issueBody = variables.String("issue.body") ?? "";
         var issueNumber = variables.String("issue.number") ?? "";
@@ -15,6 +16,7 @@ public static class AgentPromptRenderer
         var model = ResolveModel(context.Variables, context.Stage);
 
         var requirements = FormatRequirements(context.Requirements);
+        var taskContext = FormatTaskContext(with);
         var modelLine = string.IsNullOrWhiteSpace(model) ? "Model: default runner model" : $"Model: {model}";
 
         return $$"""
@@ -34,6 +36,8 @@ public static class AgentPromptRenderer
         - Stage: {{context.Stage}}
         - Task: {{context.Task}}
         - Work directory: {{context.WorkDir}}
+
+        {{taskContext}}
 
         {{requirements}}
 
@@ -103,6 +107,55 @@ public static class AgentPromptRenderer
     private static string PathFor(string? changeDir, string path) =>
         string.IsNullOrWhiteSpace(changeDir) ? path : Path.Combine(changeDir, path);
 
+    private static string FormatTaskContext(VariableBag with)
+    {
+        var lines = new List<string>();
+        var description = with.String("description");
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            lines.Add("## Task Description");
+            lines.Add(description);
+        }
+
+        var acceptanceCriteria = with.Element("acceptanceCriteria");
+        if (acceptanceCriteria is not null)
+        {
+            lines.Add(lines.Count == 0 ? "## Acceptance Criteria" : "\n## Acceptance Criteria");
+            lines.AddRange(FormatJsonLines(acceptanceCriteria.Value));
+        }
+
+        if (lines.Count == 0)
+            return "## Task Context\nNo explicit task description or acceptance criteria were declared.";
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static IEnumerable<string> FormatJsonLines(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                yield return "- " + FormatJsonValue(item);
+            yield break;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+                yield return $"- {property.Name}: {FormatJsonValue(property.Value)}";
+            yield break;
+        }
+
+        yield return "- " + FormatJsonValue(element);
+    }
+
+    private static string FormatJsonValue(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.String => element.GetString() ?? "",
+        JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => element.GetRawText(),
+        _ => element.GetRawText(),
+    };
+
     private static string FormatRequirements(AgentCompletionRequirements requirements)
     {
         if (requirements.Files.Count == 0 && requirements.Markers.Count == 0)
@@ -129,4 +182,5 @@ public sealed record AgentPromptContext(
     string Task,
     AgentCompletionRequirements Requirements,
     string WorkDir,
-    Dictionary<string, JsonElement?>? Variables);
+    Dictionary<string, JsonElement?>? Variables,
+    Dictionary<string, JsonElement?>? With = null);

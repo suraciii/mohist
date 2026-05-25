@@ -83,6 +83,47 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task StageWithDynamicTasks_LoadedTaskWithContract_DispatchPreservesWithContract()
+    {
+        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        [
+            new StageDefinitionInput("build", [], [], TasksFromUses: "spec/load")
+        ]));
+
+        var (load, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, load.WorkId, new WorkDispatchResult("loaded", Output: """
+        {
+          "tasks": [
+            {
+              "id": "T-001",
+              "title": "Implement feature",
+              "uses": "mohist/agent",
+              "with": {
+                "stage": "build",
+                "task": "T-001",
+                "description": "Add the feature flag service.",
+                "acceptanceCriteria": ["service is registered"],
+                "requireFiles": [{ "path": "src/FeatureFlags.cs" }],
+                "requireMarkers": [{ "path": "openspec/changes/issue-1/tasks.json", "marker": "\"passes\": true" }]
+              }
+            }
+          ]
+        }
+        """));
+
+        var (dynamicTask, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("T-001.", dynamicTask.WorkId);
+        Assert.Equal("mohist/agent", dynamicTask.Uses);
+        Assert.NotNull(dynamicTask.With);
+        Assert.Contains("Add the feature flag service.", dynamicTask.With);
+        Assert.Contains("service is registered", dynamicTask.With);
+        Assert.Contains("requireFiles", dynamicTask.With);
+        Assert.Contains("requireMarkers", dynamicTask.With);
+        Assert.Contains("src/FeatureFlags.cs", dynamicTask.With);
+    }
+
+    [Fact]
     public async Task StageWithStaticAndDynamicTasks_LoadCompletes_StaticTasksRunBeforeDynamicTasks()
     {
         await StartWorkflowAsync(new WorkflowDefinitionInput(
