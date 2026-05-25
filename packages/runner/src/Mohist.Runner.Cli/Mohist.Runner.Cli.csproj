@@ -1,14 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>Mohist.Runner</RootNamespace>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Mohist.Runner.Cli</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Program.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <ProjectReference Include="..\Mohist.Runner\Mohist.Runner.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>

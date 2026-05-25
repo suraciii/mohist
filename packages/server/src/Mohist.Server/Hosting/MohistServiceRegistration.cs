@@ -1,8 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Runner;
+using Mohist.Runner.Actions;
+using Mohist.Runner.Transport;
 using Mohist.Server.Config.Domain;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Sessions;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
@@ -29,6 +33,12 @@ public static class MohistServiceRegistration
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddScoped<ConfigService>();
         services.AddSingleton<IGitService, GitService>();
+        services.AddSingleton<IAgentExecutor>(sp =>
+            new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>()));
+        services.AddSingleton<IWorkspaceManager>(sp =>
+            new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>()));
+        services.AddScoped<ISessionTelemetrySink, EmbeddedSessionTelemetrySink>();
+        services.AddHostedService<EmbeddedRunnerService>();
 
         return services;
     }

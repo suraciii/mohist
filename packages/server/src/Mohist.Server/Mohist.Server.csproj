@@ -11,4 +11,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\runner\src\Mohist.Runner\Mohist.Runner.csproj" />
+  </ItemGroup>
+
 </Project>
