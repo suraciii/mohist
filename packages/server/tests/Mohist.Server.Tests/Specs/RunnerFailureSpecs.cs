@@ -83,7 +83,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
-        Assert.Equal("Passed", status.Status);
+        Assert.Equal("Completed", status.Status);
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
-        Assert.Equal("Passed", status.Status);
+        Assert.Equal("Completed", status.Status);
     }
 
     [Fact]

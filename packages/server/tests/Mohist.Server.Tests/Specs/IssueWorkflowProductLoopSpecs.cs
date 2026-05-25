@@ -91,7 +91,7 @@ public class IssueWorkflowProductLoopSpecs
         for (var i = 0; i < 100; i++)
         {
             var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status?projectId={projectId}");
-            if (status.Workflow?.Status == "Passed")
+            if (status.Workflow?.Status == "Completed")
                 return;
             await CompleteNextWorkAsync();
         }
