@@ -13,13 +13,6 @@ test/agentic/
         └── <name>.sh
 ```
 
-## Running
-
-```bash
-/test-create <feature>   # Create test plan for a feature
-/test-run <feature>      # Build container and execute test plan
-```
-
 ## Container
 
 - User: `motest`
