@@ -193,7 +193,6 @@ public class IssueGrain : Grain, IIssueGrain
             UpdatedAt = _issue.UpdatedAt.ToString("o"),
             ArchivedAt = _issue.ArchivedAt?.ToString("o"),
             ApprovalState = _issue.ApprovalState,
-            MergeState = _issue.MergeState?.ToString().ToLower(),
             RetryCount = _issue.RetryCount,
             ConflictRetryCount = _issue.ConflictRetryCount,
             BlockedReason = _issue.BlockedReason,
@@ -293,10 +292,9 @@ public class IssueGrain : Grain, IIssueGrain
         IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
-        Delivered = issue.Stage == "done" || issue.Status == "completed" || issue.MergeState == "merged",
+        Delivered = issue.Stage == "done" || issue.Status == "completed",
         Stage = issue.Stage,
         Status = issue.Status,
-        MergeState = issue.MergeState,
     };
 
 }

@@ -18,7 +18,7 @@ public class WorkspaceCompatibilitySpecs
     }
 
     [Fact]
-    public async Task GitEvidence_WhenBranchMissing_ReturnsCompatibleUnavailableResponses()
+    public async Task GitWorkspace_WhenBranchMissing_ReturnsCompatibleUnavailableResponses()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"workspace-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Workspace issue", projectId = project.Id });

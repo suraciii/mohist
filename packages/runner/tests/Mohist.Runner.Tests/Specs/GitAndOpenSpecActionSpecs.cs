@@ -105,7 +105,7 @@ public class GitAndOpenSpecActionSpecs
         using var document = JsonDocument.Parse(result.Output!);
         Assert.Equal("main", document.RootElement.GetProperty("target").GetString());
         Assert.Equal("mo/issue-1", document.RootElement.GetProperty("source").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("landedSha").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("commit").GetString()));
     }
 
     [Fact]

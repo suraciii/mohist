@@ -104,7 +104,6 @@ public class IssueQueryService
         UpdatedAt = issue.UpdatedAt.ToString("o"),
         ArchivedAt = issue.ArchivedAt?.ToString("o"),
         ApprovalState = issue.ApprovalState,
-        MergeState = issue.MergeState?.ToString().ToLower(),
         RetryCount = issue.RetryCount,
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
@@ -132,7 +131,6 @@ public class IssueQueryService
         UpdatedAt = issue.UpdatedAt,
         ArchivedAt = issue.ArchivedAt,
         ApprovalState = issue.ApprovalState,
-        MergeState = issue.MergeState,
         RetryCount = issue.RetryCount,
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
@@ -274,9 +272,8 @@ public class IssueQueryService
         IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
-        Delivered = issue.Stage == "done" || issue.Status == "completed" || issue.MergeState == "merged",
+        Delivered = issue.Stage == "done" || issue.Status == "completed",
         Stage = issue.Stage,
         Status = issue.Status,
-        MergeState = issue.MergeState,
     };
 }

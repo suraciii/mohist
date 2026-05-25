@@ -24,7 +24,6 @@ public class Issue : IJsonOnDeserialized
     [Id(13), JsonInclude] public IssueStatus Status { get; private set; } = IssueStatus.Backlog;
     [Id(14), JsonInclude] public IssueAttention? Attention { get; private set; }
     [Id(15), JsonInclude] public ApprovalState? ApprovalState { get; private set; }
-    [Id(16), JsonInclude] public MergeState? MergeState { get; private set; }
     [Id(17), JsonInclude] public int RetryCount { get; private set; }
     [Id(18), JsonInclude] public int ConflictRetryCount { get; private set; }
     [Id(19), JsonInclude] public string? BlockedReason { get; private set; }
@@ -126,12 +125,6 @@ public class Issue : IJsonOnDeserialized
         UpdatedAt = DateTime.UtcNow;
     }
 
-    public void SetMergeState(MergeState? state)
-    {
-        MergeState = state;
-        UpdatedAt = DateTime.UtcNow;
-    }
-
     public void AddPrerequisite(int prerequisiteNumber)
     {
         if (prerequisiteNumber == Number)
@@ -183,7 +176,6 @@ public class Issue : IJsonOnDeserialized
         WorkflowRunId = null;
         Attention = null;
         ApprovalState = null;
-        MergeState = null;
         BlockedReason = null;
         UpdatedAt = DateTime.UtcNow;
     }

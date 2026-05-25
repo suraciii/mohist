@@ -21,7 +21,6 @@ public class IssueInfo
     [Id(13)] public string UpdatedAt { get; set; } = "";
     [Id(14)] public string? ArchivedAt { get; set; }
     [Id(15)] public ApprovalState? ApprovalState { get; set; }
-    [Id(16)] public string? MergeState { get; set; }
     [Id(17)] public int? RetryCount { get; set; }
     [Id(18)] public int? ConflictRetryCount { get; set; }
     [Id(19)] public string? BlockedReason { get; set; }
@@ -40,7 +39,6 @@ public class IssuePrerequisiteSummary
     [Id(3)] public bool Delivered { get; set; }
     [Id(4)] public string Stage { get; set; } = null!;
     [Id(5)] public string Status { get; set; } = null!;
-    [Id(6)] public string? MergeState { get; set; }
 }
 
 [GenerateSerializer]

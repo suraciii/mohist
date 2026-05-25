@@ -219,4 +219,24 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkflowAsync());
     }
 
+    [Fact]
+    public async Task CompletedPrerequisite_AllowsDependentIssueToStart()
+    {
+        var project = await SetupProjectAsync();
+        var prereq = await CreateIssueAsync(project.Id, "Prereq");
+        var dependent = await CreateIssueAsync(project.Id, "Dependent");
+        var prereqGrain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{prereq.Number}");
+        var dependentGrain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
+
+        await dependentGrain.AddPrerequisiteAsync(prereq.Number);
+        await prereqGrain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+        var prereqRunId = await prereqGrain.GetWorkflowRunIdAsync();
+        await prereqGrain.CompleteWorkflowAsync(prereqRunId!);
+
+        var eligibility = await dependentGrain.GetStartEligibilityAsync();
+
+        Assert.True(eligibility.Startable);
+        Assert.Empty(eligibility.WaitingForDelivery);
+    }
+
 }
