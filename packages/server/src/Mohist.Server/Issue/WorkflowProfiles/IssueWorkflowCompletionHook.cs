@@ -7,6 +7,8 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public sealed class IssueWorkflowCompletionHook : IWorkflowCompletionHook
 {
+    private const string ProjectKey = "projects";
+
     private readonly IGrainFactory _grains;
     private readonly IGitService _git;
     private readonly ILogger<IssueWorkflowCompletionHook> _log;
@@ -31,7 +33,7 @@ public sealed class IssueWorkflowCompletionHook : IWorkflowCompletionHook
         var issue = _grains.GetGrain<IIssueGrain>($"{correlation.ProjectId}:{correlation.OwnerNumber.Value}");
         await issue.CompleteWorkflowAsync(context.WorkflowRunId);
 
-        var projectGrain = _grains.GetGrain<IProjectGrain>("default");
+        var projectGrain = _grains.GetGrain<IProjectGrain>(ProjectKey);
         var project = await projectGrain.GetByIdAsync(correlation.ProjectId);
         if (project is null)
         {
