@@ -167,11 +167,6 @@ function useSSEInner(projectId: string | null): LiveTaskState {
             queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             break
           }
-          case 'question_asked':
-          case 'question_answered': {
-            queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-            break
-          }
           case 'merge_queued':
           case 'merge_started':
           case 'merge_completed':
@@ -298,8 +293,6 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'agent_paused',
       'agent_error',
       'approval_requested',
-      'question_asked',
-      'question_answered',
       'agent_text_chunk',
       'main_tool_call',
       'coder_text_chunk',

@@ -25,13 +25,15 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenRunnerRegistered_ReportsRuntimeRunning()
+    public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
         await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
         var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
 
-        Assert.True(status.Running);
+        Assert.False(status.Running);
+        Assert.Equal(0, status.Capacity.Active);
+        Assert.True(status.Capacity.Max > 0);
         Assert.Contains(status.Runners, r => r.Id == "runtime-test-runner");
     }
 
@@ -43,6 +45,7 @@ public class RuntimeEntrySpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private sealed record AgentStatusDto(bool Running, RunnerDto[] Runners);
+    private sealed record AgentStatusDto(bool Running, RunnerDto[] Runners, AgentCapacityDto Capacity);
+    private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id);
 }

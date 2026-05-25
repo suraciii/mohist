@@ -59,10 +59,7 @@ const mockAgentStatus: AgentStatus = {
   issueId: null,
   issueNumber: null,
   activeAgents: [],
-  maxConcurrentAgents: 2,
-  queueDepth: 0,
-  waitingQuestions: [],
-  recoverableIssues: [],
+  capacity: { active: 0, max: 2 },
 }
 
 describe('Board Query State - URL Serialization', () => {

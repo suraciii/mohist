@@ -227,7 +227,7 @@ export function IssueDetailPage() {
     )
   }
 
-  const maxConcurrent = agentStatus?.maxConcurrentAgents ?? Infinity
+  const maxConcurrent = agentStatus?.capacity?.max ?? Infinity
   const thisAgent = activeAgents.find(a => a.issueNumber === issueNumber)
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent

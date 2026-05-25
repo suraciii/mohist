@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
+using Mohist.Server.Config.Domain;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Workflow.Projection;
 
@@ -13,23 +14,21 @@ public static class AgentRoutes
     {
         var group = app.MapGroup("/api/agent");
 
-        group.MapGet("/status", async (IGrainFactory grains, WorkflowProjectionService projection) =>
+        group.MapGet("/status", async (IGrainFactory grains, WorkflowProjectionService projection, ConfigService config) =>
         {
             var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
             var runnerIds = await registry.ListRunnerIdsAsync();
             var projectId = await ResolveProjectIdAsync(grains);
             var activeAgents = await projection.ListActiveAgentsAsync(projectId);
+            var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
 
             return ApiResults.Ok(new
             {
-                running = runnerIds.Count > 0 || activeAgents.Count > 0,
+                running = activeAgents.Count > 0,
                 issueId = activeAgents.FirstOrDefault()?.IssueId,
                 issueNumber = activeAgents.FirstOrDefault()?.IssueNumber,
                 activeAgents,
-                maxConcurrentAgents = runnerIds.Count,
-                queueDepth = 0,
-                waitingQuestions = Array.Empty<object>(),
-                recoverableIssues = Array.Empty<object>(),
+                capacity = new { active = activeAgents.Count, max = maxConcurrentAgents },
                 runners = runnerIds.Select(id => new { id }).ToArray(),
             });
         });
@@ -48,19 +47,13 @@ public static class AgentRoutes
             return ApiResults.Ok(await activity.GetAsync(pid, limit, ct));
         });
 
-        group.MapGet("/session-status", () => ApiResults.Ok(new
-        {
-            sessionId = (string?)null,
-            acpSessionId = (string?)null,
-            status = (string?)null,
-            currentSessionState = "No active session",
-            lastDataAt = (string?)null,
-            probeSentAt = (string?)null,
-            probeDeadlineAt = (string?)null,
-            failureReason = (string?)null,
-        }));
-
         return app;
+    }
+
+    private static async Task<int> MaxConcurrentAgentsAsync(ConfigService config)
+    {
+        var cfg = await config.GetConfigAsync();
+        return cfg.TryGetValue("maxConcurrentAgents", out var value) && value is int n ? n : 3;
     }
 
     private static async Task<string?> ResolveProjectIdAsync(IGrainFactory grains)
