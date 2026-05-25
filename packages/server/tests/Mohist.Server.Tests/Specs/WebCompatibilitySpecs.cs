@@ -51,6 +51,18 @@ public class WebCompatibilitySpecs
     }
 
     [Fact]
+    public async Task WorkflowProfiles_ReturnDefaultProfileMetadata()
+    {
+        var profiles = await _client.GetDataAsync<WorkflowProfileDto[]>("/api/workflow-profiles");
+
+        var profile = Assert.Single(profiles);
+        Assert.Equal("mohist/default", profile.Id);
+        Assert.Equal("Mohist Default", profile.DisplayName);
+        Assert.True(profile.IsDefault);
+        Assert.Contains("OpenSpec", profile.Description);
+    }
+
+    [Fact]
     public async Task Prerequisites_ProjectIntoStartEligibility()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -113,6 +125,7 @@ public class WebCompatibilitySpecs
     }
 
     private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, StartEligibilityDto StartEligibility, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
+    private sealed record WorkflowProfileDto(string Id, string DisplayName, string Description, bool IsDefault);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
     private sealed record PrerequisiteDto(int Number, bool Delivered);
