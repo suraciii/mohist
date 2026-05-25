@@ -29,6 +29,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IssueWorkflowProfileRegistry>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionService>();
+        services.AddScoped<AgentActivityService>();
         services.AddScoped<WorkflowProjectionService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddScoped<ConfigService>();

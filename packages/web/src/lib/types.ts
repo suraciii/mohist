@@ -763,6 +763,69 @@ export interface AgentSessionInfo {
   lastActivityAt: string | null
 }
 
+export interface AgentActivityWorkItem {
+  type: string
+  id: string
+  title: string
+  stage: string | null
+  sessionWorkType: string | null
+}
+
+export interface AgentActivityTaskProgress {
+  completed: number
+  total: number
+}
+
+export interface AgentActivityPreview {
+  kind: 'text' | 'tool'
+  text: string
+  createdAt: string
+}
+
+export interface AgentActivitySession {
+  issueId: string
+  issueNumber: number
+  issueTitle: string
+  issueStage: string
+  issueStatus: string | null
+  sessionId: string
+  status: string
+  model: string | null
+  taskDescription: string | null
+  createdAt: string
+  completedAt: string | null
+  lastActivityAt: string
+  currentWorkItem: AgentActivityWorkItem | null
+  taskProgress: AgentActivityTaskProgress | null
+  lastActivity: AgentActivityPreview | null
+  failureReason: string | null
+}
+
+export interface AgentActivityWaiting {
+  issueId: string
+  issueNumber: number
+  issueTitle: string
+  stage: string | null
+  label: 'Needs Approval'
+  requestedAt: string | null
+  preview: string | null
+}
+
+export interface AgentActivity {
+  summary: {
+    active: number
+    waiting: number
+    completed: number
+    failed: number
+    slots: {
+      active: number
+      max: number
+    }
+  }
+  sessions: AgentActivitySession[]
+  waiting: AgentActivityWaiting[]
+}
+
 export interface SystemInfo {
   version: string
   gitHash: string

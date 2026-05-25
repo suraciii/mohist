@@ -98,6 +98,20 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           }
         }
 
+        if (
+          eventName === 'coder_text_chunk' ||
+          eventName === 'coder_tool_call' ||
+          eventName === 'ralph_task_update' ||
+          eventName === 'ralph_loop_progress' ||
+          eventName === 'coder_session_started' ||
+          eventName === 'coder_session_completed' ||
+          eventName === 'coder_session_failed' ||
+          eventName === 'coder_session_cancelled' ||
+          eventName === 'coder_session_status_changed'
+        ) {
+          queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+        }
+
         switch (eventName as EventName) {
           case 'stage_changed': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -116,6 +130,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'agent_paused':
           case 'agent_error': {
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             if (eventName === 'agent_paused' || eventName === 'agent_error') {
               const viewed = viewedIssueRef.current
@@ -144,10 +159,12 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           case 'agent_blocked': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             break
           }
           case 'approval_requested': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             break
           }
           case 'question_asked':
@@ -225,6 +242,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           }
           case 'stage_task_update': {
             queryClient.invalidateQueries({ queryKey: ['issues'] })
+            queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
             break
           }
           case 'base_drift_detected':
@@ -292,6 +310,8 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'plan_session_update',
       'coder_session_started',
       'coder_session_completed',
+      'coder_session_failed',
+      'coder_session_cancelled',
       'coder_session_status_changed',
       'merge_queued',
       'merge_started',
