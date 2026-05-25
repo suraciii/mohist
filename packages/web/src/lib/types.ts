@@ -196,10 +196,10 @@ export interface AgentStatus {
   issueId: string | null
   issueNumber: number | null
   activeAgents: ActiveAgentInfo[]
-  maxConcurrentAgents: number
-  queueDepth: number
-  waitingQuestions: Array<{ issueId: string; issueNumber: number; projectId: string; questionId: string; question: string }>
-  recoverableIssues: Array<{ issueNumber: number; stage: string }>
+  capacity: {
+    active: number
+    max: number
+  }
 }
 
 export interface DiffFile {
@@ -314,8 +314,6 @@ export type AgentDetailEventMap = {
   coder_session_cancelled: { issueId: string; projectId: string; coderSessionId: string; reason?: string }
   coder_session_status_changed: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; status: string; lastDataAt?: string | null; probeSentAt?: string | null; probeDeadlineAt?: string | null; failureReason?: string | null }
   agent_paused: { issueId: string; projectId: string }
-  question_asked: { issueId: string; projectId: string; questionId: string; question: string }
-  question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
   check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
   check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
   stage_task_update: { issueId: string; projectId: string; stage: string; taskId: string; taskTitle: string; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt: number; artifacts: string[] }
@@ -330,8 +328,6 @@ export type EventMap = {
   agent_error: { issueId: string; projectId: string; error: string }
   agent_blocked: { issueId: string; projectId: string; issueNumber: number; blockedReason: string; retryCount: number }
   approval_requested: { issueId: string; projectId: string; stage: string }
-  question_asked: { issueId: string; projectId: string; questionId: string; question: string }
-  question_answered: { issueId: string; projectId: string; questionId: string; answer: string }
   merge_queued: { issueId: string; projectId: string; issueNumber: number; position: number }
   merge_started: { issueId: string; projectId: string; issueNumber: number }
   merge_completed: { issueId: string; projectId: string; issueNumber: number }

@@ -21,6 +21,7 @@ public class ApiContractSpecs
     [InlineData("/api/questions/question-1")]
     [InlineData("/api/opencode/models")]
     [InlineData("/api/issues/1/agent-session")]
+    [InlineData("/api/agent/session-status")]
     public async Task RemovedLegacyApi_WhenRequested_ReturnsNotFound(string path)
     {
         using var response = await _fixture.Client.GetAsync(path);

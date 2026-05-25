@@ -16,8 +16,6 @@ public static class EventRoutes
         "agent_error",
         "approval_requested",
         "tool_call",
-        "question_asked",
-        "question_answered",
         "agent_text_chunk",
         "main_tool_call",
         "coder_text_chunk",
