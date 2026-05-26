@@ -17,14 +17,14 @@ public class OpenSpecTaskLoadingSpecs
         var result = await new OpenSpecTasksAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "load", "mohist/openspec-tasks", new
         {
             path = "tasks.json",
-            task = new { uses = "mohist/agent" }
+            task = new { uses = "mohist/coder-agent" }
         }));
 
         Assert.Equal("loaded", result.Status);
         using var document = JsonDocument.Parse(result.Output!);
         var task = document.RootElement.GetProperty("tasks")[0];
         Assert.Equal("T-001", task.GetProperty("id").GetString());
-        Assert.Equal("mohist/agent", task.GetProperty("uses").GetString());
+        Assert.Equal("mohist/coder-agent", task.GetProperty("uses").GetString());
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class OpenSpecTaskLoadingSpecs
             path = "tasks.json",
             task = new
             {
-                uses = "mohist/agent",
+                uses = "mohist/coder-agent",
                 with = new { stage = "build", task = "default" }
             }
         }));

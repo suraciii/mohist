@@ -110,7 +110,7 @@ public class IssueWorkflowProductLoopSpecs
             case "load":
                 await ReportAsync(work.WorkId, "loaded", output: JsonSerializer.Serialize(new
                 {
-                    tasks = new[] { new { id = "build-1", title = "Build task", uses = "mohist/agent" } }
+                    tasks = new[] { new { id = "build-1", title = "Build task", uses = "mohist/coder-agent" } }
                 }));
                 break;
             case "checks":
@@ -136,7 +136,7 @@ public class IssueWorkflowProductLoopSpecs
             response.EnsureSuccessStatusCode();
             var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 ?? throw new InvalidOperationException("Empty work dispatch");
-            if (work.Stage == "plan" && work.Uses == "mohist/agent")
+            if (work.Stage == "plan" && work.Uses == "mohist/coder-agent")
             {
                 Assert.NotNull(work.Variables);
                 using var doc = JsonDocument.Parse(work.Variables);

@@ -5,7 +5,7 @@ namespace Mohist.Runner.Actions;
 
 public static class RunnerActionCatalog
 {
-    public const string Agent = "mohist/agent";
+    public const string Agent = "mohist/coder-agent";
     public const string AiReview = "mohist/check/ai-review";
 
     public const string CoreProcess = "core/process";

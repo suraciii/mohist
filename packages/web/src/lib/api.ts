@@ -170,7 +170,6 @@ export const api = {
     issues: number
     activeIssues: number
     issuesByStage: Record<string, number>
-    llm: { configured: false; provider?: undefined; model?: undefined } | { configured: true; provider: string; model: string }
     version: string | null
     gitHash: string | null
     sourceHead: string | null

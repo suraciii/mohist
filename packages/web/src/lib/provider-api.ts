@@ -13,10 +13,23 @@ export interface Provider {
 
 export interface ProviderFormData {
   name?: string
-  apiKey: string
+  apiKey?: string
   baseURL?: string
   models?: string[]
   sdk?: string
+}
+
+export interface ProviderConfigValidationResult {
+  success: boolean
+  mode: 'configuration-only'
+  message: string
+}
+
+export interface CoderAgentRuntime {
+  mode: string
+  command: string
+  model: string | null
+  note: string
 }
 
 const BASE = '/api'
@@ -49,8 +62,11 @@ export const providerApi = {
     }),
 
   testProvider: (data: ProviderFormData & { id?: string }) =>
-    request<{ success: boolean }>('/providers/test', {
+    request<ProviderConfigValidationResult>('/providers/test', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  getRuntime: () =>
+    request<CoderAgentRuntime>('/providers/runtime'),
 }

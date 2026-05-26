@@ -20,7 +20,7 @@ public class OpenSpecTasksAction : IAction
             return new ActionResult("failure", "tasks.json must contain a tasks array");
 
         var templateTask = JsonInputs.Element(context.With, "task");
-        var defaultUses = ReadNestedString(templateTask, "uses") ?? "mohist/agent";
+        var defaultUses = ReadNestedString(templateTask, "uses") ?? "mohist/coder-agent";
         var defaultWith = ReadNestedObject(templateTask, "with");
 
         var tasks = new List<LoadedTask>();

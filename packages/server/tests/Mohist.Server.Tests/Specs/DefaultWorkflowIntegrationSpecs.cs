@@ -229,7 +229,7 @@ public class DefaultWorkflowIntegrationSpecs
                     {
                         tasks = new[]
                         {
-                            new { id = "build-feature", title = "Build feature", uses = "mohist/agent" }
+                            new { id = "build-feature", title = "Build feature", uses = "mohist/coder-agent" }
                         }
                     }));
                     break;

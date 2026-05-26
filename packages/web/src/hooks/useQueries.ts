@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
 import type { AgentActivity, AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
-import { providerApi, type Provider, type ProviderFormData } from '../lib/provider-api'
+import { providerApi, type CoderAgentRuntime, type Provider, type ProviderConfigValidationResult, type ProviderFormData } from '../lib/provider-api'
 import { useProject } from '../context/ProjectContext'
 
 export function useProjects() {
@@ -210,6 +210,13 @@ export function useProviders() {
   })
 }
 
+export function useProviderRuntime() {
+  return useQuery<CoderAgentRuntime, Error>({
+    queryKey: ['provider-runtime'],
+    queryFn: () => providerApi.getRuntime(),
+  })
+}
+
 export interface SaveProviderVariables {
   id: string
   data: ProviderFormData
@@ -232,7 +239,7 @@ export function useSaveProvider() {
         if (!old) return old
         return old.map((p) =>
           p.id === id
-            ? { ...p, configured: true, apiKeyMasked: maskApiKey(data.apiKey), ...data }
+            ? { ...p, configured: true, apiKeyMasked: data.apiKey ? maskApiKey(data.apiKey) : p.apiKeyMasked, ...data }
             : p
         )
       })
@@ -294,10 +301,10 @@ export interface TestProviderVariables {
 }
 
 export function useTestProvider() {
-  return useMutation<{ success: boolean }, Error, TestProviderVariables>({
+  return useMutation<ProviderConfigValidationResult, Error, TestProviderVariables>({
     mutationFn: ({ data }) => providerApi.testProvider(data),
     onSuccess: () => {
-      toast.success('Provider test passed')
+      toast.success('Provider configuration accepted')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
@@ -470,7 +477,7 @@ export function useSetAgentRuntime() {
     mutationFn: (data) => api.updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
-      toast.success('Agent runtime updated')
+      toast.success('Coder agent runtime updated')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

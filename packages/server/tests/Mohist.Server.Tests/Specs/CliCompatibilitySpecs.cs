@@ -61,12 +61,12 @@ public class CliCompatibilitySpecs
         Assert.Equal(0, runtime.ExitCode);
         Assert.Contains("local-opencode", runtime.Stdout);
 
-        var test = await RunCliAsync("providers", "test", "--api-key", "sk-test");
+        var test = await RunCliAsync("providers", "test");
         Assert.Equal(0, test.ExitCode);
         Assert.Contains("configuration-only", test.Stdout);
 
         var providerId = $"custom-{Guid.NewGuid():N}";
-        var save = await RunCliAsync("providers", "save", providerId, "--api-key", "sk-test", "--name", "Custom AI", "--base-url", "https://api.example.test", "--model", "model-a");
+        var save = await RunCliAsync("providers", "save", providerId, "--name", "Custom AI", "--base-url", "https://api.example.test", "--model", "model-a");
         Assert.Equal(0, save.ExitCode);
         Assert.Contains(providerId, save.Stdout);
 

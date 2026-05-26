@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useProviders, useDeleteProvider, useModel, useSetModel, useOpencodeModel, useUpdateOpencodeModel, useStageModels, useSetStageModels, useAvailableModelIds } from '../hooks/useQueries'
+import { useProviders, useDeleteProvider, useOpencodeModel, useUpdateOpencodeModel, useProviderRuntime, useStageModels, useSetStageModels, useAvailableModelIds } from '../hooks/useQueries'
 import { useModels } from '../hooks/useModels'
 import type { Provider } from '../lib/provider-api'
 import type { Model } from '../lib/types'
@@ -83,19 +83,21 @@ function ConnectedProviderCard({ provider, onRemove }: { provider: Provider; onR
   return (
     <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <span className="text-green-500 text-sm" aria-label="connected">&#9679;</span>
+        <span className="text-green-500 text-sm" aria-label="saved">&#9679;</span>
         <ProviderIcon providerId={provider.id} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
             {provider.isDefault && (
               <span className="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-700 text-xs font-medium">
-                default
+                built-in
               </span>
             )}
             <SourceTag source={provider.source} />
           </div>
-          <p className="text-xs text-gray-500 mt-0.5 font-mono">{provider.apiKeyMasked}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {provider.apiKeyMasked ? `legacy key ${provider.apiKeyMasked}` : 'catalog entry'}
+          </p>
         </div>
       </div>
       <button
@@ -113,12 +115,12 @@ function AvailableProviderCard({ provider, onConnect }: { provider: Provider; on
   return (
     <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <span className="text-gray-300 text-sm" aria-label="not connected">&#9675;</span>
+        <span className="text-gray-300 text-sm" aria-label="not added">&#9675;</span>
         <ProviderIcon providerId={provider.id} />
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
           <p className="text-xs text-gray-500 mt-0.5">
-            {PROVIDER_DESCRIPTIONS[provider.id] || 'Configure this provider to get started.'}
+            {PROVIDER_DESCRIPTIONS[provider.id] || 'Add this provider to the model catalog.'}
           </p>
         </div>
       </div>
@@ -126,7 +128,7 @@ function AvailableProviderCard({ provider, onConnect }: { provider: Provider; on
         onClick={() => onConnect(provider)}
         className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors min-h-[44px] md:min-h-0"
       >
-        Connect
+        Add
       </button>
     </div>
   )
@@ -136,7 +138,7 @@ function CustomProviderCard({ provider, onRemove }: { provider: Provider; onRemo
   return (
     <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
       <div className="flex items-center gap-3 flex-1 min-w-0">
-        <span className="text-green-500 text-sm" aria-label="connected">&#9679;</span>
+        <span className="text-green-500 text-sm" aria-label="saved">&#9679;</span>
         <ProviderIcon providerId={provider.id} />
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-medium text-gray-900">{provider.name}</h4>
@@ -156,13 +158,12 @@ function CustomProviderCard({ provider, onRemove }: { provider: Provider; onRemo
 
 export function AiSettingsSection() {
   const { data: providers, isLoading, error } = useProviders()
+  const { data: runtime } = useProviderRuntime()
   const deleteProvider = useDeleteProvider()
   const { data: modelProviders } = useModels()
-  const { data: modelData } = useModel()
-  const setModel = useSetModel()
-  const { data: availableModelIds } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
   const setOpencodeModel = useUpdateOpencodeModel()
+  const { data: availableModelIds } = useAvailableModelIds()
   const { data: stageModelsData } = useStageModels()
   const setStageModels = useSetStageModels()
 
@@ -227,16 +228,8 @@ export function AiSettingsSection() {
     }
   }
 
-  const handleSetModel = (modelId: string) => {
-    setModel.mutate(modelId)
-  }
-
   const handleSetOpencodeModel = (modelId: string) => {
     setOpencodeModel.mutate(modelId)
-  }
-
-  const handleClearOpencodeModel = () => {
-    setOpencodeModel.mutate(null)
   }
 
   const handleSetStageModel = (stage: string, modelId: string) => {
@@ -255,7 +248,7 @@ export function AiSettingsSection() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">AI Providers & Models</h3>
+        <h3 className="text-sm font-medium text-gray-900">Coder Agent & Models</h3>
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
@@ -268,7 +261,7 @@ export function AiSettingsSection() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">AI Providers & Models</h3>
+        <h3 className="text-sm font-medium text-gray-900">Coder Agent & Models</h3>
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           Failed to load providers: {(error as Error).message}
         </div>
@@ -280,34 +273,39 @@ export function AiSettingsSection() {
     <>
       <div className="space-y-8">
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-gray-900">Model Selection</h3>
+          <h3 className="text-sm font-medium text-gray-900">External Coder Agent</h3>
 
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-gray-700">
-                Mohist Model
-              </label>
-              <p className="text-xs text-gray-500">Used as the default Mohist model</p>
-              <ModelSelect
-                value={modelData?.model ?? DEFAULT_MODEL}
-                placeholder={DEFAULT_MODEL}
-                models={availableModels}
-                onChange={handleSetModel}
-              />
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+              <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                <div>
+                  <div className="text-gray-500">Runtime</div>
+                  <div className="font-mono text-gray-900">{runtime?.mode ?? 'external-coder-agent'}</div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Command</div>
+                  <div className="font-mono text-gray-900">{runtime?.command ?? 'opencode'}</div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Model</div>
+                  <div className="font-mono text-gray-900">{opencodeModelData?.model ?? runtime?.model ?? 'default'}</div>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Mohist orchestrates workflow tasks and passes coder work to this external agent.
+              </p>
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-gray-700">
-                Coder Model
+                Default Coder Agent Model
               </label>
-              <p className="text-xs text-gray-500">Used by external agent execution during plan/build/check/integrate stages</p>
+              <p className="text-xs text-gray-500">Passed to the external coder agent when workflow tasks run.</p>
               <ModelSelect
-                value={opencodeModelData?.model ?? null}
-                placeholder="Same as Mohist Model"
-                models={coderModels}
+                value={opencodeModelData?.model ?? DEFAULT_MODEL}
+                placeholder={DEFAULT_MODEL}
+                models={availableModels}
                 onChange={handleSetOpencodeModel}
-                onClear={handleClearOpencodeModel}
-                allowClear
               />
             </div>
           </div>
@@ -365,7 +363,7 @@ export function AiSettingsSection() {
 
         {filteredConfigured.length > 0 && (
           <div className="space-y-3">
-            <h3 className="text-sm font-medium text-gray-900">Connected Providers</h3>
+            <h3 className="text-sm font-medium text-gray-900">Saved Provider Catalog</h3>
             <div className="space-y-2">
               {filteredConfigured.map((provider) => (
                 <ConnectedProviderCard
@@ -386,7 +384,7 @@ export function AiSettingsSection() {
             >
               <ChevronRightIcon className={`h-4 w-4 text-gray-400 transition-transform ${availableProvidersOpen ? 'rotate-90' : ''}`} />
               <span className="text-sm font-medium text-gray-900">
-                Available ({filteredUnconfigured.length})
+                Catalog presets ({filteredUnconfigured.length})
               </span>
             </button>
 
@@ -426,7 +424,7 @@ export function AiSettingsSection() {
 
           {customProviders.length === 0 && (
             <p className="text-xs text-gray-500">
-              Configure a custom OpenAI-compatible provider
+              Add a custom provider catalog entry for model selection
             </p>
           )}
 

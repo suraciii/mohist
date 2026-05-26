@@ -19,7 +19,7 @@ public class AgentSessionService
 
     public async Task<AgentSessionDto?> CreateForDispatchAsync(string runnerId, WorkDispatch dispatch, CancellationToken ct = default)
     {
-        if (dispatch.Uses != "mohist/agent") return null;
+        if (dispatch.Uses != "mohist/coder-agent") return null;
         if (dispatch.Issue is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);

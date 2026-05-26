@@ -38,7 +38,7 @@ function makeTimeline(): WorkflowTimeline {
       workType: 'task',
       stage: Stage.Build,
       title: 'Implement WorkflowView',
-      uses: 'mohist/agent',
+      uses: 'mohist/coder-agent',
     },
     stages: [
       {
@@ -52,7 +52,7 @@ function makeTimeline(): WorkflowTimeline {
           {
             id: 'build-task-1',
             title: 'Implement WorkflowView',
-            uses: 'mohist/agent',
+            uses: 'mohist/coder-agent',
             status: 'running',
             startedAt: '2026-01-01T00:00:00.000Z',
             completedAt: null,
@@ -89,7 +89,7 @@ describe('WorkflowView', () => {
     expect(mockedUseWorkflowTimeline).toHaveBeenCalledWith(1, true)
     expect(screen.getByText('Implement WorkflowView')).toBeInTheDocument()
     expect(screen.getByText('Typecheck')).toBeInTheDocument()
-    expect(screen.getByText('runtime:agent')).toBeInTheDocument()
+    expect(screen.getByText('runtime:coder-agent')).toBeInTheDocument()
     expect(screen.getByText('runtime:core/script')).toBeInTheDocument()
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
   })

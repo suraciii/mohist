@@ -169,7 +169,7 @@ public class GitAndOpenSpecActionSpecs
                 conflictResolver = new
                 {
                     id = "resolve-rebase-conflicts",
-                    uses = "mohist/agent",
+                    uses = "mohist/coder-agent",
                     with = new
                     {
                         task = "resolve-rebase-conflicts"
@@ -184,7 +184,7 @@ public class GitAndOpenSpecActionSpecs
         Assert.Contains("file.txt", document.RootElement.GetProperty("conflicts").EnumerateArray().Select(x => x.GetString()));
         var requestedTask = document.RootElement.GetProperty("requestedTask");
         Assert.Equal("resolve-rebase-conflicts", requestedTask.GetProperty("id").GetString());
-        Assert.Equal("mohist/agent", requestedTask.GetProperty("uses").GetString());
+        Assert.Equal("mohist/coder-agent", requestedTask.GetProperty("uses").GetString());
         Assert.Equal("resolve-rebase-conflicts", requestedTask.GetProperty("with").GetProperty("task").GetString());
         Assert.Equal("verify-rebase", requestedTask.GetProperty("then").GetProperty("id").GetString());
         Assert.Equal("mohist/rebase-status", requestedTask.GetProperty("then").GetProperty("uses").GetString());

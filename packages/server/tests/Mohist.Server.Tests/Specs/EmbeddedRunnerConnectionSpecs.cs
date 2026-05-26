@@ -40,7 +40,7 @@ public class EmbeddedRunnerConnectionSpecs
 
         var work = await PollUntilWorkAsync(connection);
 
-        Assert.Equal("mohist/agent", work.Uses);
+        Assert.Equal("mohist/coder-agent", work.Uses);
         Assert.Equal("task", work.WorkType);
         Assert.Equal("plan", work.Stage);
         Assert.NotNull(work.Session);
@@ -127,7 +127,7 @@ public class EmbeddedRunnerConnectionSpecs
     [
         new StageDefinitionInput(
             "plan",
-            [new TaskDefinitionInput("proposal", "Generate proposal", "mohist/agent", """{"stage":"plan","task":"proposal"}""")],
+            [new TaskDefinitionInput("proposal", "Generate proposal", "mohist/coder-agent", """{"stage":"plan","task":"proposal"}""")],
             [])
     ]);
 
@@ -135,7 +135,7 @@ public class EmbeddedRunnerConnectionSpecs
     [
         new StageDefinitionInput(
             "plan",
-            [new TaskDefinitionInput("proposal", "Generate proposal", "mohist/agent", """{"stage":"plan","task":"proposal","requireFiles":[{"path":"${{ openspecChangeDir }}/proposal.md"}],"requireMarkers":[{"path":"${{ openspecChangeDir }}/proposal.md","marker":"<mohist:proposal>PASS</mohist:proposal>"}]}""")],
+            [new TaskDefinitionInput("proposal", "Generate proposal", "mohist/coder-agent", """{"stage":"plan","task":"proposal","requireFiles":[{"path":"${{ openspecChangeDir }}/proposal.md"}],"requireMarkers":[{"path":"${{ openspecChangeDir }}/proposal.md","marker":"<mohist:proposal>PASS</mohist:proposal>"}]}""")],
             [new CheckDefinitionInput("proposal-complete", "Proposal complete", "core/artifact-exists", """{"path":"${{ openspecChangeDir }}/proposal.md"}""")],
             RequiresApproval: true)
     ]);

@@ -99,7 +99,7 @@ const FIELDS: FieldDef[] = [
     key: 'timeout',
     label: 'Session Timeout',
     unit: 'minutes',
-    description: 'Maximum total time an agent session can run.',
+    description: 'Maximum total time an external coder agent session can run.',
     validate: validateTimeout,
     group: 'timeout',
   },
@@ -122,8 +122,8 @@ const FIELDS: FieldDef[] = [
   {
     key: 'maxConcurrent',
     label: 'Max Concurrent',
-    unit: 'agents',
-    description: 'Maximum number of agent sessions running simultaneously.',
+    unit: 'sessions',
+    description: 'Maximum number of external coder agent sessions running simultaneously.',
     validate: validateMaxConcurrent,
     group: 'concurrency',
   },
@@ -139,7 +139,7 @@ const FIELDS: FieldDef[] = [
     key: 'maxGracePeriods',
     label: 'Retry Budget',
     unit: 'grace periods',
-    description: 'Maximum retry attempts after an agent failure.',
+    description: 'Maximum retry attempts after an external coder agent failure.',
     validate: validateGracePeriods,
     group: 'recovery',
   },
@@ -309,7 +309,7 @@ export function AgentSettingsSection() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h3 className="text-sm font-medium text-gray-900">Agent Runtime</h3>
+        <h3 className="text-sm font-medium text-gray-900">Coder Agent Runtime</h3>
         <div className="space-y-6">
           {[1, 2, 3].map((i) => (
             <div key={i} className="space-y-1.5">
@@ -325,7 +325,7 @@ export function AgentSettingsSection() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">Agent Runtime</h3>
+        <h3 className="text-sm font-medium text-gray-900">Coder Agent Runtime</h3>
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           Failed to load settings: {error.message}
         </div>
@@ -342,8 +342,8 @@ export function AgentSettingsSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h3 className="text-sm font-medium text-gray-900">Agent Runtime</h3>
-        <p className="text-xs text-gray-500 mt-1">Configure agent execution, concurrency, and recovery settings.</p>
+        <h3 className="text-sm font-medium text-gray-900">Coder Agent Runtime</h3>
+        <p className="text-xs text-gray-500 mt-1">Configure how Mohist schedules external coder agent sessions.</p>
       </div>
 
       <div className="space-y-4">
@@ -414,7 +414,7 @@ export function AgentSettingsSection() {
           />
         </div>
         <p className="text-xs text-gray-500">
-          Number of times an agent can fail and be retried before the issue is marked as interrupted.
+          Number of times an external coder agent can fail and be retried before the issue is marked as interrupted.
         </p>
       </div>
 
@@ -456,7 +456,7 @@ export function AgentSettingsSection() {
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
-            <h4 className="text-lg font-medium text-gray-900 mb-2">Reset Agent Settings</h4>
+            <h4 className="text-lg font-medium text-gray-900 mb-2">Reset Coder Agent Settings</h4>
             <p className="text-sm text-gray-600 mb-4">
               Reset all agent runtime settings to their default values?
             </p>
