@@ -47,9 +47,9 @@ public class CliCompatibilitySpecs
     }
 
     [Fact]
-    public async Task CliServerStatus_ReportsHealth()
+    public async Task CliServerHealth_ReportsHealth()
     {
-        var result = await RunCliAsync("server", "status");
+        var result = await RunCliAsync("server", "health");
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("ok", result.Stdout, StringComparison.OrdinalIgnoreCase);
     }
@@ -81,6 +81,47 @@ public class CliCompatibilitySpecs
             Assert.Contains("Mohist.Runner.Cli.csproj", runnerUnit);
             Assert.Contains("Environment=\"ServerUrl=http://127.0.0.1:4567\"", runnerUnit);
             Assert.Contains($"Environment=\"RunnerRoot={runnerRoot}\"", runnerUnit);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CliServiceLifecycleCommands_ControlSystemdUserUnits()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mohist-cli-service-{Guid.NewGuid():N}");
+        var unitDir = Path.Combine(root, "units");
+
+        try
+        {
+            var serverStart = await RunCliAsync("server", "start", "--dry-run");
+            Assert.Equal(0, serverStart.ExitCode);
+            Assert.Contains("systemctl --user start mohist.service", serverStart.Stdout);
+
+            var serverStatus = await RunCliAsync("server", "status", "--dry-run");
+            Assert.Equal(0, serverStatus.ExitCode);
+            Assert.Contains("systemctl --user status --no-pager mohist.service", serverStatus.Stdout);
+
+            var serverLogs = await RunCliAsync("server", "logs", "--dry-run", "-n", "25", "--follow");
+            Assert.Equal(0, serverLogs.ExitCode);
+            Assert.Contains("journalctl --user -u mohist.service --no-pager -n 25 -f", serverLogs.Stdout);
+
+            var serverUninstall = await RunCliAsync("server", "uninstall", "--dry-run", "--unit-dir", unitDir);
+            Assert.Equal(0, serverUninstall.ExitCode);
+            Assert.Contains("systemctl --user disable --now mohist.service", serverUninstall.Stdout);
+            Assert.Contains(Path.Combine(unitDir, "mohist.service"), serverUninstall.Stdout);
+
+            var runnerRestart = await RunCliAsync("runner", "restart", "--dry-run");
+            Assert.Equal(0, runnerRestart.ExitCode);
+            Assert.Contains("systemctl --user restart mohist-runner.service", runnerRestart.Stdout);
+
+            var runnerUninstall = await RunCliAsync("runner", "uninstall", "--dry-run", "--unit-dir", unitDir);
+            Assert.Equal(0, runnerUninstall.ExitCode);
+            Assert.Contains("systemctl --user disable --now mohist-runner.service", runnerUninstall.Stdout);
+            Assert.Contains(Path.Combine(unitDir, "mohist-runner.service"), runnerUninstall.Stdout);
         }
         finally
         {

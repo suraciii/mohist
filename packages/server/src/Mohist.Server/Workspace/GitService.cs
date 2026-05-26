@@ -5,6 +5,7 @@ namespace Mohist.Server.Workspace;
 
 public class GitService : IGitService
 {
+    private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
     private readonly string _runnerRoot;
 
     public GitService(string? runnerRoot = null)
@@ -192,9 +193,26 @@ public class GitService : IGitService
         using var process = Process.Start(psi);
         if (process == null) return ("", "", -1);
 
+        using var timeout = new CancellationTokenSource(GitCommandTimeout);
         var outputTask = process.StandardOutput.ReadToEndAsync();
         var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Best effort: the caller receives a timeout-like git failure below.
+            }
+
+            return ("", $"git {command} timed out after {GitCommandTimeout.TotalSeconds:0}s", 124);
+        }
         return (await outputTask, await errorTask, process.ExitCode);
     }
 
