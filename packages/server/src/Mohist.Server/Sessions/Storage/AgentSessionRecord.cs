@@ -1,6 +1,8 @@
-namespace Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Domain;
 
-public class AgentSession
+namespace Mohist.Server.Sessions.Storage;
+
+public class AgentSessionRecord
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string ProjectId { get; set; } = string.Empty;
@@ -24,4 +26,29 @@ public class AgentSession
     public DateTime? LastHeartbeatAt { get; set; }
     public string? FailureReason { get; set; }
     public int? ExitCode { get; set; }
+
+    public AgentSession ToDomain() => AgentSession.Restore(
+        Id,
+        new AgentSessionIssueRef(ProjectId, IssueNumber),
+        new AgentSessionWorkRef(WorkflowRunId, WorkId, WorkType, Stage, Title),
+        AgentSessionStatusNames.Parse(Status),
+        Model,
+        CreatedAt,
+        StartedAt,
+        CompletedAt,
+        LastDataAt,
+        FailureReason,
+        ExitCode);
+
+    public void Apply(AgentSession session)
+    {
+        Status = AgentSessionStatusNames.ToName(session.Status);
+        Model = session.Model;
+        StartedAt = session.StartedAt;
+        CompletedAt = session.CompletedAt;
+        LastDataAt = session.LastActivityAt;
+        LastHeartbeatAt = session.LastActivityAt;
+        FailureReason = session.FailureReason;
+        ExitCode = session.ExitCode;
+    }
 }

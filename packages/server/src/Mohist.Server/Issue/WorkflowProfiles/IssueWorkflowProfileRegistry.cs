@@ -1,5 +1,3 @@
-using Mohist.Server.Issue.Domain;
-
 namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public class IssueWorkflowProfileRegistry

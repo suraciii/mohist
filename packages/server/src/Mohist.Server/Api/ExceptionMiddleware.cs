@@ -1,4 +1,4 @@
-using Mohist.Server.Workflow.Domain.Errors;
+using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Api;
 

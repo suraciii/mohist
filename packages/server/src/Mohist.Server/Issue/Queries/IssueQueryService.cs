@@ -1,9 +1,9 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Grains;
 
@@ -30,8 +30,19 @@ public class IssueQueryService
         var row = await db.GrainStates
             .AsNoTracking()
             .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
-        var issue = row is null ? null : JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
+        var issue = row is null ? null : IssueStateStore.Deserialize(row.JsonState);
         return issue is null ? null : await EnrichAsync(db, await ToReadModelAsync(issue, project));
+    }
+
+    public async Task<IssueInfo?> GetInfoAsync(string projectId, int number, ProjectInfo? project = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var key = $"{projectId}:{number}";
+        var row = await db.GrainStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
+        var issue = row is null ? null : IssueStateStore.Deserialize(row.JsonState);
+        return issue is null ? null : ToInfo(issue, project);
     }
 
     public async Task<List<IssueReadModel>> ListAsync(
@@ -49,7 +60,7 @@ public class IssueQueryService
             .Where(row => row.Type == _issueType && EF.Functions.Like(row.Key, projectId + ":%"))
             .ToListAsync();
         var list = rows
-            .Select(row => JsonSerializer.Deserialize<Domain.Issue>(row.JsonState))
+            .Select(row => IssueStateStore.Deserialize(row.JsonState))
             .Where(issue => issue is not null)
             .Cast<Domain.Issue>()
             .Where(issue => issue.ProjectId == projectId)
@@ -92,8 +103,8 @@ public class IssueQueryService
         Number = issue.Number,
         Title = issue.Title,
         Body = issue.Body,
-        Stage = IssueDomainNames.Status(issue.Status),
-        Status = IssueRuntimeSummary(issue.Status, issue.Attention),
+        Stage = IssueDomainNames.Stage(issue.Stage),
+        RuntimeStatus = IssueRuntimeSummary(issue.Stage, issue.Attention),
         ProjectId = issue.ProjectId,
         ProjectName = project?.Name,
         Labels = issue.Labels,
@@ -103,13 +114,13 @@ public class IssueQueryService
         CreatedAt = issue.CreatedAt.ToString("o"),
         UpdatedAt = issue.UpdatedAt.ToString("o"),
         ArchivedAt = issue.ArchivedAt?.ToString("o"),
-        ApprovalState = issue.ApprovalState,
+        StageApproval = issue.StageApproval,
         RetryCount = issue.RetryCount,
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         Attention = issue.Attention,
         WorkflowRunId = issue.WorkflowRunId,
-        WorkflowProfileId = issue.WorkflowProfileId,
+        WorkflowProfileId = issue.WorkflowProfileId ?? IssueWorkflowProfiles.DefaultId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
     };
 
@@ -120,7 +131,7 @@ public class IssueQueryService
         Title = issue.Title,
         Body = issue.Body,
         Stage = issue.Stage,
-        Status = issue.Status,
+        RuntimeStatus = issue.RuntimeStatus,
         ProjectId = issue.ProjectId,
         ProjectName = issue.ProjectName,
         Labels = issue.Labels,
@@ -130,7 +141,7 @@ public class IssueQueryService
         CreatedAt = issue.CreatedAt,
         UpdatedAt = issue.UpdatedAt,
         ArchivedAt = issue.ArchivedAt,
-        ApprovalState = issue.ApprovalState,
+        StageApproval = issue.StageApproval,
         RetryCount = issue.RetryCount,
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
@@ -148,20 +159,20 @@ public class IssueQueryService
         var status = await workflow.GetStatusAsync();
         if (status is null) return;
 
-        var projection = _profiles.Get(issue.WorkflowProfileId).Project(issue, status);
+        var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
 
-        issue.Stage = projection.IssueStatus;
-        issue.Status = projection.RuntimeStatus;
+        issue.Stage = projection.IssueStage;
+        issue.RuntimeStatus = projection.RuntimeStatus;
         issue.BlockedReason = projection.BlockedReason;
-        issue.ApprovalState = projection.ApprovalState;
+        issue.StageApproval = projection.StageApproval;
         issue.Attention = projection.Attention;
     }
 
-    private static string IssueRuntimeSummary(IssueStatus status, IssueAttention? attention) =>
+    private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
         status switch
         {
-            IssueStatus.Done => "completed",
-            IssueStatus.Cancelled => "cancelled",
+            IssueStage.Done => "completed",
+            IssueStage.Cancelled => "cancelled",
             _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
             _ when attention is not null => "attention",
             _ => "active",
@@ -214,7 +225,7 @@ public class IssueQueryService
                 .ToListAsync();
             foreach (var row in rows)
             {
-                var domain = JsonSerializer.Deserialize<Domain.Issue>(row.JsonState);
+                var domain = IssueStateStore.Deserialize(row.JsonState);
                 if (domain is not null)
                     prereqIssues[domain.Number] = ToReadModel(ToInfo(domain));
             }
@@ -272,8 +283,8 @@ public class IssueQueryService
         IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
-        Completed = issue.Stage == "done" || issue.Status == "completed",
+        Completed = issue.Stage == "done" || issue.RuntimeStatus == "completed",
         Stage = issue.Stage,
-        Status = issue.Status,
+        Status = issue.RuntimeStatus,
     };
 }

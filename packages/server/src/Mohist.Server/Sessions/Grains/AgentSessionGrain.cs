@@ -2,6 +2,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db;
 
 namespace Mohist.Server.Sessions.Grains;
@@ -11,7 +13,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventBus _eventBus;
     private readonly ILogger<AgentSessionGrain> _log;
-    private AgentSession? _session;
+    private AgentSessionRecord? _session;
     private long _nextSequence;
 
     public AgentSessionGrain(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<AgentSessionGrain> log)
@@ -28,7 +30,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         _session = await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == SessionId, ct);
         if (_session is null) return;
-        _nextSequence = await db.AgentSessionEvents
+        _nextSequence = await db.AgentSessionTranscriptEntries
             .Where(e => e.SessionId == SessionId)
             .Select(e => (long?)e.Sequence)
             .MaxAsync(ct) ?? 0;
@@ -50,7 +52,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         if (existing is null)
         {
-            existing = new AgentSession
+            existing = new AgentSessionRecord
             {
                 Id = SessionId,
                 ProjectId = dispatch.Issue.ProjectId,
@@ -69,7 +71,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         _session = Clone(existing);
-        _nextSequence = await db.AgentSessionEvents
+        _nextSequence = await db.AgentSessionTranscriptEntries
             .Where(e => e.SessionId == _session.Id)
             .Select(e => (long?)e.Sequence)
             .MaxAsync() ?? 0;
@@ -82,30 +84,29 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (session is null) return null;
         if (IsTerminal(session.Status)) return ToDto(session);
 
-        var now = DateTime.UtcNow;
-        session.Status = "running";
         session.ExternalSessionId = request.ExternalSessionId ?? session.ExternalSessionId;
-        session.Model = request.Model ?? session.Model;
         session.WorkDir = request.WorkDir ?? session.WorkDir;
         session.ChangeDir = request.ChangeDir ?? session.ChangeDir;
         session.ProcessPid = request.ProcessPid ?? session.ProcessPid;
-        session.StartedAt ??= now;
-        session.LastDataAt = now;
-        session.LastHeartbeatAt = now;
+        var domain = session.ToDomain();
+        domain.Start(request.Model, DateTime.UtcNow);
+        session.Apply(domain);
         await SaveSessionAsync(session);
 
         EmitStarted(session);
         return ToDto(session);
     }
 
-    public async Task<IReadOnlyList<AgentSessionEventSnapshot>> AppendEventsAsync(IReadOnlyList<AgentSessionEventInput> events)
+    public async Task<IReadOnlyList<AgentSessionTranscriptEntrySnapshot>> AppendTranscriptEntriesAsync(IReadOnlyList<AgentSessionTranscriptEntryInput> transcriptEntries)
     {
-        if (events.Count == 0) return [];
+        if (transcriptEntries.Count == 0) return [];
         var session = await LoadTrackedAsync();
         if (session is null) return [];
 
         var now = DateTime.UtcNow;
-        var entries = events.Select(e => new AgentSessionEvent
+        var domain = session.ToDomain();
+        domain.RecordActivity(now);
+        var entries = transcriptEntries.Select(e => new AgentSessionTranscriptEntry
         {
             SessionId = session.Id,
             ProjectId = session.ProjectId,
@@ -119,15 +120,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }).ToList();
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        db.AgentSessionEvents.AddRange(entries);
+        db.AgentSessionTranscriptEntries.AddRange(entries);
         var tracked = await db.AgentSessions.FirstAsync(s => s.Id == session.Id);
-        tracked.LastDataAt = now;
-        tracked.LastHeartbeatAt = now;
+        tracked.Apply(domain);
         await db.SaveChangesAsync();
         _session = Clone(tracked);
 
         foreach (var entry in entries)
-            EmitSessionEvent(tracked, entry);
+            EmitTranscriptEntry(tracked, entry);
         return entries.Select(ToDto).ToList();
     }
 
@@ -137,10 +137,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (session is null) return null;
         if (IsTerminal(session.Status)) return ToDto(session);
 
-        session.Status = NormalizeNonTerminalStatus(request.Status);
-        session.LastDataAt = request.LastDataAt ?? session.LastDataAt;
-        session.LastHeartbeatAt = DateTime.UtcNow;
-        session.FailureReason = request.FailureReason ?? session.FailureReason;
+        var domain = session.ToDomain();
+        domain.MarkActive(request.Status, request.LastDataAt ?? DateTime.UtcNow, request.FailureReason);
+        session.Apply(domain);
         await SaveSessionAsync(session);
         EmitStatusChanged(session);
         return ToDto(session);
@@ -152,14 +151,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (session is null) return null;
         if (IsTerminal(session.Status)) return ToDto(session);
 
-        var terminal = request.Status is "failed" or "cancelled" ? request.Status : "completed";
-        session.Status = terminal;
-        session.CompletedAt = DateTime.UtcNow;
-        session.LastHeartbeatAt = session.CompletedAt;
-        session.FailureReason = request.FailureReason ?? session.FailureReason;
-        session.ExitCode = request.ExitCode ?? session.ExitCode;
+        var now = DateTime.UtcNow;
+        var domain = session.ToDomain();
+        if (request.Status == "failed")
+            domain.Fail(now, request.FailureReason, request.ExitCode);
+        else if (request.Status == "cancelled")
+            domain.Cancel(now, request.FailureReason, request.ExitCode);
+        else
+            domain.Complete(now, request.ExitCode);
+        session.Apply(domain);
         await SaveSessionAsync(session);
-        EmitTerminal(session, terminal);
+        EmitTerminal(session, session.Status);
         return ToDto(session);
     }
 
@@ -169,10 +171,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         if (session is null) return null;
         if (IsTerminal(session.Status)) return ToDto(session);
 
-        session.Status = "failed";
-        session.CompletedAt = DateTime.UtcNow;
-        session.LastHeartbeatAt = session.CompletedAt;
-        session.FailureReason = reason;
+        var domain = session.ToDomain();
+        domain.Fail(DateTime.UtcNow, reason);
+        session.Apply(domain);
         await SaveSessionAsync(session);
         EmitTerminal(session, "failed");
         return ToDto(session);
@@ -184,7 +185,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return session is null ? null : ToDto(session);
     }
 
-    private async Task<AgentSession?> LoadDetachedAsync()
+    private async Task<AgentSessionRecord?> LoadDetachedAsync()
     {
         if (_session is not null) return _session;
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -192,13 +193,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return _session;
     }
 
-    private async Task<AgentSession?> LoadTrackedAsync()
+    private async Task<AgentSessionRecord?> LoadTrackedAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == SessionId);
     }
 
-    private async Task SaveSessionAsync(AgentSession session)
+    private async Task SaveSessionAsync(AgentSessionRecord session)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.AgentSessions.Update(session);
@@ -206,7 +207,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _session = Clone(session);
     }
 
-    private void EmitStarted(AgentSession session) => _eventBus.Emit("coder_session_started", new
+    private void EmitStarted(AgentSessionRecord session) => _eventBus.Emit("coder_session_started", new
     {
         issueId = session.IssueNumber.ToString(),
         session.ProjectId,
@@ -219,7 +220,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         title = session.Title,
     });
 
-    private void EmitSessionEvent(AgentSession session, AgentSessionEvent entry)
+    private void EmitTranscriptEntry(AgentSessionRecord session, AgentSessionTranscriptEntry entry)
     {
         var text = ExtractText(entry.PayloadJson);
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
@@ -248,7 +249,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
     }
 
-    private void EmitStatusChanged(AgentSession session) => _eventBus.Emit("coder_session_status_changed", new
+    private void EmitStatusChanged(AgentSessionRecord session) => _eventBus.Emit("coder_session_status_changed", new
     {
         issueId = session.IssueNumber.ToString(),
         session.ProjectId,
@@ -259,7 +260,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         failureReason = session.FailureReason,
     });
 
-    private void EmitTerminal(AgentSession session, string terminal) => _eventBus.Emit(terminal switch
+    private void EmitTerminal(AgentSessionRecord session, string terminal) => _eventBus.Emit(terminal switch
     {
         "failed" => "coder_session_failed",
         "cancelled" => "coder_session_cancelled",
@@ -274,10 +275,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         duration = DurationMs(session),
     });
 
-    private static string NormalizeNonTerminalStatus(string status) => status is "probing" or "running" ? status : "running";
     private static bool IsTerminal(string status) => status is "completed" or "failed" or "cancelled";
 
-    private static AgentSession Clone(AgentSession s) => new()
+    private static AgentSessionRecord Clone(AgentSessionRecord s) => new()
     {
         Id = s.Id,
         ProjectId = s.ProjectId,
@@ -303,7 +303,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         ExitCode = s.ExitCode,
     };
 
-    private static AgentSessionSnapshot ToDto(AgentSession s) => new(
+    private static AgentSessionSnapshot ToDto(AgentSessionRecord s) => new(
         s.Id,
         s.ProjectId,
         s.IssueNumber,
@@ -326,7 +326,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         s.FailureReason,
         s.ExitCode);
 
-    private static AgentSessionEventSnapshot ToDto(AgentSessionEvent e) => new(
+    private static AgentSessionTranscriptEntrySnapshot ToDto(AgentSessionTranscriptEntry e) => new(
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId, e.WorkId, e.Sequence, e.Type, e.PayloadJson, e.CreatedAt.ToString("o"));
 
     private static string ExtractText(string json)
@@ -348,7 +348,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return string.Empty;
     }
 
-    private static long DurationMs(AgentSession session)
+    private static long DurationMs(AgentSessionRecord session)
     {
         var start = session.StartedAt ?? session.CreatedAt;
         var end = session.CompletedAt ?? DateTime.UtcNow;

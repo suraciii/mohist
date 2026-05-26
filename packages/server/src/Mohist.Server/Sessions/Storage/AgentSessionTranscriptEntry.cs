@@ -1,6 +1,6 @@
-namespace Mohist.Server.Sessions;
+namespace Mohist.Server.Sessions.Storage;
 
-public class AgentSessionEvent
+public class AgentSessionTranscriptEntry
 {
     public long Id { get; set; }
     public string SessionId { get; set; } = string.Empty;

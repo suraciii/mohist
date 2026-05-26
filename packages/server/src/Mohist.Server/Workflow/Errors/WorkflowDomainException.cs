@@ -1,6 +1,6 @@
 using Orleans;
 
-namespace Mohist.Server.Workflow.Domain.Errors;
+namespace Mohist.Server.Workflow.Errors;
 
 [GenerateSerializer]
 public class WorkflowDomainException : Exception

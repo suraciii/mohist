@@ -1,9 +1,9 @@
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
-using System.Text.Json;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -77,17 +77,11 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null) return;
         if (_issue!.WorkflowRunId != workflowRunId) return;
-        if (_issue.Status == IssueStatus.Done) return;
+        if (_issue.Stage == IssueStage.Done) return;
 
         _issue.Complete();
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_completed", "completed", "Issue completed", new { workflowRunId });
-    }
-
-    public Task<string?> GetWorkflowRunIdAsync()
-    {
-        EnsureIssue();
-        return Task.FromResult(_issue!.WorkflowRunId);
     }
 
     public async Task UpdateAsync(string title, string? body)
@@ -139,13 +133,13 @@ public class IssueGrain : Grain, IIssueGrain
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         var wfStatus = await wfGrain.GetStatusAsync();
-        var projection = _profiles.Get(_issue.WorkflowProfileId).Project(_issue, wfStatus);
+        var projection = _profiles.Get(_issue.WorkflowProfileId).ProjectWorkflowState(_issue, wfStatus);
 
         return new IssueWorkflowStatus(
             _issue.Id,
             _issue.Number,
             _issue.Title,
-            projection.IssueStatus,
+            projection.IssueStage,
             projection.RuntimeStatus,
             wrId,
             projection.ChangeDir,
@@ -171,37 +165,6 @@ public class IssueGrain : Grain, IIssueGrain
             workflowProfileId);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
-    }
-
-    public Task<IssueInfo> GetInfoAsync()
-    {
-        EnsureIssue();
-        var info = new IssueInfo
-        {
-            Id = _issue!.Id,
-            Number = _issue.Number,
-            Title = _issue.Title,
-            Body = _issue.Body,
-            Stage = IssueDomainNames.Status(_issue.Status),
-            Status = IssueRuntimeSummary(_issue.Status, _issue.Attention),
-            ProjectId = _issue.ProjectId,
-            Labels = _issue.Labels,
-            Priority = _issue.Priority,
-            Model = _issue.Model,
-            StageModels = _issue.StageModels,
-            CreatedAt = _issue.CreatedAt.ToString("o"),
-            UpdatedAt = _issue.UpdatedAt.ToString("o"),
-            ArchivedAt = _issue.ArchivedAt?.ToString("o"),
-            ApprovalState = _issue.ApprovalState,
-            RetryCount = _issue.RetryCount,
-            ConflictRetryCount = _issue.ConflictRetryCount,
-            BlockedReason = _issue.BlockedReason,
-            Attention = _issue.Attention,
-            WorkflowRunId = _issue.WorkflowRunId,
-            WorkflowProfileId = _issue.WorkflowProfileId,
-            PrerequisiteNumbers = _issue.PrerequisiteNumbers,
-        };
-        return Task.FromResult(info);
     }
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
@@ -251,7 +214,7 @@ public class IssueGrain : Grain, IIssueGrain
             type,
             IssueId: _issue.Id,
             WorkflowRunId: _issue.WorkflowRunId,
-            Stage: IssueDomainNames.Status(_issue.Status),
+            Stage: IssueDomainNames.Stage(_issue.Stage),
             Status: status,
             Message: message,
             Payload: payload));
@@ -263,11 +226,11 @@ public class IssueGrain : Grain, IIssueGrain
             throw new InvalidOperationException($"Issue '{GrainKey}' not found");
     }
 
-    private static string IssueRuntimeSummary(IssueStatus status, IssueAttention? attention) =>
+    private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
         status switch
         {
-            IssueStatus.Done => "completed",
-            IssueStatus.Cancelled => "cancelled",
+            IssueStage.Done => "completed",
+            IssueStage.Cancelled => "cancelled",
             _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
             _ when attention is not null => "attention",
             _ => "active",
@@ -278,8 +241,8 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null) return null;
         try
         {
-            var info = await GrainFactory.GetGrain<IIssueGrain>($"{_issue.ProjectId}:{issueNumber}").GetInfoAsync();
-            return ToPrerequisiteSummary(info);
+            var prerequisite = await _issueStore.LoadAsync($"{_issue.ProjectId}:{issueNumber}");
+            return prerequisite is null ? null : ToPrerequisiteSummary(prerequisite);
         }
         catch (InvalidOperationException)
         {
@@ -287,14 +250,14 @@ public class IssueGrain : Grain, IIssueGrain
         }
     }
 
-    private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueInfo issue) => new()
+    private static IssuePrerequisiteSummary ToPrerequisiteSummary(Issue.Domain.Issue issue) => new()
     {
         IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
-        Completed = issue.Stage == "done" || issue.Status == "completed",
-        Stage = issue.Stage,
-        Status = issue.Status,
+        Completed = issue.Stage == IssueStage.Done,
+        Stage = IssueDomainNames.Stage(issue.Stage),
+        Status = IssueRuntimeSummary(issue.Stage, issue.Attention),
     };
 
 }

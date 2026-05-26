@@ -1,4 +1,4 @@
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 
 namespace Mohist.Server.Api;
 

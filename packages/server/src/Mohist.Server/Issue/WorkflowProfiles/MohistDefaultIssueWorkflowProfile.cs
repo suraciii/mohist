@@ -42,17 +42,17 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         };
     }
 
-    public MohistDefaultWorkflowState Project(Domain.Issue issue, WorkflowStatusSnapshot? workflow) =>
-        MohistDefaultWorkflowProjection.Project(
+    public MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusSnapshot? workflow) =>
+        MohistDefaultWorkflowProjection.ProjectWorkflowState(
             issue.Number,
             issue.Title,
-            IssueDomainNames.Status(issue.Status),
+            IssueDomainNames.Stage(issue.Stage),
             issue.Attention,
             issue.BlockedReason,
             workflow);
 
-    public MohistDefaultWorkflowState Project(IssueReadModel issue, WorkflowStatusSnapshot? workflow) =>
-        MohistDefaultWorkflowProjection.Project(
+    public MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusSnapshot? workflow) =>
+        MohistDefaultWorkflowProjection.ProjectWorkflowState(
             issue.Number,
             issue.Title,
             issue.Stage,

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Grains;
 
@@ -85,7 +86,7 @@ public class WorkflowProjectionService
         return result;
     }
 
-    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<Sessions.AgentSession> sessions)
+    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<AgentSessionRecord> sessions)
     {
         var eventList = events.ToList();
         var stages = status.Stages
@@ -102,7 +103,7 @@ public class WorkflowProjectionService
             status.AvailableActions.Select(a => new AvailableActionDto(a.Name, a.Label, a.Target)).ToList());
     }
 
-    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<Sessions.AgentSession> sessions)
+    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<AgentSessionRecord> sessions)
     {
         var stageEvents = events.Where(e => e.Stage == stage.Stage).ToList();
         var startedAt = stageEvents.FirstOrDefault()?.CreatedAt;
@@ -140,7 +141,7 @@ public class WorkflowProjectionService
             stage.Approval is null ? null : new ApprovalDto(stage.Approval.Status, stage.Approval.Output, stage.Approval.RequestedAt, stage.Approval.RespondedAt));
     }
 
-    private async Task<IReadOnlyList<Sessions.AgentSession>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
+    private async Task<IReadOnlyList<AgentSessionRecord>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.AgentSessions.AsNoTracking()

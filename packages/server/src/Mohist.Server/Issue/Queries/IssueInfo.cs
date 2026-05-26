@@ -1,6 +1,8 @@
-namespace Mohist.Server.Issue.Domain;
-
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
+using System.Text.Json.Serialization;
+
+namespace Mohist.Server.Issue.Queries;
 
 [GenerateSerializer]
 public class IssueInfo
@@ -10,7 +12,7 @@ public class IssueInfo
     [Id(2)]  public string Title { get; set; } = null!;
     [Id(3)]  public string? Body { get; set; }
     [Id(4)]  public string Stage { get; set; } = "backlog";
-    [Id(5)]  public string Status { get; set; } = "active";
+    [Id(5), JsonPropertyName("status")] public string RuntimeStatus { get; set; } = "active";
     [Id(6)]  public string ProjectId { get; set; } = null!;
     [Id(7)]  public string? ProjectName { get; set; }
     [Id(8)]  public string[] Labels { get; set; } = [];
@@ -20,7 +22,7 @@ public class IssueInfo
     [Id(12)] public string CreatedAt { get; set; } = "";
     [Id(13)] public string UpdatedAt { get; set; } = "";
     [Id(14)] public string? ArchivedAt { get; set; }
-    [Id(15)] public ApprovalState? ApprovalState { get; set; }
+    [Id(15), JsonPropertyName("approvalState")] public StageApproval? StageApproval { get; set; }
     [Id(17)] public int? RetryCount { get; set; }
     [Id(18)] public int? ConflictRetryCount { get; set; }
     [Id(19)] public string? BlockedReason { get; set; }

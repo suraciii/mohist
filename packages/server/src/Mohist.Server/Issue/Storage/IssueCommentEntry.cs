@@ -1,4 +1,4 @@
-namespace Mohist.Server.Issue.Domain;
+namespace Mohist.Server.Issue.Storage;
 
 public class IssueCommentEntry
 {
@@ -9,10 +9,3 @@ public class IssueCommentEntry
     public string Body { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
-
-[GenerateSerializer]
-public sealed record IssueCommentDto(
-    [property: Id(0)] string Id,
-    [property: Id(1)] string IssueId,
-    [property: Id(2)] string Body,
-    [property: Id(3)] string CreatedAt);

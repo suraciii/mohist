@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Storage.Db.Entities;
 
 namespace Mohist.Server.Api;
 

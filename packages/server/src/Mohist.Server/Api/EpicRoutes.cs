@@ -161,7 +161,7 @@ public static class EpicRoutes
         var allIssues = await issuesQuery.ListAsync(epic.ProjectId, all: true);
         var byId = allIssues.ToDictionary(i => i.Id);
         return links
-            .Select(link => byId.TryGetValue(link.IssueId, out var issue) ? new LinkedIssueDto(issue.Id, issue.Number, issue.Title, issue.Status, issue.Stage, issue.Priority) : null)
+            .Select(link => byId.TryGetValue(link.IssueId, out var issue) ? new LinkedIssueDto(issue.Id, issue.Number, issue.Title, issue.RuntimeStatus, issue.Stage, issue.Priority) : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
             .ToList();

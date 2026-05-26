@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 using Mohist.Server.Events;
-using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Storage.Db;
 
@@ -61,12 +61,12 @@ public static class CompatibilityRoutes
             return ApiResults.Ok(await GetAgentRuntimeAsync(svc));
         });
 
-        app.MapPost("/api/issues/{number:int}/comments", async (int number, string? projectId, CommentRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus) =>
+        app.MapPost("/api/issues/{number:int}/comments", async (int number, string? projectId, CommentRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, IssueQueryService issuesQuery) =>
         {
             if (string.IsNullOrWhiteSpace(req.Body)) return ApiResults.BadRequest("body is required");
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
-            var issue = await ResolveIssueAsync(pid, number, grains);
+            var issue = await ResolveIssueAsync(pid, number, issuesQuery);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
             await using var db = await dbFactory.CreateDbContextAsync();
@@ -176,16 +176,9 @@ public static class CompatibilityRoutes
         return projects.Count == 1 ? projects[0].Id : null;
     }
 
-    private static async Task<IssueInfo?> ResolveIssueAsync(string projectId, int number, IGrainFactory grains)
+    private static async Task<IssueInfo?> ResolveIssueAsync(string projectId, int number, IssueQueryService issuesQuery)
     {
-        try
-        {
-            return await grains.GetGrain<IIssueGrain>($"{projectId}:{number}").GetInfoAsync();
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
+        return await issuesQuery.GetInfoAsync(projectId, number);
     }
 }
 

@@ -6,7 +6,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 {
     Task<AgentSessionSnapshot?> EnsureCreatedAsync(EnsureAgentSessionCommand command);
     Task<AgentSessionSnapshot?> MarkStartedAsync(AgentSessionStartedCommand command);
-    Task<IReadOnlyList<AgentSessionEventSnapshot>> AppendEventsAsync(IReadOnlyList<AgentSessionEventInput> events);
+    Task<IReadOnlyList<AgentSessionTranscriptEntrySnapshot>> AppendTranscriptEntriesAsync(IReadOnlyList<AgentSessionTranscriptEntryInput> entries);
     Task<AgentSessionSnapshot?> MarkStatusAsync(AgentSessionStatusCommand command);
     Task<AgentSessionSnapshot?> MarkCompletedAsync(AgentSessionCompletedCommand command);
     Task<AgentSessionSnapshot?> FailIfRunningAsync(string reason);
@@ -32,7 +32,7 @@ public sealed record AgentSessionStartedCommand(
     [property: Id(4)] int? ProcessPid = null);
 
 [GenerateSerializer]
-public sealed record AgentSessionEventInput(
+public sealed record AgentSessionTranscriptEntryInput(
     [property: Id(0)] string Type,
     [property: Id(1)] string PayloadJson);
 
@@ -73,7 +73,7 @@ public sealed record AgentSessionSnapshot(
     [property: Id(20)] int? ExitCode);
 
 [GenerateSerializer]
-public sealed record AgentSessionEventSnapshot(
+public sealed record AgentSessionTranscriptEntrySnapshot(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
     [property: Id(2)] string ProjectId,
