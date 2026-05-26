@@ -3,6 +3,9 @@ using System.Text;
 
 internal sealed class SystemdServiceInstaller
 {
+    private const string ServerUnit = "mohist.service";
+    private const string RunnerUnit = "mohist-runner.service";
+
     private readonly TextWriter _out;
     private readonly TextWriter _err;
 
@@ -16,7 +19,7 @@ internal sealed class SystemdServiceInstaller
     {
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
         var unit = new SystemdUnit(
-            Name: "mohist.service",
+            Name: ServerUnit,
             Description: "Mohist Server",
             WorkingDirectory: repoRoot,
             ExecStart: DotnetRun(repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", [
@@ -39,7 +42,7 @@ internal sealed class SystemdServiceInstaller
             environment["RunnerRoot"] = Path.GetFullPath(options.RunnerRoot);
 
         var unit = new SystemdUnit(
-            Name: "mohist-runner.service",
+            Name: RunnerUnit,
             Description: "Mohist Runner",
             WorkingDirectory: repoRoot,
             ExecStart: DotnetRun(repoRoot, "packages/runner/src/Mohist.Runner.Cli/Mohist.Runner.Cli.csproj", []),
@@ -48,19 +51,25 @@ internal sealed class SystemdServiceInstaller
         return await InstallAsync(unit, options);
     }
 
+    public Task<int> StartServerAsync(ServiceCommandOptions options) => StartAsync(ServerUnit, options);
+    public Task<int> StopServerAsync(ServiceCommandOptions options) => StopAsync(ServerUnit, options);
+    public Task<int> RestartServerAsync(ServiceCommandOptions options) => RestartAsync(ServerUnit, options);
+    public Task<int> StatusServerAsync(ServiceCommandOptions options) => StatusAsync(ServerUnit, options);
+    public Task<int> LogsServerAsync(ServiceCommandOptions options) => LogsAsync(ServerUnit, options);
+    public Task<int> UninstallServerAsync(ServiceCommandOptions options) => UninstallAsync(ServerUnit, options);
+
+    public Task<int> StartRunnerAsync(ServiceCommandOptions options) => StartAsync(RunnerUnit, options);
+    public Task<int> StopRunnerAsync(ServiceCommandOptions options) => StopAsync(RunnerUnit, options);
+    public Task<int> RestartRunnerAsync(ServiceCommandOptions options) => RestartAsync(RunnerUnit, options);
+    public Task<int> StatusRunnerAsync(ServiceCommandOptions options) => StatusAsync(RunnerUnit, options);
+    public Task<int> LogsRunnerAsync(ServiceCommandOptions options) => LogsAsync(RunnerUnit, options);
+    public Task<int> UninstallRunnerAsync(ServiceCommandOptions options) => UninstallAsync(RunnerUnit, options);
+
     private async Task<int> InstallAsync(SystemdUnit unit, ServiceInstallOptions options)
     {
-        if (!OperatingSystem.IsLinux() && !options.DryRun)
-        {
-            _err.WriteLine("systemd install is only supported on Linux. Use --dry-run to render the unit file.");
-            return 1;
-        }
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
 
-        var unitDir = Path.GetFullPath(options.UnitDir ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".config",
-            "systemd",
-            "user"));
+        var unitDir = ResolveUnitDir(options.UnitDir);
         Directory.CreateDirectory(unitDir);
 
         var unitPath = Path.Combine(unitDir, unit.Name);
@@ -85,6 +94,97 @@ internal sealed class SystemdServiceInstaller
         _out.WriteLine($"Installed and started {unit.Name}");
         await TryEnableLingerAsync();
         return 0;
+    }
+
+    private async Task<int> StartAsync(string unitName, ServiceCommandOptions options)
+    {
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
+        return await RunSystemctlAsync(unitName, options, "start");
+    }
+
+    private async Task<int> StopAsync(string unitName, ServiceCommandOptions options)
+    {
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
+        return await RunSystemctlAsync(unitName, options, "stop");
+    }
+
+    private async Task<int> RestartAsync(string unitName, ServiceCommandOptions options)
+    {
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
+        return await RunSystemctlAsync(unitName, options, "restart");
+    }
+
+    private async Task<int> StatusAsync(string unitName, ServiceCommandOptions options)
+    {
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
+        return await RunSystemctlAsync(unitName, options, "status", "--no-pager");
+    }
+
+    private async Task<int> LogsAsync(string unitName, ServiceCommandOptions options)
+    {
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
+        var args = new List<string> { "--user", "-u", unitName, "--no-pager", "-n", options.Lines.ToString() };
+        if (options.Follow)
+            args.Add("-f");
+
+        if (options.DryRun)
+        {
+            _out.WriteLine("Dry run: journalctl " + string.Join(' ', args.Select(ShellQuote)));
+            return 0;
+        }
+
+        return await RunAsync("journalctl", args.ToArray());
+    }
+
+    private async Task<int> UninstallAsync(string unitName, ServiceCommandOptions options)
+    {
+        if (!EnsureSystemdSupported(options.DryRun)) return 1;
+        var unitPath = Path.Combine(ResolveUnitDir(options.UnitDir), unitName);
+
+        if (options.DryRun)
+        {
+            _out.WriteLine($"Dry run: systemctl --user disable --now {unitName}");
+            _out.WriteLine($"Dry run: remove {unitPath}");
+            _out.WriteLine("Dry run: systemctl --user daemon-reload");
+            return 0;
+        }
+
+        var disable = await RunAsync("systemctl", ["--user", "disable", "--now", unitName]);
+        if (disable != 0) return disable;
+
+        if (File.Exists(unitPath))
+        {
+            File.Delete(unitPath);
+            _out.WriteLine($"Removed {unitPath}");
+        }
+        else
+        {
+            _out.WriteLine($"Unit file not found: {unitPath}");
+        }
+
+        return await RunAsync("systemctl", ["--user", "daemon-reload"]);
+    }
+
+    private async Task<int> RunSystemctlAsync(string unitName, ServiceCommandOptions options, params string[] command)
+    {
+        var args = new List<string> { "--user" };
+        args.AddRange(command);
+        args.Add(unitName);
+
+        if (options.DryRun)
+        {
+            _out.WriteLine("Dry run: systemctl " + string.Join(' ', args.Select(ShellQuote)));
+            return 0;
+        }
+
+        return await RunAsync("systemctl", args.ToArray());
+    }
+
+    private bool EnsureSystemdSupported(bool dryRun)
+    {
+        if (OperatingSystem.IsLinux() || dryRun) return true;
+        _err.WriteLine("systemd service management is only supported on Linux. Use --dry-run to preview commands.");
+        return false;
     }
 
     private async Task<int> RunAsync(string fileName, string[] args)
@@ -143,6 +243,12 @@ internal sealed class SystemdServiceInstaller
         return Directory.GetCurrentDirectory();
     }
 
+    private static string ResolveUnitDir(string? explicitUnitDir) => Path.GetFullPath(explicitUnitDir ?? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".config",
+        "systemd",
+        "user"));
+
     private static string DotnetRun(string repoRoot, string projectPath, IReadOnlyList<string> args)
     {
         var parts = new List<string>
@@ -191,6 +297,37 @@ internal sealed record ServiceInstallOptions(
         {
             if (args[i] != name) continue;
             if (i + 1 >= args.Length) throw new ArgumentException($"{name} requires a value");
+            return args[i + 1];
+        }
+        return null;
+    }
+}
+
+internal sealed record ServiceCommandOptions(
+    bool DryRun,
+    string? UnitDir,
+    int Lines,
+    bool Follow)
+{
+    public static ServiceCommandOptions From(string[] args) => new(
+        DryRun: args.Contains("--dry-run"),
+        UnitDir: Option(args, "--unit-dir"),
+        Lines: ParseLines(Option(args, "--lines", "-n")),
+        Follow: args.Contains("--follow") || args.Contains("-f"));
+
+    private static int ParseLines(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return 100;
+        if (int.TryParse(value, out var lines) && lines > 0) return lines;
+        throw new ArgumentException("--lines requires a positive integer");
+    }
+
+    private static string? Option(string[] args, params string[] names)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (!names.Contains(args[i])) continue;
+            if (i + 1 >= args.Length) throw new ArgumentException($"{args[i]} requires a value");
             return args[i + 1];
         }
         return null;

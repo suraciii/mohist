@@ -94,14 +94,20 @@ internal sealed class MohistCli
     {
         if (args.Length == 0 || IsHelp(args[0]))
         {
-            _out.WriteLine("Usage: mo server <status|health|install>");
+            _out.WriteLine("Usage: mo server <status|health|install|start|stop|restart|logs|uninstall>");
             return 0;
         }
 
         return args[0] switch
         {
-            "status" or "health" => await PrintGetAsync("/api/health"),
+            "health" => await PrintGetAsync("/api/health"),
             "install" => await _systemd.InstallServerAsync(ServiceInstallOptions.From(args[1..])),
+            "status" => await _systemd.StatusServerAsync(ServiceCommandOptions.From(args[1..])),
+            "start" => await _systemd.StartServerAsync(ServiceCommandOptions.From(args[1..])),
+            "stop" => await _systemd.StopServerAsync(ServiceCommandOptions.From(args[1..])),
+            "restart" => await _systemd.RestartServerAsync(ServiceCommandOptions.From(args[1..])),
+            "logs" => await _systemd.LogsServerAsync(ServiceCommandOptions.From(args[1..])),
+            "uninstall" or "remove" => await _systemd.UninstallServerAsync(ServiceCommandOptions.From(args[1..])),
             _ => UsageError($"Unknown server command '{args[0]}'"),
         };
     }
@@ -110,13 +116,19 @@ internal sealed class MohistCli
     {
         if (args.Length == 0 || IsHelp(args[0]))
         {
-            _out.WriteLine("Usage: mo runner <install>");
+            _out.WriteLine("Usage: mo runner <install|status|start|stop|restart|logs|uninstall>");
             return 0;
         }
 
         return args[0] switch
         {
             "install" => await _systemd.InstallRunnerAsync(ServiceInstallOptions.From(args[1..])),
+            "status" => await _systemd.StatusRunnerAsync(ServiceCommandOptions.From(args[1..])),
+            "start" => await _systemd.StartRunnerAsync(ServiceCommandOptions.From(args[1..])),
+            "stop" => await _systemd.StopRunnerAsync(ServiceCommandOptions.From(args[1..])),
+            "restart" => await _systemd.RestartRunnerAsync(ServiceCommandOptions.From(args[1..])),
+            "logs" => await _systemd.LogsRunnerAsync(ServiceCommandOptions.From(args[1..])),
+            "uninstall" or "remove" => await _systemd.UninstallRunnerAsync(ServiceCommandOptions.From(args[1..])),
             _ => UsageError($"Unknown runner command '{args[0]}'"),
         };
     }
@@ -442,8 +454,13 @@ internal sealed class MohistCli
 
         Commands:
           mo server status
+          mo server health
           mo server install [--repo-root <path>] [--unit-dir <path>] [--listen-url <url>] [--dry-run]
+          mo server start|stop|restart|status|uninstall [--dry-run]
+          mo server logs [-n <lines>] [--follow] [--dry-run]
           mo runner install [--repo-root <path>] [--unit-dir <path>] [--server-url <url>] [--runner-root <path>] [--dry-run]
+          mo runner start|stop|restart|status|uninstall [--dry-run]
+          mo runner logs [-n <lines>] [--follow] [--dry-run]
           mo status
           mo project list
           mo project create <name> [--path <path>] [--base-branch <branch>]

@@ -54,14 +54,26 @@ mo issue approve 1
 
 | 命令 | 说明 |
 |------|------|
-| `mo server status` | 查看 Server 健康状态 |
 | `mo server install [--repo-root <path>] [--unit-dir <path>] [--listen-url <url>] [--dry-run]` | 安装并启动 systemd 用户服务 |
+| `mo server start` | 启动 Server systemd 用户服务 |
+| `mo server stop` | 停止 Server systemd 用户服务 |
+| `mo server restart` | 重启 Server systemd 用户服务 |
+| `mo server status` | 查看 Server systemd 服务状态 |
+| `mo server health` | 查看 Server HTTP 健康状态 |
+| `mo server logs [-n <行数>] [--follow]` | 查看 Server journal 日志 |
+| `mo server uninstall [--unit-dir <path>] [--dry-run]` | 卸载 Server systemd 用户服务 |
 
 ### Runner 管理 (`mo runner`)
 
 | 命令 | 说明 |
 |------|------|
 | `mo runner install [--repo-root <path>] [--unit-dir <path>] [--server-url <url>] [--runner-root <path>] [--dry-run]` | 安装并启动 Runner systemd 用户服务 |
+| `mo runner start` | 启动 Runner systemd 用户服务 |
+| `mo runner stop` | 停止 Runner systemd 用户服务 |
+| `mo runner restart` | 重启 Runner systemd 用户服务 |
+| `mo runner status` | 查看 Runner systemd 服务状态 |
+| `mo runner logs [-n <行数>] [--follow]` | 查看 Runner journal 日志 |
+| `mo runner uninstall [--unit-dir <path>] [--dry-run]` | 卸载 Runner systemd 用户服务 |
 
 ### 项目管理 (`mo project`)
 
