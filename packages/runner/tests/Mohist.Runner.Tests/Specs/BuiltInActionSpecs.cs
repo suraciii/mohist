@@ -1,4 +1,5 @@
 using Mohist.Runner.Actions;
+using Mohist.Runner.Handlers;
 using Xunit;
 
 namespace Mohist.Runner.Tests.Specs;
@@ -11,7 +12,7 @@ public class BuiltInActionSpecs
         using var temp = new TempDir();
         await File.WriteAllTextAsync(System.IO.Path.Combine(temp.Path, "proposal.md"), "ok");
 
-        var result = await new ArtifactExistsAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "mohist/artifact-exists", new { path = "proposal.md" }));
+        var result = await new ArtifactExistsAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "core/artifact-exists", new { path = "proposal.md" }));
 
         Assert.Equal("success", result.Status);
     }
@@ -21,7 +22,7 @@ public class BuiltInActionSpecs
     {
         using var temp = new TempDir();
 
-        var result = await new ArtifactExistsAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "mohist/artifact-exists", new { path = "missing.md" }));
+        var result = await new ArtifactExistsAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "core/artifact-exists", new { path = "missing.md" }));
 
         Assert.Equal("failure", result.Status);
         Assert.Contains("missing.md", result.Message);
@@ -33,7 +34,7 @@ public class BuiltInActionSpecs
         using var temp = new TempDir();
         await File.WriteAllTextAsync(System.IO.Path.Combine(temp.Path, "review.md"), "<promise>PASS</promise>");
 
-        var result = await new MarkerAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "mohist/marker", new { path = "review.md", expect = "<promise>PASS</promise>" }));
+        var result = await new MarkerAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "core/marker", new { path = "review.md", expect = "<promise>PASS</promise>" }));
 
         Assert.Equal("success", result.Status);
     }
@@ -44,33 +45,34 @@ public class BuiltInActionSpecs
         using var temp = new TempDir();
         await File.WriteAllTextAsync(System.IO.Path.Combine(temp.Path, "review.md"), "<promise>FAIL</promise>");
 
-        var result = await new MarkerAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "mohist/marker", new { path = "review.md", expect = "<promise>PASS</promise>" }));
+        var result = await new MarkerAction().ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "core/marker", new { path = "review.md", expect = "<promise>PASS</promise>" }));
 
         Assert.Equal("failure", result.Status);
     }
 
     [Fact]
-    public async Task HealthGate_CommandSucceeds_Passes()
+    public async Task Script_RunSucceeds_Passes()
     {
         using var temp = new TempDir();
 
-        var result = await new HealthGateAction(SpecHelpers.Logger<HealthGateAction>())
-            .ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "mohist/health-gate", new { command = "true", timeout = 10_000 }));
+        var result = await new ScriptHandler(SpecHelpers.Logger<ScriptHandler>())
+            .ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "core/script", new { run = "true", timeout = 10_000 }));
 
         Assert.Equal("success", result.Status);
         Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"kind\":\"script\"", result.Output);
     }
 
     [Fact]
-    public async Task HealthGate_CommandFails_ReturnsCommandOutput()
+    public async Task Script_RunFails_ReturnsCommandOutput()
     {
         using var temp = new TempDir();
 
-        var result = await new HealthGateAction(SpecHelpers.Logger<HealthGateAction>())
-            .ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "mohist/health-gate", new { command = "false", timeout = 10_000 }));
+        var result = await new ScriptHandler(SpecHelpers.Logger<ScriptHandler>())
+            .ExecuteAsync(SpecHelpers.Context(temp.Path, "check", "core/script", new { run = "false", timeout = 10_000 }));
 
         Assert.Equal("failure", result.Status);
         Assert.NotNull(result.Output);
-        Assert.Contains("health-gate", result.Output);
+        Assert.Contains("\"run\":\"false\"", result.Output);
     }
 }

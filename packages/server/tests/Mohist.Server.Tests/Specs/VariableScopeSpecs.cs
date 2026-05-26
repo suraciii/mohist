@@ -139,7 +139,9 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Equal("checks", check.WorkType);
         Assert.Contains("core/artifact-exists", check.With);
         Assert.Contains("core/marker", check.With);
-        Assert.Contains("core/health-gate", check.With);
+        Assert.Contains("core/script", check.With);
+        Assert.Contains("\"name\":\"health\"", check.With);
+        Assert.Contains("\"run\":\"git diff --check\"", check.With);
     }
 
     [Fact]

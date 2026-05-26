@@ -15,7 +15,7 @@ public class TransportContractSpecs
         {
             workflowRunId = "wr-1",
             workId = "check-1:abc",
-            uses = "mohist/artifact-exists",
+            uses = "core/artifact-exists",
             with = "{\"path\":\"proposal.md\"}",
             variables = "{\"issue\":{\"number\":42}}",
             workType = "check",

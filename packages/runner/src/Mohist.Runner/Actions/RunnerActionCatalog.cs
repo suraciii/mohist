@@ -10,7 +10,6 @@ public static class RunnerActionCatalog
 
     public const string CoreProcess = "core/process";
     public const string CoreScript = "core/script";
-    public const string CoreHealthGate = "core/health-gate";
     public const string CoreArtifactExists = "core/artifact-exists";
     public const string CoreMarker = "core/marker";
 
@@ -33,7 +32,6 @@ public static class RunnerActionCatalog
 
         manager.Register(CoreProcess, () => new ProcessHandler(services.GetRequiredService<ILogger<ProcessHandler>>()));
         manager.Register(CoreScript, () => new ScriptHandler(services.GetRequiredService<ILogger<ScriptHandler>>()));
-        manager.Register(CoreHealthGate, () => new HealthGateAction(services.GetRequiredService<ILogger<HealthGateAction>>()));
         manager.Register(CoreArtifactExists, () => new ArtifactExistsAction());
         manager.Register(CoreMarker, () => new MarkerAction());
 
@@ -45,11 +43,5 @@ public static class RunnerActionCatalog
         manager.Register(MohistArchiveChange, () => new ArchiveChangeAction());
         manager.Register(MohistMerge, () => new MergeAction());
 
-        // Compatibility aliases for older Mohist workflow definitions.
-        manager.Register("mohist/process", () => new ProcessHandler(services.GetRequiredService<ILogger<ProcessHandler>>()));
-        manager.Register("mohist/script", () => new ScriptHandler(services.GetRequiredService<ILogger<ScriptHandler>>()));
-        manager.Register("mohist/health-gate", () => new HealthGateAction(services.GetRequiredService<ILogger<HealthGateAction>>()));
-        manager.Register("mohist/artifact-exists", () => new ArtifactExistsAction());
-        manager.Register("mohist/marker", () => new MarkerAction());
     }
 }
