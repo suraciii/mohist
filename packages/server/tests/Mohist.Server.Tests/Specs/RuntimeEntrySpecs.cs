@@ -1,6 +1,4 @@
 using System.Net;
-using Microsoft.Extensions.Configuration;
-using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -50,7 +48,7 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenEmbeddedRunnerDisabledAndNoRunnerConnected_ReportsUnavailableRuntime()
+    public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
         await UnregisterAllRunnersAsync();
 
@@ -59,15 +57,7 @@ public class RuntimeEntrySpecs
         Assert.False(status.Running);
         Assert.False(status.RunnerAvailable);
         Assert.False(status.EmbeddedRunnerEnabled);
-        Assert.Contains("No runner is connected", status.RunnerMessage);
-    }
-
-    [Fact]
-    public void EmbeddedRunner_IsEnabledByDefaultForLocalProduct()
-    {
-        var config = new ConfigurationBuilder().Build();
-
-        Assert.True(EmbeddedRunnerService.IsEnabled(config));
+        Assert.Equal("No runner is connected. Start the Mohist runner process.", status.RunnerMessage);
     }
 
     private async Task UnregisterAllRunnersAsync()

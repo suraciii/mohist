@@ -18,11 +18,11 @@ public static class MohistWorkflow
     private static StageDefinitionInput Plan => new(
         "plan",
         [
-            new TaskDefinitionInput("proposal", "Generate proposal", Agent, AgentWith("plan", "proposal", requiredPath: "proposal.md")),
-            new TaskDefinitionInput("specs", "Write specs", Agent, AgentWith("plan", "specs", requiredPath: "specs")),
-            new TaskDefinitionInput("design", "Create design", Agent, AgentWith("plan", "design", requiredPath: "design.md")),
-            new TaskDefinitionInput("tasks", "Generate tasks", Agent, AgentWith("plan", "tasks", requiredPath: "tasks.json")),
-            new TaskDefinitionInput("self-review", "Self review", Agent, AgentWith("plan", "self-review", requiredPath: "self-review.md", markerPath: "self-review.md", marker: "PASS")),
+            new TaskDefinitionInput("proposal", "Generate proposal", Agent, AgentWith(ProposalPrompt, requiredPath: "proposal.md", model: "${{ model.stage.plan }}")),
+            new TaskDefinitionInput("specs", "Write specs", Agent, AgentWith(SpecsPrompt, requiredPath: "specs", model: "${{ model.stage.plan }}")),
+            new TaskDefinitionInput("design", "Create design", Agent, AgentWith(DesignPrompt, requiredPath: "design.md", model: "${{ model.stage.plan }}")),
+            new TaskDefinitionInput("tasks", "Generate tasks", Agent, AgentWith(TasksPrompt, requiredPath: "tasks.json", model: "${{ model.stage.plan }}")),
+            new TaskDefinitionInput("self-review", "Self review", Agent, AgentWith(SelfReviewPrompt, requiredPath: "self-review.md", markerPath: "self-review.md", marker: "PASS", model: "${{ model.stage.plan }}")),
         ],
         [
             ArtifactExists("proposal-complete", "Proposal complete", "proposal.md"),
@@ -30,7 +30,7 @@ public static class MohistWorkflow
             ArtifactExists("design-complete", "Design complete", "design.md"),
             ArtifactExists("tasks-valid", "Tasks valid", "tasks.json"),
             Marker("self-review-passed", "Self review passed", "self-review.md", "PASS", 1,
-                new TaskDefinitionInput("fix-plan-review", "Fix plan review findings", Agent, AgentWith("plan", "fix-plan-review"))),
+                new TaskDefinitionInput("fix-plan-review", "Fix plan review findings", Agent, AgentWith(FixPlanReviewPrompt, model: "${{ model.stage.plan }}"))),
             ScriptCheck("health", "Health", "git diff --check"),
         ],
         RequiresApproval: true);
@@ -40,7 +40,7 @@ public static class MohistWorkflow
         [],
         [
             ScriptCheck("health", "Health", "git diff --check", 1,
-                new TaskDefinitionInput("fix-build-health", "Fix build health", Agent, AgentWith("build", "fix-build-health"))),
+                new TaskDefinitionInput("fix-build-health", "Fix build health", Agent, AgentWith(FixBuildHealthPrompt, model: "${{ model.stage.build }}"))),
         ],
         TasksFromUses: "mohist/openspec-tasks",
         TasksFromWith: """
@@ -51,12 +51,12 @@ public static class MohistWorkflow
 
     private static StageDefinitionInput Check => new(
         "check",
-        [new TaskDefinitionInput("ai-review", "AI review", "mohist/check/ai-review", ChangeDirWith())],
+        [new TaskDefinitionInput("ai-review", "AI review", Agent, AgentWith(AiReviewPrompt, requiredPath: "review.md", model: "${{ model.stage.check }}"))],
         [
             ScriptCheck("health", "Health", "git diff --check", 1,
-                new TaskDefinitionInput("fix-check-health", "Fix check health", Agent, AgentWith("check", "fix-check-health"))),
+                new TaskDefinitionInput("fix-check-health", "Fix check health", Agent, AgentWith(FixCheckHealthPrompt, model: "${{ model.stage.check }}"))),
             Marker("review-passed", "Review passed", "review.md", "PASS", 2,
-                new TaskDefinitionInput("fix-review-findings", "Fix review findings", Agent, AgentWith("check", "fix-review-findings"))),
+                new TaskDefinitionInput("fix-review-findings", "Fix review findings", Agent, AgentWith(FixReviewFindingsPrompt, model: "${{ model.stage.check }}"))),
             new CheckDefinitionInput("merge-ready", "Merge ready", "mohist/merge-ready"),
         ],
         RequiresApproval: true);
@@ -70,7 +70,7 @@ public static class MohistWorkflow
         ],
         [
             ScriptCheck("health", "Health", "git diff --check", 1,
-                new TaskDefinitionInput("fix-integrate-health", "Fix integrate health", Agent, AgentWith("integrate", "fix-integrate-health"))),
+                new TaskDefinitionInput("fix-integrate-health", "Fix integrate health", Agent, AgentWith(FixIntegrateHealthPrompt, model: "${{ model.stage.integrate }}"))),
         ]);
 
     private static CheckDefinitionInput ArtifactExists(string name, string title, string path) => new(
@@ -110,22 +110,96 @@ public static class MohistWorkflow
         retryLimit,
         retryTask);
 
-    private static string AgentWith(string stage, string task, string? requiredPath = null, string? markerPath = null, string? marker = null)
+    private static string AgentWith(string prompt, string? requiredPath = null, string? markerPath = null, string? marker = null, string? model = null)
     {
         var input = new Dictionary<string, object?>
         {
-            ["stage"] = stage,
-            ["task"] = task
+            ["prompt"] = prompt,
         };
 
+        if (!string.IsNullOrWhiteSpace(model))
+            input["model"] = model;
+
+        var expect = new Dictionary<string, object?>();
+
         if (!string.IsNullOrWhiteSpace(requiredPath))
-            input["requireFiles"] = new[] { new Dictionary<string, string> { ["path"] = $"${{{{ openspecChangeDir }}}}/{requiredPath}" } };
+            expect["files"] = new[] { new Dictionary<string, string> { ["path"] = $"${{{{ openspecChangeDir }}}}/{requiredPath}" } };
 
         if (!string.IsNullOrWhiteSpace(markerPath) && !string.IsNullOrWhiteSpace(marker))
-            input["requireMarkers"] = new[] { new Dictionary<string, string> { ["path"] = $"${{{{ openspecChangeDir }}}}/{markerPath}", ["marker"] = marker } };
+            expect["markers"] = new[] { new Dictionary<string, string> { ["path"] = $"${{{{ openspecChangeDir }}}}/{markerPath}", ["contains"] = marker } };
+
+        if (expect.Count > 0)
+            input["expect"] = expect;
 
         return JsonSerializer.Serialize(input, WorkflowVariableJson.Options);
     }
+
+    private const string ProposalPrompt = """
+    Create ${{ openspecChangeDir }}/proposal.md.
+    The proposal explains why the change is needed, what will change, capabilities affected, and implementation impact.
+    Keep it concise and avoid copying prompt instructions into the file.
+    """;
+
+    private const string SpecsPrompt = """
+    Read ${{ openspecChangeDir }}/proposal.md and create spec delta files under ${{ openspecChangeDir }}/specs/<capability>/spec.md.
+    Use ADDED/MODIFIED/REMOVED/RENAMED Requirements sections.
+    Every requirement must include at least one #### Scenario with WHEN/THEN behavior.
+    """;
+
+    private const string DesignPrompt = """
+    Create ${{ openspecChangeDir }}/design.md.
+    Include Context, Goals/Non-Goals, Decisions with rationale, Risks/Trade-offs, Migration Plan, and Open Questions.
+    Focus on how to implement the proposal and specs.
+    """;
+
+    private const string TasksPrompt = """
+    Create ${{ openspecChangeDir }}/tasks.json.
+    The file must contain a JSON object with a tasks array.
+    Each task must have id, title, description, acceptanceCriteria, priority, mode, type, output, dependsOn, passes=false, and notes.
+    Tasks must be ordered by dependency and every non-first task should depend on earlier task IDs.
+    """;
+
+    private const string SelfReviewPrompt = """
+    Review proposal.md, specs, design.md, and tasks.json in ${{ openspecChangeDir }}.
+    Fix any issues directly when possible.
+    Create ${{ openspecChangeDir }}/self-review.md with Result, repaired/blocking/follow-up items, and exactly one final marker:
+    <promise>PASS</promise> or <promise>FAIL</promise>.
+    """;
+
+    private const string FixPlanReviewPrompt = """
+    Fix the plan review findings in ${{ openspecChangeDir }}.
+    Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
+    """;
+
+    private const string FixBuildHealthPrompt = """
+    Fix the build-stage health failure reported by `git diff --check`.
+    Keep changes focused on whitespace and patch formatting issues.
+    """;
+
+    private const string FixCheckHealthPrompt = """
+    Fix the check-stage health failure reported by `git diff --check`.
+    Keep changes focused on whitespace and patch formatting issues.
+    """;
+
+    private const string FixReviewFindingsPrompt = """
+    Read ${{ openspecChangeDir }}/review.md and fix the blocking findings.
+    Keep changes focused on review failures and preserve existing passing behavior.
+    """;
+
+    private const string AiReviewPrompt = """
+    Review the current workspace implementation and the change artifacts in ${{ openspecChangeDir }}.
+    Write the review result to ${{ openspecChangeDir }}/review.md.
+    The review must identify blocking correctness, test, integration, or product contract issues.
+    End the file with exactly one marker:
+    <promise>PASS</promise>
+    or
+    <promise>FAIL</promise>.
+    """;
+
+    private const string FixIntegrateHealthPrompt = """
+    Fix the integrate-stage health failure reported by `git diff --check`.
+    Keep changes focused on whitespace and patch formatting issues.
+    """;
 
     private static string ChangeDirWith() => """
     {

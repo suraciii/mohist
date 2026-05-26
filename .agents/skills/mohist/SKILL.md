@@ -12,7 +12,7 @@ hidden: true
 
 - ASP.NET Core API: `http://localhost:3456/api/...`
 - Server: `dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj`
-- Runner: `dotnet run --project packages/runner/src/Mohist.Runner.Cli/Mohist.Runner.Cli.csproj`
-- Tests: `dotnet test packages/server/Mohist.sln` 和 `dotnet test packages/runner/tests/Mohist.Runner.Tests/Mohist.Runner.Tests.csproj`
+- Runner: `npm run dev:runner`
+- Tests: `dotnet test packages/server/Mohist.sln`
 
 如果用户明确要求旧 `mo` 命令，说明它已经废弃，并改用当前 API 或 Web UI 路径完成同等操作。

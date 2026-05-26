@@ -34,9 +34,8 @@ packages/server/
 └── tests/Mohist.Server.Tests/  # 后端 spec/集成测试
 
 packages/runner/
-├── src/Mohist.Runner/          # shared runner library
-├── src/Mohist.Runner.Cli/      # standalone runner CLI
-└── tests/Mohist.Runner.Tests/
+├── src/                        # TypeScript runner runtime
+└── package.json                # standalone runner package
 
 packages/web/
 ├── src/                        # React Web UI

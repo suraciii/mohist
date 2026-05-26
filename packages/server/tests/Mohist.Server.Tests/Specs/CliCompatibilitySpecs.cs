@@ -101,9 +101,9 @@ public class CliCompatibilitySpecs
             Assert.Equal(0, runner.ExitCode);
             var runnerUnit = await File.ReadAllTextAsync(Path.Combine(unitDir, "mohist-runner.service"));
             Assert.Contains("Description=Mohist Runner", runnerUnit);
-            Assert.Contains("Mohist.Runner.Cli.csproj", runnerUnit);
-            Assert.Contains("Environment=\"ServerUrl=http://127.0.0.1:4567\"", runnerUnit);
-            Assert.Contains($"Environment=\"RunnerRoot={runnerRoot}\"", runnerUnit);
+            Assert.Contains("ExecStart=npm run start -w packages/runner", runnerUnit);
+            Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", runnerUnit);
+            Assert.Contains($"Environment=\"RUNNER_ROOT={runnerRoot}\"", runnerUnit);
         }
         finally
         {
