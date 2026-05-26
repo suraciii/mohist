@@ -277,7 +277,7 @@ npm install
 git diff --check
 
 # 运行测试
-dotnet test packages/server/Mohist.sln
+dotnet test Mohist.sln
 
 # Web UI 测试
 npm --prefix packages/web run test:run

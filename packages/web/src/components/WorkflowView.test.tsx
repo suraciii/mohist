@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '../../tests/test-utils'
 import { WorkflowView } from './WorkflowView'
-import { IssueStatus, Stage, type Issue, type WorkflowTimeline } from '../lib/types'
+import { IssueStage, IssueStatus, WorkflowStage, type Issue, type WorkflowTimeline } from '../lib/types'
 import { useWorkflowTimeline } from '../hooks/useQueries'
 
 vi.mock('../hooks/useQueries', () => ({
@@ -17,7 +17,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     number: 1,
     title: 'Implement workflow naming',
     body: '',
-    stage: Stage.Build,
+    stage: IssueStage.InProgress,
+    workflowStage: WorkflowStage.Build,
     status: IssueStatus.Active,
     projectId: 'test-project',
     labels: [],
@@ -32,17 +33,17 @@ function makeTimeline(): WorkflowTimeline {
   return {
     workflowRunId: 'workflow-run-1',
     status: 'Running',
-    currentStage: Stage.Build,
+    currentStage: WorkflowStage.Build,
     pendingWork: {
       workId: 'build-task-1',
       workType: 'task',
-      stage: Stage.Build,
+      stage: WorkflowStage.Build,
       title: 'Implement WorkflowView',
       uses: 'mohist/coder-agent',
     },
     stages: [
       {
-        stage: Stage.Build,
+        stage: WorkflowStage.Build,
         status: 'running',
         order: 2,
         startedAt: '2026-01-01T00:00:00.000Z',
@@ -97,8 +98,51 @@ describe('WorkflowView', () => {
   it('does not request workflow timeline for backlog issues', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: undefined } as ReturnType<typeof useWorkflowTimeline>)
 
-    render(<WorkflowView issue={makeIssue({ stage: Stage.Backlog })} />)
+    render(<WorkflowView issue={makeIssue({ stage: IssueStage.Backlog, workflowStage: null })} />)
 
     expect(mockedUseWorkflowTimeline).toHaveBeenCalledWith(1, false)
+  })
+
+  it('renders approval actions when an attention issue is awaiting approval', () => {
+    mockedUseWorkflowTimeline.mockReturnValue(({
+      data: {
+        ...makeTimeline(),
+        status: 'AwaitingApproval',
+        currentStage: WorkflowStage.Plan,
+        pendingWork: null,
+        stages: [
+          {
+            stage: WorkflowStage.Plan,
+            status: 'awaitingApproval',
+            order: 1,
+            startedAt: '2026-01-01T00:00:00.000Z',
+            completedAt: null,
+            durationMs: null,
+            tasks: [],
+            checks: [],
+            approval: {
+              status: 'awaiting',
+              requestedAt: '2026-01-01T00:01:00.000Z',
+              respondedAt: null,
+            },
+          },
+        ],
+        availableActions: [{ name: 'approve', label: 'Approve', target: null }],
+      },
+    } as unknown) as ReturnType<typeof useWorkflowTimeline>)
+
+    render(<WorkflowView issue={makeIssue({
+      workflowStage: WorkflowStage.Plan,
+      status: 'attention' as IssueStatus,
+      approvalState: {
+        status: 'awaiting',
+        stage: WorkflowStage.Plan,
+        requestedAt: '2026-01-01T00:01:00.000Z',
+      },
+    })} />)
+
+    expect(screen.getByText('Approval Required')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve & Continue' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send back' })).toBeInTheDocument()
   })
 })

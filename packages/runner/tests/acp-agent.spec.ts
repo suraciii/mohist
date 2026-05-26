@@ -17,6 +17,22 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.map((call) => call.event).filter((event) => ["initialize", "newSession", "prompt"].includes(event))).toEqual(["initialize", "newSession", "prompt"])
   })
 
+  it("OpenSpecTaskWithoutPrompt_ActionBuildsPromptFromTaskFields", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      description: "Requeue runnable workflows on server startup.",
+      acceptanceCriteria: ["runner can claim recovered work"],
+      output: "packages/server/src/Mohist.Server/Workflow/Recovery",
+    }))
+
+    expect(result.status).toBe("success")
+    const prompt = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(prompt).toContain("Implement this task: Build task")
+    expect(prompt).toContain("Requeue runnable workflows on server startup.")
+    expect(prompt).toContain("runner can claim recovered work")
+  })
+
   it("ModelConfigured_AcpSessionStarts_SetsSessionConfigModelBeforePrompt", async () => {
     const fixture = createFixture("basic")
 

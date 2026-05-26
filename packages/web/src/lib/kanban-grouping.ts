@@ -1,28 +1,25 @@
 import type { Issue } from './types'
-import { Stage, IssueStatus } from './types'
+import { IssueStage } from './types'
 
 export interface Column {
-  key: Stage
+  key: IssueStage
   label: string
   issues: Issue[]
 }
 
-export const STAGES: { key: Stage; label: string }[] = [
-  { key: Stage.Backlog, label: 'Backlog' },
-  { key: Stage.Plan, label: 'Plan' },
-  { key: Stage.Build, label: 'Build' },
-  { key: Stage.Check, label: 'Check' },
-  { key: Stage.Integrate, label: 'Integrate' },
-  { key: Stage.Done, label: 'Done' },
+export const STAGES: { key: IssueStage; label: string }[] = [
+  { key: IssueStage.Backlog, label: 'Backlog' },
+  { key: IssueStage.Todo, label: 'Ready' },
+  { key: IssueStage.InProgress, label: 'In Progress' },
+  { key: IssueStage.Done, label: 'Done' },
+  { key: IssueStage.Cancelled, label: 'Cancelled' },
 ]
 
 export function groupIssuesByStage(issues: Issue[]): Column[] {
-  const map = new Map<Stage, Issue[]>()
+  const map = new Map<IssueStage, Issue[]>()
   for (const s of STAGES) map.set(s.key, [])
   for (const issue of issues) {
-    const targetStage =
-      issue.status === IssueStatus.Closed ? Stage.Done : issue.stage
-    const list = map.get(targetStage)
+    const list = map.get(issue.stage)
     if (list) list.push(issue)
   }
   return STAGES.map((s) => ({
@@ -37,12 +34,10 @@ export function filterClosedFromDone(
 ): Column[] {
   if (showClosed) return columns
   return columns.map((col) =>
-    col.key === Stage.Done
+    col.key === IssueStage.Cancelled
       ? {
           ...col,
-          issues: col.issues.filter(
-            (i) => i.status !== IssueStatus.Closed,
-          ),
+          issues: [],
         }
       : col,
   )
@@ -52,10 +47,12 @@ export function getDoneColumnCounts(columns: Column[]): {
   closedCount: number
   doneTotalCount: number
 } {
-  const doneColumn = columns.find((c) => c.key === Stage.Done)
+  const cancelledColumn = columns.find((c) => c.key === IssueStage.Cancelled)
+  const cancelledIssues = cancelledColumn?.issues ?? []
+  const doneColumn = columns.find((c) => c.key === IssueStage.Done)
   const doneIssues = doneColumn?.issues ?? []
   return {
-    closedCount: doneIssues.filter((i) => i.status === IssueStatus.Closed).length,
-    doneTotalCount: doneIssues.length,
+    closedCount: cancelledIssues.length,
+    doneTotalCount: doneIssues.length + cancelledIssues.length,
   }
 }

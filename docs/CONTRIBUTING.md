@@ -110,7 +110,7 @@ npm --prefix packages/web run test:run
 ### 阶段状态专项测试
 
 ```bash
-dotnet test packages/server/Mohist.sln --filter "Stage"
+dotnet test Mohist.sln --filter "Stage"
 ```
 
 ## Commit 规范

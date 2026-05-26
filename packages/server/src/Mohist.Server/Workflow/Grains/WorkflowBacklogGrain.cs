@@ -33,7 +33,16 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
 
     public async Task RegisterAsync(string workflowId)
     {
-        if (_all.Contains(workflowId)) return;
+        if (_all.Contains(workflowId))
+        {
+            if (_waiting.Contains(workflowId)) return;
+
+            _running.Remove(workflowId);
+            _waiting.Enqueue(workflowId);
+            await SaveAsync();
+            _log.LogInformation("Workflow {WfId} re-queued in backlog, waiting={Waiting}", workflowId, _waiting.Count);
+            return;
+        }
 
         _all.Add(workflowId);
         _waiting.Enqueue(workflowId);

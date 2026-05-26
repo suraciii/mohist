@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { groupIssuesByStage, filterClosedFromDone, getDoneColumnCounts } from './kanban-grouping'
 import type { Issue } from './types'
-import { Stage, IssueStatus } from './types'
+import { IssueStage, WorkflowStage, IssueStatus } from './types'
 
 function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
   return {
     number: 1,
     title: 'Test issue',
-    stage: Stage.Backlog,
+    stage: IssueStage.Backlog,
     status: IssueStatus.Active,
     projectId: 'p1',
     labels: [],
@@ -20,7 +20,7 @@ function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
 describe('groupIssuesByStage', () => {
   it('returns empty columns when no issues', () => {
     const cols = groupIssuesByStage([])
-    expect(cols).toHaveLength(6)
+    expect(cols).toHaveLength(5)
     for (const col of cols) {
       expect(col.issues).toEqual([])
     }
@@ -28,59 +28,56 @@ describe('groupIssuesByStage', () => {
 
   it('groups active issues by their stage', () => {
     const issues = [
-      makeIssue({ id: '1', stage: Stage.Backlog }),
-      makeIssue({ id: '2', stage: Stage.Plan }),
-      makeIssue({ id: '3', stage: Stage.Build }),
+      makeIssue({ id: '1', stage: IssueStage.Backlog }),
+      makeIssue({ id: '2', stage: IssueStage.Todo }),
+      makeIssue({ id: '3', stage: IssueStage.InProgress, workflowStage: WorkflowStage.Build }),
     ]
     const cols = groupIssuesByStage(issues)
-    expect(cols.find((c) => c.key === Stage.Backlog)!.issues).toHaveLength(1)
-    expect(cols.find((c) => c.key === Stage.Plan)!.issues).toHaveLength(1)
-    expect(cols.find((c) => c.key === Stage.Build)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === IssueStage.Backlog)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === IssueStage.Todo)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === IssueStage.InProgress)!.issues).toHaveLength(1)
   })
 
-  it('routes closed issues to Done column regardless of original stage', () => {
+  it('groups cancelled issues by their issue stage', () => {
     const issues = [
-      makeIssue({ id: '1', stage: Stage.Backlog, status: IssueStatus.Closed }),
-      makeIssue({ id: '2', stage: Stage.Plan, status: IssueStatus.Closed }),
-      makeIssue({ id: '3', stage: Stage.Build, status: IssueStatus.Closed }),
+      makeIssue({ id: '1', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+      makeIssue({ id: '2', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+      makeIssue({ id: '3', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
     ]
     const cols = groupIssuesByStage(issues)
-    const doneCol = cols.find((c) => c.key === Stage.Done)!
-    expect(doneCol.issues).toHaveLength(3)
-    expect(cols.find((c) => c.key === Stage.Backlog)!.issues).toHaveLength(0)
-    expect(cols.find((c) => c.key === Stage.Plan)!.issues).toHaveLength(0)
-    expect(cols.find((c) => c.key === Stage.Build)!.issues).toHaveLength(0)
+    const cancelledCol = cols.find((c) => c.key === IssueStage.Cancelled)!
+    expect(cancelledCol.issues).toHaveLength(3)
+    expect(cols.find((c) => c.key === IssueStage.Done)!.issues).toHaveLength(0)
   })
 
-  it('keeps non-closed issues in original stage', () => {
+  it('keeps active and blocked issues in their issue lifecycle stage', () => {
     const issues = [
-      makeIssue({ id: '1', stage: Stage.Build, status: IssueStatus.Blocked }),
-      makeIssue({ id: '2', stage: Stage.Check, status: IssueStatus.Active }),
+      makeIssue({ id: '1', stage: IssueStage.InProgress, status: IssueStatus.Blocked, workflowStage: WorkflowStage.Build }),
+      makeIssue({ id: '2', stage: IssueStage.InProgress, status: IssueStatus.Active, workflowStage: WorkflowStage.Check }),
     ]
     const cols = groupIssuesByStage(issues)
-    expect(cols.find((c) => c.key === Stage.Build)!.issues).toHaveLength(1)
-    expect(cols.find((c) => c.key === Stage.Check)!.issues).toHaveLength(1)
-    expect(cols.find((c) => c.key === Stage.Done)!.issues).toHaveLength(0)
+    expect(cols.find((c) => c.key === IssueStage.InProgress)!.issues).toHaveLength(2)
+    expect(cols.find((c) => c.key === IssueStage.Done)!.issues).toHaveLength(0)
   })
 
-  it('mixes closed and non-closed issues correctly', () => {
+  it('mixes done, cancelled, and in-progress issues correctly', () => {
     const issues = [
-      makeIssue({ id: '1', stage: Stage.Build, status: IssueStatus.Active }),
-      makeIssue({ id: '2', stage: Stage.Build, status: IssueStatus.Closed }),
-      makeIssue({ id: '3', stage: Stage.Done, status: IssueStatus.Completed }),
+      makeIssue({ id: '1', stage: IssueStage.InProgress, status: IssueStatus.Active }),
+      makeIssue({ id: '2', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+      makeIssue({ id: '3', stage: IssueStage.Done, status: IssueStatus.Done }),
     ]
     const cols = groupIssuesByStage(issues)
-    expect(cols.find((c) => c.key === Stage.Build)!.issues).toHaveLength(1)
-    const doneCol = cols.find((c) => c.key === Stage.Done)!
-    expect(doneCol.issues).toHaveLength(2)
+    expect(cols.find((c) => c.key === IssueStage.InProgress)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === IssueStage.Cancelled)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === IssueStage.Done)!.issues).toHaveLength(1)
   })
 })
 
 describe('filterClosedFromDone', () => {
   const columns = groupIssuesByStage([
-    makeIssue({ id: '1', stage: Stage.Done, status: IssueStatus.Completed }),
-    makeIssue({ id: '2', stage: Stage.Build, status: IssueStatus.Closed }),
-    makeIssue({ id: '3', stage: Stage.Done, status: IssueStatus.Closed }),
+    makeIssue({ id: '1', stage: IssueStage.Done, status: IssueStatus.Done }),
+    makeIssue({ id: '2', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+    makeIssue({ id: '3', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
   ])
 
   it('returns columns unchanged when showClosed is true', () => {
@@ -88,17 +85,16 @@ describe('filterClosedFromDone', () => {
     expect(result).toBe(columns)
   })
 
-  it('removes closed issues from Done column when showClosed is false', () => {
+  it('hides cancelled issues when showClosed is false', () => {
     const result = filterClosedFromDone(columns, false)
-    const doneCol = result.find((c) => c.key === Stage.Done)!
-    expect(doneCol.issues).toHaveLength(1)
-    expect(doneCol.issues[0].id).toBe('1')
+    const cancelledCol = result.find((c) => c.key === IssueStage.Cancelled)!
+    expect(cancelledCol.issues).toHaveLength(0)
   })
 
-  it('does not affect non-Done columns', () => {
+  it('does not affect non-cancelled columns', () => {
     const result = filterClosedFromDone(columns, false)
     for (const col of result) {
-      if (col.key !== Stage.Done) {
+      if (col.key !== IssueStage.Cancelled) {
         const original = columns.find((c) => c.key === col.key)!
         expect(col.issues).toBe(original.issues)
       }
@@ -114,11 +110,11 @@ describe('getDoneColumnCounts', () => {
     expect(counts.doneTotalCount).toBe(0)
   })
 
-  it('counts closed and total issues in Done column', () => {
+  it('counts cancelled and completed issues in terminal columns', () => {
     const cols = groupIssuesByStage([
-      makeIssue({ id: '1', stage: Stage.Done, status: IssueStatus.Completed }),
-      makeIssue({ id: '2', stage: Stage.Build, status: IssueStatus.Closed }),
-      makeIssue({ id: '3', stage: Stage.Plan, status: IssueStatus.Closed }),
+      makeIssue({ id: '1', stage: IssueStage.Done, status: IssueStatus.Done }),
+      makeIssue({ id: '2', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+      makeIssue({ id: '3', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
     ])
     const counts = getDoneColumnCounts(cols)
     expect(counts.closedCount).toBe(2)
@@ -127,8 +123,8 @@ describe('getDoneColumnCounts', () => {
 
   it('returns zero closed when all issues in Done are completed', () => {
     const cols = groupIssuesByStage([
-      makeIssue({ id: '1', stage: Stage.Done, status: IssueStatus.Completed }),
-      makeIssue({ id: '2', stage: Stage.Done, status: IssueStatus.Completed }),
+      makeIssue({ id: '1', stage: IssueStage.Done, status: IssueStatus.Done }),
+      makeIssue({ id: '2', stage: IssueStage.Done, status: IssueStatus.Done }),
     ])
     const counts = getDoneColumnCounts(cols)
     expect(counts.closedCount).toBe(0)

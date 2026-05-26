@@ -14,20 +14,40 @@ export class RunnerHost {
   }
 
   async run(signal: AbortSignal) {
-    await this.connection.connect(signal)
-    const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
-    try {
-      while (!signal.aborted) {
-        const work = await this.connection.poll(signal)
-        if (!work) {
-          await delay(this.options.pollIntervalMs, signal)
-          continue
+    while (!signal.aborted) {
+      await this.connectWhenServerIsReady(signal)
+      const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
+      try {
+        while (!signal.aborted) {
+          const work = await this.connection.poll(signal)
+          if (!work) {
+            await delay(this.options.pollIntervalMs, signal)
+            continue
+          }
+          await this.connection.report(work, await this.executor.execute(work, signal), signal)
         }
-        await this.connection.report(work, await this.executor.execute(work, signal), signal)
+      } catch (error) {
+        if (signal.aborted) break
+        console.error(`runner connection lost; reconnecting in ${this.options.pollIntervalMs}ms`, error)
+        await delay(this.options.pollIntervalMs, signal)
+      } finally {
+        clearInterval(heartbeat)
+        if (!signal.aborted) {
+          await this.connection.disconnect(signal).catch((error) => console.error(error))
+        }
       }
-    } finally {
-      clearInterval(heartbeat)
-      if (!signal.aborted) await this.connection.disconnect(signal)
+    }
+  }
+
+  private async connectWhenServerIsReady(signal: AbortSignal) {
+    while (!signal.aborted) {
+      try {
+        await this.connection.connect(signal)
+        return
+      } catch (error) {
+        console.error(`runner registration failed; retrying in ${this.options.pollIntervalMs}ms`, error)
+        await delay(this.options.pollIntervalMs, signal)
+      }
     }
   }
 }

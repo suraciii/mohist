@@ -110,6 +110,24 @@ public class WebCompatibilitySpecs
     }
 
     [Fact]
+    public async Task ProjectStatus_UsesIssueLifecycleStages()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-status-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lifecycle status issue", projectId = project.Id });
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", new { });
+        var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/status?projectId={project.Id}");
+
+        Assert.Equal(1, status.Issues);
+        Assert.Equal(1, status.IssuesByStage["in_progress"]);
+        Assert.Contains("ready", status.IssuesByStage.Keys);
+        Assert.Contains("cancelled", status.IssuesByStage.Keys);
+        Assert.DoesNotContain("plan", status.IssuesByStage.Keys);
+        Assert.DoesNotContain("build", status.IssuesByStage.Keys);
+        Assert.DoesNotContain("check", status.IssuesByStage.Keys);
+    }
+
+    [Fact]
     public async Task Epics_LinkIssueAndExposePrimaryEpic()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-epic-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -133,6 +151,7 @@ public class WebCompatibilitySpecs
     private sealed record PrimaryEpicDto(string Id, string Title);
     private sealed record LogLevelDto(string Level);
     private sealed record AgentRuntimeDto(int Timeout, int MaxConcurrent);
+    private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStage);
     private sealed record ProviderDto(string Id, bool Configured);
     private sealed record SystemInfoDto(ServerInfoDto Server);
     private sealed record ServerInfoDto(string Status);

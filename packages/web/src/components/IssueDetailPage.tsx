@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Stage, IssueStatus, type RecoveryProjection } from '../lib/types'
+import { IssueStage, IssueStatus, type RecoveryProjection } from '../lib/types'
 import { api } from '../lib/api'
-import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus } from '../hooks/useQueries'
+import { useIssue, useIssueDiff, useIssueCommits, useAgentStatus, useWorkflowTimeline } from '../hooks/useQueries'
 import { EditIssueDialog } from './EditIssueDialog'
 import { WorkflowConvergencePanel } from './WorkflowConvergencePanel'
 import { NotFoundPage } from './NotFoundPage'
@@ -58,6 +58,15 @@ function formatRelativeTime(iso: string): string {
   return `${hours}h ago`
 }
 
+function formatStageName(stage: string | null | undefined): string {
+  if (!stage) return '-'
+  return stage
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
@@ -94,6 +103,7 @@ export function IssueDetailPage() {
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
+  const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.stage !== IssueStage.Backlog)
 
   useEffect(() => {
     if (descriptionBodyRef.current) {
@@ -231,7 +241,13 @@ export function IssueDetailPage() {
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent
   const runnerUnavailable = agentStatus?.runnerAvailable === false
-  const isBacklog = issue.stage === Stage.Backlog
+  const isBacklog = issue.stage === IssueStage.Backlog
+  const workflowStage = issue.workflowStage ?? null
+  const workflowAllowedActions = workflowTimeline?.availableActions.map((action) => action.name) ?? []
+  const allowedActions = Array.from(new Set([...recoveryAllowedActions, ...workflowAllowedActions]))
+  const canRetryWorkflow = allowedActions.includes('retry')
+  const canResumeWorkflow = allowedActions.includes('resume')
+  const canRerunWorkflow = allowedActions.includes('rerun')
   const comments = [...(issue.comments ?? [])].sort(
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
@@ -346,7 +362,7 @@ export function IssueDetailPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
-              <BranchBar issueNumber={issueNumber} stage={issue.stage} isAgentRunning={isAgentRunningOnThis} />
+              <BranchBar issueNumber={issueNumber} stage={workflowStage} isAgentRunning={isAgentRunningOnThis} />
               {issue.body && (
                   <div className="rounded-lg border border-gray-200 bg-white p-4">
                     <h2 className="text-sm font-semibold text-gray-700 mb-2">Description</h2>
@@ -513,9 +529,15 @@ export function IssueDetailPage() {
                 <h2 className="text-sm font-semibold text-gray-700 mb-3">Details</h2>
                 <dl className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <dt className="text-gray-500">Stage</dt>
-                    <dd className="text-gray-900 font-medium capitalize">{issue.stage}</dd>
+                    <dt className="text-gray-500">Issue Stage</dt>
+                    <dd className="text-gray-900 font-medium">{formatStageName(issue.stage)}</dd>
                   </div>
+                  {workflowStage && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Workflow Stage</dt>
+                      <dd className="text-gray-900 font-medium">{formatStageName(workflowStage)}</dd>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <dt className="text-gray-500">Status</dt>
                     <dd
@@ -729,10 +751,10 @@ export function IssueDetailPage() {
                   )}
 
                   {(issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (() => {
-                    const canRetry = recoveryAllowedActions.includes('retry')
-                    const canResume = recoveryAllowedActions.includes('resume')
-                    const canRerun = recoveryAllowedActions.includes('rerun')
-                    const canInspect = recoveryAllowedActions.includes('inspect')
+                    const canRetry = canRetryWorkflow
+                    const canResume = canResumeWorkflow
+                    const canRerun = canRerunWorkflow
+                    const canInspect = allowedActions.includes('inspect')
                     const isInterrupted = recoveryAttemptState === 'interrupted'
                     const showProjectedCheckRepairActions = showCheckRepairActions && (canRetry || canRerun)
 
@@ -788,7 +810,7 @@ export function IssueDetailPage() {
                     )
                   })()}
 
-                  {!isBacklog && issue.stage !== Stage.Done && !isAgentRunningOnThis && issue.recovery?.allowedActions.includes('rerun') && !showCheckRepairActions && (
+                  {!isBacklog && issue.stage !== IssueStage.Done && workflowStage && !isAgentRunningOnThis && canRerunWorkflow && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted && !showCheckRepairActions && (
                     <button
                       onClick={() => rerunMutation.mutate()}
                       disabled={rerunMutation.isPending}
@@ -906,18 +928,18 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {!isBacklog && (
+              {!isBacklog && workflowStage && (
                 <TaskProgressPanel
                   issueNumber={issueNumber}
-                  currentStage={issue.stage}
+                  currentStage={workflowStage}
                   isAgentRunning={isAgentRunningOnThis}
                 />
               )}
 
-              {!isBacklog && (
+              {!isBacklog && workflowStage && (
                 <SessionList
                   issueNumber={issueNumber}
-                  currentStage={issue.stage}
+                  currentStage={workflowStage}
                   isLive={isAgentRunningOnThis}
                 />
               )}

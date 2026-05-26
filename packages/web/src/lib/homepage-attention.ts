@@ -1,5 +1,5 @@
 import type { Issue, AgentStatus } from './types'
-import { IssueStatus, Stage } from './types'
+import { IssueStatus, WorkflowStage } from './types'
 
 export interface AttentionItem {
   issueNumber: number
@@ -10,7 +10,7 @@ export interface AttentionItem {
 
 function isIntegrateFailure(issue: Issue): boolean {
   return (
-    issue.stage === Stage.Integrate
+    issue.workflowStage === WorkflowStage.Integrate
     && (
       issue.status === IssueStatus.Blocked
       || issue.status === IssueStatus.Interrupted

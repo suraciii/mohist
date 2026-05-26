@@ -29,6 +29,8 @@ public class IssueReadModel
     public string? BlockedReason { get; set; }
     public IssueAttention? Attention { get; set; }
     public string? WorkflowRunId { get; set; }
+    public string? WorkflowStage { get; set; }
+    public string? WorkflowStatus { get; set; }
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];

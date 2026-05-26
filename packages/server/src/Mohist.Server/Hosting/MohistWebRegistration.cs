@@ -22,6 +22,8 @@ public static class MohistWebRegistration
             ContentTypeProvider = provider,
         });
 
+        app.MapGet("/issue/{number:int}/session/{**sessionId}", async context => await SendIndexAsync(context, webRoot));
+
         app.MapFallback(async context =>
         {
             if (context.Request.Path.StartsWithSegments("/api"))
@@ -30,8 +32,7 @@ public static class MohistWebRegistration
                 return;
             }
 
-            context.Response.ContentType = "text/html; charset=utf-8";
-            await context.Response.SendFileAsync(Path.Combine(webRoot, "index.html"));
+            await SendIndexAsync(context, webRoot);
         });
 
         return app;
@@ -42,6 +43,10 @@ public static class MohistWebRegistration
         var configured = configuration["Mohist:WebRoot"];
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(Path.Combine(configured, "index.html")))
             return Path.GetFullPath(configured);
+
+        var bundled = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        if (File.Exists(Path.Combine(bundled, "index.html")))
+            return bundled;
 
         var dir = AppContext.BaseDirectory;
         while (!string.IsNullOrWhiteSpace(dir))
@@ -56,5 +61,11 @@ public static class MohistWebRegistration
         }
 
         return null;
+    }
+
+    private static async Task SendIndexAsync(HttpContext context, string webRoot)
+    {
+        context.Response.ContentType = "text/html; charset=utf-8";
+        await context.Response.SendFileAsync(Path.Combine(webRoot, "index.html"));
     }
 }

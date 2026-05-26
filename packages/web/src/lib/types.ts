@@ -1,5 +1,12 @@
-export enum Stage {
+export enum IssueStage {
   Backlog = 'backlog',
+  Todo = 'todo',
+  InProgress = 'in_progress',
+  Done = 'done',
+  Cancelled = 'cancelled',
+}
+
+export enum WorkflowStage {
   Plan = 'plan',
   Build = 'build',
   Check = 'check',
@@ -7,22 +14,32 @@ export enum Stage {
   Done = 'done',
 }
 
-export const STAGE_ORDER: Stage[] = [
-  Stage.Backlog,
-  Stage.Plan,
-  Stage.Build,
-  Stage.Check,
-  Stage.Integrate,
-  Stage.Done,
+export const STAGE_ORDER: IssueStage[] = [
+  IssueStage.Backlog,
+  IssueStage.Todo,
+  IssueStage.InProgress,
+  IssueStage.Done,
+  IssueStage.Cancelled,
 ]
+
+export const WORKFLOW_STAGE_ORDER: WorkflowStage[] = [
+  WorkflowStage.Plan,
+  WorkflowStage.Build,
+  WorkflowStage.Check,
+  WorkflowStage.Integrate,
+  WorkflowStage.Done,
+]
+
+export const Stage = { ...IssueStage, ...WorkflowStage } as const
+export type Stage = IssueStage | WorkflowStage
 
 export enum IssueStatus {
   Active = 'active',
   Paused = 'paused',
   Blocked = 'blocked',
   Interrupted = 'interrupted',
-  Closed = 'closed',
-  Completed = 'completed',
+  Cancelled = 'cancelled',
+  Done = 'done',
 }
 
 export interface ApprovalState {
@@ -38,7 +55,7 @@ export interface IssuePrerequisiteSummary {
   number: number
   title: string
   completed: boolean
-  stage: Stage
+  stage: IssueStage
   status: IssueStatus
 }
 
@@ -69,7 +86,9 @@ export interface Issue {
   number: number
   title: string
   body?: string
-  stage: Stage
+  stage: IssueStage
+  workflowStage?: WorkflowStage | null
+  workflowStatus?: string | null
   status: IssueStatus
   projectId: string
   labels: string[]
@@ -150,7 +169,7 @@ export interface LinkedIssue {
   number: number
   title: string
   status: IssueStatus
-  stage: Stage
+  stage: IssueStage
   priority: string | null
 }
 
@@ -406,6 +425,24 @@ export interface WorkflowLogItem {
   id: string
   eventType: string
   data: unknown
+  createdAt: string
+}
+
+export interface WorkflowEvent {
+  id: string
+  projectId: string
+  issueId: string | null
+  issueNumber: number
+  workflowRunId: string | null
+  category: string
+  type: string
+  stage: string | null
+  taskId: string | null
+  checkName: string | null
+  runnerId: string | null
+  status: string | null
+  message: string | null
+  payload: unknown
   createdAt: string
 }
 
@@ -992,7 +1029,7 @@ export interface StageApprovalState {
 }
 
 export interface StageStateRead {
-  stage: Stage
+  stage: WorkflowStage
   status: StageStateStatus
   tasks: StageTaskState[]
   checks: StageCheckState[]
@@ -1023,7 +1060,7 @@ export interface WorkflowTimelinePendingWork {
 }
 
 export interface WorkflowTimelineStage {
-  stage: Stage
+  stage: WorkflowStage
   status: StageStateStatus
   order: number
   startedAt: string | null
@@ -1091,7 +1128,7 @@ export interface WorkflowTaskResetCause {
 
 export interface WorkflowFailureDetails {
   reason: string
-  stage: Stage
+  stage: WorkflowStage
   taskId?: string
   checkName?: string
   message?: string | null
@@ -1128,7 +1165,7 @@ export interface WorkflowCheck {
 }
 
 export interface WorkflowStageRun {
-  stage: Stage
+  stage: WorkflowStage
   status: WorkflowStageRunStatus
   definition?: WorkflowStageDefinition | null
   tasks: WorkflowTask[]
@@ -1155,7 +1192,7 @@ export interface WorkflowDefinitionMetadata {
   name?: string
   source: WorkflowDefinitionSource
   capturedAt: string
-  stageOrder: Stage[]
+  stageOrder: WorkflowStage[]
   stageDefinitions?: WorkflowStageDefinition[]
 }
 
@@ -1167,7 +1204,7 @@ export interface WorkflowCheckFailurePolicy {
 }
 
 export interface WorkflowStageDefinition {
-  stage: Stage
+  stage: WorkflowStage
   checkFailurePolicies?: WorkflowCheckFailurePolicy[]
 }
 
@@ -1176,7 +1213,7 @@ export interface WorkflowRun {
   issueId: string
   issueNumber: number
   status: WorkflowRunStatus
-  currentStage: Stage
+  currentStage: WorkflowStage
   workflowDefinition?: WorkflowDefinitionMetadata | null
   stageRuns: WorkflowStageRun[]
   failure?: WorkflowFailureDetails | null

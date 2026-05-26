@@ -37,11 +37,9 @@ public static class MohistDefaultWorkflowProjection
                 issueStage == "done");
         }
 
-        var projectedStage = workflow.Status == "Completed" ? "done" : issueStage;
-
         return new MohistDefaultWorkflowState(
-            projectedStage,
-            RuntimeStatus(projectedStage, attention, workflow.Status),
+            issueStage,
+            RuntimeStatus(issueStage, attention, workflow.Status),
             attention?.Message ?? (workflow.Status == "Failed" ? workflow.Failure?.Message : fallbackBlockedReason),
             approval,
             attention,
@@ -60,7 +58,7 @@ public static class MohistDefaultWorkflowProjection
 
     private static string RuntimeStatus(string issueStatus, IssueAttention? attention, string? workflowStatus = null)
     {
-        if (issueStatus == "done") return "completed";
+        if (issueStatus == "done") return "done";
         if (issueStatus == "cancelled") return "cancelled";
         if (attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed) return "blocked";
         if (attention is not null) return "attention";

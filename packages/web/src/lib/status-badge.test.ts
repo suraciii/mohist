@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusBadge } from './status-badge'
+import { statusBadge, statusLabel } from './status-badge'
 import { IssueStatus } from './types'
 
 describe('statusBadge', () => {
@@ -42,11 +42,20 @@ describe('statusBadge', () => {
       IssueStatus.Paused,
       IssueStatus.Blocked,
       IssueStatus.Interrupted,
+      IssueStatus.Cancelled,
+      IssueStatus.Done,
     ]
     for (const s of allStatuses) {
       const result = statusBadge(s)
       expect(result.length).toBeGreaterThan(0)
       expect(result).toMatch(/^text-\w+-\d+ bg-\w+-\d+$/)
     }
+  })
+})
+
+describe('statusLabel', () => {
+  it('uses issue lifecycle language for terminal issue statuses', () => {
+    expect(statusLabel(IssueStatus.Cancelled)).toBe('Cancelled')
+    expect(statusLabel(IssueStatus.Done)).toBe('Done')
   })
 })

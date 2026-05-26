@@ -19,7 +19,7 @@ stages:
 agent:
   context: |
     Tech stack: ASP.NET Core + Orleans backend, shared .NET runner, React/Vite Web UI.
-    Build: npm run build (web build + dotnet build packages/server/Mohist.sln)
+    Build: npm run build (dotnet build Mohist.sln; server project builds and bundles web first)
     Test: npm test (server + runner tests); npm --prefix packages/web run test:run for Web UI tests.
     Directory layout: packages/server/ is the backend, packages/runner/ is shared runner code, packages/web/ is React UI.
     Agent execution is owned by Mohist.Runner and exposed to the server through embedded runner hosting.

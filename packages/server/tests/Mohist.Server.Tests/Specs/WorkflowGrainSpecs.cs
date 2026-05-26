@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events;
-using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
@@ -28,7 +27,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
         {
             siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
-            siloBuilder.Services.AddSingleton<IssueQueryService>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
         });

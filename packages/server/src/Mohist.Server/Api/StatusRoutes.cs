@@ -54,10 +54,10 @@ public static class StatusRoutes
                 issuesByStage = new Dictionary<string, int>
                 {
                     ["backlog"] = allIssues.Count(i => i.Stage == "backlog"),
-                    ["plan"] = allIssues.Count(i => i.Stage == "plan"),
-                    ["build"] = allIssues.Count(i => i.Stage == "build"),
-                    ["check"] = allIssues.Count(i => i.Stage == "check"),
+                    ["ready"] = allIssues.Count(i => i.Stage == "ready" || i.Stage == "todo"),
+                    ["in_progress"] = allIssues.Count(i => i.Stage == "in_progress"),
                     ["done"] = allIssues.Count(i => i.Stage == "done"),
+                    ["cancelled"] = allIssues.Count(i => i.Stage == "cancelled"),
                 },
                 version = versionInfo.Version,
                 gitHash = versionInfo.GitHash,

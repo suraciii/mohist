@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { Popover, Transition } from '@headlessui/react'
 import type { Issue, AgentStatus } from '../lib/types'
-import { Stage } from '../lib/types'
+import { IssueStage } from '../lib/types'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -331,11 +331,6 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
     [allColumns, localState],
   )
 
-  const columns = useMemo(
-    () => filterClosedFromDone(filteredColumns, false),
-    [filteredColumns],
-  )
-
   const { closedCount } = useMemo(
     () => getDoneColumnCounts(filteredColumns),
     [filteredColumns],
@@ -349,8 +344,8 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
   }, [])
 
   const displayedColumns = useMemo(
-    () => filterClosedFromDone(columns, showClosed),
-    [columns, showClosed],
+    () => filterClosedFromDone(filteredColumns, showClosed),
+    [filteredColumns, showClosed],
   )
 
   const defaultStage = useMemo(() => {
@@ -358,7 +353,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
     return withIssues ? withIssues.key : STAGES[0].key
   }, [displayedColumns])
 
-  const [selectedStage, setSelectedStage] = useState<Stage>(defaultStage)
+  const [selectedStage, setSelectedStage] = useState<IssueStage>(defaultStage)
 
   useEffect(() => {
     setSelectedStage(defaultStage)
@@ -414,13 +409,13 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
           ))}
         </div>
 
-        {selectedStage === Stage.Done && closedCount > 0 && !showClosed && (
+        {selectedStage === IssueStage.Cancelled && closedCount > 0 && !showClosed && (
           <div className="px-4 py-2">
             <button
               onClick={() => setShowClosed(true)}
               className="text-xs text-blue-600 hover:text-blue-700 font-medium"
             >
-              Show closed ({closedCount})
+              Show cancelled ({closedCount})
             </button>
           </div>
         )}
@@ -445,8 +440,8 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
             label={col.label}
             issues={col.issues}
             agentStatus={agentStatus}
-            isDone={col.key === Stage.Done}
-            archivedCount={col.key === Stage.Done ? archivedCount : undefined}
+            isDone={col.key === IssueStage.Done}
+            archivedCount={col.key === IssueStage.Done ? archivedCount : undefined}
             sort={localState.sort}
             onSortChange={(s) => updateState({ ...localState, sort: s })}
           />
@@ -457,7 +452,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
               onClick={() => setShowClosed(true)}
               className="text-xs text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap"
             >
-              Show closed ({closedCount})
+              Show cancelled ({closedCount})
             </button>
           </div>
         )}

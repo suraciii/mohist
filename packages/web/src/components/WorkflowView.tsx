@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { onAgentEvent } from '../lib/agent-events'
-import { Stage, IssueStatus } from '../lib/types'
+import { IssueStage, WorkflowStage, IssueStatus } from '../lib/types'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../lib/types'
 import { useWorkflowTimeline } from '../hooks/useQueries'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
@@ -18,8 +18,7 @@ function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   return 'UNKNOWN'
 }
 
-const WORKFLOW_STAGES = [Stage.Plan, Stage.Build, Stage.Check, Stage.Integrate, Stage.Done] as const
-type WorkflowStage = (typeof WORKFLOW_STAGES)[number]
+const WORKFLOW_STAGES = [WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Integrate, WorkflowStage.Done] as const
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`
@@ -36,7 +35,7 @@ function getStageStatus(
 ): 'pending' | 'running' | 'completed' | 'failed' | 'awaiting-approval' {
   const stageState = stageStateMap.get(stage)
   const stageOrder = WORKFLOW_STAGES.indexOf(stage)
-  const currentStageIdx = WORKFLOW_STAGES.indexOf(issue.stage as WorkflowStage)
+  const currentStageIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
 
   if (stageState) {
     if (stageState.status === 'running') return 'running'
@@ -46,9 +45,9 @@ function getStageStatus(
     if (stageState.status === 'skipped') return 'pending'
   }
 
-  if (issue.stage === stage && !stageState) return 'running'
+  if (issue.workflowStage === stage && !stageState) return 'running'
 
-  if (issue.status === IssueStatus.Completed && stage === Stage.Done) return 'completed'
+  if (issue.stage === IssueStage.Done && stage === WorkflowStage.Done) return 'completed'
 
   if (currentStageIdx < 0 || stageOrder > currentStageIdx) return 'pending'
 
@@ -554,8 +553,8 @@ function InlineApproval({
   }, [])
 
   const getApproveLabel = () => {
-    if (stage === Stage.Plan) return 'Approve & Continue'
-    if (stage === Stage.Check) return 'Approve & Continue'
+    if (stage === WorkflowStage.Plan) return 'Approve & Continue'
+    if (stage === WorkflowStage.Check) return 'Approve & Continue'
     return 'Approve & Continue'
   }
 
@@ -575,9 +574,9 @@ function InlineApproval({
 
       <h3 className="text-sm font-semibold text-amber-800">Approval Required</h3>
       <p className="text-xs text-amber-600">
-        {stage === Stage.Plan
+        {stage === WorkflowStage.Plan
           ? 'Review the design proposal and approve to continue the workflow.'
-          : stage === Stage.Check
+          : stage === WorkflowStage.Check
             ? 'Review the check results and approve to continue the workflow.'
             : `Review the ${stage} stage output and approve to continue, or send back with feedback.`}
       </p>
@@ -763,12 +762,11 @@ function StepList({
   const isAwaitingApproval =
     failedScriptHealthChecks.length === 0 &&
     issue.approvalState?.status === 'awaiting' &&
-    issue.stage === stage &&
-    (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked)
+    issue.workflowStage === stage
 
   return (
     <div className="space-y-4">
-      {stage !== Stage.Done && (
+      {stage !== WorkflowStage.Done && (
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tasks</h3>
           <div className="space-y-1.5">
@@ -788,7 +786,7 @@ function StepList({
         </div>
       )}
 
-      {checkResults.length > 0 && stage !== Stage.Done && (
+      {checkResults.length > 0 && stage !== WorkflowStage.Done && (
         <div>
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Checks</h3>
           <div className="space-y-1.5">
@@ -821,13 +819,13 @@ function StepList({
         </div>
       )}
 
-      {!isAwaitingApproval && stage === Stage.Check && failedScriptHealthChecks.length > 0 && (
+      {!isAwaitingApproval && stage === WorkflowStage.Check && failedScriptHealthChecks.length > 0 && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
           <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the health check passes. Fix the failures and rerun Check.
         </div>
       )}
 
-      {!isAwaitingApproval && stage === Stage.Check && scriptHealthChecks.length > 0 && scriptHealthChecks.every(c => c.status === 'pending') && (
+      {!isAwaitingApproval && stage === WorkflowStage.Check && scriptHealthChecks.length > 0 && scriptHealthChecks.every(c => c.status === 'pending') && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
           Full verification has not run yet. Approval will be available once verification completes.
         </div>
@@ -866,7 +864,7 @@ function SpecialStatePanel({
 
   if (readOnly) return null
 
-  if (issue.stage === Stage.Backlog) {
+  if (issue.stage === IssueStage.Backlog) {
     return (
       <div className="flex justify-center py-4">
         <button
@@ -1004,7 +1002,7 @@ export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairStat
 }
 
 function IntegrateFailurePanel({ issue }: { issue: Issue }) {
-  if (issue.stage !== Stage.Integrate) return null
+  if (issue.workflowStage !== WorkflowStage.Integrate) return null
   if (issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted) return null
 
   const blockedReason = issue.blockedReason ?? 'Integration step failed'
@@ -1076,20 +1074,20 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 }
 
 export function WorkflowView({ issue }: { issue: Issue }) {
-  const isClosed = issue.status === IssueStatus.Closed
-  const isCompleted = issue.status === IssueStatus.Completed
-  const isBacklog = issue.stage === Stage.Backlog
+  const isClosed = issue.stage === IssueStage.Cancelled
+  const isCompleted = issue.stage === IssueStage.Done
+  const isBacklog = issue.stage === IssueStage.Backlog
   const readOnly = isClosed
   const { data: timeline } = useWorkflowTimeline(issue.number, !isBacklog)
   const stageStateMap = useMemo(() => workflowTimelineToStageStateMap(timeline), [timeline])
 
   const getDefaultStage = useCallback((): WorkflowStage => {
-    if (isBacklog) return Stage.Plan
-    if (isCompleted) return Stage.Done
-    const currentIdx = WORKFLOW_STAGES.indexOf(issue.stage as WorkflowStage)
+    if (isBacklog) return WorkflowStage.Plan
+    if (isCompleted) return WorkflowStage.Done
+    const currentIdx = issue.workflowStage ? WORKFLOW_STAGES.indexOf(issue.workflowStage) : -1
     if (currentIdx >= 0) return WORKFLOW_STAGES[currentIdx]
-    return Stage.Plan
-  }, [issue.stage, isBacklog, isCompleted])
+    return WorkflowStage.Plan
+  }, [issue.workflowStage, isBacklog, isCompleted])
 
   const [selectedStage, setSelectedStage] = useState<WorkflowStage>(getDefaultStage)
 
@@ -1202,7 +1200,7 @@ export function WorkflowView({ issue }: { issue: Issue }) {
         />
       )}
 
-      {issue.stage === Stage.Integrate && (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
+      {issue.workflowStage === WorkflowStage.Integrate && (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
         <IntegrateFailurePanel issue={issue} />
       )}
 

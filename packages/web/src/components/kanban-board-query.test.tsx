@@ -5,7 +5,7 @@ import { act, cleanup, render, screen, fireEvent, waitFor, within } from '@testi
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { KanbanBoard } from './KanbanBoard'
-import { Stage, IssueStatus } from '../lib/types'
+import { IssueStage, IssueStatus, WorkflowStage } from '../lib/types'
 import type { Issue, AgentStatus, ApprovalState } from '../lib/types'
 import {
   parseBoardQuery,
@@ -33,7 +33,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     id: `issue-${Math.random().toString(36).slice(2)}`,
     number: 1,
     title: 'Test Issue',
-    stage: Stage.Backlog,
+    stage: IssueStage.Backlog,
     status: IssueStatus.Active,
     projectId: 'proj-1',
     labels: [],
@@ -319,10 +319,10 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
   it('renders all columns with unfiltered issues', () => {
     const issues = [
-      makeIssue({ number: 1, stage: Stage.Backlog }),
-      makeIssue({ number: 2, stage: Stage.Backlog }),
-      makeIssue({ number: 3, stage: Stage.Plan }),
-      makeIssue({ number: 4, stage: Stage.Build }),
+      makeIssue({ number: 1, stage: IssueStage.Backlog }),
+      makeIssue({ number: 2, stage: IssueStage.Backlog }),
+      makeIssue({ number: 3, stage: IssueStage.Todo }),
+      makeIssue({ number: 4, stage: IssueStage.InProgress }),
     ]
     const queryClient = new QueryClient()
 
@@ -335,8 +335,8 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     )
 
     expect(screen.getAllByText('Backlog').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Plan').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Build').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('In Progress').length).toBeGreaterThan(0)
   })
 
   it('shows runner unavailable banner when no runner is connected', () => {
@@ -362,10 +362,10 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
   it('displays filtered issue count after priority filter applied', () => {
     const issues = [
-      makeIssue({ number: 1, stage: Stage.Backlog, priority: 'p0' }),
-      makeIssue({ number: 2, stage: Stage.Backlog, priority: 'p1' }),
-      makeIssue({ number: 3, stage: Stage.Backlog, priority: 'p2' }),
-      makeIssue({ number: 4, stage: Stage.Plan, priority: 'p0' }),
+      makeIssue({ number: 1, stage: IssueStage.Backlog, priority: 'p0' }),
+      makeIssue({ number: 2, stage: IssueStage.Backlog, priority: 'p1' }),
+      makeIssue({ number: 3, stage: IssueStage.Backlog, priority: 'p2' }),
+      makeIssue({ number: 4, stage: IssueStage.Todo, priority: 'p0' }),
     ]
 
     Object.defineProperty(window, 'location', {
@@ -406,10 +406,10 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
   describe('Desktop layout regression - horizontal multi-column contract at md+', () => {
     it('renders desktop board container with horizontal multi-column layout at md+', () => {
       const issues = [
-        makeIssue({ number: 1, stage: Stage.Backlog }),
-        makeIssue({ number: 2, stage: Stage.Plan }),
-        makeIssue({ number: 3, stage: Stage.Build }),
-        makeIssue({ number: 4, stage: Stage.Check }),
+        makeIssue({ number: 1, stage: IssueStage.Backlog }),
+        makeIssue({ number: 2, stage: IssueStage.Todo }),
+        makeIssue({ number: 3, stage: IssueStage.InProgress }),
+        makeIssue({ number: 4, stage: IssueStage.InProgress }),
       ]
       const queryClient = new QueryClient()
 
@@ -428,9 +428,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('does not stack all stage columns vertically in desktop board container', () => {
       const issues = [
-        makeIssue({ number: 1, stage: Stage.Backlog }),
-        makeIssue({ number: 2, stage: Stage.Plan }),
-        makeIssue({ number: 3, stage: Stage.Done }),
+        makeIssue({ number: 1, stage: IssueStage.Backlog }),
+        makeIssue({ number: 2, stage: IssueStage.Todo }),
+        makeIssue({ number: 3, stage: IssueStage.Done }),
       ]
       const queryClient = new QueryClient()
 
@@ -447,6 +447,32 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const stageColumns = desktopBoard!.querySelectorAll('[class*="min-w-"]')
       expect(stageColumns.length).toBeGreaterThanOrEqual(3)
     })
+
+    it('reveals cancelled issues after clicking the show cancelled control', async () => {
+      const issues = [
+        makeIssue({ number: 1, title: 'Active work', stage: IssueStage.InProgress, status: IssueStatus.Active }),
+        makeIssue({ number: 2, title: 'Cancelled work', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+      ]
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={issues} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      expect(screen.queryByText('Cancelled work')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByText('Show cancelled (1)'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Cancelled work')).toBeInTheDocument()
+        expect(screen.getAllByText('Cancelled').length).toBeGreaterThan(0)
+        expect(screen.queryByText('Closed')).not.toBeInTheDocument()
+      })
+    })
   })
 
   describe('Needs attention summary - user-action wording', () => {
@@ -454,7 +480,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const approvalAwaitingIssue = makeIssue({
         number: 180,
         title: 'Plan awaits review',
-        stage: Stage.Plan,
+        stage: IssueStage.Todo,
         status: IssueStatus.Active,
         approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' } as ApprovalState,
       })
@@ -479,7 +505,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const interruptedIssue = makeIssue({
         number: 17,
         title: 'Resume available',
-        stage: Stage.Build,
+        stage: IssueStage.InProgress,
         status: IssueStatus.Interrupted,
       })
       const queryClient = new QueryClient()
@@ -503,7 +529,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const failedIssue = makeIssue({
         number: 206,
         title: 'integrate task failed',
-        stage: Stage.Integrate,
+        stage: IssueStage.InProgress,
+        workflowStage: WorkflowStage.Integrate,
         status: IssueStatus.Blocked,
         blockedReason: 'integration task failed',
       })
@@ -528,7 +555,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const failedIssue = makeIssue({
         number: 207,
         title: 'integration blocked by merge conflict',
-        stage: Stage.Integrate,
+        stage: IssueStage.InProgress,
+        workflowStage: WorkflowStage.Integrate,
         status: IssueStatus.Blocked,
         blockedReason: 'merge conflict',
       })
@@ -554,7 +582,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const failedIssue = makeIssue({
         number: 208,
         title: 'integration interrupted',
-        stage: Stage.Integrate,
+        stage: IssueStage.InProgress,
+        workflowStage: WorkflowStage.Integrate,
         status: IssueStatus.Interrupted,
       })
       const queryClient = new QueryClient()
@@ -578,8 +607,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const doneUnmergedIssue = makeIssue({
         number: 42,
         title: 'Completed issue',
-        stage: Stage.Done,
-        status: IssueStatus.Completed,
+        stage: IssueStage.Done,
+        status: IssueStatus.Done,
       })
       const queryClient = new QueryClient()
 
@@ -599,7 +628,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const doneUnmergedIssue = makeIssue({
         number: 44,
         title: 'Blocked completed issue',
-        stage: Stage.Done,
+        stage: IssueStage.Done,
         status: IssueStatus.Blocked,
         blockedReason: 'Manual intervention required',
       })
@@ -621,7 +650,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const blockedIssue = makeIssue({
         number: 99,
         title: 'Issue blocked by dependency',
-        stage: Stage.Build,
+        stage: IssueStage.InProgress,
         status: IssueStatus.Blocked,
         blockedReason: 'waiting on #88',
       })
@@ -646,7 +675,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const normalIssue = makeIssue({
         number: 1,
         title: 'Normal issue',
-        stage: Stage.Backlog,
+        stage: IssueStage.Backlog,
         status: IssueStatus.Active,
       })
       const queryClient = new QueryClient()
@@ -759,10 +788,10 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('updates board counts after selecting a label beyond the first eight', async () => {
       const issues = [
-        makeIssue({ number: 1, stage: Stage.Backlog, labels: ['reliability'] }),
-        makeIssue({ number: 2, stage: Stage.Backlog, labels: ['bug'] }),
-        makeIssue({ number: 3, stage: Stage.Plan, labels: ['session'] }),
-        makeIssue({ number: 4, stage: Stage.Build, labels: ['agent'] }),
+        makeIssue({ number: 1, stage: IssueStage.Backlog, labels: ['reliability'] }),
+        makeIssue({ number: 2, stage: IssueStage.Backlog, labels: ['bug'] }),
+        makeIssue({ number: 3, stage: IssueStage.Todo, labels: ['session'] }),
+        makeIssue({ number: 4, stage: IssueStage.InProgress, labels: ['agent'] }),
       ]
       const queryClient = new QueryClient()
 
@@ -790,13 +819,13 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         expect(desktopBoard).toBeInTheDocument()
 
         const backlogColumn = desktopBoard.children[0] as HTMLElement
-        const planColumn = desktopBoard.children[1] as HTMLElement
+        const readyColumn = desktopBoard.children[1] as HTMLElement
 
         expect(backlogColumn.textContent).toContain('Backlog')
         expect(backlogColumn.textContent).toContain('No issues')
-        expect(planColumn.textContent).toContain('Plan')
-        expect(planColumn.textContent).toContain('#3')
-        expect(planColumn.textContent).toContain('session')
+        expect(readyColumn.textContent).toContain('Ready')
+        expect(readyColumn.textContent).toContain('#3')
+        expect(readyColumn.textContent).toContain('session')
       })
     })
 

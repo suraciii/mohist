@@ -5,21 +5,22 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using System.Text.Json;
 
 namespace Mohist.Server.Issue.Queries;
 
 public class IssueQueryService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IGrainFactory _grains;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly string _issueType = typeof(Domain.Issue).FullName!;
+    private readonly string _workflowType = typeof(WorkflowGrainState).FullName!;
 
-    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IGrainFactory grains, IssueWorkflowProfileRegistry profiles)
+    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IssueWorkflowProfileRegistry profiles)
     {
         _dbFactory = dbFactory;
-        _grains = grains;
         _profiles = profiles;
     }
 
@@ -31,7 +32,7 @@ public class IssueQueryService
             .AsNoTracking()
             .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
         var issue = row is null ? null : IssueStateStore.Deserialize(row.JsonState);
-        return issue is null ? null : await EnrichAsync(db, await ToReadModelAsync(issue, project));
+        return issue is null ? null : await EnrichAsync(db, await ToReadModelAsync(db, issue, project));
     }
 
     public async Task<IssueInfo?> GetInfoAsync(string projectId, int number, ProjectInfo? project = null)
@@ -68,8 +69,7 @@ public class IssueQueryService
             .OrderBy(i => i.Number)
             .ToList();
 
-        foreach (var issue in list)
-            await ApplyWorkflowProjectionAsync(issue);
+        ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
 
         var query = list.AsEnumerable();
 
@@ -90,10 +90,10 @@ public class IssueQueryService
         return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
     }
 
-    private async Task<IssueReadModel> ToReadModelAsync(Domain.Issue issue, ProjectInfo? project = null)
+    private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
     {
         var model = ToReadModel(ToInfo(issue, project));
-        await ApplyWorkflowProjectionAsync(model);
+        ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
         return model;
     }
 
@@ -147,31 +147,152 @@ public class IssueQueryService
         BlockedReason = issue.BlockedReason,
         Attention = issue.Attention,
         WorkflowRunId = issue.WorkflowRunId,
+        WorkflowStage = issue.WorkflowStage,
+        WorkflowStatus = issue.WorkflowStatus,
         WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
     };
 
-    private async Task ApplyWorkflowProjectionAsync(IssueReadModel issue)
+    private async Task<Dictionary<string, WorkflowStatusSnapshot>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
     {
-        if (issue.WorkflowRunId is null) return;
+        var workflowRunIds = issues
+            .Select(i => i.WorkflowRunId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (workflowRunIds.Length == 0) return [];
 
-        var workflow = _grains.GetGrain<IWorkflowGrain>(issue.WorkflowRunId);
-        var status = await workflow.GetStatusAsync();
-        if (status is null) return;
+        var rows = await db.GrainStates
+            .AsNoTracking()
+            .Where(row => row.Type == _workflowType && workflowRunIds.Contains(row.Key))
+            .ToListAsync();
 
-        var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
-
-        issue.Stage = projection.IssueStage;
-        issue.RuntimeStatus = projection.RuntimeStatus;
-        issue.BlockedReason = projection.BlockedReason;
-        issue.StageApproval = projection.StageApproval;
-        issue.Attention = projection.Attention;
+        var workflows = new Dictionary<string, WorkflowStatusSnapshot>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var workflow = DeserializeWorkflow(row.JsonState);
+            if (workflow is not null)
+                workflows[row.Key] = workflow;
+        }
+        return workflows;
     }
+
+    private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusSnapshot> workflows)
+    {
+        foreach (var issue in issues)
+        {
+            if (issue.WorkflowRunId is null || !workflows.TryGetValue(issue.WorkflowRunId, out var status)) continue;
+
+            var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
+
+            issue.Stage = projection.IssueStage;
+            issue.RuntimeStatus = projection.RuntimeStatus;
+            issue.BlockedReason = projection.BlockedReason;
+            issue.StageApproval = projection.StageApproval;
+            issue.Attention = projection.Attention;
+            issue.WorkflowStage = status.CurrentStage;
+            issue.WorkflowStatus = status.Status;
+        }
+    }
+
+    private static WorkflowStatusSnapshot? DeserializeWorkflow(string jsonState)
+    {
+        var state = JsonSerializer.Deserialize<WorkflowGrainState>(jsonState);
+        if (state?.Run is null) return null;
+
+        var run = state.Run;
+        var currentStageIndex = Math.Clamp(run.CurrentStageIndex, 0, run.Stages.Count - 1);
+        var currentStage = run.Stages.Count == 0 ? null : run.Stages[currentStageIndex];
+        if (currentStage is null) return null;
+
+        var stages = run.Stages.Select(stage =>
+            new StageStatusSnapshot(
+                stage.Stage,
+                StageStatus(stage),
+                stage.Order,
+                stage.Tasks.Select(task => new TaskStatusSnapshot(
+                    task.DefinitionId,
+                    task.Title,
+                    task.Uses,
+                    task.Status.ToString())).ToList(),
+                stage.Checks.Select(check => new CheckStatusSnapshot(
+                    check.Name,
+                    check.Title,
+                    check.Uses,
+                    check.Status.ToString(),
+                    check.Message)).ToList(),
+                stage.Approval is not null
+                    ? new ApprovalStatusSnapshot(stage.Approval.Status, stage.Approval.Output?.ToString(), stage.Approval.RequestedAt, stage.Approval.RespondedAt)
+                    : null,
+                stage.Failure is not null
+                    ? new FailureStatusSnapshot(
+                        stage.Failure.Reason.ToString(),
+                        stage.Failure.Stage,
+                        stage.Failure.TaskId,
+                        stage.Failure.CheckName,
+                        stage.Failure.Message)
+                    : null)).ToList();
+
+        var pending = state.LastDispatch is not null && state.Lease is not null
+            ? new PendingWorkSnapshot(
+                state.LastDispatch.WorkId,
+                state.LastDispatch.WorkType,
+                state.LastDispatch.Stage,
+                state.LastDispatch.Title,
+                state.LastDispatch.Uses)
+            : null;
+
+        var failure = currentStage.Failure is not null
+            ? new FailureStatusSnapshot(
+                currentStage.Failure.Reason.ToString(),
+                currentStage.Failure.Stage,
+                currentStage.Failure.TaskId,
+                currentStage.Failure.CheckName,
+                currentStage.Failure.Message)
+            : null;
+
+        return new WorkflowStatusSnapshot(
+            run.Id,
+            WorkflowStatus(run, currentStage),
+            currentStage.Stage,
+            stages,
+            pending,
+            failure,
+            []);
+    }
+
+    private static string WorkflowStatus(WorkflowRunSnapshot run, StageRunSnapshot currentStage)
+    {
+        if (!run.Started) return WorkflowRunStatus.Pending.ToString();
+        if (currentStage.Failure is not null) return WorkflowRunStatus.Failed.ToString();
+        if (run.Paused) return WorkflowRunStatus.Paused.ToString();
+        if (StageStatus(currentStage) == StageRunStatus.AwaitingApproval.ToString()) return WorkflowRunStatus.AwaitingApproval.ToString();
+        if (StageStatus(currentStage) == StageRunStatus.Completed.ToString() && currentStage.Order == run.Stages.Max(s => s.Order)) return WorkflowRunStatus.Completed.ToString();
+        return WorkflowRunStatus.Running.ToString();
+    }
+
+    private static string StageStatus(StageRunSnapshot stage)
+    {
+        if (stage.Failure is not null) return StageRunStatus.Failed.ToString();
+        if (!stage.Started) return StageRunStatus.Pending.ToString();
+        if (stage.Approval?.Status == "awaiting") return StageRunStatus.AwaitingApproval.ToString();
+        if (StageIsComplete(stage))
+        {
+            if (stage.RequiresApproval && stage.Approval?.Status != "approved") return StageRunStatus.Running.ToString();
+            return StageRunStatus.Completed.ToString();
+        }
+        return StageRunStatus.Running.ToString();
+    }
+
+    private static bool StageIsComplete(StageRunSnapshot stage) =>
+        stage.Initialized &&
+        stage.Tasks.All(t => t.Status == TaskRunStatus.Completed) &&
+        stage.Checks.All(c => c.Status == CheckRunStatus.Passed);
 
     private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
         status switch
         {
-            IssueStage.Done => "completed",
+            IssueStage.Done => "done",
             IssueStage.Cancelled => "cancelled",
             _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
             _ when attention is not null => "attention",
@@ -283,7 +404,7 @@ public class IssueQueryService
         IssueId = issue.Id,
         Number = issue.Number,
         Title = issue.Title,
-        Completed = issue.Stage == "done" || issue.RuntimeStatus == "completed",
+        Completed = issue.Stage == "done" || issue.RuntimeStatus is "done" or "completed",
         Stage = issue.Stage,
         Status = issue.RuntimeStatus,
     };

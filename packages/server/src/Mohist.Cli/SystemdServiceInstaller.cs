@@ -236,7 +236,7 @@ internal sealed class SystemdServiceInstaller
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "packages", "server", "Mohist.sln")))
+            if (File.Exists(Path.Combine(dir.FullName, "Mohist.sln")))
                 return dir.FullName;
             dir = dir.Parent;
         }

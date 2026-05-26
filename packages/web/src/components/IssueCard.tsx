@@ -2,13 +2,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import type { Issue, AgentStatus } from '../lib/types'
-import { Stage, IssueStatus } from '../lib/types'
+import { IssueStage, WorkflowStage, IssueStatus } from '../lib/types'
 import { api } from '../lib/api'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../lib/label-colors'
 import { formatRelativeTime } from '../lib/relative-time'
 import { useProject } from '../context/ProjectContext'
 
-export const APPROVAL_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check])
+export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
 
 interface Props {
   issue: Issue
@@ -16,20 +16,20 @@ interface Props {
   showArchiveButton?: boolean
 }
 
-type BadgeType = 'conflict' | 'closed' | 'approval' | 'running' | 'waiting' | 'drift' | null
+type BadgeType = 'conflict' | 'attention' | 'approval' | 'running' | 'waiting' | 'drift' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
-  if (issue.stage === Stage.Integrate) {
+  if (issue.workflowStage === WorkflowStage.Integrate) {
     if (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) {
-      return 'closed'
+      return 'attention'
     }
     return 'running'
   }
   if (issue.status === IssueStatus.Blocked) {
-    return 'closed'
+    return 'attention'
   }
-  if (issue.status === IssueStatus.Closed) {
-    return 'closed'
+  if (issue.stage === IssueStage.Cancelled) {
+    return 'attention'
   }
   if (issue.approvalState?.status === 'awaiting') {
     return 'approval'
@@ -50,7 +50,7 @@ function Badge({
   type,
   driftDecision,
 }: {
-  type: Exclude<BadgeType, 'closed' | null>
+  type: Exclude<BadgeType, 'attention' | null>
   driftDecision?: string | null
 }) {
   if (type === 'conflict') {
@@ -110,8 +110,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   ) ?? false
   const badge = getBadgeType(issue, isAgentRunning)
   const isBlocked = issue.status === IssueStatus.Blocked
-  const isClosed = issue.status === IssueStatus.Closed
+  const isCancelled = issue.stage === IssueStage.Cancelled
   const isInterrupted = issue.status === IssueStatus.Interrupted
+  const isAwaitingApproval = issue.approvalState?.status === 'awaiting'
 
   const resumeMutation = useMutation({
     mutationFn: () => api.resumeIssue(issue.number, projectId),
@@ -155,9 +156,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
       className="block rounded-lg border border-gray-200 border-l-4 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors relative overflow-hidden"
       style={{ borderLeftColor: getStripColor(issue.labels) }}
     >
-      {isClosed && (
+      {isCancelled && (
         <div className="absolute inset-0 bg-gray-400/50 z-10 flex items-center justify-center">
-          <span className="text-sm font-semibold text-gray-700">Closed</span>
+          <span className="text-sm font-semibold text-gray-700">Cancelled</span>
         </div>
       )}
 
@@ -167,7 +168,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
         </div>
       )}
 
-      <div className={`p-3 ${isClosed ? 'opacity-50' : ''}`}>
+      <div className={`p-3 ${isCancelled ? 'opacity-50' : ''}`}>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono text-gray-400">
@@ -180,13 +181,13 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             )}
           </div>
           <div className="flex items-center gap-1">
-            {issue.stage === Stage.Integrate && (
+            {issue.workflowStage === WorkflowStage.Integrate && (
               <IntegrationBadge blockedReason={issue.blockedReason} />
             )}
-            {badge && badge !== 'closed' && badge !== 'running' && (
+            {badge && badge !== 'attention' && badge !== 'running' && (
               <Badge type={badge} driftDecision={issue.drift?.decision ?? undefined} />
             )}
-            {showArchiveButton && issue.status === IssueStatus.Completed && (
+            {showArchiveButton && issue.stage === IssueStage.Done && (
               <button
                 onClick={(e) => {
                   e.preventDefault()
@@ -260,7 +261,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           </div>
         )}
 
-        {!isClosed && !isBlocked && !isInterrupted && issue.stage !== Stage.Backlog && issue.stage !== Stage.Done && !isAgentRunning && (
+        {!isCancelled && !isBlocked && !isInterrupted && !isAwaitingApproval && issue.workflowStage && issue.stage !== IssueStage.Done && !isAgentRunning && (
           <div className="mt-2 flex justify-end">
             <button
               onClick={(e) => {
@@ -295,7 +296,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           </div>
         )}
 
-        {issue.startEligibility?.waitingForCompletion?.length && !isClosed && (
+        {issue.startEligibility?.waitingForCompletion?.length && !isCancelled && (
           <div className="mt-2">
             <p
               className="text-xs text-amber-600"

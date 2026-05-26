@@ -30,6 +30,8 @@ public class IssueInfo
     [Id(21)] public int[] PrerequisiteNumbers { get; set; } = [];
     [Id(22)] public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     [Id(23)] public IssueAttention? Attention { get; set; }
+    [Id(24)] public string? WorkflowStage { get; set; }
+    [Id(25)] public string? WorkflowStatus { get; set; }
 }
 
 [GenerateSerializer]

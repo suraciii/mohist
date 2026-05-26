@@ -229,7 +229,7 @@ public class IssueGrain : Grain, IIssueGrain
     private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
         status switch
         {
-            IssueStage.Done => "completed",
+            IssueStage.Done => "done",
             IssueStage.Cancelled => "cancelled",
             _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
             _ when attention is not null => "attention",

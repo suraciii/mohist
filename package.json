@@ -7,8 +7,8 @@
     "packages/runner"
   ],
   "scripts": {
-    "build": "npm run build -w packages/web && dotnet build packages/server/Mohist.sln",
-    "test": "dotnet test packages/server/Mohist.sln",
+    "build": "dotnet build Mohist.sln",
+    "test": "dotnet test Mohist.sln",
     "build:web": "npm run build -w packages/web",
     "build:runner": "npm run build -w packages/runner",
     "dev:runner": "npm run dev -w packages/runner",

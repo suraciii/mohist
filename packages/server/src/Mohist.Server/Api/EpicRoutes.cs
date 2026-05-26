@@ -180,7 +180,7 @@ public static class EpicRoutes
             linked.Count > 0 && completed.Count == linked.Count);
     }
 
-    private static bool IsCompleted(LinkedIssueDto issue) => issue.Stage == "done" || issue.Status == "completed";
+    private static bool IsCompleted(LinkedIssueDto issue) => issue.Stage == "done" || issue.Status is "done" or "completed";
 
     private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
     {

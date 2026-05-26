@@ -224,6 +224,14 @@ export const api = {
     return request<import('./types').LogTailResult>(`/logs/tail${qs ? `?${qs}` : ''}`)
   },
 
+  getRecentEvents: (params?: { projectId?: string | null; limit?: number }) => {
+    const search = new URLSearchParams()
+    if (params?.projectId) search.set('projectId', params.projectId)
+    if (params?.limit != null) search.set('limit', String(params.limit))
+    const qs = search.toString()
+    return request<import('./types').WorkflowEvent[]>(`/events/recent${qs ? `?${qs}` : ''}`)
+  },
+
   getWorktreeStatus: (number: number, projectId?: string | null) =>
     request<{
       exists: boolean
