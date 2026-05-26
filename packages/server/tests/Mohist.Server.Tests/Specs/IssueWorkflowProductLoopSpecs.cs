@@ -13,6 +13,8 @@ public class IssueWorkflowProductLoopSpecs
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
     private string? _runnerId;
+    private string? _projectId;
+    private int _issueNumber;
 
     public IssueWorkflowProductLoopSpecs(MohistIntegrationFixture fixture)
     {
@@ -26,10 +28,15 @@ public class IssueWorkflowProductLoopSpecs
         var projectName = $"project-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-product-loop", baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", stageModels = new Dictionary<string, string> { ["plan"] = "anthropic/claude" }, projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
         _runnerId = "product-loop-runner";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).AssignWorkflowAsync(startedIssue.WorkflowRunId!);
 
         var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
         Assert.Contains(startEvents, e => e.Type == "issue_created");
@@ -138,15 +145,30 @@ public class IssueWorkflowProductLoopSpecs
                 ?? throw new InvalidOperationException("Empty work dispatch");
             if (work.Stage == "plan" && work.Uses == "mohist/acp-agent")
             {
+                if (!IsCurrentIssueWork(work))
+                {
+                    await ReportAsync(work.WorkId, "completed");
+                    continue;
+                }
                 Assert.NotNull(work.Variables);
                 using var doc = JsonDocument.Parse(work.Variables);
                 Assert.Equal("anthropic/claude", doc.RootElement.GetProperty("model").GetProperty("stage").GetProperty("plan").GetString());
+            }
+            else if (!IsCurrentIssueWork(work))
+            {
+                await ReportAsync(work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
+                continue;
             }
             return work;
         }
 
         Assert.Fail($"Runner '{_runnerId}' has no work");
         return default!;
+    }
+
+    private bool IsCurrentIssueWork(WorkDispatchDto work)
+    {
+        return work.ProjectId == _projectId && work.IssueNumber == _issueNumber;
     }
 
     private Task ReportAsync(string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
@@ -167,7 +189,7 @@ public class IssueWorkflowProductLoopSpecs
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title, string Stage, string Status, ApprovalStateDto? ApprovalState, AttentionDto? Attention);
+    private sealed record IssueDto(int Number, string Title, string Stage, string Status, ApprovalStateDto? ApprovalState, AttentionDto? Attention, string? WorkflowRunId);
     private sealed record ApprovalStateDto(string Stage, string Status);
     private sealed record AttentionDto(string Reason);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);
@@ -186,5 +208,7 @@ public class IssueWorkflowProductLoopSpecs
         string? Variables,
         string WorkType,
         string? Stage,
-        string? Title);
+        string? Title,
+        string? ProjectId,
+        int? IssueNumber);
 }

@@ -1,4 +1,5 @@
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -8,6 +9,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerInfo? _info;
     private readonly HashSet<string> _assignedWorkflows = [];
     private readonly Dictionary<string, string> _workToWorkflow = new();
+    private readonly Dictionary<string, WorkDispatch> _workById = new();
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
     private readonly ILogger<RunnerGrain> _log;
@@ -53,10 +55,13 @@ public class RunnerGrain : Grain, IRunnerGrain
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
 
         var workflows = _assignedWorkflows.ToList();
+        var workMappings = _workToWorkflow.ToList();
+        var agentWorkMappings = workMappings.Where(kv => IsAgentWork(kv.Key)).ToList();
         _status = RunnerStatus.Offline;
         _info = null;
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
+        _workById.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
 
@@ -65,6 +70,12 @@ public class RunnerGrain : Grain, IRunnerGrain
             _log.LogWarning("Runner {Id} unregistered with in-flight work, failing workflow {WorkflowId}", RunnerId, wfId);
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
             await workflowGrain.FailInFlightWorkAsync(RunnerId, $"Runner {RunnerId} unregistered");
+        }
+
+        foreach (var (workId, workflowRunId) in agentWorkMappings)
+        {
+            var session = GrainFactory.GetGrain<IAgentSessionGrain>(AgentSessionGrainKeys.ForWork(workflowRunId, workId));
+            await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
         }
     }
 
@@ -91,6 +102,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             if (work is not null)
             {
                 _workToWorkflow[work.WorkId] = wfId;
+                _workById[work.WorkId] = work;
                 return work;
             }
         }
@@ -105,6 +117,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             if (work is not null)
             {
                 _workToWorkflow[work.WorkId] = claimedId;
+                _workById[work.WorkId] = work;
                 return work;
             }
         }
@@ -126,6 +139,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         if (!_workToWorkflow.Remove(workId, out var wfId))
             return null;
+        _workById.Remove(workId);
 
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
         await workflow.ReportResultAsync(RunnerId, workId, result);
@@ -138,8 +152,11 @@ public class RunnerGrain : Grain, IRunnerGrain
                 .Where(kv => kv.Value == wfId)
                 .Select(kv => kv.Key)
                 .ToList();
-            foreach (var key in staleKeys)
-                _workToWorkflow.Remove(key);
+                foreach (var key in staleKeys)
+                {
+                    _workToWorkflow.Remove(key);
+                    _workById.Remove(key);
+                }
             _log.LogInformation("Runner {Id} released terminal workflow {WorkflowId} (status={Status})", RunnerId, wfId, status.Status);
         }
 
@@ -168,12 +185,16 @@ public class RunnerGrain : Grain, IRunnerGrain
                 .Select(kv => kv.Key)
                 .ToList();
             foreach (var key in staleKeys)
+            {
                 _workToWorkflow.Remove(key);
+                _workById.Remove(key);
+            }
         }
         else
         {
             _assignedWorkflows.Clear();
             _workToWorkflow.Clear();
+            _workById.Clear();
         }
 
         _log.LogInformation("Runner {Id} released workflow {WorkflowId}", RunnerId, workflowRunId ?? "*");
@@ -195,8 +216,11 @@ public class RunnerGrain : Grain, IRunnerGrain
     private async Task HandleTimeoutAsync()
     {
         var timedOutWorkflows = _assignedWorkflows.ToList();
+        var timedOutWork = _workToWorkflow.ToList();
+        var timedOutAgentWork = timedOutWork.Where(kv => IsAgentWork(kv.Key)).ToList();
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
+        _workById.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
         await registry.UnregisterAsync(RunnerId);
@@ -207,5 +231,16 @@ public class RunnerGrain : Grain, IRunnerGrain
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
             await workflowGrain.FailInFlightWorkAsync(RunnerId, $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
+
+        foreach (var (workId, workflowRunId) in timedOutAgentWork)
+        {
+            var session = GrainFactory.GetGrain<IAgentSessionGrain>(AgentSessionGrainKeys.ForWork(workflowRunId, workId));
+            await session.FailIfRunningAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
+        }
+    }
+
+    private bool IsAgentWork(string workId)
+    {
+        return _workById.TryGetValue(workId, out var work) && work.Uses == "mohist/acp-agent";
     }
 }

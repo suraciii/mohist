@@ -40,6 +40,10 @@ export class ServerConnection {
     await this.post(`sessions/${sessionId}/completed`, body, signal)
   }
 
+  async sessionStatus(sessionId: string, body: unknown, signal: AbortSignal) {
+    await this.post(`sessions/${sessionId}/status`, body, signal)
+  }
+
   private async post(path: string, body: unknown, signal: AbortSignal) {
     const response = await fetch(this.url(path), { method: "POST", headers: body === undefined ? undefined : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)

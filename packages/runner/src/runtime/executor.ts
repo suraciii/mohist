@@ -114,5 +114,6 @@ function telemetry(connection: ServerConnection) {
     started: (sessionId: string, body: unknown, signal: AbortSignal) => connection.sessionStarted(sessionId, body, signal),
     events: (sessionId: string, events: unknown[], signal: AbortSignal) => connection.sessionEvents(sessionId, events, signal),
     completed: (sessionId: string, body: unknown, signal: AbortSignal) => connection.sessionCompleted(sessionId, body, signal),
+    status: (sessionId: string, body: unknown, signal: AbortSignal) => connection.sessionStatus(sessionId, body, signal),
   }
 }

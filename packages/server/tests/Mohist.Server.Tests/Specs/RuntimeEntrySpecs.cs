@@ -1,4 +1,5 @@
 using System.Net;
+using Mohist.Server.Api;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -27,11 +28,14 @@ public class RuntimeEntrySpecs
     [Fact]
     public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
+        var projectName = $"runtime-status-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+
         try
         {
             await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
 
             Assert.False(status.Running);
             Assert.True(status.RunnerAvailable);
@@ -50,21 +54,12 @@ public class RuntimeEntrySpecs
     [Fact]
     public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
-        await UnregisterAllRunnersAsync();
-
-        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
+        var status = AgentStatusResponse.Create([], [], 3);
 
         Assert.False(status.Running);
         Assert.False(status.RunnerAvailable);
         Assert.False(status.EmbeddedRunnerEnabled);
         Assert.Equal("No runner is connected. Start the Mohist runner process.", status.RunnerMessage);
-    }
-
-    private async Task UnregisterAllRunnersAsync()
-    {
-        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>("/api/agent/status");
-        foreach (var runner in status.Runners)
-            await _fixture.Client.PostAsync($"/api/runner/{runner.Id}/unregister", null);
     }
 
     [Fact]
@@ -78,4 +73,5 @@ public class RuntimeEntrySpecs
     private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity);
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null);
+    private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
 }

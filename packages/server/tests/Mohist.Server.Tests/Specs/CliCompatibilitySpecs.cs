@@ -80,36 +80,28 @@ public class CliCompatibilitySpecs
     [Fact]
     public async Task CliInstallCommands_WriteSystemdUserUnits()
     {
-        var root = Path.Combine(Path.GetTempPath(), $"mohist-cli-install-{Guid.NewGuid():N}");
+        var files = new FakeFileSystem();
+        var root = Path.Combine("fake-root", $"mohist-cli-install-{Guid.NewGuid():N}");
         var unitDir = Path.Combine(root, "units");
         var repoRoot = Path.Combine(root, "repo");
-        Directory.CreateDirectory(repoRoot);
 
-        try
-        {
-            var server = await RunCliAsync("server", "install", "--dry-run", "--unit-dir", unitDir, "--repo-root", repoRoot, "--listen-url", "http://127.0.0.1:4567");
-            Assert.Equal(0, server.ExitCode);
-            var serverUnit = await File.ReadAllTextAsync(Path.Combine(unitDir, "mohist.service"));
-            Assert.Contains("Description=Mohist Server", serverUnit);
-            Assert.Contains("ExecStart=dotnet run --project", serverUnit);
-            Assert.Contains("Mohist.Server.csproj", serverUnit);
-            Assert.Contains("http://127.0.0.1:4567", serverUnit);
-            Assert.Contains("SuccessExitStatus=0 143", serverUnit);
+        var server = await RunCliAsync(files, "server", "install", "--dry-run", "--unit-dir", unitDir, "--repo-root", repoRoot, "--listen-url", "http://127.0.0.1:4567");
+        Assert.Equal(0, server.ExitCode);
+        var serverUnit = files.Read(Path.Combine(unitDir, "mohist.service"));
+        Assert.Contains("Description=Mohist Server", serverUnit);
+        Assert.Contains("ExecStart=dotnet run --project", serverUnit);
+        Assert.Contains("Mohist.Server.csproj", serverUnit);
+        Assert.Contains("http://127.0.0.1:4567", serverUnit);
+        Assert.Contains("SuccessExitStatus=0 143", serverUnit);
 
-            var runnerRoot = Path.Combine(root, "runner-root");
-            var runner = await RunCliAsync("runner", "install", "--dry-run", "--unit-dir", unitDir, "--repo-root", repoRoot, "--server-url", "http://127.0.0.1:4567", "--runner-root", runnerRoot);
-            Assert.Equal(0, runner.ExitCode);
-            var runnerUnit = await File.ReadAllTextAsync(Path.Combine(unitDir, "mohist-runner.service"));
-            Assert.Contains("Description=Mohist Runner", runnerUnit);
-            Assert.Contains("ExecStart=npm run start -w packages/runner", runnerUnit);
-            Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", runnerUnit);
-            Assert.Contains($"Environment=\"RUNNER_ROOT={runnerRoot}\"", runnerUnit);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        var runnerRoot = Path.Combine(root, "runner-root");
+        var runner = await RunCliAsync(files, "runner", "install", "--dry-run", "--unit-dir", unitDir, "--repo-root", repoRoot, "--server-url", "http://127.0.0.1:4567", "--runner-root", runnerRoot);
+        Assert.Equal(0, runner.ExitCode);
+        var runnerUnit = files.Read(Path.Combine(unitDir, "mohist-runner.service"));
+        Assert.Contains("Description=Mohist Runner", runnerUnit);
+        Assert.Contains("ExecStart=npm run start -w packages/runner", runnerUnit);
+        Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", runnerUnit);
+        Assert.Contains($"Environment=\"RUNNER_ROOT={Path.GetFullPath(runnerRoot).Replace("\\", "\\\\", StringComparison.Ordinal)}\"", runnerUnit);
     }
 
     [Fact]
@@ -159,6 +151,31 @@ public class CliCompatibilitySpecs
         using var stderr = new StringWriter();
         var exitCode = await MohistCliCommands.RunAsync(_fixture.Client, args, stdout, stderr);
         return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private async Task<CliResult> RunCliAsync(IFileSystem files, params string[] args)
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var exitCode = await MohistCliCommands.RunAsync(_fixture.Client, args, stdout, stderr, files);
+        return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private sealed class FakeFileSystem : IFileSystem
+    {
+        private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
+
+        public Task WriteAllTextAsync(string path, string contents)
+        {
+            _files[Path.GetFullPath(path)] = contents;
+            return Task.CompletedTask;
+        }
+
+        public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
+
+        public void Delete(string path) => _files.Remove(Path.GetFullPath(path));
+
+        public string Read(string path) => _files[Path.GetFullPath(path)];
     }
 
     private sealed record CliResult(int ExitCode, string Stdout, string Stderr);

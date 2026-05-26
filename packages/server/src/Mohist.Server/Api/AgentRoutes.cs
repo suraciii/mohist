@@ -14,29 +14,15 @@ public static class AgentRoutes
     {
         var group = app.MapGroup("/api/agent");
 
-        group.MapGet("/status", async (IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
+        group.MapGet("/status", async (string? projectId, IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
         {
             var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
             var runnerIds = await registry.ListRunnerIdsAsync();
-            var projectId = await ResolveProjectIdAsync(grains);
-            var activeAgents = await projection.ListActiveAgentsAsync(projectId);
+            var pid = projectId ?? await ResolveProjectIdAsync(grains);
+            var activeAgents = await projection.ListActiveAgentsAsync(pid);
             var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
-            var runnerAvailable = runnerIds.Count > 0;
 
-            return ApiResults.Ok(new
-            {
-                running = activeAgents.Count > 0,
-                issueId = activeAgents.FirstOrDefault()?.IssueId,
-                issueNumber = activeAgents.FirstOrDefault()?.IssueNumber,
-                activeAgents,
-                capacity = new { active = activeAgents.Count, max = maxConcurrentAgents },
-                runnerAvailable,
-                embeddedRunnerEnabled = false,
-                runnerMessage = runnerAvailable
-                    ? null
-                    : "No runner is connected. Start the Mohist runner process.",
-                runners = runnerIds.Select(id => new { id, kind = "external" }).ToArray(),
-            });
+            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runnerIds, maxConcurrentAgents));
         });
 
         group.MapGet("/sessions", async (string? projectId, string? status, int? limit, IGrainFactory grains, AgentSessionService sessions) =>
@@ -69,3 +55,33 @@ public static class AgentRoutes
         return projects.Count == 1 ? projects[0].Id : null;
     }
 }
+
+public sealed record AgentStatusResponse(
+    bool Running,
+    string? IssueId,
+    int? IssueNumber,
+    IReadOnlyList<ActiveAgentDto> ActiveAgents,
+    AgentCapacityResponse Capacity,
+    bool RunnerAvailable,
+    bool EmbeddedRunnerEnabled,
+    string? RunnerMessage,
+    IReadOnlyList<RunnerStatusResponse> Runners)
+{
+    public static AgentStatusResponse Create(IReadOnlyList<ActiveAgentDto> activeAgents, IReadOnlyList<string> runnerIds, int maxConcurrentAgents)
+    {
+        var runnerAvailable = runnerIds.Count > 0;
+        return new AgentStatusResponse(
+            Running: activeAgents.Count > 0,
+            IssueId: activeAgents.FirstOrDefault()?.IssueId,
+            IssueNumber: activeAgents.FirstOrDefault()?.IssueNumber,
+            ActiveAgents: activeAgents,
+            Capacity: new AgentCapacityResponse(activeAgents.Count, maxConcurrentAgents),
+            RunnerAvailable: runnerAvailable,
+            EmbeddedRunnerEnabled: false,
+            RunnerMessage: runnerAvailable ? null : "No runner is connected. Start the Mohist runner process.",
+            Runners: runnerIds.Select(id => new RunnerStatusResponse(id, "external")).ToArray());
+    }
+}
+
+public sealed record AgentCapacityResponse(int Active, int Max);
+public sealed record RunnerStatusResponse(string Id, string Kind);

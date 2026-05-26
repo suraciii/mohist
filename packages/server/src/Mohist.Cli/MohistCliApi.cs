@@ -15,9 +15,11 @@ internal sealed class MohistCliApi
     private readonly HttpClient _http;
     private readonly TextWriter _out;
     private readonly TextWriter _err;
+    private readonly IFileSystem _fileSystem;
 
     internal TextWriter Output => _out;
     internal TextWriter Error => _err;
+    internal IFileSystem FileSystem => _fileSystem;
 
     public MohistCliApi() : this(new HttpClient
     {
@@ -27,11 +29,12 @@ internal sealed class MohistCliApi
     {
     }
 
-    public MohistCliApi(HttpClient http, TextWriter output, TextWriter error)
+    public MohistCliApi(HttpClient http, TextWriter output, TextWriter error, IFileSystem? fileSystem = null)
     {
         _http = http;
         _out = output;
         _err = error;
+        _fileSystem = fileSystem ?? RealFileSystem.Instance;
     }
 
     public async Task<int> PrintGetAsync(string path) =>

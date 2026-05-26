@@ -50,7 +50,7 @@ internal static class MohistCliCommands
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
     internal static SystemdServiceInstaller CreateSystemd(MohistCliApi api) =>
-        new(api.Output, api.Error);
+        new(api.Output, api.Error, api.FileSystem);
 
     internal static string Query(
         string? ProjectId = null,
@@ -86,6 +86,13 @@ internal static class MohistCliCommands
     internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error)
     {
         var api = new MohistCliApi(http, output, error);
+        var root = Build(api);
+        return root.Parse(args).InvokeAsync();
+    }
+
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem)
+    {
+        var api = new MohistCliApi(http, output, error, fileSystem);
         var root = Build(api);
         return root.Parse(args).InvokeAsync();
     }
