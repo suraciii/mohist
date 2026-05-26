@@ -63,9 +63,9 @@ function makeTimeline(): WorkflowTimeline {
         ],
         checks: [
           {
-            name: 'health:typecheck',
+            name: 'health',
             title: 'Typecheck',
-            uses: 'mohist/health-gate',
+            uses: 'core/script',
             status: 'completed',
             message: 'ok',
             startedAt: '2026-01-01T00:01:00.000Z',
@@ -90,7 +90,7 @@ describe('WorkflowView', () => {
     expect(screen.getByText('Implement WorkflowView')).toBeInTheDocument()
     expect(screen.getByText('Typecheck')).toBeInTheDocument()
     expect(screen.getByText('runtime:agent')).toBeInTheDocument()
-    expect(screen.getByText('runtime:health-gate')).toBeInTheDocument()
+    expect(screen.getByText('runtime:core/script')).toBeInTheDocument()
     expect(screen.queryByText('No tasks yet')).not.toBeInTheDocument()
   })
 

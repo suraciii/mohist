@@ -55,6 +55,28 @@ public class CliCompatibilitySpecs
     }
 
     [Fact]
+    public async Task CliProviderCommands_ExposeLocalOpencodeRuntimeAndSaveConfig()
+    {
+        var runtime = await RunCliAsync("providers", "runtime");
+        Assert.Equal(0, runtime.ExitCode);
+        Assert.Contains("local-opencode", runtime.Stdout);
+
+        var test = await RunCliAsync("providers", "test", "--api-key", "sk-test");
+        Assert.Equal(0, test.ExitCode);
+        Assert.Contains("configuration-only", test.Stdout);
+
+        var providerId = $"custom-{Guid.NewGuid():N}";
+        var save = await RunCliAsync("providers", "save", providerId, "--api-key", "sk-test", "--name", "Custom AI", "--base-url", "https://api.example.test", "--model", "model-a");
+        Assert.Equal(0, save.ExitCode);
+        Assert.Contains(providerId, save.Stdout);
+
+        var list = await RunCliAsync("providers", "list");
+        Assert.Equal(0, list.ExitCode);
+        Assert.Contains("Custom AI", list.Stdout);
+        Assert.DoesNotContain("sk-test", list.Stdout);
+    }
+
+    [Fact]
     public async Task CliInstallCommands_WriteSystemdUserUnits()
     {
         var root = Path.Combine(Path.GetTempPath(), $"mohist-cli-install-{Guid.NewGuid():N}");

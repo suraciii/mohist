@@ -30,14 +30,14 @@ AI: 产出 proposal → 设计方案 → 拆任务 → 实现 → 审查 → 集
 - **需求先行** — AI 面试你，把模糊想法变成清晰 proposal
 - **产物可审** — 每步都有文件产出，可 diff、可 review、可追溯
 - **循环反馈** — PLAN → BUILD → CHECK 循环，CHECK 发现问题自动回到 BUILD
-- **健康门控** — 每阶段自动运行编译/测试，失败自动修复
+- **健康检查** — 每阶段自动运行编译/测试，失败自动修复
 - **自动集成** — 审查通过后自动同步规格、归档、合并到主干
 - **随时介入** — gate 点让你确认，你也可以随时追加指令
 
-## Pipeline 模型
+## Workflow 模型
 
 ```
-Explore Mode (Pipeline 外)              Pipeline Mode
+Explore Mode (Workflow 外)              Workflow Mode
 ┌────────────────────────────┐          ┌──────────────────────────────────────────────────┐
 │ AI 面试人类，梳理需求       │          │                                                  │
 │ 产出 proposal.md           │──▶ Plan ──▶│ PLAN ──▶ BUILD ──▶ CHECK ──▶ INTEGRATE ──▶ Done│

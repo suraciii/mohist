@@ -12,6 +12,10 @@ var serverUrl = builder.Configuration["ServerUrl"] ?? "http://localhost:3456";
 var runnerId = builder.Configuration["RunnerId"] ?? $"runner-{Environment.MachineName}-{Environment.ProcessId}";
 var runnerRoot = builder.Configuration["RunnerRoot"]
     ?? builder.Configuration["Mohist:RunnerRoot"];
+var agentCommand = builder.Configuration["AgentCommand"]
+    ?? builder.Configuration["Mohist:AgentCommand"]
+    ?? Environment.GetEnvironmentVariable("MOHIST_AGENT_COMMAND")
+    ?? "opencode";
 
 builder.Services.AddHttpClient<IServerConnection>((sp, client) =>
 {
@@ -42,7 +46,7 @@ builder.Services.AddSingleton<ActionManager>(sp =>
 builder.Services.AddSingleton<RunnerHostOptions>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IAgentExecutor>(sp =>
-    new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>()));
+    new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>(), agentCommand));
 builder.Services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
 builder.Services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
 builder.Services.AddSingleton<IWorkspaceManager>(sp =>

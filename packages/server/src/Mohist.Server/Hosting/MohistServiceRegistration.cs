@@ -36,9 +36,10 @@ public static class MohistServiceRegistration
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddScoped<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);
+        var agentCommand = ResolveAgentCommand(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<IAgentExecutor>(sp =>
-            new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>()));
+            new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>(), agentCommand));
         services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
         services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
         services.AddSingleton<IWorkspaceManager>(sp =>
@@ -82,5 +83,12 @@ public static class MohistServiceRegistration
             ?? Environment.GetEnvironmentVariable("MOHIST_RUNNER_ROOT")
             ?? Environment.GetEnvironmentVariable("MOHIST_WORKSPACE_ROOT");
         return string.IsNullOrWhiteSpace(configured) ? null : configured;
+    }
+
+    private static string ResolveAgentCommand(IConfiguration configuration)
+    {
+        var configured = configuration["Mohist:AgentCommand"]
+            ?? Environment.GetEnvironmentVariable("MOHIST_AGENT_COMMAND");
+        return string.IsNullOrWhiteSpace(configured) ? "opencode" : configured;
     }
 }

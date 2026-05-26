@@ -172,8 +172,8 @@
 |------|-----------|---------|
 | M1 | 硬编码 3 阶段 (plan → build → check)，gate 属性 | system prompt |
 | M2 | 默认 3 阶段 + gate_after 机制 | config/table |
-| M3 | 可配置 pipeline，用户可加减阶段 | workflow.yaml |
-| 远期 | Pipeline as Code（条件分支、并行、插件） | workflow.yaml 扩展 |
+| M3 | 可配置 workflow，用户可加减阶段 | workflow.yaml |
+| 远期 | Workflow as Code（条件分支、并行、插件） | workflow.yaml 扩展 |
 
 **来源**: 2026-04-01 explore 讨论 → `talks/2026-04-01-stage-model.md`
 **更新**: 2026-04-15 工作流对齐 → `talks/2026-04-15-workflow-alignment.md`
@@ -255,4 +255,3 @@
 | ID | 事项 | 说明 | 来源 |
 |----|------|------|------|
 | B-402 | 允许切换 explore 使用的 model | 用户可配置 explore 模式使用的 LLM 模型（如从默认模型切换到更强的模型） | 用户反馈 |
-

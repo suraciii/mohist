@@ -37,7 +37,7 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         try
         {
             var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistPipeline.Definition);
+            await wf.StartAsync(MohistWorkflow.Definition);
 
             Assert.Single(received);
             var json = System.Text.Json.JsonSerializer.Serialize(received[0]);
@@ -60,7 +60,7 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         try
         {
             var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistPipeline.Definition);
+            await wf.StartAsync(MohistWorkflow.Definition);
             received.Clear();
 
             await wf.PauseAsync("user-requested");
@@ -86,7 +86,7 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         try
         {
             var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistPipeline.Definition);
+            await wf.StartAsync(MohistWorkflow.Definition);
             await wf.PauseAsync();
             received.Clear();
 

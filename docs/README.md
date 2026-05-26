@@ -9,8 +9,8 @@ AI 驱动的开发工作流自动化工具，使用本地 SQLite 存储，通过
 - **CLI**: 11 个命令组，60+ 子命令
 - **实时事件流**: 基于 SSE 的 49 种事件类型，agent 进度、任务状态、merge 状态实时推送
 - **OpenSpec 工作流**: proposal → specs → design → tasks → self-review → build → check → integrate
-- **健康门控**: Plan/Build/Integrate 阶段自动运行健康检查（typecheck、build、test），失败自动修复
-- **AI 驱动修复**: agent 产物缺失、健康门控失败、审查发现问题、合并冲突 → 自动修复
+- **健康检查**: Plan/Build/Integrate 阶段自动运行健康检查（typecheck、build、test），失败自动修复
+- **AI 驱动修复**: agent 产物缺失、健康检查失败、审查发现问题、合并冲突 → 自动修复
 - **Provider 管理**: 内置 anthropic/openai/glm/kimi/deepseek/minimax/qwen，支持自定义 OpenAI 兼容 provider
 - **Agent 运行时配置**: 分层 timeout（session/stage/task）、并发控制、重试策略
 - **断点续传**: 支持中断恢复，从检查点继续执行
@@ -94,7 +94,7 @@ mo issue approve 1
 | `mo issue list [-s <stage>] [-l <label>] [-p <level>] [--archived] [--all]` | 列出 Issue |
 | `mo issue show <number>` | 查看 Issue 详情（含合并状态、检查结果） |
 | `mo issue update <number> --title <text> --body <text> -l <+label\|-label>` | 更新 Issue |
-| `mo issue start <number>` | 启动 Pipeline |
+| `mo issue start <number>` | 启动 Workflow |
 | `mo issue approve <number>` | 审批通过 |
 | `mo issue reject <number> -m <reason>` | 审批驳回 |
 | `mo issue close <number>` | 关闭 Issue |
@@ -130,7 +130,7 @@ mo issue approve 1
 | 页面 | 路由 | 说明 |
 |------|------|------|
 | 看板 | `/` | 6 列看板（Plan/Build/Check/Integrate/Done），移动端 Tab 切换 |
-| Issue 详情 | `/issue/:number` | Pipeline 视图、代码差异、评论、合并管理、agent 会话 |
+| Issue 详情 | `/issue/:number` | Workflow 视图、代码差异、评论、合并管理、agent 会话 |
 | 会话详情 | `/issue/:number/session/:sessionId` | Coder agent 完整对话 transcript |
 | 活动监控 | `/activity` | 运行中/等待中/最近完成的 agent 任务 |
 | 探索 | `/explore` / `/explore/:id` | 与 AI 自由对话，梳理需求 |
@@ -143,7 +143,7 @@ mo issue approve 1
 ## 工作流
 
 ```
-                    Explore (Pipeline 外)
+                    Explore (Workflow 外)
                     AI 面试，梳理需求
                     产出 proposal.md
                            │
@@ -159,11 +159,11 @@ Draft ──→ Plan ──→ Build ──→ Check ──→ Integrate ──�
 
 | 阶段 | 职责 | 产物 | Gate |
 |------|------|------|------|
-| Explore | 结构化面试，梳理需求 | proposal.md | — (Pipeline 外) |
-| Plan | 技术设计、拆分任务 | specs/ + design.md + tasks.json + self-review.md | 用户审批 + 健康门控 |
-| Build | 逐个执行任务，写代码，内循环 write→test→fix | 代码变更 | 健康门控 + 全任务完成 |
+| Explore | 结构化面试，梳理需求 | proposal.md | — (Workflow 外) |
+| Plan | 技术设计、拆分任务 | specs/ + design.md + tasks.json + self-review.md | 用户审批 + 健康检查 |
+| Build | 逐个执行任务，写代码，内循环 write→test→fix | 代码变更 | 健康检查 + 全任务完成 |
 | Check | AI 代码审查 | review.md | 用户审批 + merge-ready |
-| Integrate | 规格同步、归档、合并到主干 | 合并后的代码 | 集成后健康门控 |
+| Integrate | 规格同步、归档、合并到主干 | 合并后的代码 | 集成后健康检查 |
 | Done | 完成 | — | — |
 
 ### 用户审批点
@@ -174,7 +174,7 @@ Draft ──→ Plan ──→ Build ──→ Check ──→ Integrate ──�
 ### 自动修复
 
 - Plan 阶段产物缺失 → AI 自动修复（1 次尝试）
-- 健康门控失败 → AI 自动修复（可配置重试次数）
+- 健康检查失败 → AI 自动修复（可配置重试次数）
 - Check 审查发现问题 → AI 自动修复（默认 3 次重试）
 - 合并冲突 → AI 自动 rebase（默认 2 次重试）
 
@@ -274,10 +274,10 @@ Web UI 中 `Settings → Agent` 可配置：
 npm install
 
 # 构建（web + .NET server）
-npm run build
+git diff --check
 
 # 运行测试
-npm test
+dotnet test packages/server/Mohist.sln
 
 # Web UI 测试
 npm --prefix packages/web run test:run

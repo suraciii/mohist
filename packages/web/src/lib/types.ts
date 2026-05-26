@@ -896,7 +896,7 @@ export interface MergeReadinessOutput {
   conflictFiles?: string[]
 }
 
-export interface IntegrationHealthGatePolicy {
+export interface IntegrationHealthCheckPolicy {
   policyName: string
   command: string
   timeout: number
@@ -906,7 +906,7 @@ export interface IntegrationHealthGatePolicy {
 export interface CheckReadinessOutput {
   specImpact?: OpenSpecSyncOutput
   mergeReadiness?: MergeReadinessOutput
-  healthGatePolicy?: IntegrationHealthGatePolicy
+  healthCheckPolicy?: IntegrationHealthCheckPolicy
 }
 
 export interface IntegrationFailureOutput {
@@ -943,7 +943,7 @@ export interface CheckRepairState {
 }
 
 export interface StageTaskCause {
-  type: 'check-failure' | 'health-gate-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown';
+  type: 'check-failure' | 'health-check-failure' | 'retry' | 'rebase' | 'merge-conflict' | 'unknown';
   checkName?: string;
   taskId?: string;
   message?: string;

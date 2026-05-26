@@ -2,7 +2,7 @@
 
 ## 核心理念
 
-mohist 是一条从想法到代码的流水线，基于 DevOps pipeline 模型。
+mohist 是一个从想法到代码的可编排 workflow，基于 DevOps workflow 模型。
 
 ```
 你的想法 ──▶ mohist ──▶ 合格的代码
@@ -53,7 +53,7 @@ AI 通过结构化面试从产品/用户视角梳理需求。可以随时发起�
 
 Stage 状态机：Draft → Plan → Build → Check → Integrate → Done（Explore 不在其中）
 
-### Pipeline Mode（PLAN → BUILD → CHECK → INTEGRATE 流程）
+### Workflow Mode（PLAN → BUILD → CHECK → INTEGRATE 流程）
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -66,7 +66,7 @@ Stage 状态机：Draft → Plan → Build → Check → Integrate → Done（Ex
 │       │                       Build            Build                    │
 │       │                    (驳回/审查失败)   (集成失败)                  │
 │       │                                                                  │
-│       └───────── 健康门控失败回到 Plan（后备策略） ──────────────────     │
+│       └───────── 健康检查失败回到 Plan（后备策略） ──────────────────     │
 │                                                                          │
 │     ⏸ plan gate            (自动推进)        ⏸ check gate              │
 │                                                                          │
@@ -77,21 +77,22 @@ Stage 状态机：Draft → Plan → Build → Check → Integrate → Done（Ex
 
 | Stage | 职责 | 产出 | Gate |
 |-------|------|------|------|
-| Explore | 从产品/用户视角结构化面试，梳理需求 | proposal.md | — (Pipeline 外) |
-| Plan | 基于提案做技术设计、拆分任务 | specs/ + design.md + tasks.json + self-review.md | 用户审批 + 健康门控 (typecheck) |
-| Build | 逐个执行任务，写代码，内循环 write→test→fix | 代码变更 | 健康门控 (build) + 全任务完成 |
+| Explore | 从产品/用户视角结构化面试，梳理需求 | proposal.md | — (Workflow 外) |
+| Plan | 基于提案做技术设计、拆分任务 | specs/ + design.md + tasks.json + self-review.md | 用户审批 + 健康检查 |
+| Build | 逐个执行任务，写代码，内循环 write→test→fix | 代码变更 | 健康检查 + 全任务完成 |
 | Check | AI 代码审查 + merge-ready 检查 | review.md | 用户审批 + merge-ready |
 | Integrate | 规格同步 + 归档 + 合并 + 集成后健康检查 | 合并到主干的代码 | 集成后门控 (build+test) |
 
-## 健康门控
+## 健康检查
 
-每个阶段完成后，自动运行健康检查命令，失败时触发 AI 自动修复：
+默认 workflow 在关键阶段完成后运行通用 `core/script` 检查。命令直接写在 workflow 定义中，项目可以按自己的技术栈替换：
 
-| 阶段 | 默认命令 | 自动修复策略 |
+| 阶段 | 默认命令 | 失败处理 |
 |------|---------|-------------|
-| Plan | `npm run typecheck` | 1 次 AI 修复尝试，失败后回退到 Plan |
-| Build | `npm run build` | 默认 2 次 AI 修复重试，失败后回退到 Plan |
-| Integrate | `npm run build && npm test` | 不自动修复——这是最后防线 |
+| Plan | `git diff --check` | 注入修复 task 后重试 |
+| Build | `git diff --check` | 注入修复 task 后重试 |
+| Check | `git diff --check` | 通过后才允许审批 |
+| Integrate | `git diff --check` | 失败后 Issue 回到可处理状态 |
 
 此外，Plan 阶段产物缺失和 Check 阶段审查发现问题也会触发 AI 自动修复。
 
@@ -100,7 +101,7 @@ Stage 状态机：Draft → Plan → Build → Check → Integrate → Done（Ex
 ```
 1. Explore Mode：AI 面试你，梳理需求，产出 proposal.md
        ↓
-2. 进入 Pipeline
+2. 进入 Workflow
        ↓
 3. Plan gate：确认技术方案和任务拆分
        ↓
@@ -124,7 +125,7 @@ HITL task 在决策点暂停等人类，AFK task 自动流转。
 
 ## 断点续传
 
-通过 `CheckpointManager` 支持 Pipeline 中断后恢复：
+Workflow 中断后可以从持久化状态恢复：
 
 - 每个 Stage 的 tasks → checks → auto-fix 进度被持久化
 - 服务重启后，Issue 从最后一个检查点恢复执行
@@ -154,9 +155,9 @@ Issue #42: "Add logs page"
 Gate 是 Stage 的属性，不是独立 Stage：
 
 - **Plan gate**: 用户确认技术方案和任务拆分后，AI 开始写代码
-- **Build gate**: 健康门控（build 通过）后自动进入 Check
+- **Build gate**: 健康检查（build 通过）后自动进入 Check
 - **Check gate**: 用户确认审查结果后，AI 自动集成
-- **Integrate gate**: 集成后健康门控（build+test 通过），完成后标记 Done
+- **Integrate gate**: 集成后健康检查（build+test 通过），完成后标记 Done
 
 ## 随时可以介入
 

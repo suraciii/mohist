@@ -392,15 +392,15 @@ function TaskItem({
   )
 }
 
-function isHealthGateCheck(check: StageCheckState): boolean {
+function isScriptHealthCheck(check: StageCheckState): boolean {
   const output = check.output as { kind?: string } | undefined
-  return output?.kind === 'health-gate' || check.checkName.startsWith('health:')
+  return check.checkName === 'health' || output?.kind === 'script'
 }
 
 function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLabel?: string }) {
   const isPending = check.status === 'pending'
   const isFailed = check.status === 'failed' || check.status === 'error'
-  const isHealthGate = isHealthGateCheck(check)
+  const isHealthCheck = isScriptHealthCheck(check)
   const healthOutput = check.output as { command?: string; duration?: number; summary?: string; logExcerpt?: string; enabled?: boolean; exitCode?: number; timedOut?: boolean } | undefined
 
   let icon: React.ReactNode
@@ -414,7 +414,7 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
     icon = <EmptyCircleIcon className="h-4 w-4 text-gray-300 flex-shrink-0" />
   }
 
-  const fallbackName = isHealthGate ? `Health Gate: ${check.checkName.replace('health:', '')}` : check.checkName
+  const fallbackName = isHealthCheck ? 'Health check' : check.checkName
   const baseName = check.title?.trim() || fallbackName
   const displayName = attemptLabel ? `${baseName} (${attemptLabel})` : baseName
   const originLabel = formatOriginLabel(check.origin)
@@ -422,7 +422,7 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
 
   return (
     <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${isHealthGate && isFailed ? 'border-red-200 bg-red-50' : ''} ${isPending ? 'opacity-50' : ''}`}
+      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${isHealthCheck && isFailed ? 'border-red-200 bg-red-50' : ''} ${isPending ? 'opacity-50' : ''}`}
     >
       {icon}
       <span className="text-sm text-gray-900 flex-1 truncate">{displayName}</span>
@@ -432,7 +432,7 @@ function CheckItem({ check, attemptLabel }: { check: StageCheckState; attemptLab
       {originLabel && (
         <span className="text-[11px] text-gray-400 flex-shrink-0 font-mono" title={originTitle}>{originLabel}</span>
       )}
-      {isHealthGate && healthOutput && (
+      {isHealthCheck && healthOutput && (
         <>
           {healthOutput.command && (
             <span className="text-xs text-gray-400 flex-shrink-0 font-mono truncate max-w-32" title={healthOutput.command}>{healthOutput.command}</span>
@@ -755,13 +755,13 @@ function StepList({
   const taskResults: StageTaskState[] = stageState?.tasks ?? []
   const checkResults: StageCheckState[] = stageState?.checks ?? []
 
-  const healthGateChecks = checkResults.filter(c =>
-    c.checkName.startsWith('health:') || (c.output && (c.output as Record<string, unknown>).kind === 'health-gate')
+  const scriptHealthChecks = checkResults.filter(c =>
+    c.checkName === 'health' || (c.output && (c.output as Record<string, unknown>).kind === 'script')
   )
-  const failedHealthGates = healthGateChecks.filter(c => c.status === 'failed' || c.status === 'error')
+  const failedScriptHealthChecks = scriptHealthChecks.filter(c => c.status === 'failed' || c.status === 'error')
 
   const isAwaitingApproval =
-    failedHealthGates.length === 0 &&
+    failedScriptHealthChecks.length === 0 &&
     issue.approvalState?.status === 'awaiting' &&
     issue.stage === stage &&
     (issue.status === IssueStatus.Active || issue.status === IssueStatus.Blocked)
@@ -821,13 +821,13 @@ function StepList({
         </div>
       )}
 
-      {!isAwaitingApproval && stage === Stage.Check && failedHealthGates.length > 0 && (
+      {!isAwaitingApproval && stage === Stage.Check && failedScriptHealthChecks.length > 0 && (
         <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the verification gate passes. Fix the failures and rerun Check.
+          <span className="font-semibold">Full verification failed:</span> Check approval is blocked until the health check passes. Fix the failures and rerun Check.
         </div>
       )}
 
-      {!isAwaitingApproval && stage === Stage.Check && healthGateChecks.length > 0 && healthGateChecks.every(c => c.status === 'pending') && (
+      {!isAwaitingApproval && stage === Stage.Check && scriptHealthChecks.length > 0 && scriptHealthChecks.every(c => c.status === 'pending') && (
         <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
           Full verification has not run yet. Approval will be available once verification completes.
         </div>
@@ -1028,9 +1028,9 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
     } else if (blockedReason.includes('merge') || blockedReason.includes('Merge')) {
       failingStep = 'Merge to target branch'
       nextAction = 'Resolve any merge conflicts and return to Build for re-check.'
-    } else if (blockedReason.includes('health') || blockedReason.includes('final-health') || blockedReason.includes('health gate')) {
-      failingStep = 'Run final integration health gate'
-      nextAction = 'Review the health gate failure and fix the underlying issue. Return to Build for re-check.'
+    } else if (blockedReason.includes('health') || blockedReason.includes('final-health')) {
+      failingStep = 'Run final integration health check'
+      nextAction = 'Review the health check failure and fix the underlying issue. Return to Build for re-check.'
     }
   }
 
