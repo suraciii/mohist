@@ -334,7 +334,7 @@ internal sealed record ServiceCommandOptions(
     }
 }
 
-internal sealed record SystemdUnit(
+internal record SystemdUnit(
     string Name,
     string Description,
     string WorkingDirectory,
