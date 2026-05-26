@@ -16,19 +16,18 @@ public class ScriptHandler : IAction
 
     public async Task<ActionResult> ExecuteAsync(ActionContext context)
     {
-        var shell = context.With?.TryGetValue("shell", out var shellVal) == true
-            ? shellVal?.GetString() ?? DefaultShell()
-            : DefaultShell();
-
-        var script = context.With?.TryGetValue("run", out var runVal) == true
-            ? runVal?.GetString() ?? ""
-            : "";
+        var shell = JsonInputs.String(context.With, "shell") ?? DefaultShell();
+        var script = JsonInputs.String(context.With, "run") ?? "";
 
         if (string.IsNullOrWhiteSpace(script))
-            return new ActionResult("failed", "ScriptHandler requires 'run' input");
+            return new ActionResult("failure", "Script action requires 'run'");
 
         var scriptFile = Path.Combine(context.WorkDir, $"_{Guid.NewGuid():N}.sh");
         await File.WriteAllTextAsync(scriptFile, script);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        if (JsonInputs.Int(context.With, "timeout") is { } timeoutMs)
+            timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
 
         try
         {
@@ -66,11 +65,21 @@ public class ScriptHandler : IAction
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            await process.WaitForExitAsync(context.CancellationToken);
+            await process.WaitForExitAsync(timeout.Token);
+
+            var output = JsonSerializer.Serialize(new
+            {
+                kind = "script",
+                run = script,
+                shell,
+                process.ExitCode,
+                stdout = Trim(stdout.ToString()),
+                stderr = Trim(stderr.ToString()),
+            });
 
             return process.ExitCode == 0
-                ? new ActionResult("completed", stdout.ToString().Trim())
-                : new ActionResult("failed", stderr.Length > 0 ? stderr.ToString().Trim() : $"Exit code {process.ExitCode}", ExitCode: process.ExitCode);
+                ? new ActionResult("success", "Script completed", output, process.ExitCode)
+                : new ActionResult("failure", $"Script failed: {FirstLine(script)}", output, process.ExitCode);
         }
         finally
         {
@@ -81,4 +90,13 @@ public class ScriptHandler : IAction
 
     private static string DefaultShell() =>
         OperatingSystem.IsWindows() ? "pwsh" : "bash";
+
+    private static string Trim(string value) => value.Length <= 20_000 ? value : value[..20_000];
+
+    private static string FirstLine(string value)
+    {
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        var index = normalized.IndexOf('\n');
+        return index < 0 ? normalized : normalized[..index];
+    }
 }

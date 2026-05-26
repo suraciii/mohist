@@ -1,18 +1,14 @@
-using System.Text.Json;
 using Mohist.Runner.Actions;
-using Mohist.Runner.Handlers;
 
 namespace Mohist.Runner;
 
 public class ActionManager
 {
     private readonly Dictionary<string, Func<IAction>> _actions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly IServiceProvider _services;
     private readonly ILogger<ActionManager> _log;
 
     public ActionManager(IServiceProvider services, ILogger<ActionManager> log)
     {
-        _services = services;
         _log = log;
     }
 
@@ -27,9 +23,6 @@ public class ActionManager
 
         if (_actions.TryGetValue(uses, out var factory))
             return factory();
-
-        if (uses.StartsWith("run:"))
-            return new ScriptHandler(_services.GetRequiredService<ILogger<ScriptHandler>>());
 
         _log.LogWarning("No action registered for '{Uses}', falling back to ProcessHandler", uses);
         return null;

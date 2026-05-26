@@ -31,7 +31,7 @@ public static class MohistPipeline
             ArtifactExists("tasks-valid", "Tasks valid", "tasks.json"),
             Marker("self-review-passed", "Self review passed", "self-review.md", "PASS", 1,
                 new TaskDefinitionInput("fix-plan-review", "Fix plan review findings", Agent, AgentWith("plan", "fix-plan-review"))),
-            HealthGate("health:plan", "Plan health gate"),
+            ScriptCheck("health", "Health", "git diff --check"),
         ],
         RequiresApproval: true);
 
@@ -39,7 +39,7 @@ public static class MohistPipeline
         "build",
         [],
         [
-            HealthGate("health:build", "Build health gate", 1,
+            ScriptCheck("health", "Health", "git diff --check", 1,
                 new TaskDefinitionInput("fix-build-health", "Fix build health", Agent, AgentWith("build", "fix-build-health"))),
         ],
         TasksFromUses: "mohist/openspec-tasks",
@@ -53,7 +53,7 @@ public static class MohistPipeline
         "check",
         [new TaskDefinitionInput("ai-review", "AI review", "mohist/check/ai-review", ChangeDirWith())],
         [
-            HealthGate("health:check", "Check health gate", 1,
+            ScriptCheck("health", "Health", "git diff --check", 1,
                 new TaskDefinitionInput("fix-check-health", "Fix check health", Agent, AgentWith("check", "fix-check-health"))),
             Marker("review-passed", "Review passed", "review.md", "PASS", 2,
                 new TaskDefinitionInput("fix-review-findings", "Fix review findings", Agent, AgentWith("check", "fix-review-findings"))),
@@ -69,7 +69,7 @@ public static class MohistPipeline
             new TaskDefinitionInput("integrate:merge", "Merge branch", "mohist/merge", MergeWith()),
         ],
         [
-            HealthGate("health:integrate", "Final workflow health check", 1,
+            ScriptCheck("health", "Health", "git diff --check", 1,
                 new TaskDefinitionInput("fix-integrate-health", "Fix integrate health", Agent, AgentWith("integrate", "fix-integrate-health"))),
         ]);
 
@@ -102,18 +102,11 @@ public static class MohistPipeline
             retryLimit,
             retryTask);
 
-    private static CheckDefinitionInput HealthGate(string name, string title, int retryLimit = 0, TaskDefinitionInput? retryTask = null) => new(
+    private static CheckDefinitionInput ScriptCheck(string name, string title, string run, int retryLimit = 0, TaskDefinitionInput? retryTask = null) => new(
         name,
         title,
-        "core/health-gate",
-        name switch
-        {
-            "health:plan" => """{"command":"npm ci && npm run typecheck","timeout":300000}""",
-            "health:build" => """{"command":"npm ci && npm run build","timeout":300000}""",
-            "health:check" => """{"command":"npm ci && npm run build && npm test","timeout":300000}""",
-            "health:integrate" => """{"command":"npm ci && npm run build && npm test","timeout":300000}""",
-            _ => """{"command":"npm ci && npm run build && npm test","timeout":300000}"""
-        },
+        "core/script",
+        JsonSerializer.Serialize(new { run, timeout = 300_000 }, WorkflowVariableJson.Options),
         retryLimit,
         retryTask);
 

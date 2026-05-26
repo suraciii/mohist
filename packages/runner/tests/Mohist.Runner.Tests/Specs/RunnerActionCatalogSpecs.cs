@@ -10,14 +10,8 @@ public class RunnerActionCatalogSpecs
     [Theory]
     [InlineData("core/process")]
     [InlineData("core/script")]
-    [InlineData("core/health-gate")]
     [InlineData("core/artifact-exists")]
     [InlineData("core/marker")]
-    [InlineData("mohist/process")]
-    [InlineData("mohist/script")]
-    [InlineData("mohist/health-gate")]
-    [InlineData("mohist/artifact-exists")]
-    [InlineData("mohist/marker")]
     [InlineData("mohist/agent")]
     [InlineData("mohist/check/ai-review")]
     [InlineData("mohist/openspec-tasks")]
@@ -27,12 +21,14 @@ public class RunnerActionCatalogSpecs
     [InlineData("mohist/openspec-sync")]
     [InlineData("mohist/archive-change")]
     [InlineData("mohist/merge")]
-    public void RegisterDefaults_ExposesCoreActionsAndMohistAliases(string uses)
+    public void RegisterDefaults_ExposesCoreActionsAndMohistActions(string uses)
     {
         var services = new ServiceCollection()
             .AddLogging()
             .AddSingleton<IAgentExecutor, FakeAgentExecutor>()
             .AddSingleton<ISessionTelemetrySink, NullSessionTelemetrySink>()
+            .AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>()
+            .AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>()
             .BuildServiceProvider();
         var manager = new ActionManager(services, SpecHelpers.Logger<ActionManager>());
 
