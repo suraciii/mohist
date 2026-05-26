@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Storage.Db;
 
 namespace Mohist.Server.Sessions;
@@ -10,158 +11,49 @@ public class AgentSessionService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventBus _eventBus;
+    private readonly IGrainFactory _grains;
 
-    public AgentSessionService(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus)
+    public AgentSessionService(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, IGrainFactory grains)
     {
         _dbFactory = dbFactory;
         _eventBus = eventBus;
+        _grains = grains;
     }
 
     public async Task<AgentSessionDto?> CreateForDispatchAsync(string runnerId, WorkDispatch dispatch, CancellationToken ct = default)
     {
-        if (dispatch.Uses != "mohist/acp-agent") return null;
-        if (dispatch.Issue is null) return null;
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var existing = await db.AgentSessions.AsNoTracking()
-            .FirstOrDefaultAsync(s => s.WorkflowRunId == dispatch.WorkflowRunId && s.WorkId == dispatch.WorkId, ct);
-        if (existing is not null) return ToDto(existing);
-
-        var session = new AgentSession
-        {
-            ProjectId = dispatch.Issue.ProjectId,
-            IssueNumber = dispatch.Issue.IssueNumber,
-            WorkflowRunId = dispatch.WorkflowRunId,
-            WorkId = dispatch.WorkId,
-            WorkType = dispatch.WorkType,
-            Stage = dispatch.Stage,
-            Title = dispatch.Title,
-            RunnerId = runnerId,
-            Status = "created",
-            CreatedAt = DateTime.UtcNow,
-        };
-        db.AgentSessions.Add(session);
-        await db.SaveChangesAsync(ct);
-        return ToDto(session);
+        var grain = _grains.GetGrain<IAgentSessionGrain>(AgentSessionGrainKeys.ForWork(dispatch.WorkflowRunId, dispatch.WorkId));
+        var session = await grain.EnsureCreatedAsync(new EnsureAgentSessionCommand(runnerId, dispatch));
+        return session is null ? null : ToDto(session);
     }
 
     public async Task<AgentSessionDto?> MarkStartedAsync(string sessionId, SessionStartedRequest req, CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
-        if (session is null) return null;
-
-        var now = DateTime.UtcNow;
-        session.Status = "running";
-        session.ExternalSessionId = req.ExternalSessionId ?? session.ExternalSessionId;
-        session.Model = req.Model ?? session.Model;
-        session.WorkDir = req.WorkDir ?? session.WorkDir;
-        session.ChangeDir = req.ChangeDir ?? session.ChangeDir;
-        session.ProcessPid = req.ProcessPid ?? session.ProcessPid;
-        session.StartedAt ??= now;
-        session.LastDataAt = now;
-        session.LastHeartbeatAt = now;
-        await db.SaveChangesAsync(ct);
-
-        var dto = ToDto(session);
-        _eventBus.Emit("coder_session_started", new
-        {
-            issueId = session.IssueNumber.ToString(),
-            session.ProjectId,
-            coderSessionId = session.Id,
-            acpSessionId = session.ExternalSessionId ?? session.Id,
-            executionId = session.WorkId,
-            session.Model,
-            stage = session.Stage,
-            taskDescription = session.Title,
-            title = session.Title,
-        });
-        return dto;
+        var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var session = await grain.MarkStartedAsync(new AgentSessionStartedCommand(req.ExternalSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid));
+        return session is null ? null : ToDto(session);
     }
 
     public async Task<IReadOnlyList<AgentSessionEventDto>> AppendEventsAsync(string sessionId, IReadOnlyList<SessionEventRequest> events, CancellationToken ct = default)
     {
-        if (events.Count == 0) return [];
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
-        if (session is null) return [];
-
-        var nextSequence = await db.AgentSessionEvents
-            .Where(e => e.SessionId == sessionId)
-            .Select(e => (long?)e.Sequence)
-            .MaxAsync(ct) ?? 0;
-
-        var now = DateTime.UtcNow;
-        var entries = events.Select(e => new AgentSessionEvent
-        {
-            SessionId = session.Id,
-            ProjectId = session.ProjectId,
-            IssueNumber = session.IssueNumber,
-            WorkflowRunId = session.WorkflowRunId,
-            WorkId = session.WorkId,
-            Sequence = ++nextSequence,
-            Type = e.Type,
-            PayloadJson = e.Payload.ValueKind == JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText(),
-            CreatedAt = now,
-        }).ToList();
-
-        db.AgentSessionEvents.AddRange(entries);
-        session.LastDataAt = now;
-        session.LastHeartbeatAt = now;
-        await db.SaveChangesAsync(ct);
-
-        foreach (var entry in entries)
-            EmitSessionEvent(session, entry);
-
-        return entries.Select(ToDto).ToList();
+        var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var inputs = events.Select(e => new AgentSessionEventInput(e.Type, e.Payload.ValueKind == JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToList();
+        var saved = await grain.AppendEventsAsync(inputs);
+        return saved.Select(ToDto).ToList();
     }
 
     public async Task<AgentSessionDto?> MarkStatusAsync(string sessionId, SessionStatusRequest req, CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
-        if (session is null) return null;
-
-        session.Status = req.Status;
-        session.LastDataAt = req.LastDataAt ?? session.LastDataAt;
-        session.LastHeartbeatAt = DateTime.UtcNow;
-        session.FailureReason = req.FailureReason ?? session.FailureReason;
-        await db.SaveChangesAsync(ct);
-        EmitStatusChanged(session);
-        return ToDto(session);
+        var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var session = await grain.MarkStatusAsync(new AgentSessionStatusCommand(req.Status, req.LastDataAt, req.FailureReason));
+        return session is null ? null : ToDto(session);
     }
 
     public async Task<AgentSessionDto?> MarkCompletedAsync(string sessionId, SessionCompletedRequest req, CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await db.AgentSessions.FirstOrDefaultAsync(s => s.Id == sessionId, ct);
-        if (session is null) return null;
-
-        var terminal = req.Status is "failed" or "cancelled" ? req.Status : "completed";
-        session.Status = terminal;
-        session.CompletedAt = DateTime.UtcNow;
-        session.LastHeartbeatAt = session.CompletedAt;
-        session.FailureReason = req.FailureReason ?? session.FailureReason;
-        session.ExitCode = req.ExitCode ?? session.ExitCode;
-        await db.SaveChangesAsync(ct);
-
-        _eventBus.Emit(terminal switch
-        {
-            "failed" => "coder_session_failed",
-            "cancelled" => "coder_session_cancelled",
-            _ => "coder_session_completed"
-        }, new
-        {
-            issueId = session.IssueNumber.ToString(),
-            session.ProjectId,
-            coderSessionId = session.Id,
-            status = terminal,
-            reason = session.FailureReason,
-            duration = DurationMs(session),
-        });
-
-        return ToDto(session);
+        var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var session = await grain.MarkCompletedAsync(new AgentSessionCompletedCommand(req.Status, req.FailureReason, req.ExitCode));
+        return session is null ? null : ToDto(session);
     }
 
     public async Task<IReadOnlyList<AgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
@@ -336,8 +228,34 @@ public class AgentSessionService
         s.FailureReason,
         s.ExitCode);
 
+    private static AgentSessionDto ToDto(AgentSessionSnapshot s) => new(
+        s.Id,
+        s.ProjectId,
+        s.IssueNumber,
+        s.WorkflowRunId,
+        s.WorkId,
+        s.WorkType,
+        s.Stage,
+        s.Title,
+        s.RunnerId,
+        s.ExternalSessionId,
+        s.Status,
+        s.Model,
+        s.WorkDir,
+        s.ChangeDir,
+        s.ProcessPid,
+        s.CreatedAt,
+        s.StartedAt,
+        s.CompletedAt,
+        s.LastDataAt,
+        s.FailureReason,
+        s.ExitCode);
+
     private static AgentSessionEventDto ToDto(AgentSessionEvent e) => new(
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId, e.WorkId, e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"));
+
+    private static AgentSessionEventDto ToDto(AgentSessionEventSnapshot e) => new(
+        e.Id, e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId, e.WorkId, e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt);
 
     private static object? ParsePayload(string json) => JsonSerializer.Deserialize<JsonElement>(json);
 

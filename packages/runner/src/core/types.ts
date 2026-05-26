@@ -65,6 +65,7 @@ export interface RunnerTelemetry {
   started(sessionId: string, body: unknown, signal: AbortSignal): Promise<void>
   events(sessionId: string, events: unknown[], signal: AbortSignal): Promise<void>
   completed(sessionId: string, body: unknown, signal: AbortSignal): Promise<void>
+  status?(sessionId: string, body: unknown, signal: AbortSignal): Promise<void>
 }
 
 export interface ActionResult {

@@ -8,11 +8,13 @@ internal sealed class SystemdServiceInstaller
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
+    private readonly IFileSystem _fileSystem;
 
-    public SystemdServiceInstaller(TextWriter output, TextWriter error)
+    public SystemdServiceInstaller(TextWriter output, TextWriter error, IFileSystem? fileSystem = null)
     {
         _out = output;
         _err = error;
+        _fileSystem = fileSystem ?? RealFileSystem.Instance;
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -70,10 +72,9 @@ internal sealed class SystemdServiceInstaller
         if (!EnsureSystemdSupported(options.DryRun)) return 1;
 
         var unitDir = ResolveUnitDir(options.UnitDir);
-        Directory.CreateDirectory(unitDir);
 
         var unitPath = Path.Combine(unitDir, unit.Name);
-        await File.WriteAllTextAsync(unitPath, unit.Render(), Encoding.UTF8);
+        await _fileSystem.WriteAllTextAsync(unitPath, unit.Render());
         _out.WriteLine($"Wrote {unitPath}");
 
         if (options.DryRun)
@@ -152,9 +153,9 @@ internal sealed class SystemdServiceInstaller
         var disable = await RunAsync("systemctl", ["--user", "disable", "--now", unitName]);
         if (disable != 0) return disable;
 
-        if (File.Exists(unitPath))
+        if (_fileSystem.Exists(unitPath))
         {
-            File.Delete(unitPath);
+            _fileSystem.Delete(unitPath);
             _out.WriteLine($"Removed {unitPath}");
         }
         else
@@ -273,6 +274,34 @@ internal sealed class SystemdServiceInstaller
             return value;
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
+}
+
+internal interface IFileSystem
+{
+    Task WriteAllTextAsync(string path, string contents);
+    bool Exists(string path);
+    void Delete(string path);
+}
+
+internal sealed class RealFileSystem : IFileSystem
+{
+    public static readonly RealFileSystem Instance = new();
+
+    private RealFileSystem()
+    {
+    }
+
+    public async Task WriteAllTextAsync(string path, string contents)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(path, contents, Encoding.UTF8);
+    }
+
+    public bool Exists(string path) => File.Exists(path);
+
+    public void Delete(string path) => File.Delete(path);
 }
 
 internal sealed record ServiceInstallOptions(
