@@ -23,10 +23,23 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
-            ["model"] = JsonSerializer.SerializeToElement(new { @default = issue.Model ?? "", stage = issue.StageModels ?? new Dictionary<string, string>() }, WorkflowVariableJson.Options),
+            ["model"] = JsonSerializer.SerializeToElement(new { @default = issue.Model ?? "", stage = StageModels(issue) }, WorkflowVariableJson.Options),
             ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>(), WorkflowVariableJson.Options),
         };
         return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+    }
+
+    private static Dictionary<string, string> StageModels(Domain.Issue issue)
+    {
+        var defaultModel = issue.Model ?? "";
+        var overrides = issue.StageModels ?? new Dictionary<string, string>();
+        return new Dictionary<string, string>
+        {
+            ["plan"] = overrides.GetValueOrDefault("plan") ?? defaultModel,
+            ["build"] = overrides.GetValueOrDefault("build") ?? defaultModel,
+            ["check"] = overrides.GetValueOrDefault("check") ?? defaultModel,
+            ["integrate"] = overrides.GetValueOrDefault("integrate") ?? defaultModel,
+        };
     }
 
     public MohistDefaultWorkflowState Project(Domain.Issue issue, WorkflowStatusSnapshot? workflow) =>

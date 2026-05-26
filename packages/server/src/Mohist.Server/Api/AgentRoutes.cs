@@ -1,5 +1,4 @@
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Sessions;
 using Mohist.Server.Config.Domain;
 using Mohist.Server.Project.Grains;
@@ -22,7 +21,6 @@ public static class AgentRoutes
             var projectId = await ResolveProjectIdAsync(grains);
             var activeAgents = await projection.ListActiveAgentsAsync(projectId);
             var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
-            var embeddedRunnerEnabled = EmbeddedRunnerService.IsEnabled(configuration);
             var runnerAvailable = runnerIds.Count > 0;
 
             return ApiResults.Ok(new
@@ -33,13 +31,11 @@ public static class AgentRoutes
                 activeAgents,
                 capacity = new { active = activeAgents.Count, max = maxConcurrentAgents },
                 runnerAvailable,
-                embeddedRunnerEnabled,
+                embeddedRunnerEnabled = false,
                 runnerMessage = runnerAvailable
                     ? null
-                    : embeddedRunnerEnabled
-                        ? "Embedded runner is starting or not connected yet."
-                        : "No runner is connected. Enable the embedded runner or start Mohist.Runner.",
-                runners = runnerIds.Select(id => new { id, kind = id.StartsWith("embedded-", StringComparison.OrdinalIgnoreCase) ? "embedded" : "external" }).ToArray(),
+                    : "No runner is connected. Start the Mohist runner process.",
+                runners = runnerIds.Select(id => new { id, kind = "external" }).ToArray(),
             });
         });
 

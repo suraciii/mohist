@@ -98,9 +98,9 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         {
             Assert.False(proposalWith.RootElement.TryGetProperty("changeDir", out _));
             Assert.False(proposalWith.RootElement.TryGetProperty("openspecChangeDir", out _));
-            Assert.Equal("proposal", proposalWith.RootElement.GetProperty("task").GetString());
-            Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalWith.RootElement.GetProperty("requireFiles")[0].GetProperty("path").GetString());
-            Assert.False(proposalWith.RootElement.TryGetProperty("requireMarkers", out _));
+            Assert.Contains("proposal.md", proposalWith.RootElement.GetProperty("prompt").GetString());
+            Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalWith.RootElement.GetProperty("expect").GetProperty("files")[0].GetProperty("path").GetString());
+            Assert.False(proposalWith.RootElement.GetProperty("expect").TryGetProperty("markers", out _));
         }
         await ReportAsync(r1, proposal.WorkId, "completed");
 
@@ -155,10 +155,11 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Equal("plan", proposal.Stage);
         Assert.Equal("mohist/coder-agent", proposal.Uses);
         Assert.Contains("proposal", proposal.WorkId);
-        Assert.Contains("\"stage\":\"plan\"", proposal.With);
-        Assert.Contains("\"task\":\"proposal\"", proposal.With);
+        Assert.Contains("\"prompt\"", proposal.With);
+        Assert.DoesNotContain("\"stage\":", proposal.With);
+        Assert.DoesNotContain("\"task\":", proposal.With);
         Assert.DoesNotContain("changeDir", proposal.With);
-        Assert.Contains("\"requireFiles\"", proposal.With);
+        Assert.Contains("\"expect\"", proposal.With);
         Assert.Contains("${{ openspecChangeDir }}/proposal.md", proposal.With);
     }
 }

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Mohist.Runner;
+using Mohist.Server.Workspace;
 using Mohist.Server.Tests.Support;
 using Xunit;
 

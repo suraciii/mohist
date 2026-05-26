@@ -48,7 +48,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
                 {
                     ["Mohist:SqliteConnectionString"] = ConnectionString,
                     ["Mohist:RunnerRoot"] = _runnerRoot,
-                    ["Mohist:EmbeddedRunner:Enabled"] = "false",
                 })
                 .Build();
             siloBuilder.Services.AddSingleton<IConfiguration>(config);
@@ -99,7 +98,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
-        builder.UseSetting("Mohist:EmbeddedRunner:Enabled", "false");
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -109,7 +107,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
-                ["Mohist:EmbeddedRunner:Enabled"] = "false",
             });
         });
 

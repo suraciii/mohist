@@ -36,16 +36,16 @@ internal sealed class SystemdServiceInstaller
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
         var environment = new Dictionary<string, string>
         {
-            ["ServerUrl"] = options.ServerUrl ?? "http://127.0.0.1:3456",
+            ["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456",
         };
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
-            environment["RunnerRoot"] = Path.GetFullPath(options.RunnerRoot);
+            environment["RUNNER_ROOT"] = Path.GetFullPath(options.RunnerRoot);
 
         var unit = new SystemdUnit(
             Name: RunnerUnit,
             Description: "Mohist Runner",
             WorkingDirectory: repoRoot,
-            ExecStart: DotnetRun(repoRoot, "packages/runner/src/Mohist.Runner.Cli/Mohist.Runner.Cli.csproj", []),
+            ExecStart: "npm run start -w packages/runner",
             Environment: environment);
 
         return await InstallAsync(unit, options);

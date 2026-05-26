@@ -1,12 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Runner;
-using Mohist.Runner.Actions;
-using Mohist.Runner.Transport;
 using Mohist.Server.Config.Domain;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Sessions;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
@@ -36,16 +32,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddScoped<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);
-        var agentCommand = ResolveAgentCommand(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
-        services.AddSingleton<IAgentExecutor>(sp =>
-            new ProcessAgentExecutor(sp.GetRequiredService<ILogger<ProcessAgentExecutor>>(), agentCommand));
-        services.AddSingleton<IAgentCompletionVerifier, AgentCompletionVerifier>();
-        services.AddSingleton<IAgentSessionRepairer, NoopAgentSessionRepairer>();
-        services.AddSingleton<IWorkspaceManager>(sp =>
-            new WorkspaceManager(sp.GetRequiredService<ILogger<WorkspaceManager>>(), runnerRoot));
-        services.AddScoped<ISessionTelemetrySink, EmbeddedSessionTelemetrySink>();
-        services.AddHostedService<EmbeddedRunnerService>();
 
         return services;
     }
@@ -83,12 +70,5 @@ public static class MohistServiceRegistration
             ?? Environment.GetEnvironmentVariable("MOHIST_RUNNER_ROOT")
             ?? Environment.GetEnvironmentVariable("MOHIST_WORKSPACE_ROOT");
         return string.IsNullOrWhiteSpace(configured) ? null : configured;
-    }
-
-    private static string ResolveAgentCommand(IConfiguration configuration)
-    {
-        var configured = configuration["Mohist:AgentCommand"]
-            ?? Environment.GetEnvironmentVariable("MOHIST_AGENT_COMMAND");
-        return string.IsNullOrWhiteSpace(configured) ? "opencode" : configured;
     }
 }

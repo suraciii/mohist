@@ -48,4 +48,4 @@ scripts/restart-server.sh   # 停止 Mohist.Server，重启，等待健康检查
 
 手动创建 `test/agentic/verify-<feature>/scripts`，写 `TESTPLAN.md` 和脚本。
 
-旧 CLI 时代的 `/test-create` 和 `/test-run` 命令已移除；新的 agentic 测试应直接面向 ASP.NET Core server、Mohist.Runner 和 HTTP API。
+旧 CLI 时代的 `/test-create` 和 `/test-run` 命令已移除；新的 agentic 测试应直接面向 ASP.NET Core server、TypeScript runner 和 HTTP API。

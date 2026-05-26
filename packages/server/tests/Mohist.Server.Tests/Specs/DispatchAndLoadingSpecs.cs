@@ -99,12 +99,11 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
               "title": "Implement feature",
               "uses": "mohist/coder-agent",
               "with": {
-                "stage": "build",
-                "task": "T-001",
-                "description": "Add the feature flag service.",
-                "acceptanceCriteria": ["service is registered"],
-                "requireFiles": [{ "path": "src/FeatureFlags.cs" }],
-                "requireMarkers": [{ "path": "openspec/changes/issue-1/tasks.json", "marker": "\"passes\": true" }]
+                "prompt": "Add the feature flag service.\n- service is registered",
+                "expect": {
+                  "files": [{ "path": "src/FeatureFlags.cs" }],
+                  "markers": [{ "path": "openspec/changes/issue-1/tasks.json", "contains": "\"passes\": true" }]
+                }
               }
             }
           ]
@@ -118,8 +117,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.NotNull(dynamicTask.With);
         Assert.Contains("Add the feature flag service.", dynamicTask.With);
         Assert.Contains("service is registered", dynamicTask.With);
-        Assert.Contains("requireFiles", dynamicTask.With);
-        Assert.Contains("requireMarkers", dynamicTask.With);
+        Assert.Contains("expect", dynamicTask.With);
+        Assert.Contains("contains", dynamicTask.With);
         Assert.Contains("src/FeatureFlags.cs", dynamicTask.With);
     }
 
@@ -246,8 +245,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             "title": "Resolve rebase conflicts",
             "uses": "mohist/coder-agent",
             "with": {
-              "stage": "maintenance",
-              "task": "resolve-rebase-conflicts"
+              "prompt": "Resolve the active git rebase conflicts."
             },
             "then": {
               "id": "verify-rebase",
@@ -267,7 +265,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (resolver, resolverRunnerId) = await PollWorkAnyAsync();
         Assert.StartsWith("resolve-rebase-conflicts.", resolver.WorkId);
         Assert.Equal("mohist/coder-agent", resolver.Uses);
-        Assert.Contains("resolve-rebase-conflicts", resolver.With);
+        Assert.Contains("rebase conflicts", resolver.With);
+        Assert.Contains("prompt", resolver.With);
 
         await ReportAsync(resolverRunnerId, resolver.WorkId, "completed");
         var (verify, verifyRunnerId) = await PollWorkAnyAsync();
