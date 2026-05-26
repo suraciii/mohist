@@ -1,8 +1,13 @@
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
-import { arrayInput, isObject, objectInput, stringInput } from "../core/json.js"
+import type { ActionContext, ActionResult } from "../core/types.js"
+import { arrayInput, numberInput, stringInput } from "../core/json.js"
 import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
+import { acpAgentAction } from "./acp-agent.js"
+import { resolveActionPath } from "./expectations.js"
+import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
+import { rebaseAction, rebaseStatusAction } from "./rebase.js"
+import { git } from "./git.js"
 
 export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
 
@@ -25,7 +30,12 @@ export function createDefaultRegistry() {
   registry.register("core/script", scriptAction)
   registry.register("core/artifact-exists", artifactExistsAction)
   registry.register("core/marker", markerAction)
-  registry.register("mohist/coder-agent", coderAgentAction)
+  registry.register("mohist/acp-agent", acpAgentAction)
+  registry.register("mohist/openspec-tasks", openspecTasksAction)
+  registry.register("mohist/openspec-sync", openspecSyncAction)
+  registry.register("mohist/archive-change", archiveChangeAction)
+  registry.register("mohist/rebase", rebaseAction)
+  registry.register("mohist/rebase-status", rebaseStatusAction)
   registry.register("mohist/merge-ready", mergeReadyAction)
   registry.register("mohist/merge", mergeAction)
   return registry
@@ -47,7 +57,9 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
   const file = join(context.workDir, `_${randomUUID().replace(/-/g, "")}${process.platform === "win32" ? ".ps1" : ".sh"}`)
   await writeText(file, run)
   try {
-    const result = await runCommand(shell, [file], context.workDir, context.signal)
+    const timeoutMs = numberInput(context.with, "timeout")
+    const signal = timeoutMs ? timeoutSignal(context.signal, timeoutMs) : context.signal
+    const result = await runCommand(shell, [file], context.workDir, signal)
     return {
       status: result.exitCode === 0 ? "success" : "failure",
       message: result.exitCode === 0 ? "Script completed" : `Script failed: ${firstLine(run)}`,
@@ -62,7 +74,9 @@ async function scriptAction(context: ActionContext): Promise<ActionResult> {
 async function artifactExistsAction(context: ActionContext): Promise<ActionResult> {
   const path = resolveActionPath(context, stringInput(context.with, "path"))
   if (!path) return { status: "failure", message: "Artifact check requires 'path'" }
-  return exists(path) ? { status: "success", message: `Artifact exists: ${path}` } : { status: "failure", message: `Artifact missing: ${path}` }
+  const found = exists(path)
+  const output = JSON.stringify({ kind: "artifact-exists", path, exists: found })
+  return found ? { status: "success", message: `Artifact exists: ${path}`, output } : { status: "failure", message: `Artifact missing: ${path}`, output }
 }
 
 async function markerAction(context: ActionContext): Promise<ActionResult> {
@@ -70,97 +84,68 @@ async function markerAction(context: ActionContext): Promise<ActionResult> {
   const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
   if (!path || !expect) return { status: "failure", message: "Marker check requires 'path' and 'expect'" }
   if (!exists(path)) return { status: "failure", message: `Marker file missing: ${path}` }
-  return (await readText(path)).includes(expect) ? { status: "success", message: `Marker found in ${path}` } : { status: "failure", message: `Marker missing in ${path}` }
-}
-
-async function coderAgentAction(context: ActionContext): Promise<ActionResult> {
-  const prompt = stringInput(context.with, "prompt")
-  if (!prompt?.trim()) return { status: "failure", message: "Coder agent requires 'prompt'" }
-
-  // ACP belongs in the TypeScript runner. The current implementation keeps the boundary here;
-  // next step is replacing this CLI fallback with an ACP ClientSideConnection session.
-  const command = process.env.MOHIST_AGENT_COMMAND ?? "opencode"
-  const args = ["agent", "--local", "--message"]
-  const model = stringInput(context.with, "model")
-  const variant = stringInput(context.with, "variant")
-  if (model) args.push("--model", model)
-  if (variant) args.push("--variant", variant)
-  args.push(prompt)
-
-  if (context.session) {
-    await emitSessionStarted(context, context.session.externalSessionId ?? context.session.id)
-    await emitSessionEvent(context, "mohist_prompt", { text: prompt, sentAt: new Date().toISOString(), kind: "task", issueId: String(context.session.issueNumber), acpSessionId: context.session.externalSessionId ?? context.session.id })
-  }
-
-  const result = await runCommand(command, args, context.workDir, context.signal)
-  const verification = await verifyExpectations(context)
-  const ok = result.exitCode === 0 && verification.satisfied
-  if (context.session) await emitSessionCompleted(context, ok ? "completed" : "failed", ok ? "Agent completed" : verification.message, result.exitCode)
-  return {
-    status: ok ? "success" : "failure",
-    message: ok ? "Coder agent task completed" : verification.message,
-    output: JSON.stringify({ kind: "coder-agent", status: ok ? "success" : "failure", exitCode: result.exitCode, model, stdout: result.stdout, stderr: result.stderr, expectation: verification }),
-    exitCode: result.exitCode,
-  }
+  const found = (await readText(path)).includes(expect)
+  const output = JSON.stringify({ kind: "marker", path, marker: expect, found })
+  return found ? { status: "success", message: `Marker found in ${path}`, output } : { status: "failure", message: `Marker missing in ${path}`, output }
 }
 
 async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
-  const result = await runCommand("git", ["diff", "--check"], context.workDir, context.signal)
-  return result.exitCode === 0
-    ? { status: "success", message: "Merge checks passed", output: result.stdout }
-    : { status: "failure", message: result.stderr || result.stdout || "Merge checks failed", output: result.stdout, exitCode: result.exitCode }
+  const baseBranch = stringInput(context.with, "baseBranch") ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
+  const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal)
+  if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseBranch}'`, base.exitCode)
+  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+  if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve HEAD", head.exitCode)
+  const mergeBase = await git(context.workDir, ["merge-base", baseBranch, "HEAD"], context.signal)
+  const mergeTree = await git(context.workDir, ["merge-tree", "--write-tree", baseBranch, "HEAD"], context.signal)
+  return mergeTree.success
+    ? mergeReadyResult(true, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBase.success ? mergeBase.stdout.trim() : null, null, mergeTree.exitCode)
+    : mergeReadyResult(false, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBase.success ? mergeBase.stdout.trim() : null, mergeTree.combinedOutput, mergeTree.exitCode)
 }
 
 async function mergeAction(context: ActionContext): Promise<ActionResult> {
-  const base = stringInput(context.with, "base") ?? "main"
-  const squash = stringInput(context.with, "squash") !== "false"
-  const message = stringInput(context.with, "message") ?? "Integrate Mohist issue"
-  const checkout = await runCommand("git", ["checkout", base], context.workDir, context.signal)
-  if (checkout.exitCode !== 0) return { status: "failure", message: checkout.stderr || checkout.stdout, exitCode: checkout.exitCode }
-  const merge = await runCommand("git", squash ? ["merge", "--squash", "HEAD@{1}"] : ["merge", "HEAD@{1}"], context.workDir, context.signal)
-  if (merge.exitCode !== 0) return { status: "failure", message: merge.stderr || merge.stdout, exitCode: merge.exitCode }
-  const commit = await runCommand("git", ["commit", "-m", message], context.workDir, context.signal)
-  return commit.exitCode === 0 ? { status: "success", message: "Merged", output: commit.stdout, exitCode: commit.exitCode } : { status: "failure", message: commit.stderr || commit.stdout, exitCode: commit.exitCode }
-}
+  const source = stringInput(context.with, "source") ?? "HEAD"
+  const target = stringInput(context.with, "target")
+  const strategy = stringInput(context.with, "strategy") ?? "squash"
+  const message = stringInput(context.with, "message") ?? "Mohist merge"
+  const mergeWorkDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
 
-async function verifyExpectations(context: ActionContext) {
-  const expect = objectInput(context.with, "expect")
-  const files = arrayInput(expect, "files").filter(isObject)
-  const markers = arrayInput(expect, "markers").filter(isObject)
-  const missingFiles = files.map((file) => resolveActionPath(context, stringValue(file.path))).filter((path): path is string => !!path && !exists(path)).map((path) => ({ path }))
-  const missingMarkers = (await Promise.all(markers.map(async (marker) => {
-    const path = resolveActionPath(context, stringValue(marker.path))
-    const contains = stringValue(marker.contains)
-    if (!path || !contains || !exists(path)) return path && contains ? { path, contains } : null
-    return (await readText(path)).includes(contains) ? null : { path, contains }
-  }))).filter((marker): marker is { path: string; contains: string } => marker !== null)
-  return {
-    satisfied: missingFiles.length === 0 && missingMarkers.length === 0,
-    missingFiles,
-    missingMarkers,
-    message: missingFiles.length === 0 && missingMarkers.length === 0 ? "Agent completion requirements satisfied" : `Agent completion requirements were not satisfied: ${[...missingFiles.map((file) => `missing file: ${file.path}`), ...missingMarkers.map((marker) => `missing marker in ${marker.path}: ${marker.contains}`)].join("; ")}`,
+  const sourceCommit = await commitPendingSourceChanges(context.workDir, message, context.signal)
+  if (!sourceCommit.success) return mergeFailure(source, target, strategy, sourceCommit.combinedOutput, sourceCommit.exitCode)
+
+  if (target?.trim()) {
+    const checkout = await git(mergeWorkDir, ["checkout", target], context.signal)
+    if (!checkout.success) return mergeFailure(source, target, strategy, checkout.combinedOutput, checkout.exitCode)
   }
+
+  const result = strategy.toLowerCase() === "squash"
+    ? await squashMerge(mergeWorkDir, source, message, context.signal)
+    : await git(mergeWorkDir, ["merge", source], context.signal)
+  const head = result.success ? await git(mergeWorkDir, ["rev-parse", "HEAD"], context.signal) : null
+  const output = JSON.stringify({ kind: "merge", source, target, strategy, workDir: mergeWorkDir, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: result.combinedOutput })
+  return result.success ? { status: "success", message: "Merge completed", output, exitCode: result.exitCode } : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
 }
 
-async function emitSessionStarted(context: ActionContext, externalSessionId: string) {
-  if (context.telemetry && context.session) await context.telemetry.started(context.session.id, { externalSessionId, workDir: context.workDir, changeDir: null, processPid: null }, context.signal)
+function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null): ActionResult {
+  const output = JSON.stringify({ kind: "merge-ready", targetBranch: baseBranch, baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles: [], checkedAt: new Date().toISOString(), error })
+  return canMerge ? { status: "success", message: "Merge ready", output, exitCode } : { status: "failure", message: error ?? "Merge is not ready", output, exitCode }
 }
 
-async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
-  if (context.telemetry && context.session) await context.telemetry.events(context.session.id, [{ type, payload }], context.signal)
+async function commitPendingSourceChanges(workDir: string, message: string, signal: AbortSignal) {
+  const status = await git(workDir, ["status", "--porcelain"], signal)
+  if (!status.success || !status.stdout.trim()) return status.success ? { ...status, combinedOutput: "" } : status
+  const add = await git(workDir, ["add", "."], signal)
+  if (!add.success) return add
+  return await git(workDir, ["commit", "-m", `${message} integration`], signal)
 }
 
-async function emitSessionCompleted(context: ActionContext, status: string, message: string, exitCode: number) {
-  if (context.telemetry && context.session) await context.telemetry.completed(context.session.id, { status, failureReason: message, exitCode }, context.signal)
+async function squashMerge(workDir: string, source: string, message: string, signal: AbortSignal) {
+  const merge = await git(workDir, ["merge", "--squash", source], signal)
+  if (!merge.success) return merge
+  return await git(workDir, ["commit", "-m", message], signal)
 }
 
-function resolveActionPath(context: ActionContext, value?: string) {
-  if (!value) return undefined
-  return value.match(/^[A-Za-z]:[\\/]|^\//) ? value : join(context.workDir, value)
-}
-
-function stringValue(value: JsonValue | undefined) {
-  return typeof value === "string" ? value : undefined
+function mergeFailure(source: string, target: string | undefined, strategy: string, outputText: string, exitCode: number): ActionResult {
+  return { status: "failure", message: outputText, output: JSON.stringify({ kind: "merge", source, target, strategy, commit: null, output: outputText }), exitCode }
 }
 
 function firstLine(value: string) {
@@ -169,4 +154,21 @@ function firstLine(value: string) {
 
 function trim(value: string) {
   return value.length <= 20_000 ? value : value.slice(0, 20_000)
+}
+
+function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController()
+  const abort = () => controller.abort(parent.reason)
+  if (parent.aborted) abort()
+  else parent.addEventListener("abort", abort, { once: true })
+  setTimeout(() => controller.abort(new Error(`Timed out after ${timeoutMs / 1000}s`)), timeoutMs).unref?.()
+  return controller.signal
+}
+
+function stringAt(value: unknown, path: string[]) {
+  const found = path.reduce<unknown>((current, part) => {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
+    return (current as Record<string, unknown>)[part]
+  }, value)
+  return typeof found === "string" ? found : undefined
 }

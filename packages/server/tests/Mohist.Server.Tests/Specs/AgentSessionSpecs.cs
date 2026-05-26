@@ -27,7 +27,7 @@ public class AgentSessionSpecs
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
         var sessionWork = await PollUntilAgentWorkAsync();
-        Assert.Equal("mohist/coder-agent", sessionWork.Uses);
+        Assert.Equal("mohist/acp-agent", sessionWork.Uses);
         Assert.NotNull(sessionWork.Session);
 
         var status = await _client.GetDataAsync<AgentStatusDto>("/api/agent/status");
@@ -86,12 +86,12 @@ public class AgentSessionSpecs
                 {
                     workId = work.WorkId,
                     status = "loaded",
-                    output = JsonSerializer.Serialize(new { tasks = new[] { new { id = "build-1", title = "Build task", uses = "mohist/coder-agent" } } })
+                    output = JsonSerializer.Serialize(new { tasks = new[] { new { id = "build-1", title = "Build task", uses = "mohist/acp-agent" } } })
                 });
                 continue;
             }
 
-            if (work.Uses == "mohist/coder-agent") return work;
+            if (work.Uses == "mohist/acp-agent") return work;
 
             await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, status = "completed" });
         }

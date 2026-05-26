@@ -153,7 +153,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
 
         Assert.Equal("task", proposal.WorkType);
         Assert.Equal("plan", proposal.Stage);
-        Assert.Equal("mohist/coder-agent", proposal.Uses);
+        Assert.Equal("mohist/acp-agent", proposal.Uses);
         Assert.Contains("proposal", proposal.WorkId);
         Assert.Contains("\"prompt\"", proposal.With);
         Assert.DoesNotContain("\"stage\":", proposal.With);

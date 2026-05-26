@@ -97,7 +97,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             {
               "id": "T-001",
               "title": "Implement feature",
-              "uses": "mohist/coder-agent",
+              "uses": "mohist/acp-agent",
               "with": {
                 "prompt": "Add the feature flag service.\n- service is registered",
                 "expect": {
@@ -113,7 +113,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var (dynamicTask, _) = await PollWorkAnyAsync();
 
         Assert.StartsWith("T-001.", dynamicTask.WorkId);
-        Assert.Equal("mohist/coder-agent", dynamicTask.Uses);
+        Assert.Equal("mohist/acp-agent", dynamicTask.Uses);
         Assert.NotNull(dynamicTask.With);
         Assert.Contains("Add the feature flag service.", dynamicTask.With);
         Assert.Contains("service is registered", dynamicTask.With);
@@ -243,7 +243,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
           "requestedTask": {
             "id": "resolve-rebase-conflicts",
             "title": "Resolve rebase conflicts",
-            "uses": "mohist/coder-agent",
+            "uses": "mohist/acp-agent",
             "with": {
               "prompt": "Resolve the active git rebase conflicts."
             },
@@ -264,7 +264,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         var (resolver, resolverRunnerId) = await PollWorkAnyAsync();
         Assert.StartsWith("resolve-rebase-conflicts.", resolver.WorkId);
-        Assert.Equal("mohist/coder-agent", resolver.Uses);
+        Assert.Equal("mohist/acp-agent", resolver.Uses);
         Assert.Contains("rebase conflicts", resolver.With);
         Assert.Contains("prompt", resolver.With);
 

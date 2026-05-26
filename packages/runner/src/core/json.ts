@@ -11,6 +11,14 @@ export function stringInput(input: JsonObject | null | undefined, key: string) {
   return typeof value === "string" ? value : JSON.stringify(value)
 }
 
+export function numberInput(input: JsonObject | null | undefined, key: string) {
+  const value = input?.[key]
+  if (typeof value === "number") return value
+  if (typeof value !== "string") return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
 export function objectInput(input: JsonObject | null | undefined, key: string) {
   const value = input?.[key]
   return isObject(value) ? value : undefined
