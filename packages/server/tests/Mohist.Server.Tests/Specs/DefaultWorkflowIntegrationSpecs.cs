@@ -29,23 +29,18 @@ public class DefaultWorkflowIntegrationSpecs
     {
         using var repo = new TestTempDir();
         await InitRepositoryAsync(repo.Path);
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
-        {
-            name = $"default-workflow-{Guid.NewGuid():N}",
-            path = repo.Path,
-            baseBranch = "main"
-        });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new
-        {
-            title = "Deliver default workflow",
-            body = "body",
-            labels = Array.Empty<string>(),
-            priority = "p1",
-            projectId = project.Id
-        });
+        var projectName = $"default-workflow-{Guid.NewGuid():N}";
+        var projectResult = await RunCliAsync("project", "create", projectName, "--path", repo.Path, "--base-branch", "main");
+        Assert.Equal(0, projectResult.ExitCode);
+        var project = JsonSerializer.Deserialize<ProjectDto>(projectResult.Stdout, JsonOptions)!;
+
+        var issueResult = await RunCliAsync("issue", "create", "Deliver default workflow", "--body", "body", "--priority", "p1", "--project-id", project.Id);
+        Assert.Equal(0, issueResult.ExitCode);
+        var issue = JsonSerializer.Deserialize<IssueDto>(issueResult.Stdout, JsonOptions)!;
         var changeDir = $"openspec/changes/issue-{issue.Number}";
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        var start = await RunCliAsync("issue", "start", issue.Number.ToString(), "--project-id", project.Id);
+        Assert.Equal(0, start.ExitCode);
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         await using var runnerServices = RunnerServices(
@@ -77,10 +72,12 @@ public class DefaultWorkflowIntegrationSpecs
         try
         {
             await WaitForWorkflowAsync(project.Id, issue.Number, "AwaitingApproval", "plan");
-            await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+            var approvePlan = await RunCliAsync("issue", "approve", issue.Number.ToString(), "--project-id", project.Id);
+            Assert.Equal(0, approvePlan.ExitCode);
             await WaitForWorkflowAsync(project.Id, issue.Number, "AwaitingApproval", "check");
             await AssertProductSurfaceDuringWorkflowAsync(project.Id, issue.Number);
-            await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+            var approveCheck = await RunCliAsync("issue", "approve", issue.Number.ToString(), "--project-id", project.Id);
+            Assert.Equal(0, approveCheck.ExitCode);
             await WaitForWorkflowAsync(project.Id, issue.Number, "Completed", null);
         }
         finally
@@ -166,6 +163,14 @@ public class DefaultWorkflowIntegrationSpecs
         var activity = await _client.GetDataAsync<AgentActivityDto>($"/api/agent/activity?projectId={projectId}");
         Assert.True(activity.Summary.Completed > 0);
         Assert.Contains(activity.Waiting, w => w.IssueNumber == issueNumber && w.Stage == "check");
+    }
+
+    private async Task<CliResult> RunCliAsync(params string[] args)
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var exitCode = await new MohistCli(args, stdout, stderr, _fixture.Client).RunAsync();
+        return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
     }
 
     private async Task WaitForWorkflowAsync(string projectId, int issueNumber, string status, string? stage)
@@ -325,6 +330,9 @@ public class DefaultWorkflowIntegrationSpecs
         ? $"\"{value.Replace("\"", "\\\"")}\""
         : value;
 
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private sealed record CliResult(int ExitCode, string Stdout, string Stderr);
     private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(int Number, string Stage, string Status);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);

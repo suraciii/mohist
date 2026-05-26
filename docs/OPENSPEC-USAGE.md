@@ -90,7 +90,7 @@ Agent 探索 Issue 和代码库，生成：
 - **tasks.json**: 从 specs 派生的任务列表
 - **self-review.md**: Agent 自审 report（最多 3 次迭代）
 
-Plan gate 包含用户审批和健康门控（`npm run typecheck`）。
+Plan gate 包含用户审批和健康检查（`git diff --check`）。
 
 ### Build 阶段
 
@@ -101,7 +101,7 @@ Ralph loop 执行 `tasks.json` 中的任务：
 - 失败分析后带有失败上下文重试
 - 任务状态通过每个任务上的 `passes`/`attempts`/`error` 追踪
 
-Build gate 包含健康门控（`npm run build`）和全部任务完成检查。
+Build gate 包含健康检查（`git diff --check`）和全部任务完成检查。
 
 ### Check 阶段
 
@@ -114,7 +114,7 @@ Build gate 包含健康门控（`npm run build`）和全部任务完成检查。
 - 增量规格同步到主规格
 - Change 归档到 `openspec/changes/archive/`
 - 压缩合并到目标分支
-- 集成后健康门控（`npm run build && npm test`）
+- 集成后健康检查（`git diff --check`）
 
 ## 示例工作流
 

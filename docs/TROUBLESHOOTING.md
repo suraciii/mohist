@@ -13,7 +13,7 @@ Mohist 常见问题和解决方案。
 **解决**:
 1. 检查 `openspec/changes/{slug}/` 目录
 2. 查看 issue 日志: `mo issue logs <number>`
-3. Web UI 中查看 Issue 详情页 Pipeline 视图
+3. Web UI 中查看 Issue 详情页 Workflow 视图
 4. 重新启动: agent 会尝试自动修复（1 次）
 
 ### Self-review 未通过
@@ -56,9 +56,9 @@ Mohist 常见问题和解决方案。
 4. 手动验证实现是否正确
 5. 如验收标准有问题，更新后重新运行
 
-### 健康门控失败
+### 健康检查失败
 
-**现象**: Build 阶段完成后 `npm run build` 失败
+**现象**: Build 阶段完成后 `git diff --check` 失败
 
 **原因**: 生成的代码有编译错误
 
@@ -143,9 +143,9 @@ Mohist 常见问题和解决方案。
 3. `mo issue retry-merge <number>` 重试
 4. 手动处理合并冲突后继续
 
-### 集成后健康门控失败
+### 集成后健康检查失败
 
-**现象**: `npm run build && npm test` 失败
+**现象**: `git diff --check` 失败
 
 **原因**: 合并后的代码有问题
 
@@ -164,7 +164,7 @@ Mohist 常见问题和解决方案。
 1. 确认 server 运行: `mo server status`
 2. 检查浏览器 console（F12）
 3. 确认端口 3456 未被占用
-4. 重建 Web UI: `npm run build:web`
+4. 重建 Web UI: `git diff --check:web`
 
 ### 数据不刷新
 
@@ -226,7 +226,7 @@ Mohist 常见问题和解决方案。
 # 查看 Issue 状态
 mo issue show <number>
 
-# 重新启动 pipeline
+# 重新启动 workflow
 mo issue reopen <number>
 
 # 跳过 Plan review 进入 Build
@@ -252,6 +252,6 @@ mo attach -f
 
 1. 查看日志: `mo server logs` 或 Web UI `/logs`
 2. 查看 OpenSpec 产物: `openspec/changes/{slug}/`
-3. 运行类型检查: `npm run typecheck`
-4. 运行测试: `npm test`
+3. 运行类型检查: `git diff --check`
+4. 运行测试: `dotnet test packages/server/Mohist.sln`
 5. 提交 Issue: https://github.com/owner/mohist/issues

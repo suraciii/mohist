@@ -313,7 +313,7 @@ internal sealed class MohistCli
     {
         if (args.Length == 0 || IsHelp(args[0]))
         {
-            _out.WriteLine("Usage: mo providers <list|models|delete> ...");
+            _out.WriteLine("Usage: mo providers <list|models|runtime|save|test|delete> ...");
             return 0;
         }
 
@@ -321,9 +321,41 @@ internal sealed class MohistCli
         {
             "list" or "ls" => await PrintGetAsync("/api/providers"),
             "models" => await PrintGetAsync("/api/providers/models"),
+            "runtime" => await PrintGetAsync("/api/providers/runtime"),
+            "save" => await SaveProviderAsync(args[1..]),
+            "test" => await TestProviderAsync(args[1..]),
             "delete" or "remove" or "rm" => await PrintDeleteAsync($"/api/providers/{Escape(Required(args, 1, "provider id"))}"),
             _ => UsageError($"Unknown providers command '{args[0]}'"),
         };
+    }
+
+    private async Task<int> SaveProviderAsync(string[] args)
+    {
+        var id = Required(args, 0, "provider id");
+        var apiKey = Option(args, "--api-key", "--key")
+            ?? throw new ArgumentException("providers save requires --api-key");
+        return await PrintPostAsync($"/api/providers/{Escape(id)}", new
+        {
+            name = Option(args, "--name"),
+            apiKey,
+            baseURL = Option(args, "--base-url", "--baseURL"),
+            models = Values(args, "--model"),
+            sdk = Option(args, "--sdk"),
+        });
+    }
+
+    private async Task<int> TestProviderAsync(string[] args)
+    {
+        var apiKey = Option(args, "--api-key", "--key")
+            ?? throw new ArgumentException("providers test requires --api-key");
+        return await PrintPostAsync("/api/providers/test", new
+        {
+            name = Option(args, "--name"),
+            apiKey,
+            baseURL = Option(args, "--base-url", "--baseURL"),
+            models = Values(args, "--model"),
+            sdk = Option(args, "--sdk"),
+        });
     }
 
     private async Task<int> PrintGetAsync(string path) => await PrintResponseAsync(await _http.GetAsync(path));
@@ -478,7 +510,7 @@ internal sealed class MohistCli
           mo issue logs|events|diff|commits|sessions <number>
           mo issue workflow status|timeline <number>
           mo config list|get|set
-          mo providers list|models|delete
+          mo providers list|models|runtime|save|test|delete
         """);
     }
 }

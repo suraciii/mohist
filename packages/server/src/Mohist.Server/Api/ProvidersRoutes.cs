@@ -90,11 +90,31 @@ public static class ProvidersRoutes
             return ApiResults.Ok(result);
         });
 
+        app.MapGet("/api/providers/runtime", async (ConfigService svc, IConfiguration configuration) =>
+        {
+            var cfg = await svc.GetAllAsync();
+            cfg.TryGetValue("model", out var model);
+            return ApiResults.Ok(new
+            {
+                mode = "local-opencode",
+                command = configuration["Mohist:AgentCommand"]
+                    ?? Environment.GetEnvironmentVariable("MOHIST_AGENT_COMMAND")
+                    ?? "opencode",
+                model = string.IsNullOrWhiteSpace(model) ? null : model,
+                note = "Mohist delegates agent execution to the local opencode CLI. Provider credentials are stored for configuration visibility; the local CLI is responsible for provider authentication.",
+            });
+        });
+
         app.MapPost("/api/providers/test", (ProviderFormRequest req) =>
         {
             if (string.IsNullOrWhiteSpace(req.ApiKey))
                 return ApiResults.BadRequest("apiKey is required");
-            return ApiResults.Ok(new { success = true });
+            return ApiResults.Ok(new
+            {
+                success = true,
+                mode = "configuration-only",
+                message = "Provider configuration is syntactically valid. Runtime connectivity is handled by the local opencode CLI.",
+            });
         });
 
         app.MapPost("/api/providers/{id}", async (string id, ProviderFormRequest req, IDbContextFactory<MohistDbContext> dbFactory) =>
