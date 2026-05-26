@@ -1,4 +1,4 @@
-using ProjectInfo = Mohist.Server.Project.Domain.ProjectInfo;
+using ProjectInfo = Mohist.Server.Project.Queries.ProjectInfo;
 using Mohist.Server.Storage;
 
 namespace Mohist.Server.Project.Grains;

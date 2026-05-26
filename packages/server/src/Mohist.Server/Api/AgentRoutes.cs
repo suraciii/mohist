@@ -1,6 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Workflow.Projection;
 

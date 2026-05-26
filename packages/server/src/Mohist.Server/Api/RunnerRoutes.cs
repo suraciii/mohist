@@ -1,5 +1,7 @@
+using System.Text.Json.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Queries;
 
 namespace Mohist.Server.Api;
 
@@ -67,10 +69,10 @@ public static class RunnerRoutes
             return session is null ? ApiResults.NotFound($"Session {sessionId} not found") : ApiResults.Ok(session);
         });
 
-        group.MapPost("/sessions/{sessionId}/events", async (string sessionId, SessionEventsRequest req, AgentSessionService sessions) =>
+        group.MapPost("/sessions/{sessionId}/events", async (string sessionId, SessionTranscriptEntriesRequest req, AgentSessionService sessions) =>
         {
-            var events = await sessions.AppendEventsAsync(sessionId, req.Events);
-            return ApiResults.Ok(events);
+            var transcriptEntries = await sessions.AppendTranscriptEntriesAsync(sessionId, req.TranscriptEntries);
+            return ApiResults.Ok(transcriptEntries);
         });
 
         group.MapPost("/sessions/{sessionId}/status", async (string sessionId, SessionStatusRequest req, AgentSessionService sessions) =>
@@ -91,7 +93,7 @@ public static class RunnerRoutes
 
 public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null);
 public record RunnerReportRequest(string WorkId, string Status, string? Message = null, string? Output = null, int? ExitCode = null);
-public record SessionEventsRequest(IReadOnlyList<SessionEventRequest> Events);
+public record SessionTranscriptEntriesRequest([property: JsonPropertyName("events")] IReadOnlyList<SessionTranscriptEntryRequest> TranscriptEntries);
 public record WorkDispatchResponse(
     string WorkflowRunId,
     string WorkId,

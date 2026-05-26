@@ -1,8 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Storage.Db.Entities;
 
-namespace Mohist.Server.Config.Domain;
+namespace Mohist.Server.Config;
 
 public class ConfigService
 {
@@ -118,11 +119,4 @@ public class ConfigService
         try { JsonSerializer.Deserialize<JsonElement>(value); return true; }
         catch { return false; }
     }
-}
-
-public class ConfigEntry
-{
-    public string Key { get; set; } = null!;
-    public string Value { get; set; } = null!;
-    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

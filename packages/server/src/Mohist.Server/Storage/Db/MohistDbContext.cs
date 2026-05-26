@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 using Mohist.Server.Epics;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Sessions;
+using Mohist.Server.Issue.Storage;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db.Entities;
 
 namespace Mohist.Server.Storage.Db;
@@ -13,8 +14,8 @@ public class MohistDbContext : DbContext
     public DbSet<GrainState> GrainStates { get; set; } = null!;
     public DbSet<ConfigEntry> Configs { get; set; } = null!;
     public DbSet<WorkflowEventEntry> WorkflowEvents { get; set; } = null!;
-    public DbSet<AgentSession> AgentSessions { get; set; } = null!;
-    public DbSet<AgentSessionEvent> AgentSessionEvents { get; set; } = null!;
+    public DbSet<AgentSessionRecord> AgentSessions { get; set; } = null!;
+    public DbSet<AgentSessionTranscriptEntry> AgentSessionTranscriptEntries { get; set; } = null!;
     public DbSet<IssueCommentEntry> IssueComments { get; set; } = null!;
     public DbSet<IssuePrerequisiteEntry> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicEntry> Epics { get; set; } = null!;
@@ -60,7 +61,7 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
         });
 
-        modelBuilder.Entity<AgentSession>(entity =>
+        modelBuilder.Entity<AgentSessionRecord>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64);
@@ -72,14 +73,14 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Title).HasMaxLength(512);
             entity.Property(e => e.RunnerId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ExternalSessionId).HasMaxLength(256);
-            entity.Property(e => e.Status).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.Status).HasColumnName("Status").HasMaxLength(64).IsRequired();
             entity.Property(e => e.Model).HasMaxLength(256);
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
             entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
         });
 
-        modelBuilder.Entity<AgentSessionEvent>(entity =>
+        modelBuilder.Entity<AgentSessionTranscriptEntry>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SessionId).HasMaxLength(64).IsRequired();

@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Grains;
@@ -9,14 +10,12 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkflowAsync(string workflowRunId);
     Task CloseAsync();
-    Task<string?> GetWorkflowRunIdAsync();
     Task UpdateAsync(string title, string? body);
     Task UpdateFullAsync(UpdateIssueData data);
     Task ArchiveAsync();
     Task UnarchiveAsync();
     Task ReopenAsync();
     Task<IssueWorkflowStatus?> GetWorkflowStatusAsync();
-    Task<IssueInfo> GetInfoAsync();
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartEligibility> GetStartEligibilityAsync();

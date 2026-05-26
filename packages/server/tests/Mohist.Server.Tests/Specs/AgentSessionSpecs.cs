@@ -37,10 +37,10 @@ public class AgentSessionSpecs
         });
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{session.Id}/completed", new { status = "completed", exitCode = 0 });
 
-        var sessions = await _client.GetDataAsync<CoderSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
+        var sessions = await _client.GetDataAsync<AgentSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
         Assert.Contains(sessions, s => s.Id == session.Id && s.Status == "completed");
 
-        var detail = await _client.GetDataAsync<CoderSessionDetailDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<AgentSessionTranscriptDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
         Assert.Equal(session.Id, detail.Id);
         Assert.Contains("hello from agent", JsonSerializer.Serialize(detail.Turns));
 
@@ -72,17 +72,17 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task RunnerAppendsSessionEvents_ConcurrentBatches_AssignsMonotonicSequences()
+    public async Task RunnerAppendsSessionTranscriptEntries_ConcurrentBatches_AssignsMonotonicSequences()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("sequence");
 
         await Task.WhenAll(
-            PostEventsAsync(session.Id, "first"),
-            PostEventsAsync(session.Id, "second"));
+            PostTranscriptEntriesAsync(session.Id, "first"),
+            PostTranscriptEntriesAsync(session.Id, "second"));
 
-        var detail = await _client.GetDataAsync<CoderSessionDetailDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<AgentSessionTranscriptDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var sequences = await db.AgentSessionEvents.AsNoTracking()
+        var sequences = await db.AgentSessionTranscriptEntries.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
@@ -93,7 +93,7 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task RunnerReportsTerminalSession_TerminalStateExists_IgnoresLaterStatusChanges()
+    public async Task RunnerReportsTerminalSession_TerminalStatusExists_IgnoresLaterStatusChanges()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("terminal-lock");
 
@@ -185,7 +185,7 @@ public class AgentSessionSpecs
         return (project, issue, work, session);
     }
 
-    private Task PostEventsAsync(string sessionId, string text) => _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{sessionId}/events", new
+    private Task PostTranscriptEntriesAsync(string sessionId, string text) => _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{sessionId}/events", new
     {
         events = new[]
         {
@@ -197,8 +197,8 @@ public class AgentSessionSpecs
     private sealed record IssueDto(int Number, string Title);
     private sealed record AgentSessionDispatchDto(string Id, string ProjectId, int IssueNumber, string WorkflowRunId, string WorkId, string? Stage, string? Title, string? ExternalSessionId);
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber, AgentSessionDispatchDto? Session);
-    private sealed record CoderSessionSummaryDto(string Id, string Status);
-    private sealed record CoderSessionDetailDto(string Id, JsonElement Turns, WorkflowLogItemDto[] WorkflowLogs);
+    private sealed record AgentSessionSummaryDto(string Id, string Status);
+    private sealed record AgentSessionTranscriptDto(string Id, JsonElement Turns, WorkflowLogItemDto[] WorkflowLogs);
     private sealed record WorkflowLogItemDto(string Id, string EventType, JsonElement Data, string CreatedAt);
     private sealed record AgentSessionInfoDto(string SessionId);
     private sealed record AgentStatusDto(ActiveAgentDto[] ActiveAgents);

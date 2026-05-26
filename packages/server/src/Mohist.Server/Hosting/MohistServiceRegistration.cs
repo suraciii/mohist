@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Sessions;
 using Mohist.Server.Storage;
@@ -22,6 +23,7 @@ public static class MohistServiceRegistration
             options.UseSqlite(connectionString));
 
         services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
+        services.AddScoped<IStateStore<Issue.Domain.Issue>, IssueStateStore>();
         services.AddScoped<IssueQueryService>();
         services.AddSingleton<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();

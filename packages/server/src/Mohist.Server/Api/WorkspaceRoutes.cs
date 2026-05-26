@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Projection;
@@ -138,7 +139,7 @@ public static class WorkspaceRoutes
             return ApiResults.Ok(new { @base = baseContent, head = headContent });
         });
 
-        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection) =>
+        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -147,10 +148,11 @@ public static class WorkspaceRoutes
             var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             try
             {
-                await grain.GetInfoAsync();
+                var issue = await issuesQuery.GetInfoAsync(pid, number);
+                if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+                var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
                 var workflow = await grain.GetWorkflowStatusAsync();
                 if (IsWorkflowActive(workflow))
                 {

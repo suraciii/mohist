@@ -1,4 +1,4 @@
-namespace Mohist.Server.Project.Domain;
+namespace Mohist.Server.Project.Queries;
 
 [GenerateSerializer]
 public class ProjectInfo

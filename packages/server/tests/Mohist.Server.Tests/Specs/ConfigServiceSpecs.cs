@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Config.Domain;
+using Mohist.Server.Config;
 using Mohist.Server.Storage.Db;
 using Xunit;
 

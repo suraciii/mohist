@@ -12,6 +12,6 @@ public interface IIssueWorkflowProfile
     bool IsDefault { get; }
     WorkflowDefinitionInput Definition { get; }
     string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project);
-    MohistDefaultWorkflowState Project(Domain.Issue issue, WorkflowStatusSnapshot? workflow);
-    MohistDefaultWorkflowState Project(Queries.IssueReadModel issue, WorkflowStatusSnapshot? workflow);
+    MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusSnapshot? workflow);
+    MohistDefaultWorkflowState ProjectWorkflowState(Queries.IssueReadModel issue, WorkflowStatusSnapshot? workflow);
 }

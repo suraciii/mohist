@@ -1,19 +1,20 @@
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Workflow.Grains;
 
-namespace Mohist.Server.Issue.Domain;
+namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public static class MohistDefaultWorkflowProjection
 {
-    public static MohistDefaultWorkflowState Project(
+    public static MohistDefaultWorkflowState ProjectWorkflowState(
         int issueNumber,
         string issueTitle,
-        string issueStatus,
+        string issueStage,
         IssueAttention? issueAttention,
         string? fallbackBlockedReason,
         WorkflowStatusSnapshot? workflow)
     {
         var approval = workflow?.Stages
-            .Select(s => s.Approval is null ? null : new ApprovalState
+            .Select(s => s.Approval is null ? null : new StageApproval
             {
                 Stage = s.Stage,
                 Status = s.Approval.Status,
@@ -27,20 +28,20 @@ public static class MohistDefaultWorkflowProjection
         if (workflow is null)
         {
             return new MohistDefaultWorkflowState(
-                issueStatus,
-                RuntimeStatus(issueStatus, attention),
+                issueStage,
+                RuntimeStatus(issueStage, attention),
                 fallbackBlockedReason,
                 null,
                 attention,
                 ChangeDir(issueNumber),
-                issueStatus == "done");
+                issueStage == "done");
         }
 
-        var projectedStatus = workflow.Status == "Completed" ? "done" : issueStatus;
+        var projectedStage = workflow.Status == "Completed" ? "done" : issueStage;
 
         return new MohistDefaultWorkflowState(
-            projectedStatus,
-            RuntimeStatus(projectedStatus, attention, workflow.Status),
+            projectedStage,
+            RuntimeStatus(projectedStage, attention, workflow.Status),
             attention?.Message ?? (workflow.Status == "Failed" ? workflow.Failure?.Message : fallbackBlockedReason),
             approval,
             attention,
@@ -77,10 +78,10 @@ public static class MohistDefaultWorkflowProjection
 }
 
 public sealed record MohistDefaultWorkflowState(
-    string IssueStatus,
+    string IssueStage,
     string RuntimeStatus,
     string? BlockedReason,
-    ApprovalState? ApprovalState,
+    StageApproval? StageApproval,
     IssueAttention? Attention,
     string ChangeDir,
     bool Completed);

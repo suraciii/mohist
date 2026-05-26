@@ -1,7 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Projection;
 
@@ -42,21 +44,21 @@ public class AgentActivityService
 
         var activeAgents = await _workflowProjection.ListActiveAgentsAsync(projectId, ct);
         var activeBySessionId = activeAgents.ToDictionary(a => a.SessionId);
-        var latestEvents = await LoadLatestEventsAsync(db, sessions.Select(s => s.Id).ToArray(), ct);
+        var latestTranscriptEntries = await LoadLatestTranscriptEntriesAsync(db, sessions.Select(s => s.Id).ToArray(), ct);
         var cards = sessions
-            .Select(s => ToCard(s, issues.GetValueOrDefault(s.IssueNumber), activeBySessionId.GetValueOrDefault(s.Id), latestEvents.GetValueOrDefault(s.Id)))
+            .Select(s => ToCard(s, issues.GetValueOrDefault(s.IssueNumber), activeBySessionId.GetValueOrDefault(s.Id), latestTranscriptEntries.GetValueOrDefault(s.Id)))
             .ToList();
 
         var waiting = issues.Values
-            .Where(i => i.ApprovalState?.Status == "awaiting")
+            .Where(i => i.StageApproval?.Status == "awaiting")
             .Select(i => new AgentActivityWaitingCardDto(
                 i.Id,
                 i.Number,
                 i.Title,
-                i.ApprovalState?.Stage,
+                i.StageApproval?.Stage,
                 "Needs Approval",
-                i.ApprovalState?.RequestedAt,
-                i.ApprovalState?.OutputJson))
+                i.StageApproval?.RequestedAt,
+                i.StageApproval?.OutputJson))
             .OrderByDescending(c => c.RequestedAt)
             .ToList();
 
@@ -73,10 +75,10 @@ public class AgentActivityService
     }
 
     private static AgentActivityCardDto ToCard(
-        AgentSession session,
+        AgentSessionRecord session,
         IssueReadModel? issue,
         ActiveAgentDto? active,
-        AgentSessionEvent? latestEvent)
+        AgentSessionTranscriptEntry? latestTranscriptEntry)
     {
         var lastActivityAt = (session.LastDataAt ?? session.StartedAt ?? session.CreatedAt).ToString("o");
         var progress = active?.Progress;
@@ -98,7 +100,7 @@ public class AgentActivityService
             session.IssueNumber,
             issue?.Title ?? $"Issue #{session.IssueNumber}",
             issue?.Stage ?? session.Stage ?? "",
-            issue?.Status,
+            issue?.RuntimeStatus,
             session.Id,
             session.Status,
             session.Model,
@@ -108,18 +110,18 @@ public class AgentActivityService
             lastActivityAt,
             currentWork,
             taskProgress,
-            latestEvent is null ? null : ToPreview(latestEvent),
+            latestTranscriptEntry is null ? null : ToPreview(latestTranscriptEntry),
             session.FailureReason);
     }
 
-    private static async Task<Dictionary<string, AgentSessionEvent>> LoadLatestEventsAsync(
+    private static async Task<Dictionary<string, AgentSessionTranscriptEntry>> LoadLatestTranscriptEntriesAsync(
         MohistDbContext db,
         string[] sessionIds,
         CancellationToken ct)
     {
         if (sessionIds.Length == 0) return [];
 
-        var latestIds = await db.AgentSessionEvents.AsNoTracking()
+        var latestIds = await db.AgentSessionTranscriptEntries.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .GroupBy(e => e.SessionId)
             .Select(g => new { SessionId = g.Key, Sequence = g.Max(e => e.Sequence) })
@@ -127,16 +129,16 @@ public class AgentActivityService
         if (latestIds.Count == 0) return [];
 
         var latestBySession = latestIds.ToDictionary(e => e.SessionId, e => e.Sequence);
-        var events = await db.AgentSessionEvents.AsNoTracking()
+        var transcriptEntries = await db.AgentSessionTranscriptEntries.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .ToListAsync(ct);
 
-        return events
+        return transcriptEntries
             .Where(e => latestBySession.TryGetValue(e.SessionId, out var sequence) && e.Sequence == sequence)
             .ToDictionary(e => e.SessionId);
     }
 
-    private static AgentActivityPreviewDto ToPreview(AgentSessionEvent e)
+    private static AgentActivityPreviewDto ToPreview(AgentSessionTranscriptEntry e)
     {
         var text = ExtractPreviewText(e.PayloadJson);
         var kind = e.Type.Contains("tool", StringComparison.OrdinalIgnoreCase) ? "tool" : "text";
@@ -185,11 +187,11 @@ public sealed record AgentActivityCardDto(
     int IssueNumber,
     string IssueTitle,
     string IssueStage,
-    string? IssueStatus,
+    string? IssueRuntimeStatus,
     string SessionId,
-    string Status,
+    [property: JsonPropertyName("status")] string Status,
     string? Model,
-    string? TaskDescription,
+    string? Title,
     string CreatedAt,
     string? CompletedAt,
     string LastActivityAt,

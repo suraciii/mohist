@@ -1,6 +1,7 @@
-using Mohist.Server.Issue.Domain;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Project.Domain;
+using Mohist.Server.Issue.Queries;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
@@ -8,13 +9,16 @@ using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
-public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
+[Collection("MohistIntegration")]
+public class IssueCreationSpecs
 {
     private readonly IGrainFactory _grains;
+    private readonly IServiceProvider _services;
 
-    public IssueCreationSpecs(WorkflowGrainFixture fixture)
+    public IssueCreationSpecs(MohistIntegrationFixture fixture)
     {
         _grains = fixture.Grains;
+        _services = fixture.Services;
     }
 
     private async Task<ProjectInfo> SetupProjectAsync()
@@ -28,7 +32,14 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var grain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
         await grain.HydrateAsync(projectId, number, title, body, labels, priority, model, stageModels, workflowProfileId);
-        return await grain.GetInfoAsync();
+        return (await GetIssueInfoAsync(projectId, number))!;
+    }
+
+    private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)
+    {
+        using var scope = _services.CreateScope();
+        var issues = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        return await issues.GetInfoAsync(projectId, number);
     }
 
     [Fact]
@@ -42,7 +53,7 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("Test issue", issue.Title);
         Assert.Equal("body", issue.Body);
         Assert.Equal("backlog", issue.Stage);
-        Assert.Equal("active", issue.Status);
+        Assert.Equal("active", issue.RuntimeStatus);
         Assert.Equal(project.Id, issue.ProjectId);
         Assert.StartsWith("issue_", issue.Id);
         Assert.Equal("mohist/default", issue.WorkflowProfileId);
@@ -94,14 +105,14 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
     }
 
     [Fact]
-    public async Task GetInfo_ReturnsIssueFromGrain()
+    public async Task QueryService_ReturnsIssueInfo()
     {
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Info test", "desc");
 
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
-        var info = await grain.GetInfoAsync();
+        var info = await GetIssueInfoAsync(project.Id, created.Number);
 
+        Assert.NotNull(info);
         Assert.Equal(created.Number, info.Number);
         Assert.Equal("Info test", info.Title);
         Assert.Equal("desc", info.Body);
@@ -115,8 +126,9 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
 
         var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
         await grain.UpdateAsync("Updated", "new body");
-        var info = await grain.GetInfoAsync();
+        var info = await GetIssueInfoAsync(project.Id, created.Number);
 
+        Assert.NotNull(info);
         Assert.Equal("Updated", info.Title);
         Assert.Equal("new body", info.Body);
     }
@@ -131,9 +143,10 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         await grain.StartWorkflowAsync();
         await grain.CloseAsync();
 
-        var info = await grain.GetInfoAsync();
+        var info = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.NotNull(info);
         Assert.Equal("cancelled", info.Stage);
-        Assert.Equal("cancelled", info.Status);
+        Assert.Equal("cancelled", info.RuntimeStatus);
     }
 
     [Fact]
@@ -210,9 +223,10 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
 
         await grain.AddPrerequisiteAsync(prereq.Number);
-        var info = await grain.GetInfoAsync();
+        var info = await GetIssueInfoAsync(project.Id, dependent.Number);
         var eligibility = await grain.GetStartEligibilityAsync();
 
+        Assert.NotNull(info);
         Assert.Contains(prereq.Number, info.PrerequisiteNumbers);
         Assert.False(eligibility.Startable);
         Assert.Contains(eligibility.WaitingForCompletion, p => p.Number == prereq.Number);
@@ -229,9 +243,8 @@ public class IssueCreationSpecs : IClassFixture<WorkflowGrainFixture>
         var dependentGrain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
 
         await dependentGrain.AddPrerequisiteAsync(prereq.Number);
-        await prereqGrain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
-        var prereqRunId = await prereqGrain.GetWorkflowRunIdAsync();
-        await prereqGrain.CompleteWorkflowAsync(prereqRunId!);
+        var prereqRunId = await prereqGrain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+        await prereqGrain.CompleteWorkflowAsync(prereqRunId);
 
         var eligibility = await dependentGrain.GetStartEligibilityAsync();
 

@@ -6,7 +6,7 @@ namespace Mohist.Server.Api;
 
 public static class EventRoutes
 {
-    private static readonly string[] AllEventTypes =
+    private static readonly string[] WorkflowEventTypes =
     [
         "stage_changed",
         "comment_added",
@@ -21,9 +21,6 @@ public static class EventRoutes
         "coder_text_chunk",
         "coder_thought_chunk",
         "coder_tool_call",
-        "ralph_task_update",
-        "ralph_loop_progress",
-        "plan_round_start",
         "plan_session_update",
         "merge_queued",
         "merge_started",
@@ -48,11 +45,20 @@ public static class EventRoutes
         "schedule_failed",
         "stage_task_update",
         "integration_started",
-        "integration_step_updated",
         "integration_completed",
         "integration_failed",
         "integration_preflight_refreshed",
     ];
+
+    private static readonly string[] LegacyEventTypes =
+    [
+        "ralph_task_update",
+        "ralph_loop_progress",
+        "plan_round_start",
+        "integration_step_updated",
+    ];
+
+    private static readonly string[] AllEventTypes = [.. WorkflowEventTypes, .. LegacyEventTypes];
 
     public static WebApplication MapEventRoutes(this WebApplication app)
     {

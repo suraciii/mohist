@@ -22,7 +22,7 @@ public static class StatusRoutes
                 foreach (var project in projects)
                 {
                     var issues = await issuesQuery.ListAsync(project.Id, project, all: true);
-                    var activeIssues = issues.Count(i => i.Status == "active");
+                    var activeIssues = issues.Count(i => i.RuntimeStatus == "active");
 
                     status.Add(new
                     {
@@ -41,7 +41,7 @@ public static class StatusRoutes
                 return ApiResults.BadRequest("No active project. Pass projectId or create/select a project in the web UI.");
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
-            var active = allIssues.Where(i => i.Status == "active").ToList();
+            var active = allIssues.Where(i => i.RuntimeStatus == "active").ToList();
 
             var versionInfo = GetVersionInfo();
 
@@ -71,7 +71,7 @@ public static class StatusRoutes
         return app;
     }
 
-    private static async Task<Mohist.Server.Project.Domain.ProjectInfo?> ResolveProjectAsync(string? projectId, IProjectGrain projectsGrain)
+    private static async Task<Mohist.Server.Project.Queries.ProjectInfo?> ResolveProjectAsync(string? projectId, IProjectGrain projectsGrain)
     {
         if (!string.IsNullOrWhiteSpace(projectId))
             return await projectsGrain.GetByIdAsync(projectId);

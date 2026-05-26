@@ -1,7 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
-using Mohist.Server.Project.Domain;
+using Mohist.Server.Issue.Storage;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Storage.Db.Entities;
 using Mohist.Server.Tests.Support;
@@ -31,7 +32,7 @@ public class IssueQueryServiceSpecs
         {
             Key = $"{project.Id}:1",
             Type = typeof(Issue.Domain.Issue).FullName!,
-            JsonState = System.Text.Json.JsonSerializer.Serialize(issue),
+            JsonState = IssueStateStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 

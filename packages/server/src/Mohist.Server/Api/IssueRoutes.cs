@@ -1,4 +1,3 @@
-using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Grains;
@@ -39,7 +38,7 @@ public static class IssueRoutes
             return ApiResults.Ok(list);
         });
 
-        issues.MapPost("/", async (CreateIssueRequest req, IGrainFactory grains) =>
+        issues.MapPost("/", async (CreateIssueRequest req, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -54,7 +53,7 @@ public static class IssueRoutes
             var number = await counter.NextAsync();
             var issueGrain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
             await issueGrain.HydrateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels, req.WorkflowProfileId);
-            var issue = await issueGrain.GetInfoAsync();
+            var issue = await issuesQuery.GetAsync(pid, number);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
 
@@ -70,7 +69,7 @@ public static class IssueRoutes
             return info is not null ? ApiResults.Ok(info) : ApiResults.NotFound($"Issue #{number} not found");
         });
 
-        issues.MapPatch("/{number:int}", async (int number, string? projectId, UpdateIssueRequest req, IGrainFactory grains) =>
+        issues.MapPatch("/{number:int}", async (int number, string? projectId, UpdateIssueRequest req, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -80,7 +79,7 @@ public static class IssueRoutes
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
                     req.Title, req.Body, req.Labels, req.Priority, req.Model, req.StageModels));
-                var info = await grain.GetInfoAsync();
+                var info = await issuesQuery.GetAsync(pid, number);
                 return ApiResults.Ok(info);
             }
             catch (InvalidOperationException)
@@ -89,7 +88,7 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/start", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/start", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -114,7 +113,7 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/close", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/close", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -131,7 +130,7 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/reopen", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/reopen", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -177,7 +176,7 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/unarchive", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/unarchive", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -233,7 +232,7 @@ public static class IssueRoutes
             });
         });
 
-        issues.MapGet("/{number:int}/workflow/status", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapGet("/{number:int}/workflow/status", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -273,18 +272,18 @@ public static class IssueRoutes
             return detail is null ? ApiResults.NotFound($"Coder session {sessionId} not found") : ApiResults.Ok(detail);
         });
 
-        issues.MapPost("/{number:int}/resume", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/resume", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ResumeAsync();
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/rebase", async (int number, string? projectId, RebaseRequest? req, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/rebase", async (int number, string? projectId, RebaseRequest? req, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
 
@@ -320,45 +319,45 @@ public static class IssueRoutes
             });
         });
 
-        issues.MapPost("/{number:int}/approve", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/approve", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync();
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/reject", async (int number, string? projectId, RejectRequest? req, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/reject", async (int number, string? projectId, RejectRequest? req, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RejectAsync(req?.Reason);
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/retry", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/retry", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/rerun", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/rerun", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/force-stop", async (int number, string? projectId, IGrainFactory grains) =>
+        issues.MapPost("/{number:int}/force-stop", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
-            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains);
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("user-force-stop");
@@ -377,21 +376,13 @@ public static class IssueRoutes
         return projects.Count == 1 ? projects[0].Id : null;
     }
 
-    private static async Task<(string? pid, string? wrId)> ResolveWorkflowRunIdAsync(int number, string? projectId, IGrainFactory grains)
+    private static async Task<(string? pid, string? wrId)> ResolveWorkflowRunIdAsync(int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery)
     {
         var pid = await ResolveProjectIdAsync(projectId, grains);
         if (pid is null) return (null, null);
 
-        var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
-        try
-        {
-            var wrId = await grain.GetWorkflowRunIdAsync();
-            return (pid, wrId);
-        }
-        catch (InvalidOperationException)
-        {
-            return (pid, null);
-        }
+        var issue = await issuesQuery.GetInfoAsync(pid, number);
+        return (pid, issue?.WorkflowRunId);
     }
 
     private static string BuildRebaseTaskWith(string baseBranch, RuntimeTaskRequest? conflictResolver)

@@ -1,0 +1,230 @@
+stages:
+  - stage: plan
+    requiresApproval: true
+    tasks:
+      - id: proposal
+        title: Generate proposal
+        uses: mohist/acp-agent
+        with:
+          prompt: |
+            Create ${{ openspecChangeDir }}/proposal.md.
+            The proposal explains why the change is needed, what will change, capabilities affected, and implementation impact.
+            Keep it concise and avoid copying prompt instructions into the file.
+          model: ${{ model.stage.plan }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/proposal.md
+      - id: specs
+        title: Write specs
+        uses: mohist/acp-agent
+        with:
+          prompt: |
+            Read ${{ openspecChangeDir }}/proposal.md and create spec delta files under ${{ openspecChangeDir }}/specs/<capability>/spec.md.
+            Use ADDED/MODIFIED/REMOVED/RENAMED Requirements sections.
+            Every requirement must include at least one #### Scenario with WHEN/THEN behavior.
+          model: ${{ model.stage.plan }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/specs
+      - id: design
+        title: Create design
+        uses: mohist/acp-agent
+        with:
+          prompt: |
+            Create ${{ openspecChangeDir }}/design.md.
+            Include Context, Goals/Non-Goals, Decisions with rationale, Risks/Trade-offs, Migration Plan, and Open Questions.
+            Focus on how to implement the proposal and specs.
+          model: ${{ model.stage.plan }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/design.md
+      - id: tasks
+        title: Generate tasks
+        uses: mohist/acp-agent
+        with:
+          prompt: |
+            Create ${{ openspecChangeDir }}/tasks.json.
+            The file must contain a JSON object with a tasks array.
+            Each task must have id, title, description, acceptanceCriteria, priority, mode, type, output, dependsOn, passes=false, and notes.
+            Tasks must be ordered by dependency and every non-first task should depend on earlier task IDs.
+          model: ${{ model.stage.plan }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/tasks.json
+      - id: self-review
+        title: Self review
+        uses: mohist/acp-agent
+        with:
+          prompt: |
+            Review proposal.md, specs, design.md, and tasks.json in ${{ openspecChangeDir }}.
+            Fix any issues directly when possible.
+            Create ${{ openspecChangeDir }}/self-review.md with Result, repaired/blocking/follow-up items, and exactly one final marker:
+            <promise>PASS</promise> or <promise>FAIL</promise>.
+          model: ${{ model.stage.plan }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/self-review.md
+            markers:
+              - path: ${{ openspecChangeDir }}/self-review.md
+                contains: PASS
+    checks:
+      - name: proposal-complete
+        title: Proposal complete
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/proposal.md
+      - name: specs-complete
+        title: Specs complete
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/specs
+      - name: design-complete
+        title: Design complete
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/design.md
+      - name: tasks-valid
+        title: Tasks valid
+        uses: core/artifact-exists
+        with:
+          path: ${{ openspecChangeDir }}/tasks.json
+      - name: self-review-passed
+        title: Self review passed
+        uses: core/marker
+        with:
+          path: ${{ openspecChangeDir }}/self-review.md
+          expect: PASS
+        retryLimit: 1
+        retryTask:
+          id: fix-plan-review
+          title: Fix plan review findings
+          uses: mohist/acp-agent
+          with:
+            prompt: |
+              Fix the plan review findings in ${{ openspecChangeDir }}.
+              Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
+            model: ${{ model.stage.plan }}
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+
+  - stage: build
+    tasks: []
+    tasksFrom:
+      uses: mohist/openspec-tasks
+      with:
+        path: ${{ openspecChangeDir }}/tasks.json
+    checks:
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+        retryLimit: 1
+        retryTask:
+          id: fix-build-health
+          title: Fix build health
+          uses: mohist/acp-agent
+          with:
+            prompt: |
+              Fix the build-stage health failure reported by `git diff --check`.
+              Keep changes focused on whitespace and patch formatting issues.
+            model: ${{ model.stage.build }}
+
+  - stage: check
+    requiresApproval: true
+    tasks:
+      - id: ai-review
+        title: AI review
+        uses: mohist/acp-agent
+        with:
+          prompt: |
+            Review the current workspace implementation and the change artifacts in ${{ openspecChangeDir }}.
+            Write the review result to ${{ openspecChangeDir }}/review.md.
+            The review must identify blocking correctness, test, integration, or product contract issues.
+            End the file with exactly one marker:
+            <promise>PASS</promise>
+            or
+            <promise>FAIL</promise>.
+          model: ${{ model.stage.check }}
+          expect:
+            files:
+              - path: ${{ openspecChangeDir }}/review.md
+    checks:
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+        retryLimit: 1
+        retryTask:
+          id: fix-check-health
+          title: Fix check health
+          uses: mohist/acp-agent
+          with:
+            prompt: |
+              Fix the check-stage health failure reported by `git diff --check`.
+              Keep changes focused on whitespace and patch formatting issues.
+            model: ${{ model.stage.check }}
+      - name: review-passed
+        title: Review passed
+        uses: core/marker
+        with:
+          path: ${{ openspecChangeDir }}/review.md
+          expect: PASS
+        retryLimit: 2
+        retryTask:
+          id: fix-review-findings
+          title: Fix review findings
+          uses: mohist/acp-agent
+          with:
+            prompt: |
+              Read ${{ openspecChangeDir }}/review.md and fix the blocking findings.
+              Keep changes focused on review failures and preserve existing passing behavior.
+            model: ${{ model.stage.check }}
+      - name: merge-ready
+        title: Merge ready
+        uses: mohist/merge-ready
+
+  - stage: integrate
+    tasks:
+      - id: integrate:spec-sync
+        title: Sync specs
+        uses: mohist/openspec-sync
+        with:
+          changeDir: ${{ openspecChangeDir }}
+      - id: integrate:archive-change
+        title: Archive change
+        uses: mohist/archive-change
+        with:
+          changeDir: ${{ openspecChangeDir }}
+      - id: integrate:merge
+        title: Merge branch
+        uses: mohist/merge
+        with:
+          source: mo/issue-${{ issue.number }}
+          target: ${{ project.baseBranch }}
+          strategy: squash
+          message: Complete issue #${{ issue.number }}
+    checks:
+      - name: health
+        title: Health
+        uses: core/script
+        with:
+          run: git diff --check
+          timeout: 300000
+        retryLimit: 1
+        retryTask:
+          id: fix-integrate-health
+          title: Fix integrate health
+          uses: mohist/acp-agent
+          with:
+            prompt: |
+              Fix the integrate-stage health failure reported by `git diff --check`.
+              Keep changes focused on whitespace and patch formatting issues.
+            model: ${{ model.stage.integrate }}

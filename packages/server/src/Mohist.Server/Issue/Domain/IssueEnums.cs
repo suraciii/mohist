@@ -1,6 +1,6 @@
 namespace Mohist.Server.Issue.Domain;
 
-public enum IssueStatus
+public enum IssueStage
 {
     Backlog,
     Todo,
@@ -20,15 +20,14 @@ public static class IssueAttentionReasons
     public const string Paused = "paused";
 }
 
-[GenerateSerializer]
 public sealed class IssueAttention
 {
-    [Id(0)] public string Reason { get; set; } = IssueAttentionReasons.Blocked;
-    [Id(1)] public string? Message { get; set; }
-    [Id(2)] public string Source { get; set; } = "system";
-    [Id(3)] public string? WorkflowRunId { get; set; }
-    [Id(4)] public string RequestedAt { get; set; } = DateTime.UtcNow.ToString("O");
-    [Id(5)] public string[] AvailableActions { get; set; } = [];
+    public string Reason { get; set; } = IssueAttentionReasons.Blocked;
+    public string? Message { get; set; }
+    public string Source { get; set; } = "system";
+    public string? WorkflowRunId { get; set; }
+    public string RequestedAt { get; set; } = DateTime.UtcNow.ToString("O");
+    public string[] AvailableActions { get; set; } = [];
 
     public static IssueAttention ReviewRequired(string? workflowRunId, string? message = null) => new()
     {

@@ -2,10 +2,10 @@ namespace Mohist.Server.Issue.Domain;
 
 public static class IssueDomainNames
 {
-    public static string Status(IssueStatus status) => status switch
+    public static string Stage(IssueStage stage) => stage switch
     {
-        IssueStatus.InProgress => "in_progress",
-        _ => status.ToString().ToLowerInvariant(),
+        IssueStage.InProgress => "in_progress",
+        _ => stage.ToString().ToLowerInvariant(),
     };
 
 }
