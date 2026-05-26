@@ -21,7 +21,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new
             {
                 stage = "plan",
@@ -55,7 +55,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new
             {
                 stage = "plan",
@@ -84,7 +84,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new
             {
                 stage = "plan",
@@ -114,7 +114,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new
             {
                 stage = "plan",
@@ -138,7 +138,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new { stage = "build", task = "T-001" },
             new
             {
@@ -165,7 +165,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new
             {
                 stage = "build",
@@ -193,7 +193,7 @@ public class AgentActionSpecs
         var result = await action.ExecuteAsync(SpecHelpers.Context(
             temp.Path,
             "task",
-            "mohist/agent",
+            "mohist/coder-agent",
             new { stage = "build", task = "task-1" }));
 
         Assert.Equal("failure", result.Status);
@@ -214,7 +214,7 @@ public class AgentActionSpecs
             "task",
             "build",
             "Build task",
-            "mohist/agent",
+            "mohist/coder-agent",
             null,
             null,
             temp.Path,
@@ -241,7 +241,7 @@ public class AgentActionSpecs
             "task",
             "",
             "Work",
-            "mohist/agent",
+            "mohist/coder-agent",
             null,
             null,
             temp.Path,

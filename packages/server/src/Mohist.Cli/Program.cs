@@ -332,12 +332,10 @@ internal sealed class MohistCli
     private async Task<int> SaveProviderAsync(string[] args)
     {
         var id = Required(args, 0, "provider id");
-        var apiKey = Option(args, "--api-key", "--key")
-            ?? throw new ArgumentException("providers save requires --api-key");
         return await PrintPostAsync($"/api/providers/{Escape(id)}", new
         {
             name = Option(args, "--name"),
-            apiKey,
+            apiKey = Option(args, "--api-key", "--key"),
             baseURL = Option(args, "--base-url", "--baseURL"),
             models = Values(args, "--model"),
             sdk = Option(args, "--sdk"),
@@ -346,12 +344,10 @@ internal sealed class MohistCli
 
     private async Task<int> TestProviderAsync(string[] args)
     {
-        var apiKey = Option(args, "--api-key", "--key")
-            ?? throw new ArgumentException("providers test requires --api-key");
         return await PrintPostAsync("/api/providers/test", new
         {
             name = Option(args, "--name"),
-            apiKey,
+            apiKey = Option(args, "--api-key", "--key"),
             baseURL = Option(args, "--base-url", "--baseURL"),
             models = Values(args, "--model"),
             sdk = Option(args, "--sdk"),

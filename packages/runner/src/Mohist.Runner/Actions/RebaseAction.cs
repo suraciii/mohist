@@ -68,7 +68,7 @@ public class RebaseAction : IAction
             : "resolve-rebase-conflicts";
         var uses = conflictResolver.TryGetProperty("uses", out var usesProp) && usesProp.ValueKind == JsonValueKind.String
             ? usesProp.GetString()
-            : "mohist/agent";
+            : "mohist/coder-agent";
         var title = conflictResolver.TryGetProperty("title", out var titleProp) && titleProp.ValueKind == JsonValueKind.String
             ? titleProp.GetString()
             : "Resolve rebase conflicts";

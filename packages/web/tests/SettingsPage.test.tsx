@@ -35,11 +35,9 @@ vi.mock('../src/hooks/useQueries', async () => {
   return {
     ...actual,
     useProviders: vi.fn(),
+    useProviderRuntime: vi.fn(),
     useDeleteProvider: vi.fn(),
     useSaveProvider: vi.fn(),
-    useTestProvider: vi.fn(),
-    useModel: vi.fn(),
-    useSetModel: vi.fn(),
     useOpencodeModel: vi.fn(),
     useUpdateOpencodeModel: vi.fn(),
     useStageModels: vi.fn(),
@@ -60,11 +58,9 @@ vi.mock('../src/hooks/useModels', () => ({
 
 const {
   useProviders,
+  useProviderRuntime,
   useDeleteProvider,
   useSaveProvider,
-  useTestProvider,
-  useModel,
-  useSetModel,
   useOpencodeModel,
   useUpdateOpencodeModel,
   useStageModels,
@@ -111,24 +107,16 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   })
+  ;(useProviderRuntime as ReturnType<typeof vi.fn>).mockReturnValue({
+    data: { mode: 'local-opencode', command: 'opencode', model: null, note: 'external coder agent' },
+    isLoading: false,
+    error: null,
+  })
   ;(useDeleteProvider as ReturnType<typeof vi.fn>).mockReturnValue({
     mutate: vi.fn(),
     isPending: false,
   })
   ;(useSaveProvider as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-  ;(useTestProvider as ReturnType<typeof vi.fn>).mockReturnValue({
-    mutate: vi.fn(),
-    isPending: false,
-  })
-  ;(useModel as ReturnType<typeof vi.fn>).mockReturnValue({
-    data: { model: 'openai/gpt-4' },
-    isLoading: false,
-    error: null,
-  })
-  ;(useSetModel as ReturnType<typeof vi.fn>).mockReturnValue({
     mutate: vi.fn(),
     isPending: false,
   })
@@ -192,24 +180,25 @@ beforeEach(() => {
 })
 
 describe('SettingsPage', () => {
-  describe('AI Tab', () => {
-    it('should render AI tab by default', () => {
+  describe('Coder Agent Tab', () => {
+    it('should render Coder Agent tab by default', () => {
       renderWithQueryClient(<SettingsPage />)
 
       expect(screen.getByText('Settings')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'AI' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Coder Agent' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Runtime' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'System' })).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'External Coder Agent' })[0]).toBeInTheDocument()
     })
 
-    it('should display Connected Providers group', () => {
+    it('should display Saved Provider Catalog group', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getAllByRole('heading', { name: 'Connected Providers' })[0]).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Saved Provider Catalog' })[0]).toBeInTheDocument()
     })
 
-    it('should display Available providers count', () => {
+    it('should display catalog presets count', () => {
       renderWithQueryClient(<SettingsPage />)
-      expect(screen.getAllByRole('button', { name: /Available/ })[0]).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: /Catalog presets/ })[0]).toBeInTheDocument()
     })
 
     it('should display Add button for custom providers', () => {
@@ -219,29 +208,29 @@ describe('SettingsPage', () => {
   })
 
   describe('Tab switching', () => {
-    it('should switch to Agent tab when clicked', () => {
+    it('should switch to Runtime tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Agent' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Runtime' }))
 
-      expect(screen.getAllByRole('heading', { name: 'Agent Runtime' })[0]).toBeInTheDocument()
+      expect(screen.getAllByRole('heading', { name: 'Coder Agent Runtime' })[0]).toBeInTheDocument()
     })
 
-    it('should switch back to AI tab when clicked', () => {
+    it('should switch back to Coder Agent tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Agent' }))
-      expect(screen.getAllByRole('heading', { name: 'Agent Runtime' })[0]).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Runtime' }))
+      expect(screen.getAllByRole('heading', { name: 'Coder Agent Runtime' })[0]).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole('button', { name: 'AI' }))
-      expect(screen.getAllByRole('heading', { name: 'Connected Providers' })[0]).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Coder Agent' }))
+      expect(screen.getAllByRole('heading', { name: 'Saved Provider Catalog' })[0]).toBeInTheDocument()
     })
 
     it('should highlight active tab', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      const aiTab = screen.getByRole('button', { name: 'AI' })
-      const agentTab = screen.getByRole('button', { name: 'Agent' })
+      const aiTab = screen.getByRole('button', { name: 'Coder Agent' })
+      const agentTab = screen.getByRole('button', { name: 'Runtime' })
 
       expect(aiTab).toHaveClass('bg-blue-50')
       expect(aiTab).toHaveClass('text-blue-700')

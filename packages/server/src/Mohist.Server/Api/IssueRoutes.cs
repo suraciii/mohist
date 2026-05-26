@@ -408,7 +408,7 @@ public static class IssueRoutes
             {
                 id = string.IsNullOrWhiteSpace(resolver.Id) ? "resolve-rebase-conflicts" : resolver.Id,
                 title = string.IsNullOrWhiteSpace(resolver.Title) ? "Resolve rebase conflicts" : resolver.Title,
-                uses = string.IsNullOrWhiteSpace(resolver.Uses) ? "mohist/agent" : resolver.Uses,
+                uses = string.IsNullOrWhiteSpace(resolver.Uses) ? "mohist/coder-agent" : resolver.Uses,
                 with = resolver.With ?? DefaultConflictResolverWith(),
             };
         }
@@ -419,7 +419,7 @@ public static class IssueRoutes
     private static RuntimeTaskRequest DefaultConflictResolver() => new(
         Id: "resolve-rebase-conflicts",
         Title: "Resolve rebase conflicts",
-        Uses: "mohist/agent",
+        Uses: "mohist/coder-agent",
         With: DefaultConflictResolverWith());
 
     private static Dictionary<string, object?> DefaultConflictResolverWith() => new()

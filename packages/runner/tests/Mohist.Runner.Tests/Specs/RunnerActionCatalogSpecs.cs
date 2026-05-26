@@ -12,7 +12,7 @@ public class RunnerActionCatalogSpecs
     [InlineData("core/script")]
     [InlineData("core/artifact-exists")]
     [InlineData("core/marker")]
-    [InlineData("mohist/agent")]
+    [InlineData("mohist/coder-agent")]
     [InlineData("mohist/check/ai-review")]
     [InlineData("mohist/openspec-tasks")]
     [InlineData("mohist/merge-ready")]

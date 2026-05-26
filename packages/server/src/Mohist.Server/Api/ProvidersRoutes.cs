@@ -44,8 +44,8 @@ public static class ProvidersRoutes
                 p.Id,
                 p.Name,
                 BaseURL = configured.GetValueOrDefault($"provider:{p.Id}:baseURL"),
-                Configured = configured.ContainsKey($"provider:{p.Id}:apiKey"),
-                Source = configured.ContainsKey($"provider:{p.Id}:apiKey") ? "config" : "none",
+                Configured = IsCatalogConfigured(configured, p.Id),
+                Source = IsCatalogConfigured(configured, p.Id) ? "config" : "none",
                 p.IsBuiltin,
                 p.IsDefault,
                 apiKeyMasked = configured.TryGetValue($"provider:{p.Id}:apiKey", out var key) ? Mask(key) : null,
@@ -62,8 +62,8 @@ public static class ProvidersRoutes
                 Id = id,
                 Name = configured.GetValueOrDefault($"provider:{id}:name") ?? id,
                 BaseURL = configured.GetValueOrDefault($"provider:{id}:baseURL"),
-                Configured = configured.ContainsKey($"provider:{id}:apiKey"),
-                Source = configured.ContainsKey($"provider:{id}:apiKey") ? "config" : "none",
+                Configured = IsCatalogConfigured(configured, id),
+                Source = IsCatalogConfigured(configured, id) ? "config" : "none",
                 IsBuiltin = false,
                 IsDefault = false,
                 apiKeyMasked = configured.TryGetValue($"provider:{id}:apiKey", out var key) ? Mask(key) : null,
@@ -101,27 +101,24 @@ public static class ProvidersRoutes
                     ?? Environment.GetEnvironmentVariable("MOHIST_AGENT_COMMAND")
                     ?? "opencode",
                 model = string.IsNullOrWhiteSpace(model) ? null : model,
-                note = "Mohist delegates agent execution to the local opencode CLI. Provider credentials are stored for configuration visibility; the local CLI is responsible for provider authentication.",
+                note = "Mohist delegates coder work to an external coder agent. The local coder agent is responsible for provider authentication.",
             });
         });
 
         app.MapPost("/api/providers/test", (ProviderFormRequest req) =>
         {
-            if (string.IsNullOrWhiteSpace(req.ApiKey))
-                return ApiResults.BadRequest("apiKey is required");
             return ApiResults.Ok(new
             {
                 success = true,
                 mode = "configuration-only",
-                message = "Provider configuration is syntactically valid. Runtime connectivity is handled by the local opencode CLI.",
+                message = "Provider configuration is syntactically valid. Runtime connectivity is handled by the external coder agent.",
             });
         });
 
         app.MapPost("/api/providers/{id}", async (string id, ProviderFormRequest req, IDbContextFactory<MohistDbContext> dbFactory) =>
         {
-            if (string.IsNullOrWhiteSpace(req.ApiKey))
-                return ApiResults.BadRequest("apiKey is required");
-            await SetProviderValueAsync(dbFactory, id, "apiKey", req.ApiKey);
+            await SetProviderValueAsync(dbFactory, id, "enabled", "true");
+            if (!string.IsNullOrWhiteSpace(req.ApiKey)) await SetProviderValueAsync(dbFactory, id, "apiKey", req.ApiKey);
             if (!string.IsNullOrWhiteSpace(req.Name)) await SetProviderValueAsync(dbFactory, id, "name", req.Name);
             if (!string.IsNullOrWhiteSpace(req.BaseURL)) await SetProviderValueAsync(dbFactory, id, "baseURL", req.BaseURL);
             if (req.Models is { Length: > 0 }) await SetProviderValueAsync(dbFactory, id, "models", string.Join(",", req.Models));
@@ -165,9 +162,15 @@ public static class ProvidersRoutes
         await db.SaveChangesAsync();
     }
 
+    private static bool IsCatalogConfigured(IReadOnlyDictionary<string, string> configured, string id) =>
+        configured.ContainsKey($"provider:{id}:enabled")
+        || configured.ContainsKey($"provider:{id}:apiKey")
+        || configured.ContainsKey($"provider:{id}:models")
+        || configured.ContainsKey($"provider:{id}:baseURL");
+
     private static string Mask(string key) => key.Length <= 8 ? "********" : key[..4] + new string('*', key.Length - 8) + key[^4..];
 }
 
 public record ProviderInfo(string Id, string Name, bool Configured, bool IsBuiltin, bool IsDefault = false);
 public record ModelInfo(string Id, string Name, string[] Badges, int ContextWindow);
-public record ProviderFormRequest(string? Name, string ApiKey, string? BaseURL, string[]? Models, string? Sdk);
+public record ProviderFormRequest(string? Name, string? ApiKey, string? BaseURL, string[]? Models, string? Sdk);

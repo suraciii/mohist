@@ -94,8 +94,8 @@ public class WebCompatibilitySpecs
     {
         await _client.PutAsJsonOkAsync("/api/log-level", new { level = "DEBUG" });
         await _client.PutAsJsonOkAsync("/api/agent-runtime", new { timeout = 900, maxConcurrent = 5 });
-        await _client.PostOkAsync("/api/providers/test", new { apiKey = "sk-test-key" });
-        await _client.PostOkAsync("/api/providers/custom-openai", new { apiKey = "sk-test-key", baseURL = "https://example.test" });
+        await _client.PostOkAsync("/api/providers/test", new { });
+        await _client.PostOkAsync("/api/providers/custom-openai", new { name = "Custom OpenAI", baseURL = "https://example.test", models = new[] { "model-a" } });
 
         var logLevel = await _client.GetDataAsync<LogLevelDto>("/api/log-level");
         var runtime = await _client.GetDataAsync<AgentRuntimeDto>("/api/agent-runtime");

@@ -43,9 +43,6 @@ public static class StatusRoutes
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Status == "active").ToList();
 
-            var llm = new { configured = false };
-            // TODO: read from config service when implemented
-
             var versionInfo = GetVersionInfo();
 
             var result = new
@@ -62,7 +59,6 @@ public static class StatusRoutes
                     ["check"] = allIssues.Count(i => i.Stage == "check"),
                     ["done"] = allIssues.Count(i => i.Stage == "done"),
                 },
-                llm,
                 version = versionInfo.Version,
                 gitHash = versionInfo.GitHash,
                 sourceHead = versionInfo.SourceHead,
