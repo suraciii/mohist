@@ -1,3 +1,4 @@
+using Mohist.Cli;
 using Mohist.Server.Tests.Support;
 using System.Text.Json;
 using Xunit;
@@ -156,7 +157,7 @@ public class CliCompatibilitySpecs
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var exitCode = await new MohistCli(args, stdout, stderr, _fixture.Client).RunAsync();
+        var exitCode = await MohistCliCommands.RunAsync(_fixture.Client, args, stdout, stderr);
         return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
     }
 

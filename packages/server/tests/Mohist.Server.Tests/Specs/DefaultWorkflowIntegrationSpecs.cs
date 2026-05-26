@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Runner;
 using Mohist.Runner.Actions;
 using Mohist.Runner.Transport;
+using Mohist.Cli;
 using Mohist.Server.Runner.Embedded;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -169,7 +170,7 @@ public class DefaultWorkflowIntegrationSpecs
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var exitCode = await new MohistCli(args, stdout, stderr, _fixture.Client).RunAsync();
+        var exitCode = await MohistCliCommands.RunAsync(_fixture.Client, args, stdout, stderr);
         return new CliResult(exitCode, stdout.ToString(), stderr.ToString());
     }
 
