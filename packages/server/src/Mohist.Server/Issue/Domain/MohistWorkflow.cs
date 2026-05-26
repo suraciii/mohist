@@ -5,7 +5,7 @@ namespace Mohist.Server.Issue.Domain;
 
 public static class MohistWorkflow
 {
-    private const string Agent = "mohist/coder-agent";
+    private const string Agent = "mohist/acp-agent";
 
     public static WorkflowDefinitionInput Definition => new(
     [
