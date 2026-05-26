@@ -5,10 +5,12 @@ using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Recovery;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Recovery;
 using Mohist.Server.Workspace;
 
 namespace Mohist.Server.Hosting;
@@ -31,6 +33,8 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentSessionService>();
         services.AddScoped<AgentActivityService>();
         services.AddScoped<WorkflowProjectionService>();
+        services.AddHostedService<WorkflowBacklogRecoveryService>();
+        services.AddHostedService<AgentSessionRecoveryService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddScoped<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);

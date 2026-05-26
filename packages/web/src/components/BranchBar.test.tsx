@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BranchBar } from './BranchBar'
-import { Stage } from '../lib/types'
+import { WorkflowStage } from '../lib/types'
 import { useWorktreeStatus } from '../hooks/useQueries'
 
 vi.mock('../hooks/useQueries', () => ({
@@ -35,7 +35,7 @@ describe('BranchBar', () => {
     const queryClient = new QueryClient()
     render(
       <QueryClientProvider client={queryClient}>
-        <BranchBar issueNumber={146} stage={Stage.Done} isAgentRunning={false} />
+        <BranchBar issueNumber={146} stage={WorkflowStage.Done} isAgentRunning={false} />
       </QueryClientProvider>
     )
 

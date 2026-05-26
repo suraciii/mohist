@@ -253,5 +253,5 @@ mo attach -f
 1. 查看日志: `mo server logs` 或 Web UI `/logs`
 2. 查看 OpenSpec 产物: `openspec/changes/{slug}/`
 3. 运行类型检查: `git diff --check`
-4. 运行测试: `dotnet test packages/server/Mohist.sln`
+4. 运行测试: `dotnet test Mohist.sln`
 5. 提交 Issue: https://github.com/owner/mohist/issues

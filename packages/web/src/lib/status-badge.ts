@@ -25,10 +25,10 @@ export function statusLabel(status: IssueStatus): string {
       return 'Needs Action'
     case IssueStatus.Interrupted:
       return 'Interrupted'
-    case IssueStatus.Closed:
-      return 'Closed'
-    case IssueStatus.Completed:
-      return 'Completed'
+    case IssueStatus.Cancelled:
+      return 'Cancelled'
+    case IssueStatus.Done:
+      return 'Done'
     default:
       return status
   }

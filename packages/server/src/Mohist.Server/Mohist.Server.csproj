@@ -16,4 +16,23 @@
     <Content Include="Issue/WorkflowProfiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <Target Name="BuildWebAssets" BeforeTargets="Build" Condition="'$(SkipWebBuild)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Command="npm install" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Command="npm run build -w packages/web" />
+  </Target>
+
+  <Target Name="CopyWebAssetsToOutput" AfterTargets="BuildWebAssets" BeforeTargets="Build">
+    <ItemGroup>
+      <WebDistFiles Include="$(MSBuildProjectDirectory)/../../../web/dist/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebDistFiles)" DestinationFiles="@(WebDistFiles->'$(OutDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyWebAssetsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <WebDistFiles Include="$(MSBuildProjectDirectory)/../../../web/dist/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebDistFiles)" DestinationFiles="@(WebDistFiles->'$(PublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

@@ -9,7 +9,7 @@ import {
   useMarkEpicDone,
   useRemoveEpicIssue,
 } from '../hooks/useQueries'
-import { EpicStatus, type LinkedIssue, type IssueStatus } from '../lib/types'
+import { EpicStatus, IssueStatus, type LinkedIssue } from '../lib/types'
 import { ApiError } from '../lib/api'
 
 function PriorityBadge({ priority }: { priority: string }) {
@@ -50,8 +50,8 @@ function issueStatusTone(status: IssueStatus) {
   switch (status) {
     case 'blocked':
       return 'bg-red-50 text-red-700'
-    case 'completed':
-    case 'closed':
+    case IssueStatus.Done:
+    case IssueStatus.Cancelled:
       return 'bg-green-50 text-green-700'
     default:
       return 'bg-gray-50 text-gray-700'

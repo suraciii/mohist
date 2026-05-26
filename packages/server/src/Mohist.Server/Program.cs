@@ -2,12 +2,15 @@ using Mohist.Server.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var useExternalOrleans = builder.Configuration.GetValue<bool>("Mohist:UseExternalOrleans");
-
-if (!useExternalOrleans)
+if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]) &&
+    string.IsNullOrWhiteSpace(builder.Configuration["ASPNETCORE_URLS"]))
 {
-    builder.Host.UseOrleans(silo => silo.ConfigureMohistSilo());
+    var host = builder.Configuration["Mohist:Host"] ?? "localhost";
+    var port = builder.Configuration.GetValue<int?>("Mohist:Port") ?? 3456;
+    builder.WebHost.UseUrls($"http://{host}:{port}");
 }
+
+builder.Host.UseOrleans(silo => silo.ConfigureMohistSilo());
 
 builder.Services.AddMohistServerCore(builder.Configuration);
 

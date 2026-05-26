@@ -121,6 +121,36 @@ public class AgentSessionSpecs
         Assert.Contains("unregistered", grainSession.FailureReason);
     }
 
+    [Fact]
+    public async Task RunnerReport_WhenAgentWorkFailsBeforeTelemetry_ClosesCreatedSession()
+    {
+        var projectName = $"session-report-failure-{Guid.NewGuid():N}";
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Report closes failed session", body = "track report failure", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>() });
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", new { });
+        var work = await PollUntilAgentWorkAsync(issue.Number);
+        Assert.NotNull(work.Session);
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
+        {
+            workId = work.WorkId,
+            status = "failed",
+            message = "ACP agent requires 'prompt'",
+            exitCode = 1
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(work.Session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal("failed", grainSession.Status);
+        Assert.Equal("ACP agent requires 'prompt'", grainSession.FailureReason);
+
+        var activity = await _client.GetDataAsync<AgentActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        Assert.Equal(0, activity.Summary.Active);
+        Assert.Equal(1, activity.Summary.Failed);
+        Assert.Contains(activity.Sessions, s => s.IssueNumber == issue.Number && s.Status == "failed");
+    }
+
     private async Task<WorkDispatchDto> PollUntilAgentWorkAsync(int? expectedIssueNumber = null)
     {
         for (var attempt = 0; attempt < 100; attempt++)

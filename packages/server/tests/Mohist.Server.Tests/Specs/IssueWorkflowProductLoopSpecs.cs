@@ -59,6 +59,8 @@ public class IssueWorkflowProductLoopSpecs
 
         var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.Equal("in_progress", listedAtApproval.Stage);
+        Assert.Equal("plan", listedAtApproval.WorkflowStage);
+        Assert.Equal("AwaitingApproval", listedAtApproval.WorkflowStatus);
         Assert.Equal("attention", listedAtApproval.Status);
         Assert.Equal("review_required", listedAtApproval.Attention?.Reason);
         Assert.Equal("awaiting", listedAtApproval.ApprovalState?.Status);
@@ -72,7 +74,7 @@ public class IssueWorkflowProductLoopSpecs
 
         var completed = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.Equal("done", completed.Stage);
-        Assert.Equal("completed", completed.Status);
+        Assert.Equal("done", completed.Status);
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/archive?projectId={project.Id}");
         var events = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
@@ -189,7 +191,7 @@ public class IssueWorkflowProductLoopSpecs
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title, string Stage, string Status, ApprovalStateDto? ApprovalState, AttentionDto? Attention, string? WorkflowRunId);
+    private sealed record IssueDto(int Number, string Title, string Stage, string Status, ApprovalStateDto? ApprovalState, AttentionDto? Attention, string? WorkflowRunId, string? WorkflowStage, string? WorkflowStatus);
     private sealed record ApprovalStateDto(string Stage, string Status);
     private sealed record AttentionDto(string Reason);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);

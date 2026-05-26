@@ -40,7 +40,7 @@ export function setAcpProcessFactoryForTest(factory: AcpProcessFactory | null) {
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
-  const prompt = stringInput(context.with, "prompt")
+  const prompt = stringInput(context.with, "prompt") ?? buildFallbackPrompt(context)
   if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
 
   const result = await runAcpSession(context, prompt)
@@ -53,6 +53,35 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
     output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: stringInput(context.with, "model"), text: result.text, error: result.error, expectation: verification }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
   }
+}
+
+function buildFallbackPrompt(context: ActionContext) {
+  const title = context.title ?? stringInput(context.with, "title")
+  const description = stringInput(context.with, "description")
+  if (!title?.trim() && !description?.trim()) return undefined
+
+  const sections = [
+    title?.trim() ? `Implement this task: ${title.trim()}` : "Implement this task.",
+    description?.trim() ? `## Description\n${description.trim()}` : "",
+    valueSection("Acceptance Criteria", context.with?.acceptanceCriteria),
+    valueSection("Depends On", context.with?.dependsOn),
+    valueSection("Output", context.with?.output),
+    valueSection("Notes", context.with?.notes),
+    "Follow the repository conventions. Make the smallest complete change that satisfies the task, and run the relevant verification before reporting completion.",
+  ].filter(Boolean)
+  return sections.join("\n\n")
+}
+
+function valueSection(title: string, value: unknown) {
+  if (value === undefined || value === null) return ""
+  if (Array.isArray(value) && value.length === 0) return ""
+  return `## ${title}\n${formatValue(value)}`
+}
+
+function formatValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => `- ${String(item)}`).join("\n")
+  if (typeof value === "object") return JSON.stringify(value, null, 2)
+  return String(value)
 }
 
 async function runAcpSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {

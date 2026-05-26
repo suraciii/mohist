@@ -31,7 +31,7 @@ COPY packages/web/ packages/web/
 COPY packages/runner/ packages/runner/
 COPY packages/server/ packages/server/
 RUN npm run build:web
-RUN dotnet build packages/server/Mohist.sln
+RUN dotnet build Mohist.sln
 
 RUN mkdir -p /app/workspace /home/motest/.mohist/projects /home/motest/.mohist/logs && \
     chown -R motest:motest /app /home/motest

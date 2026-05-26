@@ -89,6 +89,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("resumed");
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed");
+        await RegisterToBacklogIfRunnableAsync();
         await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
 
@@ -113,6 +114,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("approved");
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved");
+        await RegisterToBacklogIfRunnableAsync();
         await ReleaseFromBacklogIfTerminalAsync();
         await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
@@ -129,6 +131,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("rejected", reason);
         await PersistAsync();
         await AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", reason ?? "Workflow approval rejected");
+        await RegisterToBacklogIfRunnableAsync();
         await ReleaseFromBacklogIfTerminalAsync();
         await DispatchCompletedHookIfNeededAsync(statusBefore);
     }
@@ -400,6 +403,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
         await backlog.RegisterAsync(GrainKey);
         _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
+    }
+
+    private async Task RegisterToBacklogIfRunnableAsync()
+    {
+        if (_run?.Status != WorkflowRunStatus.Running) return;
+        if (_run.GetNextWork() is null) return;
+        await RegisterToBacklogAsync();
     }
 
     private WorkDispatch? PrepareWork(WorkflowWork work, string runnerId)

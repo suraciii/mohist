@@ -55,6 +55,14 @@ public class AgentSessionService
         return session is null ? null : ToDto(session);
     }
 
+    public async Task<AgentSessionDto?> MarkWorkReportedAsync(string workflowRunId, string workId, WorkDispatchResult result, CancellationToken ct = default)
+    {
+        var sessionId = AgentSessionGrainKeys.ForWork(workflowRunId, workId);
+        var status = ToSessionTerminalStatus(result.Status);
+        var failureReason = status == "failed" ? result.Message : null;
+        return await MarkCompletedAsync(sessionId, new SessionCompletedRequest(status, failureReason, result.ExitCode), ct);
+    }
+
     public async Task<IReadOnlyList<AgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -201,6 +209,13 @@ public class AgentSessionService
 
     private static AgentSessionTranscriptEntryDto ToDto(AgentSessionTranscriptEntrySnapshot e) => new(
         e.Id, e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId, e.WorkId, e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt);
+
+    private static string ToSessionTerminalStatus(string status) => status.ToLowerInvariant() switch
+    {
+        "completed" or "success" or "succeeded" or "pass" or "passed" or "loaded" => "completed",
+        "cancelled" or "canceled" => "cancelled",
+        _ => "failed",
+    };
 
     private static object? ParsePayload(string json) => JsonSerializer.Deserialize<JsonElement>(json);
 

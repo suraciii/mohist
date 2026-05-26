@@ -5,9 +5,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events;
-using Mohist.Server.Hosting;
-using Mohist.Server.Runner.Grains;
-using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.Tests.Support;
@@ -21,8 +18,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private MohistWebApplicationFactory _factory = null!;
     private string? _runnerRoot;
 
-    public InProcessTestCluster Cluster { get; private set; } = null!;
-    public IGrainFactory Grains => Cluster.Client;
+    public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public IEventBus EventBus => _eventBus;
@@ -38,27 +34,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
         _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-root-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_runnerRoot);
 
-        var builder = new InProcessTestClusterBuilder();
-        builder.Options.InitialSilosCount = 1;
-        builder.ConfigureSilo((_, siloBuilder) =>
-        {
-            siloBuilder.ConfigureMohistSilo();
-            var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Mohist:SqliteConnectionString"] = ConnectionString,
-                    ["Mohist:RunnerRoot"] = _runnerRoot,
-                })
-                .Build();
-            siloBuilder.Services.AddSingleton<IConfiguration>(config);
-            siloBuilder.Services.AddMohistServerCore(config);
-            siloBuilder.Services.AddSingleton<IEventBus>(_ => _eventBus);
-        });
-
-        Cluster = builder.Build();
-        await Cluster.DeployAsync();
-
-        _factory = new MohistWebApplicationFactory(ConnectionString, Cluster.Client, _eventBus, _runnerRoot);
+        _factory = new MohistWebApplicationFactory(ConnectionString, _eventBus, _runnerRoot);
         Client = _factory.CreateClient();
     }
 
@@ -66,8 +42,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
     {
         Client?.Dispose();
         _factory?.Dispose();
-        if (Cluster is not null)
-            await Cluster.DisposeAsync();
         if (_keeper is not null)
             await _keeper.DisposeAsync();
         if (!string.IsNullOrWhiteSpace(_runnerRoot) && Directory.Exists(_runnerRoot))
@@ -78,15 +52,13 @@ public class MohistIntegrationFixture : IAsyncLifetime
 public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 {
     private readonly string _connectionString;
-    private readonly IClusterClient _clusterClient;
     private readonly IEventBus _eventBus;
     private readonly string _runnerRoot;
     private string? _webRoot;
 
-    public MohistWebApplicationFactory(string connectionString, IClusterClient clusterClient, IEventBus eventBus, string runnerRoot)
+    public MohistWebApplicationFactory(string connectionString, IEventBus eventBus, string runnerRoot)
     {
         _connectionString = connectionString;
-        _clusterClient = clusterClient;
         _eventBus = eventBus;
         _runnerRoot = runnerRoot;
     }
@@ -94,7 +66,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         _webRoot ??= CreateWebRoot();
-        builder.UseSetting("Mohist:UseExternalOrleans", "true");
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
@@ -103,7 +74,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Mohist:UseExternalOrleans"] = "true",
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
@@ -112,8 +82,6 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
-            services.AddSingleton<IClusterClient>(_clusterClient);
-            services.AddSingleton<IGrainFactory>(_clusterClient);
             services.AddSingleton<IEventBus>(_eventBus);
         });
     }

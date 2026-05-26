@@ -1,15 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Stage } from '../lib/types'
+import { WorkflowStage } from '../lib/types'
 import { api, ApiError } from '../lib/api'
 import { useWorktreeStatus } from '../hooks/useQueries'
 import { useLiveTask } from '../hooks/useSSE'
 import { useProject } from '../context/ProjectContext'
 
-const BRANCH_BAR_STAGES = new Set<string>([Stage.Plan, Stage.Build, Stage.Check, Stage.Done])
+const BRANCH_BAR_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Done])
 
 interface BranchBarProps {
   issueNumber: number
-  stage: string
+  stage: string | null
   isAgentRunning: boolean
 }
 
@@ -18,7 +18,8 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const { projectId } = useProject()
   const { rebaseConflict } = useLiveTask()
 
-  const { data, isLoading } = useWorktreeStatus(issueNumber, BRANCH_BAR_STAGES.has(stage))
+  const hasWorktreeStage = stage !== null && BRANCH_BAR_STAGES.has(stage)
+  const { data, isLoading } = useWorktreeStatus(issueNumber, hasWorktreeStage)
 
   const rebaseMutation = useMutation({
     mutationFn: () => api.rebaseIssue(issueNumber, projectId),
@@ -29,7 +30,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
     },
   })
 
-  if (!BRANCH_BAR_STAGES.has(stage)) return null
+  if (!hasWorktreeStage) return null
   if (isLoading) return null
   if (!data || !data.exists) return null
 
@@ -48,7 +49,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const behind = data.behind ?? 0
   const branch = data.branch ?? `mo/issue-${issueNumber}`
   const baseBranch = data.baseBranch ?? 'master'
-  const isDone = stage === Stage.Done
+  const isDone = stage === WorkflowStage.Done
 
   if (isRebasing) {
     return (

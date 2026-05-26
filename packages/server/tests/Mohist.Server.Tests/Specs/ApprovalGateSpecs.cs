@@ -51,6 +51,27 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task AwaitingApproval_UserApproves_WorkflowIsClaimableByAnotherRunner()
+    {
+        var workflow = await StartWorkflowAsync(ApprovalStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+
+        var (check, r2) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(r2, check, "plan-ok");
+
+        await workflow.ApproveAsync();
+
+        var nextRunnerId = await RegisterRunnerAsync();
+        var nextRunner = Grains.GetGrain<IRunnerGrain>(nextRunnerId);
+        var buildWork = await nextRunner.PollAsync();
+
+        Assert.NotNull(buildWork);
+        Assert.StartsWith("compile.", buildWork.WorkId);
+    }
+
+    [Fact]
     public async Task AwaitingApproval_UserRejects_WorkflowFails()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());

@@ -55,11 +55,13 @@ public static class RunnerRoutes
                 session));
         });
 
-        group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
+        group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains, AgentSessionService sessions) =>
         {
             var result = new WorkDispatchResult(req.Status, req.Message, req.Output, req.ExitCode);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.ReportAsync(req.WorkId, result);
+            var workflowRunId = await runner.ReportAsync(req.WorkId, result);
+            if (workflowRunId is not null)
+                await sessions.MarkWorkReportedAsync(workflowRunId, req.WorkId, result);
             return Results.Ok();
         });
 

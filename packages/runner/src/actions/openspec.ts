@@ -51,6 +51,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 
 function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
+  const title = stringInput(task, "title") ?? stringInput(task, "id") ?? stringInput(task, "taskId") ?? "OpenSpec task"
   addString(merged, task, "description")
   addValue(merged, task, "acceptanceCriteria")
   addValue(merged, task, "dependsOn")
@@ -62,7 +63,39 @@ function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject) {
   addValue(merged, task, "requireMarkers")
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
+  if (!stringInput(merged, "prompt")?.trim()) {
+    merged.prompt = buildOpenSpecTaskPrompt(title, task)
+  }
   return Object.keys(merged).length === 0 ? null : merged
+}
+
+function buildOpenSpecTaskPrompt(title: string, task: JsonObject) {
+  const sections = [
+    `Implement this OpenSpec task: ${title}`,
+    stringSection("Description", stringInput(task, "description")),
+    valueSection("Acceptance Criteria", task.acceptanceCriteria),
+    valueSection("Depends On", task.dependsOn),
+    stringSection("Output", stringInput(task, "output")),
+    stringSection("Notes", stringInput(task, "notes")),
+    "Follow the repository conventions. Make the smallest complete change that satisfies the task, and run the relevant verification before reporting completion.",
+  ].filter(Boolean)
+  return sections.join("\n\n")
+}
+
+function stringSection(title: string, value: string | undefined) {
+  return value?.trim() ? `## ${title}\n${value.trim()}` : ""
+}
+
+function valueSection(title: string, value: unknown) {
+  if (value === undefined || value === null) return ""
+  if (Array.isArray(value) && value.length === 0) return ""
+  return `## ${title}\n${formatValue(value)}`
+}
+
+function formatValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => `- ${String(item)}`).join("\n")
+  if (typeof value === "object") return JSON.stringify(value, null, 2)
+  return String(value)
 }
 
 function addString(target: JsonObject, source: JsonObject, key: string) {
