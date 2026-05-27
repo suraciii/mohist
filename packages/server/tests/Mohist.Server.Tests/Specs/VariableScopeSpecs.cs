@@ -99,7 +99,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         {
             Assert.False(proposalWith.RootElement.TryGetProperty("changeDir", out _));
             Assert.False(proposalWith.RootElement.TryGetProperty("openspecChangeDir", out _));
-            Assert.Contains("proposal.md", proposalWith.RootElement.GetProperty("prompt").GetString());
+            Assert.Equal("${{ prompts.proposal }}", proposalWith.RootElement.GetProperty("prompt").GetString());
             Assert.Equal("${{ openspecChangeDir }}/proposal.md", proposalWith.RootElement.GetProperty("expect").GetProperty("files")[0].GetProperty("path").GetString());
             Assert.False(proposalWith.RootElement.GetProperty("expect").TryGetProperty("markers", out _));
         }

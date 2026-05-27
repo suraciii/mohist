@@ -118,37 +118,34 @@ function formatValue(value: unknown): string {
 }
 
 async function runAcpSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
-  const sessionName = stringInput(context.with, "session")
+  const sessionName = workflowSessionName(context)
   const manager = context.acpSessionManager
 
-  if (sessionName && manager) {
+  if (sessionName && manager && context.serverConnection) {
     const key = manager.key(context.workflowRunId, sessionName)
-    const existing = manager.get(key)
-    if (existing) return runPromptOnExistingSession(context, prompt, existing)
-    return runNamedSession(context, prompt, manager, key, sessionName)
-  }
+    const session = await context.serverConnection.ensureWorkflowSession(context.workflowRunId, sessionName, {
+      workId: context.workId,
+      workType: context.workType,
+      stage: context.stage,
+      title: context.title,
+      projectId: context.session?.projectId,
+      issueNumber: context.session?.issueNumber,
+    }, context.signal)
 
-  return runEphemeralSession(context, prompt)
-}
-
-async function runNamedSession(context: ActionContext, prompt: string, manager: AcpSessionManager, key: string, sessionName: string): Promise<AcpSessionResult> {
-  const conn = context.serverConnection
-  const existing = conn ? await conn.getSession(context.workflowRunId, sessionName, context.signal).catch(() => null) : null
-
-  if (existing) {
-    const result = await runResumedSession(context, prompt, existing.acpSessionId, existing.workDir)
-    if (result.success && result.acpSessionId) {
-      manager.set(key, { sessionId: result.acpSessionId, workDir: existing.workDir })
+    if (session.acpSessionId) {
+      const cached = manager.get(key)
+      if (cached?.sessionId === session.acpSessionId) return runPromptOnExistingSession(context, prompt, cached)
+      const result = await runResumedSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+      if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
+      return result
     }
+
+    const result = await runNewSession(context, prompt)
+    if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
     return result
   }
 
-  const result = await runNewSession(context, prompt)
-  if (result.success && result.acpSessionId && conn) {
-    manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
-    await conn.registerSession(context.workflowRunId, sessionName, result.acpSessionId, context.workDir, context.signal).catch(() => {})
-  }
-  return result
+  return runEphemeralSession(context, prompt)
 }
 
 async function runPromptOnExistingSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
@@ -549,20 +546,44 @@ function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"da
 }
 
 async function emitSessionStarted(context: ActionContext, externalSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined) {
+  const sessionName = workflowSessionName(context)
+  if (sessionName && context.serverConnection) {
+    await context.serverConnection.attachWorkflowSession(context.workflowRunId, sessionName, { acpSessionId: externalSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
+    return
+  }
   if (context.telemetry && context.session) await context.telemetry.started(context.session.id, { externalSessionId, workDir: context.workDir, changeDir: null, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
 }
 
 async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
+  const sessionName = workflowSessionName(context)
+  if (sessionName && context.serverConnection) {
+    await context.serverConnection.workflowSessionEvents(context.workflowRunId, sessionName, { workId: context.workId, workType: context.workType, stage: context.stage, events: [{ type, payload }] }, context.signal)
+    return
+  }
   if (context.telemetry && context.session) await context.telemetry.events(context.session.id, [{ type, payload }], context.signal)
 }
 
 async function emitSessionCompleted(context: ActionContext, status: string, message: string, exitCode: number) {
+  const sessionName = workflowSessionName(context)
+  if (sessionName && context.serverConnection) {
+    await context.serverConnection.workflowSessionComplete(context.workflowRunId, sessionName, { status, failureReason: message, exitCode }, context.signal)
+    return
+  }
   if (context.telemetry && context.session) await context.telemetry.completed(context.session.id, { status, failureReason: message, exitCode }, context.signal)
 }
 
 async function emitSessionStatus(context: ActionContext, status: string, input: { lastDataAt?: Date; probeSentAt?: Date; probeDeadlineAt?: Date; failureReason?: string }) {
+  const sessionName = workflowSessionName(context)
+  if (sessionName && context.serverConnection) {
+    await context.serverConnection.workflowSessionStatus(context.workflowRunId, sessionName, { status, lastDataAt: input.lastDataAt?.toISOString(), failureReason: input.failureReason }, context.signal)
+    return
+  }
   if (!context.telemetry?.status || !context.session) return
   await context.telemetry.status(context.session.id, { status, lastDataAt: input.lastDataAt?.toISOString(), probeSentAt: input.probeSentAt?.toISOString(), probeDeadlineAt: input.probeDeadlineAt?.toISOString(), failureReason: input.failureReason }, context.signal)
+}
+
+function workflowSessionName(context: ActionContext) {
+  return stringInput(context.with, "session") ?? (context.session ? `work:${context.workId}` : null)
 }
 
 function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {

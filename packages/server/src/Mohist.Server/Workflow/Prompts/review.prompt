@@ -1,0 +1,113 @@
+<artifact id="review">
+
+<task>
+Perform a comprehensive code review of the current change and write `review.md`.
+Review the post-build candidate snapshot, not the intended plan.
+</task>
+
+<dependencies>
+Read the issue, proposal, specs, design, tasks, and all changed files before producing the final review.
+</dependencies>
+
+<instruction>
+Perform a full review pass. Do not stop after the first blocker.
+
+Inspect:
+1. Current issue acceptance criteria with concrete evidence.
+2. All changed files.
+3. Adjacent retry, recovery, and artifact paths.
+4. Regression coverage gaps.
+5. Cross-cutting concerns: security, data safety, public contracts, migration impact.
+</instruction>
+
+<review_dimensions>
+- Correctness: logic errors, bugs, edge cases.
+- Complexity: unnecessary coupling, overly large functions, confusing flow.
+- Test Coverage: new code has meaningful tests and all relevant tests pass.
+- Security: input validation, no injection risks, no exposed secrets.
+- Spec Compliance: acceptance criteria are verified with file paths, lines, or actual values.
+</review_dimensions>
+
+<repair_policy>
+You MAY repair small, local, low-risk issues directly during review:
+- formatting
+- typos
+- obvious missing guards
+- small test expectation updates
+- import cleanup
+- dead code removal
+
+You MUST NOT repair issues involving:
+- product behavior changes
+- public contract changes
+- data safety or security posture changes
+- architectural judgment
+- broad refactoring
+- ambiguous trade-offs
+
+If unsure, report the issue as unresolved instead of fixing it.
+</repair_policy>
+
+<output_format>
+# Review Report
+
+## Result: PASS / FAIL
+
+## Repaired Items
+
+- [ID: item-N]
+  Severity: info
+  Scope: formatting | typos | missing-obvious-guards | ...
+  Evidence: What was wrong and what was changed
+  Verification: Command run to verify the fix
+  Status: resolved
+
+## Blocking Items
+
+- [ID: item-N]
+  Severity: blocking
+  Scope: file path or area
+  Evidence: What is wrong [disallowed:reason] if repair was considered but disallowed
+  SuggestedAction: What should be done
+  Verification: How to verify the fix
+  Status: open | unresolved
+
+## Follow-up Items
+
+- [ID: item-N]
+  Severity: follow-up
+  Scope: file path or area
+  Evidence: Description
+  SuggestedAction: Suggested improvement
+  Status: follow-up
+
+## Pre-existing or Out-of-scope Items
+
+- [ID: item-N]
+  Severity: info | warning
+  Scope: file path or area
+  Evidence: Description
+  SuggestedAction: Optional future action
+  Status: pre-existing | out-of-scope
+</output_format>
+
+<verdict_rules>
+- The verdict MUST reflect the post-repair candidate snapshot.
+- Do not PASS if unresolved blocking items remain.
+- Do not PASS if repaired items lack verification evidence.
+- Pre-existing failures do not block the current change but must be reported.
+</verdict_rules>
+
+<verdict_marker>
+The final line of `review.md` MUST be exactly one of:
+- `<promise>PASS</promise>` if review passes.
+- `<promise>FAIL</promise>` if review fails.
+
+Do NOT include more than one marker. Do NOT include markers in examples or quoted text.
+</verdict_marker>
+
+<output>
+Write to: `${{ openspecChangeDir }}/review.md`
+</output>
+
+</artifact>

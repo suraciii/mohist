@@ -17,7 +17,7 @@ public sealed class FilePromptLoader : IPromptLoader
         if (_cache.TryGetValue(name, out var cached))
             return cached;
 
-        var filePath = Path.Combine(_promptsDirectory, $"{name}.md");
+        var filePath = Path.Combine(_promptsDirectory, $"{name}.prompt");
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Prompt file not found: {filePath}", filePath);
 
@@ -35,7 +35,7 @@ public sealed class FilePromptLoader : IPromptLoader
         if (!Directory.Exists(_promptsDirectory))
             return result;
 
-        foreach (var filePath in Directory.EnumerateFiles(_promptsDirectory, "*.md"))
+        foreach (var filePath in Directory.EnumerateFiles(_promptsDirectory, "*.prompt"))
         {
             var name = Path.GetFileNameWithoutExtension(filePath);
             var content = File.ReadAllText(filePath);
