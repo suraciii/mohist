@@ -113,6 +113,161 @@ function formatValue(value: unknown): string {
 }
 
 async function runAcpSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+  const sessionName = stringInput(context.with, "session")
+  const pool = context.sessionPool
+
+  if (sessionName && pool) {
+    const poolKey = pool.key(context.workflowRunId, sessionName)
+    const pooled = pool.get(poolKey)
+    if (pooled) return runPooledPrompt(context, prompt, pooled, pool, poolKey)
+    return runNamedSession(context, prompt, pool, poolKey, sessionName)
+  }
+
+  return runEphemeralSession(context, prompt)
+}
+
+async function runNamedSession(context: ActionContext, prompt: string, pool: import("../runtime/session-pool.js").AcpSessionPool, poolKey: string, sessionName: string): Promise<AcpSessionResult> {
+  const conn = context.serverConnection
+  const existing = conn ? await conn.getSession(context.workflowRunId, sessionName, context.signal).catch(() => null) : null
+
+  if (existing) {
+    const result = await runResumedSession(context, prompt, pool, poolKey, existing.acpSessionId, existing.workDir)
+    if (!result.success) return result
+    return result
+  }
+
+  const result = await runNewPooledSession(context, prompt, pool, poolKey)
+  if (result.success && result.acpSessionId && conn) {
+    await conn.registerSession(context.workflowRunId, sessionName, result.acpSessionId, context.workDir, context.signal).catch(() => {})
+  }
+  return result
+}
+
+async function runResumedSession(context: ActionContext, prompt: string, pool: import("../runtime/session-pool.js").AcpSessionPool, poolKey: string, acpSessionId: string, workDir: string): Promise<AcpSessionResult> {
+  const acpProcess = acpProcessFactory(context)
+  const agentConfig = resolveAgentConfig(context.with)
+  const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
+  let agentText = ""
+  let agentTextTruncated = false
+  let lastDataAt = Date.now()
+  let dataVersion = 0
+  const dataWaiters = new Set<() => void>()
+  const toolIds = new ToolCallIdGenerator()
+  const notifyData = () => {
+    lastDataAt = Date.now()
+    dataVersion += 1
+    for (const waiter of dataWaiters) waiter()
+    dataWaiters.clear()
+  }
+
+  const connection = new ClientSideConnection(
+    () => ({
+      sessionUpdate: async (notification: SessionNotification) => {
+        notifyData()
+        const update = notification.update
+        const type = update.sessionUpdate
+        if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
+          const text = String(update.content.text)
+          if (!agentTextTruncated) {
+            agentText += text
+            if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
+              agentText = truncateAgentText(agentText)
+              agentTextTruncated = true
+            }
+          }
+        }
+        if (context.session) await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
+      },
+      requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
+        const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
+        return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
+      },
+    }),
+    acpProcess.stream,
+  )
+
+  try {
+    const initialize = await Promise.race([
+      connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "mohist-runner", version: "0.1.0" } }),
+      timeout(timeoutMs),
+      acpProcess.spawnFailure,
+    ])
+    acpProcess.markInitialized()
+    if (initialize === "timeout") throw new Error("Timed out during ACP initialize")
+    notifyData()
+
+    const resumeResult = await Promise.race([
+      connection.resumeSession({ sessionId: acpSessionId, cwd: workDir, mcpServers: [] }),
+      timeout(timeoutMs),
+      acpProcess.exitFailure,
+    ])
+    if (resumeResult === "timeout") throw new Error("Timed out during ACP resumeSession")
+    notifyData()
+
+    const model = agentConfig?.model ?? stringInput(context.with, "model")
+    pool.set(poolKey, { process: acpProcess, connection, sessionId: acpSessionId, model, workDir })
+
+    if (context.session) {
+      await emitSessionStarted(context, acpSessionId, acpProcess.processPid, agentConfig)
+      await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
+    }
+
+    const promptResult = await monitorPrompt(context, connection, acpSessionId, prompt, {
+      timeoutMs,
+      livenessQuietThresholdMs: agentConfig?.livenessQuietThresholdMs ?? numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
+      probeTimeoutMs: agentConfig?.probeTimeoutMs ?? numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
+      lastDataAt: () => lastDataAt,
+      dataVersion: () => dataVersion,
+      waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
+      exitFailure: acpProcess.exitFailure,
+    })
+    if (promptResult !== "completed") {
+      await pool.close(poolKey)
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: acpProcess.exitCode() }
+    }
+
+    return { text: agentText, success: true, acpSessionId, exitCode: acpProcess.exitCode() ?? 0 }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { text: agentText, success: false, error: message, acpSessionId, exitCode: acpProcess.exitCode() ?? 1 }
+  }
+}
+
+async function runPooledPrompt(context: ActionContext, prompt: string, pooled: import("../runtime/session-pool.js").PooledSession, pool: import("../runtime/session-pool.js").AcpSessionPool, poolKey: string): Promise<AcpSessionResult> {
+  const agentConfig = resolveAgentConfig(context.with)
+  const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
+  let agentText = ""
+  let agentTextTruncated = false
+  const toolIds = new ToolCallIdGenerator()
+
+  if (context.session) {
+    await emitSessionStarted(context, pooled.sessionId, pooled.process.processPid, agentConfig)
+    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, pooled.sessionId))
+  }
+
+  try {
+    const promptPromise = pooled.connection.prompt({ sessionId: pooled.sessionId, prompt: [{ type: "text", text: prompt }] })
+    const result = await Promise.race([promptPromise.then(() => "completed" as const), timeout(timeoutMs), aborted(context.signal), pooled.process.exitFailure])
+    if (result === "completed") {
+      return { text: agentText, success: true, acpSessionId: pooled.sessionId, exitCode: 0 }
+    }
+    const error = result === "aborted" ? "Agent stopped by user" : `Timed out after ${timeoutMs / 1000}s`
+    return { text: agentText, success: false, error, acpSessionId: pooled.sessionId, exitCode: 1 }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await pool.close(poolKey)
+    return { text: agentText, success: false, error: message, acpSessionId: pooled.sessionId, exitCode: 1 }
+  }
+}
+
+async function runNewPooledSession(context: ActionContext, prompt: string, pool: import("../runtime/session-pool.js").AcpSessionPool, poolKey: string): Promise<AcpSessionResult> {
+  const result = await runEphemeralSession(context, prompt)
+  if (!result.success && pool.has(poolKey)) return result
+
+  return result
+}
+
+async function runEphemeralSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const acpProcess = acpProcessFactory(context)
   const agentConfig = resolveAgentConfig(context.with)
   let sessionId = ""
@@ -155,6 +310,10 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
     acpProcess.stream,
   )
 
+  const sessionName = stringInput(context.with, "session")
+  const pool = context.sessionPool
+  const poolKey = sessionName && pool ? pool.key(context.workflowRunId, sessionName) : null
+
   try {
     const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
     const initialize = await Promise.race([
@@ -182,10 +341,12 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
       } catch {
         try {
           await connection.unstable_setSessionModel({ sessionId, modelId: model })
-        } catch {
-          // Older ACP agents may not support model selection; the prompt can still run.
-        }
+        } catch {}
       }
+    }
+
+    if (poolKey && pool) {
+      pool.set(poolKey, { process: acpProcess, connection, sessionId, model, workDir: context.workDir })
     }
 
     if (context.session) {
@@ -202,14 +363,18 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
       waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
       exitFailure: acpProcess.exitFailure,
     })
-    if (promptResult !== "completed") return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode() }
+    if (promptResult !== "completed") {
+      if (poolKey && pool) await pool.close(poolKey)
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode() }
+    }
 
     return { text: agentText, success: true, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 0 }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    if (poolKey && pool) await pool.close(poolKey)
     return { text: agentText, success: false, error: message, acpSessionId: sessionId || undefined, exitCode: acpProcess.exitCode() ?? 1 }
   } finally {
-    await acpProcess.cleanup()
+    if (!poolKey) await acpProcess.cleanup()
   }
 }
 

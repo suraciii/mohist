@@ -59,6 +59,8 @@ export interface ActionContext {
   signal: AbortSignal
   session?: AgentSessionContext | null
   telemetry?: RunnerTelemetry
+  sessionPool?: import("../runtime/session-pool.js").AcpSessionPool | null
+  serverConnection?: import("../server/connection.js").ServerConnection | null
 }
 
 export interface RunnerTelemetry {
