@@ -5,6 +5,8 @@ node_modules/
 # Build outputs
 **/dist/
 build/
+.publish/
+nupkg/
 *.tsbuildinfo
 
 # Logs
