@@ -16,25 +16,25 @@ internal sealed class MohistCliApi
     private readonly TextWriter _out;
     private readonly TextWriter _err;
     private readonly IFileSystem _fileSystem;
+    private readonly ICommandExecutor _commandExecutor;
 
     internal TextWriter Output => _out;
     internal TextWriter Error => _err;
     internal IFileSystem FileSystem => _fileSystem;
+    internal ICommandExecutor CommandExecutor => _commandExecutor;
 
-    public MohistCliApi() : this(new HttpClient
-    {
-        BaseAddress = new Uri(Environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
-        Timeout = TimeSpan.FromSeconds(30),
-    }, Console.Out, Console.Error)
-    {
-    }
-
-    public MohistCliApi(HttpClient http, TextWriter output, TextWriter error, IFileSystem? fileSystem = null)
+    public MohistCliApi(
+        HttpClient http,
+        TextWriter output,
+        TextWriter error,
+        IFileSystem fileSystem,
+        ICommandExecutor commandExecutor)
     {
         _http = http;
         _out = output;
         _err = error;
-        _fileSystem = fileSystem ?? RealFileSystem.Instance;
+        _fileSystem = fileSystem;
+        _commandExecutor = commandExecutor;
     }
 
     public async Task<int> PrintGetAsync(string path) =>

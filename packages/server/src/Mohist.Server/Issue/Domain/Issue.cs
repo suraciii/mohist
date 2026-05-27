@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Mohist.Server.Issue.Domain;
 
 public class Issue
@@ -10,7 +12,9 @@ public class Issue
     public string[] Labels { get; private set; }
     public string Priority { get; private set; }
     public string? Model { get; private set; }
+    public Dictionary<string, object?>? AgentConfig { get; private set; }
     public Dictionary<string, string>? StageModels { get; private set; }
+    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
     public DateTime? ArchivedAt { get; private set; }
@@ -33,7 +37,9 @@ public class Issue
         string[]? labels = null,
         string priority = "p2",
         string? model = null,
+        Dictionary<string, object?>? agentConfig = null,
         Dictionary<string, string>? stageModels = null,
+        Dictionary<string, Dictionary<string, string>>? stageVariables = null,
         string? workflowProfileId = null)
     {
         Id = id;
@@ -44,7 +50,9 @@ public class Issue
         Labels = labels ?? [];
         Priority = priority;
         Model = model;
+        AgentConfig = agentConfig;
         StageModels = stageModels;
+        StageVariables = stageVariables;
         WorkflowProfileId = string.IsNullOrWhiteSpace(workflowProfileId) ? null : workflowProfileId;
         CreatedAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
@@ -59,7 +67,9 @@ public class Issue
         string[] labels,
         string priority,
         string? model,
+        Dictionary<string, object?>? agentConfig,
         Dictionary<string, string>? stageModels,
+        Dictionary<string, Dictionary<string, string>>? stageVariables,
         DateTime createdAt,
         DateTime updatedAt,
         DateTime? archivedAt,
@@ -73,7 +83,7 @@ public class Issue
         int[] prerequisiteNumbers,
         string? workflowProfileId)
     {
-        var issue = new Issue(id, projectId, number, title, body, labels, priority, model, stageModels, workflowProfileId)
+        var issue = new Issue(id, projectId, number, title, body, labels, priority, model, agentConfig, stageModels, stageVariables, workflowProfileId)
         {
             CreatedAt = createdAt,
             UpdatedAt = updatedAt,
@@ -90,14 +100,24 @@ public class Issue
         return issue;
     }
 
-    public void Update(string? title, string? body, string[]? labels, string? priority, string? model, Dictionary<string, string>? stageModels)
+    public void Update(
+        string? title,
+        string? body,
+        string[]? labels,
+        string? priority,
+        string? model,
+        Dictionary<string, object?>? agentConfig,
+        Dictionary<string, string>? stageModels,
+        Dictionary<string, Dictionary<string, string>>? stageVariables)
     {
         if (title != null) Title = title;
         if (body != null) Body = body;
         if (labels != null) Labels = labels;
         if (priority != null) Priority = priority;
         if (model != null) Model = model;
+        if (agentConfig != null) AgentConfig = agentConfig;
         if (stageModels != null) StageModels = stageModels;
+        if (stageVariables != null) StageVariables = stageVariables;
         UpdatedAt = DateTime.UtcNow;
     }
 

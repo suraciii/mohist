@@ -31,7 +31,7 @@ public class IssueCreationSpecs
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var grain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await grain.HydrateAsync(projectId, number, title, body, labels, priority, model, stageModels, workflowProfileId);
+        await grain.HydrateAsync(projectId, number, title, body, labels, priority, model, null, stageModels, workflowProfileId);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
 

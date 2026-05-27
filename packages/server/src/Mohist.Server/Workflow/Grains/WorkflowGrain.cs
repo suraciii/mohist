@@ -70,7 +70,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         if (!string.IsNullOrWhiteSpace(input?.Variables))
-            _variables = new WorkflowExecutionContext(input.Variables!);
+            _variables = new WorkflowExecutionContext(input.Variables!, input?.StageVariables);
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStage.Stage);
         EmitStageChanged("started");
@@ -279,6 +279,41 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await AppendTerminalEventIfNeededAsync();
         await ReleaseFromBacklogIfTerminalAsync();
         await DispatchCompletedHookIfNeededAsync(statusBefore);
+    }
+
+    public Task<WorkflowVariablesSnapshot?> GetVariablesAsync()
+    {
+        return Task.FromResult(_variables is null
+            ? null
+            : new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables));
+    }
+
+    public async Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson)
+    {
+        EnsureRun();
+        if (string.IsNullOrWhiteSpace(section))
+            throw new InvalidOperationException("Workflow variable section is required");
+
+        _variables = (_variables ?? new WorkflowExecutionContext("{}"))
+            .PatchSection(section, patchJson);
+
+        await PersistAsync();
+        return new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables);
+    }
+
+    public async Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson)
+    {
+        EnsureRun();
+        if (string.IsNullOrWhiteSpace(stage))
+            throw new InvalidOperationException("Workflow stage is required");
+        if (string.IsNullOrWhiteSpace(section))
+            throw new InvalidOperationException("Workflow variable section is required");
+
+        _variables = (_variables ?? new WorkflowExecutionContext("{}"))
+            .PatchStageSection(stage, section, patchJson);
+
+        await PersistAsync();
+        return new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables);
     }
 
     public Task<WorkflowStatusSnapshot?> GetStatusAsync()

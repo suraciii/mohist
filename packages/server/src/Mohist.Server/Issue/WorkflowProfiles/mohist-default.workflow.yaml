@@ -10,7 +10,7 @@ stages:
             Create ${{ openspecChangeDir }}/proposal.md.
             The proposal explains why the change is needed, what will change, capabilities affected, and implementation impact.
             Keep it concise and avoid copying prompt instructions into the file.
-          model: ${{ model.stage.plan }}
+          agent: ${{ agent.opencode }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/proposal.md
@@ -22,7 +22,7 @@ stages:
             Read ${{ openspecChangeDir }}/proposal.md and create spec delta files under ${{ openspecChangeDir }}/specs/<capability>/spec.md.
             Use ADDED/MODIFIED/REMOVED/RENAMED Requirements sections.
             Every requirement must include at least one #### Scenario with WHEN/THEN behavior.
-          model: ${{ model.stage.plan }}
+          agent: ${{ agent.opencode }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/specs
@@ -34,7 +34,7 @@ stages:
             Create ${{ openspecChangeDir }}/design.md.
             Include Context, Goals/Non-Goals, Decisions with rationale, Risks/Trade-offs, Migration Plan, and Open Questions.
             Focus on how to implement the proposal and specs.
-          model: ${{ model.stage.plan }}
+          agent: ${{ agent.opencode }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/design.md
@@ -47,7 +47,7 @@ stages:
             The file must contain a JSON object with a tasks array.
             Each task must have id, title, description, acceptanceCriteria, priority, mode, type, output, dependsOn, passes=false, and notes.
             Tasks must be ordered by dependency and every non-first task should depend on earlier task IDs.
-          model: ${{ model.stage.plan }}
+          agent: ${{ agent.opencode }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/tasks.json
@@ -60,7 +60,7 @@ stages:
             Fix any issues directly when possible.
             Create ${{ openspecChangeDir }}/self-review.md with Result, repaired/blocking/follow-up items, and exactly one final marker:
             <promise>PASS</promise> or <promise>FAIL</promise>.
-          model: ${{ model.stage.plan }}
+          agent: ${{ agent.opencode }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/self-review.md
@@ -103,7 +103,7 @@ stages:
             prompt: |
               Fix the plan review findings in ${{ openspecChangeDir }}.
               Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
-            model: ${{ model.stage.plan }}
+            agent: ${{ agent.opencode }}
       - name: health
         title: Health
         uses: core/script
@@ -133,7 +133,7 @@ stages:
             prompt: |
               Fix the build-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            model: ${{ model.stage.build }}
+            agent: ${{ agent.opencode }}
 
   - stage: check
     requiresApproval: true
@@ -150,7 +150,7 @@ stages:
             <promise>PASS</promise>
             or
             <promise>FAIL</promise>.
-          model: ${{ model.stage.check }}
+          agent: ${{ agent.opencode }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/review.md
@@ -170,7 +170,7 @@ stages:
             prompt: |
               Fix the check-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            model: ${{ model.stage.check }}
+            agent: ${{ agent.opencode }}
       - name: review-passed
         title: Review passed
         uses: core/marker
@@ -186,7 +186,7 @@ stages:
             prompt: |
               Read ${{ openspecChangeDir }}/review.md and fix the blocking findings.
               Keep changes focused on review failures and preserve existing passing behavior.
-            model: ${{ model.stage.check }}
+            agent: ${{ agent.opencode }}
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
@@ -227,4 +227,4 @@ stages:
             prompt: |
               Fix the integrate-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            model: ${{ model.stage.integrate }}
+            agent: ${{ agent.opencode }}

@@ -837,7 +837,7 @@ export function IssueDetailPage() {
                   )}
 
                   <div className="pt-2 border-t border-gray-100">
-                    <IssueModelSelector issueNumber={issue.number} currentModel={issue.model} currentStageModels={issue.stageModels} />
+                    <IssueModelSelector issueNumber={issue.number} currentWorkflowRunId={issue.workflowRunId} currentModel={issue.model} currentAgentConfig={issue.agentConfig} currentStageModels={issue.stageModels} />
                   </div>
                 </div>
               </div>

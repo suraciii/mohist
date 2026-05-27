@@ -93,8 +93,8 @@ public static class ProvidersRoutes
 
         app.MapGet("/api/providers/runtime", async (ConfigService svc, IConfiguration configuration) =>
         {
-            var cfg = await svc.GetAllAsync();
-            cfg.TryGetValue("model", out var model);
+            var agent = await svc.GetAgentConfigAsync();
+            var model = agent?.GetValueOrDefault("model")?.ToString();
             return ApiResults.Ok(new
             {
                 mode = "local-opencode",

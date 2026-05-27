@@ -37,6 +37,13 @@ public static class ApiTestClient
         response.EnsureSuccessStatusCode();
     }
 
+    public static async Task<T> PatchDataAsync<T>(this HttpClient client, string path, object body)
+    {
+        using var response = await client.PatchAsJsonAsync(path, body, JsonOptions);
+        response.EnsureSuccessStatusCode();
+        return await ReadDataAsync<T>(response);
+    }
+
     private static async Task<T> ReadDataAsync<T>(HttpResponseMessage response)
     {
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<T>>(JsonOptions);

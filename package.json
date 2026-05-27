@@ -14,7 +14,8 @@
     "dev:runner": "npm run dev -w packages/runner",
     "dev:web": "npm run dev -w packages/web",
     "dev:server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj",
-    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\""
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "install:cli": "dotnet pack packages/server/src/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

@@ -82,6 +82,34 @@ public class IssueWorkflowProductLoopSpecs
         Assert.Contains(events, e => e.Type == "issue_archived");
     }
 
+    [Fact]
+    public async Task IssueWorkflowVariablesPatch_AppliesToFutureDispatches()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"variables-{Guid.NewGuid():N}", path = "/tmp/mohist-variable-patch", baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Patch workflow variables", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        _runnerId = "variable-patch-runner";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).AssignWorkflowAsync(startedIssue.WorkflowRunId!);
+
+        var patched = await _client.PatchDataAsync<WorkflowVariablesDto>(
+            $"/api/issues/{issue.Number}/workflow/variables/agent?projectId={project.Id}",
+            new { opencode = new { model = "kimi/k2", timeout = 1200 } });
+        Assert.Equal("future-dispatches", patched.Affected);
+
+        var firstWork = await PollWorkAnyAsync();
+
+        Assert.NotNull(firstWork.Variables);
+        using var doc = JsonDocument.Parse(firstWork.Variables!);
+        var opencode = doc.RootElement.GetProperty("agent").GetProperty("opencode");
+        Assert.Equal("kimi/k2", opencode.GetProperty("model").GetString());
+        Assert.Equal(1200, opencode.GetProperty("timeout").GetInt32());
+    }
+
     private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)
     {
         for (var i = 0; i < 100; i++)
@@ -152,9 +180,6 @@ public class IssueWorkflowProductLoopSpecs
                     await ReportAsync(work.WorkId, "completed");
                     continue;
                 }
-                Assert.NotNull(work.Variables);
-                using var doc = JsonDocument.Parse(work.Variables);
-                Assert.Equal("anthropic/claude", doc.RootElement.GetProperty("model").GetProperty("stage").GetProperty("plan").GetString());
             }
             else if (!IsCurrentIssueWork(work))
             {
@@ -199,6 +224,7 @@ public class IssueWorkflowProductLoopSpecs
     private sealed record EventDto(string Id, string Type, string Category, string? Status, string CreatedAt);
     private sealed record WorkflowLogDto(string Id, string EventType, string CreatedAt);
     private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
+    private sealed record WorkflowVariablesDto(int IssueNumber, string WorkflowRunId, string Affected);
     private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? Approval);
     private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
     private sealed record ApprovalDto(string Status);

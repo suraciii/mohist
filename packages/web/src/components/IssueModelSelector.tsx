@@ -12,7 +12,9 @@ const ISSUE_STAGES = ['plan', 'build', 'check', 'integrate'] as const
 
 interface Props {
   issueNumber: number
+  currentWorkflowRunId?: string | null
   currentModel?: string | null
+  currentAgentConfig?: Record<string, unknown> | null
   currentStageModels?: Record<string, string> | null
 }
 
@@ -91,7 +93,7 @@ function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEn
   )
 }
 
-export function IssueModelSelector({ issueNumber, currentModel, currentStageModels }: Props) {
+export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentModel, currentAgentConfig, currentStageModels }: Props) {
   const queryClient = useQueryClient()
   const { data: availableModelIds, isLoading, error } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
@@ -101,6 +103,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const listRef = useRef<HTMLDivElement>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
+  const [localWorkflowModel, setLocalWorkflowModel] = useState<string | null>(null)
 
   useEffect(() => {
     if (currentStageModels) {
@@ -124,7 +127,12 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
   const handleSelect = useCallback(
     async (modelId: string) => {
       try {
-        await api.updateIssue(issueNumber, { model: modelId })
+        if (currentWorkflowRunId) {
+          await api.patchIssueWorkflowVariable(issueNumber, 'agent', { opencode: { model: modelId } })
+          setLocalWorkflowModel(modelId)
+        } else {
+          await api.updateIssue(issueNumber, { agentConfig: { ...(currentAgentConfig ?? {}), model: modelId } })
+        }
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -132,34 +140,46 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
         console.error('Failed to update issue model:', err)
       }
     },
-    [issueNumber, queryClient],
+    [issueNumber, currentWorkflowRunId, currentAgentConfig, queryClient],
   )
 
   const handleClear = useCallback(
     async () => {
       try {
-        await api.updateIssue(issueNumber, { model: null })
+        if (currentWorkflowRunId) {
+          await api.patchIssueWorkflowVariable(issueNumber, 'agent', { opencode: { model: null } })
+          setLocalWorkflowModel(null)
+        } else {
+          const updatedAgent = { ...(currentAgentConfig ?? {}) }
+          delete updatedAgent.model
+          await api.updateIssue(issueNumber, { model: null, agentConfig: Object.keys(updatedAgent).length > 0 ? updatedAgent : null })
+        }
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       } catch (err) {
         console.error('Failed to clear issue model:', err)
       }
     },
-    [issueNumber, queryClient],
+    [issueNumber, currentWorkflowRunId, currentAgentConfig, queryClient],
   )
 
   const handleSetStageModel = useCallback(
     async (stage: string, modelId: string) => {
       try {
         const updated = { ...localStageModels, [stage]: modelId }
-        await api.updateIssue(issueNumber, { stageModels: updated })
+        if (currentWorkflowRunId) {
+          await api.patchIssueWorkflowStageVariable(issueNumber, stage, 'agent', { opencode: { model: modelId } })
+        } else {
+          await api.updateIssue(issueNumber, { stageModels: updated })
+        }
+        setLocalStageModels(updated)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       } catch (err) {
         console.error('Failed to update stage model:', err)
       }
     },
-    [issueNumber, localStageModels, queryClient],
+    [issueNumber, currentWorkflowRunId, localStageModels, queryClient],
   )
 
   const handleClearStageModel = useCallback(
@@ -167,15 +187,20 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
       try {
         const updated = { ...localStageModels }
         delete updated[stage]
-        const stageModelsValue = Object.keys(updated).length > 0 ? updated : null
-        await api.updateIssue(issueNumber, { stageModels: stageModelsValue })
+        if (currentWorkflowRunId) {
+          await api.patchIssueWorkflowStageVariable(issueNumber, stage, 'agent', { opencode: { model: null } })
+        } else {
+          const stageModelsValue = Object.keys(updated).length > 0 ? updated : null
+          await api.updateIssue(issueNumber, { stageModels: stageModelsValue })
+        }
+        setLocalStageModels(updated)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
       } catch (err) {
         console.error('Failed to clear stage model:', err)
       }
     },
-    [issueNumber, localStageModels, queryClient],
+    [issueNumber, currentWorkflowRunId, localStageModels, queryClient],
   )
 
   const handleKeyDown = useCallback(
@@ -204,8 +229,10 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
     ? opencodeModelData.model.split('/').pop()!
     : null
 
-  const currentModelDisplay = currentModel
-    ? modelDisplayName(currentModel)
+  const configuredModel = localWorkflowModel ?? (typeof currentAgentConfig?.model === 'string' ? currentAgentConfig.model : currentModel)
+
+  const currentModelDisplay = configuredModel
+    ? modelDisplayName(configuredModel)
     : defaultModelName || 'Use default'
 
   return (
@@ -218,7 +245,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
               className={`w-full inline-flex items-center justify-between gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors shadow-sm min-h-[44px] md:min-h-0 ${
                 open
                   ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : currentModel
+                    : configuredModel
                     ? 'border-blue-200 bg-blue-50 text-blue-700'
                     : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
               }`}
@@ -268,7 +295,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                     </div>
                   )}
 
-                  {!isLoading && !error && currentModel && !searchQuery.trim() && (
+              {!isLoading && !error && configuredModel && !searchQuery.trim() && (
                     <div>
                       <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
                         Override
@@ -292,7 +319,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                         <ModelListItem
                           key={modelId}
                           modelId={modelId}
-                          isSelected={modelId === currentModel}
+                          isSelected={modelId === configuredModel}
                           isHighlighted={i === highlightedIndex}
                           onSelect={() => handleSelect(modelId)}
                           onMouseEnter={() => setHighlightedIndex(i)}
@@ -313,7 +340,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                       <ModelListItem
                         key={modelId}
                         modelId={modelId}
-                        isSelected={modelId === currentModel}
+                        isSelected={modelId === configuredModel}
                         isHighlighted={i === highlightedIndex}
                         onSelect={() => handleSelect(modelId)}
                         onMouseEnter={() => setHighlightedIndex(i)}
@@ -325,7 +352,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
                       <ModelListItem
                         key={modelId}
                         modelId={modelId}
-                        isSelected={modelId === currentModel}
+                        isSelected={modelId === configuredModel}
                         isHighlighted={i === highlightedIndex}
                         onSelect={() => handleSelect(modelId)}
                         onMouseEnter={() => setHighlightedIndex(i)}
@@ -341,7 +368,7 @@ export function IssueModelSelector({ issueNumber, currentModel, currentStageMode
           </>
         )}
       </Popover>
-      {currentModel && (
+      {configuredModel && (
         <p className="text-xs text-gray-400">
           Override active. Falls back to default when cleared.
         </p>

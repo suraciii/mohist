@@ -1,14 +1,15 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Mohist.Cli;
 
 internal static class ServerCommands
 {
-    public static Command Build(MohistCliApi api)
+    public static Command Build(MohistCliApi api, IServiceProvider provider)
     {
         var server = new Command("server", "Server management");
-        var systemd = MohistCliCommands.CreateSystemd(api);
+        var systemd = provider.GetRequiredService<SystemdServiceInstaller>();
 
         server.Subcommands.Add(BuildHealth(api));
         server.Subcommands.Add(BuildInstall(systemd));
@@ -92,10 +93,10 @@ internal static class ServerCommands
 
 internal static class RunnerCommands
 {
-    public static Command Build(MohistCliApi api)
+    public static Command Build(MohistCliApi api, IServiceProvider provider)
     {
         var runner = new Command("runner", "Runner management");
-        var systemd = MohistCliCommands.CreateSystemd(api);
+        var systemd = provider.GetRequiredService<SystemdServiceInstaller>();
 
         runner.Subcommands.Add(BuildInstall(systemd));
         runner.Subcommands.Add(BuildSystemd("start", systemd.StartRunnerAsync, systemd));

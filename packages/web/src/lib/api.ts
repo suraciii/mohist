@@ -56,13 +56,13 @@ export const api = {
   getIssue: (number: number, projectId?: string | null) =>
     request<import('./types').Issue>(withProject(`/issues/${number}`, projectId)),
 
-  createIssue: (data: { title: string; body?: string; labels?: string[]; model?: string; priority?: string; projectId?: string }) =>
+  createIssue: (data: { title: string; body?: string; labels?: string[]; model?: string; agentConfig?: Record<string, unknown>; priority?: string; projectId?: string }) =>
     request<import('./types').Issue>('/issues', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
-  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) =>
+  updateIssue: (number: number, data: { title?: string; body?: string; addLabels?: string[]; removeLabels?: string[]; model?: string | null; agentConfig?: Record<string, unknown> | null; stageModels?: Record<string, string> | null; priority?: string | null }, projectId?: string | null) =>
     request<import('./types').Issue>(withProject(`/issues/${number}`, projectId), {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -189,6 +189,21 @@ export const api = {
 
   getWorkflowTimeline: (number: number, projectId?: string | null) =>
     request<import('./types').WorkflowTimeline>(withProject(`/issues/${number}/workflow/timeline`, projectId)),
+
+  getIssueWorkflowVariable: (number: number, section: string, projectId?: string | null) =>
+    request<{ issueNumber: number; workflowRunId: string; section: string; value: unknown }>(withProject(`/issues/${number}/workflow/variables/${encodeURIComponent(section)}`, projectId)),
+
+  patchIssueWorkflowVariable: (number: number, section: string, value: unknown, projectId?: string | null) =>
+    request<{ issueNumber: number; workflowRunId: string; affected: string; variables: Record<string, unknown>; stageVariables?: Record<string, Record<string, unknown>> | null }>(withProject(`/issues/${number}/workflow/variables/${encodeURIComponent(section)}`, projectId), {
+      method: 'PATCH',
+      body: JSON.stringify(value),
+    }),
+
+  patchIssueWorkflowStageVariable: (number: number, stage: string, section: string, value: unknown, projectId?: string | null) =>
+    request<{ issueNumber: number; workflowRunId: string; affected: string; variables: Record<string, unknown>; stageVariables?: Record<string, Record<string, unknown>> | null }>(withProject(`/issues/${number}/workflow/stages/${encodeURIComponent(stage)}/variables/${encodeURIComponent(section)}`, projectId), {
+      method: 'PATCH',
+      body: JSON.stringify(value),
+    }),
 
   rebaseIssue: async (number: number, projectId?: string | null) => {
     try {
