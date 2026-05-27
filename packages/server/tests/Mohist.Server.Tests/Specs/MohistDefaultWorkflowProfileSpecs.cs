@@ -1,16 +1,34 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Workflow.Prompts;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
+
+public class FakePromptLoader : IPromptLoader
+{
+    public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal)
+    {
+        ["proposal"] = "# Proposal Artifact\nCreate proposal.md",
+        ["specs"] = "# Specs Artifact\nCreate specs",
+        ["design"] = "# Design Artifact\nCreate design.md",
+        ["tasks"] = "# Tasks Artifact\nCreate tasks.json",
+        ["self-review"] = "# Self Review\nReview artifacts",
+        ["review"] = "# Review\nReview implementation",
+        ["build"] = "# Build\nImplement task",
+    };
+
+    public string Load(string name) => Prompts.TryGetValue(name, out var value) ? value : throw new KeyNotFoundException($"Prompt '{name}' not found");
+    public Dictionary<string, string> LoadAll() => new(Prompts, StringComparer.Ordinal);
+}
 
 public class MohistDefaultWorkflowProfileSpecs
 {
     [Fact]
     public void IssueWithNonAsciiTitle_BuildsIssueNumberBasedOpenSpecChangeVariables()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile();
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
         var issue = new Mohist.Server.Issue.Domain.Issue("issue-154", "project-1", 154, "支持中文标题 🚀");
 
         var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
@@ -61,7 +79,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void AgentConfig_BuildsFlatAgentVariableAndStageOverrides()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile();
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
         var issue = new Mohist.Server.Issue.Domain.Issue(
             "issue-1",
             "project-1",
@@ -83,17 +101,34 @@ public class MohistDefaultWorkflowProfileSpecs
             });
 
         using var document = JsonDocument.Parse(variables);
-        var opencode = document.RootElement.GetProperty("agent").GetProperty("opencode");
-        Assert.Equal("openai/gpt-4o", opencode.GetProperty("model").GetString());
-        Assert.Equal(1200, opencode.GetProperty("timeout").GetInt32());
-        Assert.Equal(30000, opencode.GetProperty("probeTimeoutMs").GetInt32());
-        Assert.False(opencode.TryGetProperty("stage", out _));
+        var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-4o", agent.GetProperty("model").GetString());
+        Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
+        Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
+        Assert.False(agent.TryGetProperty("stage", out _));
 
         Assert.NotNull(stageVariables);
-        using var planAgent = JsonDocument.Parse(stageVariables!["plan"]["agent"]);
-        Assert.Equal("anthropic/claude", planAgent.RootElement.GetProperty("opencode").GetProperty("model").GetString());
-        using var checkAgent = JsonDocument.Parse(stageVariables["check"]["agent"]);
-        Assert.Equal("openai/o3", checkAgent.RootElement.GetProperty("opencode").GetProperty("model").GetString());
+        using var planVars = JsonDocument.Parse(stageVariables!["plan"]["vars"]);
+        Assert.Equal("anthropic/claude", planVars.RootElement.GetProperty("agent").GetProperty("model").GetString());
+        using var checkVars = JsonDocument.Parse(stageVariables["check"]["vars"]);
+        Assert.Equal("openai/o3", checkVars.RootElement.GetProperty("agent").GetProperty("model").GetString());
+    }
+
+    [Fact]
+    public void BuildVariables_IncludesPromptsFromLoader()
+    {
+        var loader = new FakePromptLoader();
+        var profile = new MohistDefaultIssueWorkflowProfile(loader);
+        var issue = new Mohist.Server.Issue.Domain.Issue("issue-1", "project-1", 1, "Test");
+
+        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+
+        using var document = JsonDocument.Parse(variables);
+        var prompts = document.RootElement.GetProperty("prompts");
+        Assert.Equal("# Proposal Artifact\nCreate proposal.md", prompts.GetProperty("proposal").GetString());
+        Assert.Equal("# Build\nImplement task", prompts.GetProperty("build").GetString());
+        Assert.Equal(7, prompts.EnumerateObject().Count());
     }
 
     [Fact]

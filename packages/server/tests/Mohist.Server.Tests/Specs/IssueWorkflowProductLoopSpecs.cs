@@ -97,17 +97,18 @@ public class IssueWorkflowProductLoopSpecs
         await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).AssignWorkflowAsync(startedIssue.WorkflowRunId!);
 
         var patched = await _client.PatchDataAsync<WorkflowVariablesDto>(
-            $"/api/issues/{issue.Number}/workflow/variables/agent?projectId={project.Id}",
-            new { opencode = new { model = "kimi/k2", timeout = 1200 } });
+            $"/api/issues/{issue.Number}/workflow/vars/agent?projectId={project.Id}",
+            new { type = "opencode", model = "kimi/k2", timeout = 1200 });
         Assert.Equal("future-dispatches", patched.Affected);
 
         var firstWork = await PollWorkAnyAsync();
 
         Assert.NotNull(firstWork.Variables);
         using var doc = JsonDocument.Parse(firstWork.Variables!);
-        var opencode = doc.RootElement.GetProperty("agent").GetProperty("opencode");
-        Assert.Equal("kimi/k2", opencode.GetProperty("model").GetString());
-        Assert.Equal(1200, opencode.GetProperty("timeout").GetInt32());
+        var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("kimi/k2", agent.GetProperty("model").GetString());
+        Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
     }
 
     private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)

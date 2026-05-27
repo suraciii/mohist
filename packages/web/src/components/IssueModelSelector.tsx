@@ -128,7 +128,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async (modelId: string) => {
       try {
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowVariable(issueNumber, 'agent', { opencode: { model: modelId } })
+          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId })
           setLocalWorkflowModel(modelId)
         } else {
           await api.updateIssue(issueNumber, { agentConfig: { ...(currentAgentConfig ?? {}), model: modelId } })
@@ -147,7 +147,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async () => {
       try {
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowVariable(issueNumber, 'agent', { opencode: { model: null } })
+          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null })
           setLocalWorkflowModel(null)
         } else {
           const updatedAgent = { ...(currentAgentConfig ?? {}) }
@@ -168,7 +168,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowStageVariable(issueNumber, stage, 'agent', { opencode: { model: modelId } })
+          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId })
         } else {
           await api.updateIssue(issueNumber, { stageModels: updated })
         }
@@ -188,7 +188,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         const updated = { ...localStageModels }
         delete updated[stage]
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowStageVariable(issueNumber, stage, 'agent', { opencode: { model: null } })
+          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null })
         } else {
           const stageModelsValue = Object.keys(updated).length > 0 ? updated : null
           await api.updateIssue(issueNumber, { stageModels: stageModelsValue })

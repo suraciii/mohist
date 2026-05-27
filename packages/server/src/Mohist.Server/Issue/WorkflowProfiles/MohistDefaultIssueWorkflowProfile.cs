@@ -8,6 +8,13 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
 {
+    private readonly Workflow.Prompts.IPromptLoader _promptLoader;
+
+    public MohistDefaultIssueWorkflowProfile(Workflow.Prompts.IPromptLoader promptLoader)
+    {
+        _promptLoader = promptLoader;
+    }
+
     public string Id => IssueWorkflowProfiles.DefaultId;
     public string DisplayName => "Mohist Default";
     public string Description => "Plan, build, check, and integrate an issue using OpenSpec artifacts.";
@@ -17,6 +24,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
     public string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Dictionary<string, object?>? globalAgentConfig = null)
     {
         var agentConfig = BuildAgentConfig(issue, globalAgentConfig);
+        var prompts = _promptLoader.LoadAll();
 
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
@@ -25,8 +33,8 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
-            ["agent"] = JsonSerializer.SerializeToElement(agentConfig, WorkflowVariableJson.Options),
-            ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>(), WorkflowVariableJson.Options),
+            ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options),
+            ["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options),
         };
         return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
     }
@@ -53,17 +61,23 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         return result.Count == 0 ? null : result;
     }
 
-    private static AgentVariableConfig BuildAgentConfig(Domain.Issue issue, Dictionary<string, object?>? globalAgentConfig)
+    private static Dictionary<string, object?> BuildAgentConfig(Domain.Issue issue, Dictionary<string, object?>? globalAgentConfig)
     {
-        var opencodeConfig = new Dictionary<string, object?>(StringComparer.Ordinal);
-        MergeAgentConfig(opencodeConfig, globalAgentConfig);
-        MergeAgentConfig(opencodeConfig, issue.AgentConfig);
+        var agentConfig = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["type"] = "opencode",
+        };
+        MergeAgentConfig(agentConfig, globalAgentConfig);
+        MergeAgentConfig(agentConfig, issue.AgentConfig);
 
         // Legacy compatibility: issue.model is equivalent to agent.model.
         if (!string.IsNullOrWhiteSpace(issue.Model))
-            opencodeConfig["model"] = issue.Model;
+            agentConfig["model"] = issue.Model;
 
-        return new AgentVariableConfig(Default: "opencode", Opencode: opencodeConfig);
+        if (!agentConfig.ContainsKey("type"))
+            agentConfig["type"] = "opencode";
+
+        return agentConfig;
     }
 
     private static Dictionary<string, Dictionary<string, string>> CopyStageVariables(Dictionary<string, Dictionary<string, string>>? source)
@@ -85,26 +99,30 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             stageVariables[stage] = sections;
         }
 
-        if (sections.TryGetValue("agent", out var existingJson))
-            agentConfig = MergeAgentJson(existingJson, agentConfig);
-
-        sections["agent"] = JsonSerializer.Serialize(new AgentVariableConfig("opencode", agentConfig), WorkflowVariableJson.Options);
+        sections["vars"] = sections.TryGetValue("vars", out var existingVars)
+            ? MergeVarsJson(existingVars, agentConfig)
+            : JsonSerializer.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options);
     }
 
-    private static Dictionary<string, object?> MergeAgentJson(string existingJson, Dictionary<string, object?> overrideConfig)
+    private static string MergeVarsJson(string existingJson, Dictionary<string, object?> agentConfig)
     {
         try
         {
-            var parsed = JsonSerializer.Deserialize<AgentVariableConfig>(existingJson, WorkflowVariableJson.Options);
-            var merged = parsed?.Opencode is null
+            var vars = JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson, WorkflowVariableJson.Options)
+                ?? new Dictionary<string, object?>(StringComparer.Ordinal);
+            var existingAgent = vars.TryGetValue("agent", out var value)
+                ? NormalizeJsonValue(value) as Dictionary<string, object?>
+                : null;
+            existingAgent = existingAgent is null
                 ? new Dictionary<string, object?>(StringComparer.Ordinal)
-                : new Dictionary<string, object?>(parsed.Opencode, StringComparer.Ordinal);
-            MergeAgentConfig(merged, overrideConfig);
-            return merged;
+                : new Dictionary<string, object?>(existingAgent, StringComparer.Ordinal);
+            MergeAgentConfig(existingAgent, agentConfig);
+            vars["agent"] = existingAgent;
+            return JsonSerializer.Serialize(vars, WorkflowVariableJson.Options);
         }
         catch
         {
-            return new Dictionary<string, object?>(overrideConfig, StringComparer.Ordinal);
+            return JsonSerializer.Serialize(new Dictionary<string, object?> { ["agent"] = agentConfig }, WorkflowVariableJson.Options);
         }
     }
 
@@ -152,8 +170,3 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             issue.BlockedReason,
             workflow);
 }
-
-public sealed record AgentVariableConfig(
-    string Default,
-    Dictionary<string, object?> Opencode
-);
