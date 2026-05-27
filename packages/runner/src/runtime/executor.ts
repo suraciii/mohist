@@ -6,16 +6,21 @@ import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
-import type { AcpSessionPool } from "./session-pool.js"
+import type { AcpSessionManager, SharedAcpConnection } from "./acp-connection.js"
 
 export class WorkExecutor {
   constructor(
     private readonly actions: ActionRegistry,
     private readonly workspaceManager: WorkspaceManager,
     private readonly connection: ServerConnection,
-    private readonly pool: AcpSessionPool,
+    private readonly sessionManager: AcpSessionManager,
+    private acpConnection: SharedAcpConnection | null,
     private readonly fallbackWorkDir = process.cwd(),
   ) {}
+
+  updateAcpConnection(acp: SharedAcpConnection) {
+    this.acpConnection = acp
+  }
 
   async execute(work: WorkItem, signal: AbortSignal): Promise<WorkItemResult> {
     if (work.workType === "checks") return await this.executeChecks(work, signal)
@@ -30,7 +35,7 @@ export class WorkExecutor {
       const variables = await this.variables(work, signal)
       const renderedWith = renderTemplate(work.with, variables)
       const workDir = await this.resolveWorkDir(renderedWith, variables)
-      return normalize(work, await action({ ...baseContext(work, variables, signal, this.pool, this.connection), with: renderedWith, workDir, telemetry: telemetry(this.connection) }))
+      return normalize(work, await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir, telemetry: telemetry(this.connection) }))
     } catch (error) {
       return failure(work, error instanceof Error ? error.message : String(error))
     }
@@ -47,7 +52,7 @@ export class WorkExecutor {
       try {
         const renderedWith = renderTemplate(check.with ?? null, variables)
         const workDir = await this.resolveWorkDir(renderedWith, variables)
-        const result = await action({ ...baseContext(work, variables, signal, this.pool, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir, telemetry: telemetry(this.connection) })
+        const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir, telemetry: telemetry(this.connection) })
         return { name: check.name, status: toCheckStatus(result.status), message: result.message, output: result.output }
       } catch (error) {
         return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
@@ -69,8 +74,8 @@ export class WorkExecutor {
   }
 }
 
-function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal, pool: AcpSessionPool, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
-  return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, session: work.session, sessionPool: pool, serverConnection: connection }
+function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
+  return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, session: work.session, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
 }
 
 function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {

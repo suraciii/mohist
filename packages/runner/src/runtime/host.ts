@@ -4,7 +4,7 @@ import { createDefaultRegistry } from "../actions/registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
-import { AcpSessionPool } from "./session-pool.js"
+import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
 import type { WorkItem } from "../core/types.js"
 
 export interface ReportResult {
@@ -15,11 +15,12 @@ export interface ReportResult {
 export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly executor: WorkExecutor
-  private readonly pool = new AcpSessionPool()
+  private readonly sessionManager = new AcpSessionManager()
+  private acpConnection: SharedAcpConnection | null = null
 
   constructor(private readonly options: RunnerOptions) {
     this.connection = new ServerConnection(options)
-    this.executor = new WorkExecutor(createDefaultRegistry(), new WorkspaceManager(options.runnerRoot), this.connection, this.pool)
+    this.executor = new WorkExecutor(createDefaultRegistry(), new WorkspaceManager(options.runnerRoot), this.connection, this.sessionManager, null)
   }
 
   async run(signal: AbortSignal) {
@@ -33,8 +34,8 @@ export class RunnerHost {
             await delay(this.options.pollIntervalMs, signal)
             continue
           }
+          await this.ensureAcpConnection(work, signal)
           const report = await this.connection.report(work, await this.executor.execute(work, signal), signal)
-          this.handleReport(work, report)
         }
       } catch (error) {
         if (signal.aborted) break
@@ -49,7 +50,16 @@ export class RunnerHost {
     }
   }
 
-  private handleReport(_work: WorkItem, _report: ReportResult) {}
+  private async ensureAcpConnection(work: WorkItem, signal: AbortSignal) {
+    if (this.acpConnection) return
+    try {
+      const workspacePath = typeof work.variables?.workspace === "object" && work.variables.workspace !== null ? (work.variables.workspace as Record<string, unknown>).path : undefined
+      this.acpConnection = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
+      this.executor.updateAcpConnection(this.acpConnection)
+    } catch (error) {
+      console.error("failed to start shared ACP connection:", error)
+    }
+  }
 
   private async connectWhenServerIsReady(signal: AbortSignal) {
     while (!signal.aborted) {
@@ -68,12 +78,12 @@ export class RunnerHost {
 async function delay(ms: number, signal: AbortSignal) {
   if (signal.aborted) throw signal.reason
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const timer = setTimeout(() => {
       signal.removeEventListener("abort", onAbort)
       resolve()
     }, ms)
     const onAbort = () => {
-      clearTimeout(timeout)
+      clearTimeout(timer)
       reject(signal.reason)
     }
     signal.addEventListener("abort", onAbort, { once: true })
