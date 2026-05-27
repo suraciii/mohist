@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent } from '@/components/ui/card'
 import { api } from '../../../shared/api/client'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
@@ -171,8 +174,9 @@ export function ReviewApprovalPanel({
         />
       )}
 
-      <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
-        <ReviewSummary output={output} />
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <ReviewSummary output={output} />
 
         {rebaseResult && (
           <div
@@ -214,10 +218,11 @@ export function ReviewApprovalPanel({
         )}
 
         <div className="pt-2 border-t border-gray-100">
-          <button
+          <Button
+            variant="outline"
             onClick={onRebase}
             disabled={rebasePending || (rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving')}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
+            className="w-full px-3 py-2 text-sm font-medium disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2 h-auto"
           >
             {rebasePending && (
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -226,7 +231,7 @@ export function ReviewApprovalPanel({
               </svg>
             )}
             {rebasePending ? 'Rebasing...' : 'Rebase onto master'}
-          </button>
+          </Button>
         </div>
 
         {actionError && (
@@ -237,39 +242,43 @@ export function ReviewApprovalPanel({
 
         {classified === 'PASS' && (
           <div className="space-y-3">
-            <button
+            <Button
+              variant="default"
               onClick={() => {
                 setActionError(null)
                 approveMutation.mutate()
               }}
               disabled={approveMutation.isPending}
-              className="w-full rounded-md bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+              className="w-full bg-green-600 hover:bg-green-700 px-4 py-2.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
             >
               {approveMutation.isPending ? 'Approving...' : 'Approve & Continue'}
-            </button>
+            </Button>
             <div className="flex items-center gap-4">
-              <button
+              <Button
+                variant="link"
                 onClick={() => setReportModalOpen(true)}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 View Report &rarr;
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="link"
                 onClick={onViewFiles}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 View Files &rarr;
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {classified === 'FAIL' && (
           <div className="space-y-3">
-            <button
+            <Button
+              variant="destructive"
               onClick={handleSendBackForFixes}
               disabled={isSending}
-              className="w-full rounded-md bg-red-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
+              className="w-full px-4 py-2.5 text-sm font-medium disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2 h-auto"
             >
               {isSending && (
                 <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -278,117 +287,126 @@ export function ReviewApprovalPanel({
                 </svg>
               )}
               {isSending ? 'Sending back...' : 'Send back for fixes'}
-            </button>
+            </Button>
 
             <div>
-              <button
+              <Button
+                variant="link"
                 onClick={() => setInstructionsExpanded(!instructionsExpanded)}
-                className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 {instructionsExpanded ? '▾' : '▸'} Add instructions...
-              </button>
+              </Button>
               {instructionsExpanded && (
                 <div className="mt-2 space-y-2">
-                  <textarea
+                  <Textarea
                     value={instructionsText}
                     onChange={(e) => setInstructionsText(e.target.value)}
                     placeholder="Add your instructions for the fix..."
                     rows={3}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                   />
-                  <button
+                  <Button
+                    variant="default"
                     onClick={handleSendWithInstructions}
                     disabled={!instructionsText.trim() || isSending}
-                    className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    className="px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
                   >
                     {isSending ? 'Sending back...' : 'Send with instructions'}
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
 
-            <button
+            <Button
+              variant="outline"
               onClick={handleApproveAnyway}
               disabled={approveMutation.isPending}
-              className="w-full rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              className="w-full px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
             >
               {approveMutation.isPending ? 'Approving...' : 'Approve anyway'}
-            </button>
+            </Button>
 
             <div className="flex items-center gap-4 pt-1">
-              <button
+              <Button
+                variant="link"
                 onClick={() => setReportModalOpen(true)}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 View Report &rarr;
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="link"
                 onClick={onViewFiles}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 View Files &rarr;
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {classified === 'UNKNOWN' && (
           <div className="space-y-3">
-            <button
+            <Button
+              variant="default"
               onClick={() => {
                 setActionError(null)
                 approveMutation.mutate()
               }}
               disabled={approveMutation.isPending}
-              className="w-full rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="w-full px-4 py-2.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
             >
               {approveMutation.isPending ? 'Approving...' : 'Approve & Continue'}
-            </button>
+            </Button>
 
             <div>
-              <button
+              <Button
+                variant="link"
                 onClick={() => setNotesExpanded(!notesExpanded)}
-                className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 {notesExpanded ? '▾' : '▸'} Send back with notes...
-              </button>
+              </Button>
               {notesExpanded && (
                 <div className="mt-2 space-y-2">
-                  <textarea
+                  <Textarea
                     value={notesText}
                     onChange={(e) => setNotesText(e.target.value)}
                     placeholder="Describe what needs to be changed..."
                     rows={3}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
                   />
-                  <button
+                  <Button
+                    variant="default"
                     onClick={handleSendBackWithNotes}
                     disabled={!notesText.trim() || isSending}
-                    className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    className="px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
                   >
                     {isSending ? 'Sending back...' : 'Send back'}
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
 
             <div className="flex items-center gap-4 pt-1">
-              <button
+              <Button
+                variant="link"
                 onClick={() => setReportModalOpen(true)}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 View Report &rarr;
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="link"
                 onClick={onViewFiles}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
               >
                 View Files &rarr;
-              </button>
+              </Button>
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
+  </div>
   )
 }

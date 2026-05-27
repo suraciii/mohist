@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import type { FileBlock, DiffLine } from '../model/diffModel'
 import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
+import { Button } from '@/components/ui/button'
 
 interface SplitDiffPaneProps {
   block: FileBlock | null
@@ -53,12 +54,13 @@ export function SplitDiffPane({
               {classified.collapseReason === 'large' && 'Large diff'}
               {' — '}{block.changedLineCount} lines changed
             </div>
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={onRenderAnyway}
-              className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors"
             >
               Render anyway
-            </button>
+            </Button>
           </div>
         ) : (
           <table className="w-full text-xs font-mono border-collapse">

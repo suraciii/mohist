@@ -5,6 +5,7 @@ import { useWorktreeStatus } from '../../../entities/issue/api/queries'
 import { onRebaseEvent } from '../../../shared/api/rebase-events'
 import { useLiveTask } from '../../../shared/model/live-task'
 import { useProject } from '../../../entities/project/model/ProjectContext'
+import { Button } from '@/components/ui/button'
 
 interface WorktreePanelProps {
   issueNumber: number
@@ -226,10 +227,11 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
         </div>
       )}
 
-      <button
+      <Button
+        variant="outline"
         onClick={() => { setRebaseResult(null); rebaseMutation.mutate() }}
         disabled={isRebasing}
-        className={`w-full rounded-md border px-3 py-2 text-sm font-medium transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50 ${
+        className={`h-auto w-full px-3 py-2 ${
           isBehind
             ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
             : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
@@ -248,16 +250,17 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
         ) : (
           'Rebase onto master'
         )}
-      </button>
+      </Button>
 
       {isDone && (
-        <button
+        <Button
+          variant="outline"
           onClick={() => { setCleanupResult(null); cleanupMutation.mutate() }}
           disabled={!canCleanup || cleanupMutation.isPending}
-          className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+          className="mt-2 h-auto w-full border-gray-300 bg-white px-3 py-2 text-gray-700 hover:bg-gray-50"
         >
           {cleanupMutation.isPending ? 'Removing worktree...' : isAgentRunning ? 'Remove after completion' : 'Remove worktree'}
-        </button>
+        </Button>
       )}
     </div>
   )

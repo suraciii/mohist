@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../../../entities/settings/api/queries'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
 const DEFAULT_LOG_LEVEL = 'INFO'
@@ -14,8 +16,8 @@ function StatusBadge({ running }: { running: boolean }) {
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-500">
-      <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+      <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/70" />
       Stopped
     </span>
   )
@@ -23,9 +25,9 @@ function StatusBadge({ running }: { running: boolean }) {
 
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
-      <span className="text-xs text-gray-500">{label}</span>
-      <span className="text-xs text-gray-900 font-mono">{children}</span>
+    <div className="flex items-center justify-between py-2 border-b last:border-b-0">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-foreground font-mono">{children}</span>
     </div>
   )
 }
@@ -172,13 +174,13 @@ export function SystemSettingsSection() {
   const rebuildButton = () => {
     if (reconnectState === 'rebuilding') {
       return (
-        <button
+        <Button
           disabled
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-400 rounded-md cursor-not-allowed"
+          className="inline-flex items-center gap-2 bg-blue-400 cursor-not-allowed"
         >
           <SpinnerIcon className="h-4 w-4" />
           Rebuilding...
-        </button>
+        </Button>
       )
     }
     if (reconnectState === 'restarting') {
@@ -191,7 +193,7 @@ export function SystemSettingsSection() {
     }
     if (reconnectState === 'reconnecting') {
       return (
-        <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-50 rounded-md">
+        <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground bg-muted rounded-md">
           <SpinnerIcon className="h-4 w-4" />
           Reconnecting...
         </span>
@@ -199,13 +201,13 @@ export function SystemSettingsSection() {
     }
     if (showRebuildButton) {
       return (
-        <button
+        <Button
           onClick={handleRebuild}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
         >
           <RefreshIcon className="h-4 w-4" />
           Rebuild &amp; Restart
-        </button>
+        </Button>
       )
     }
     return null
@@ -214,14 +216,14 @@ export function SystemSettingsSection() {
   if (isLoading) {
     return (
       <div className="space-y-8">
-        <h3 className="text-sm font-medium text-gray-900">System</h3>
+        <h3 className="text-sm font-medium text-foreground">System</h3>
         <div className="space-y-1.5">
-          <div className="h-4 w-24 bg-gray-100 rounded animate-pulse" />
-          <div className="h-9 w-full bg-gray-100 rounded-md animate-pulse" />
+          <div className="h-4 w-24 bg-muted rounded animate-pulse" />
+          <div className="h-9 w-full bg-muted rounded-md animate-pulse" />
         </div>
         <div className="space-y-2">
           {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
+            <div key={i} className="h-8 bg-muted rounded animate-pulse" />
           ))}
         </div>
       </div>
@@ -231,28 +233,28 @@ export function SystemSettingsSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h3 className="text-sm font-medium text-gray-900">System</h3>
-        <p className="text-xs text-gray-500 mt-1">Logging and runtime information.</p>
+        <h3 className="text-sm font-medium text-foreground">System</h3>
+        <p className="text-xs text-muted-foreground mt-1">Logging and runtime information.</p>
       </div>
 
       <div className="space-y-3">
-        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Logging</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Logging</h4>
 
         <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-gray-700">Log Level</label>
-          <select
-            value={currentLevel}
-            onChange={(e) => handleLogLevelChange(e.target.value)}
-            disabled={saving}
-            className="w-full max-w-xs px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
-          >
-            {LOG_LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </select>
-          {saving && <p className="text-xs text-gray-400">Saving...</p>}
+          <label className="block text-xs font-medium text-foreground/80">Log Level</label>
+          <Select value={currentLevel} onValueChange={(value) => value && handleLogLevelChange(value)} disabled={saving}>
+            <SelectTrigger className="w-full max-w-xs">
+              <SelectValue placeholder="Select log level" />
+            </SelectTrigger>
+            <SelectContent>
+              {LOG_LEVELS.map((level) => (
+                <SelectItem key={level} value={level}>
+                  {level}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {saving && <p className="text-xs text-muted-foreground/70">Saving...</p>}
         </div>
 
         {logError && (
@@ -262,17 +264,17 @@ export function SystemSettingsSection() {
         )}
 
         <div className="space-y-1">
-          <span className="block text-xs font-medium text-gray-700">Log Path</span>
-          <p className="text-xs text-gray-500 font-mono">~/.mohist/logs/</p>
+          <span className="block text-xs font-medium text-foreground/80">Log Path</span>
+          <p className="text-xs text-muted-foreground font-mono">~/.mohist/logs/</p>
         </div>
       </div>
 
-      <hr className="border-gray-100" />
+      <hr className="border" />
 
       <div className="space-y-3">
-        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">About</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">About</h4>
 
-        <div className="rounded-md border border-gray-200 px-4 py-1">
+        <div className="rounded-md border px-4 py-1">
           <InfoRow label="Mohist">
             v{systemInfo?.version ?? 'unknown'} · Git {gitHash ?? 'unknown'}
           </InfoRow>

@@ -1,5 +1,7 @@
 import { useState, useMemo, useContext, createContext, useEffect, useRef } from 'react'
 import { getFileBlockIdentity, type FileBlock } from '../model/diffModel'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 interface DirectoryNode {
   name: string
@@ -92,12 +94,12 @@ export function ChangedFilesTree({ blocks, selectedFile, onSelectFile, expandSta
     <FileFilterContext.Provider value={{ filter, setFilter, selectedFile, setSelectedFile: (b) => onSelectFile(b as FileBlock) }}>
       <div className="flex flex-col h-full">
         <div className="px-3 py-2 border-b border-gray-200">
-          <input
+          <Input
             type="text"
             placeholder="Filter files..."
             value={filter}
             onChange={e => setFilter(e.target.value)}
-            className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="h-8 w-full text-sm"
           />
         </div>
 
@@ -141,9 +143,10 @@ function DirectoryGroup({ name, node, expandState, depth = 0 }: { name: string; 
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
         onClick={() => setCollapsed(!collapsed)}
-        className="w-full flex items-center gap-1 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+        className="h-auto w-full justify-start gap-1 rounded-none px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50"
         style={{ paddingLeft: `${depth * 12 + 12}px` }}
       >
         <svg
@@ -159,7 +162,7 @@ function DirectoryGroup({ name, node, expandState, depth = 0 }: { name: string; 
         </svg>
         <span>{name}/</span>
         <span className="text-gray-400">({node.files.length})</span>
-      </button>
+      </Button>
 
       {!collapsed && (
         <>
@@ -189,9 +192,10 @@ function FileTreeEntry({ block, depth }: { block: FileBlock; depth: number }) {
   const isSelected = selectedFile ? getFileBlockIdentity(selectedFile) === displayName : false
 
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={() => setSelectedFile(block)}
-      className={`w-full flex items-center gap-2 px-3 py-1 text-xs text-left transition-colors ${
+      className={`h-auto w-full justify-start gap-2 rounded-none px-3 py-1 text-xs text-left ${
         isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
       }`}
       style={{ paddingLeft: `${depth * 12 + 24}px` }}
@@ -199,6 +203,6 @@ function FileTreeEntry({ block, depth }: { block: FileBlock; depth: number }) {
       <span className="font-mono truncate flex-1">{fileName}</span>
       {block.additions > 0 && <span className="text-green-600">+{block.additions}</span>}
       {block.deletions > 0 && <span className="text-red-500">-{block.deletions}</span>}
-    </button>
+    </Button>
   )
 }

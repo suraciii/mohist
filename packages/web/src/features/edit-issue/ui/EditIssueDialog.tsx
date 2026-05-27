@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Dialog } from '../../../shared/ui/Dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { api } from '../../../shared/api/client'
 import { useLabels } from '../../../entities/issue/api/queries'
 import type { Issue } from '../../../shared/api/types'
@@ -57,102 +65,109 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title={`Edit Issue #${issue.number}`}>
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Title</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            autoFocus
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Optional description"
-            rows={4}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-          />
-        </div>
-
-        {allLabels && allLabels.length > 0 && (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit Issue #{issue.number}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Labels</label>
-            <div className="flex flex-wrap gap-1.5">
-              {allLabels.map((label) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => toggleLabel(label)}
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                    labels.includes(label)
-                      ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <label className="block text-xs font-medium text-foreground mb-1">Title</label>
+            <Input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Description</label>
+            <Textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Optional description"
+              rows={4}
+              className="resize-none"
+            />
+          </div>
+
+          {allLabels && allLabels.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Labels</label>
+              <div className="flex flex-wrap gap-1.5">
+                {allLabels.map((label) => (
+                  <Button
+                    key={label}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => toggleLabel(label)}
+                    className={`rounded-full ${
+                      labels.includes(label)
+                        ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    }`}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Priority</label>
+            <div className="flex gap-1.5">
+              {PRIORITIES.map((p) => {
+                const style = getPriorityStyle(p)
+                return (
+                  <Button
+                    key={p}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setPriority(p)}
+                    className={`rounded-full ${
+                      priority === p
+                        ? 'ring-1 ring-offset-1'
+                        : 'hover:opacity-80'
+                    }`}
+                    style={{
+                      backgroundColor: style.bg,
+                      color: style.text,
+                      ...(priority === p ? { ringColor: style.text } : {}),
+                    }}
+                  >
+                    {p.toUpperCase()}
+                  </Button>
+                )
+              })}
             </div>
           </div>
-        )}
 
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
-          <div className="flex gap-1.5">
-            {PRIORITIES.map((p) => {
-              const style = getPriorityStyle(p)
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                    priority === p
-                      ? 'ring-1 ring-offset-1'
-                      : 'hover:opacity-80'
-                  }`}
-                  style={{
-                    backgroundColor: style.bg,
-                    color: style.text,
-                    ...(priority === p ? { ringColor: style.text } : {}),
-                  }}
-                >
-                  {p.toUpperCase()}
-                </button>
-              )
-            })}
+          {mutation.error && (
+            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+              {mutation.error.message}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="outline"
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => mutation.mutate()}
+              disabled={!title.trim() || mutation.isPending}
+            >
+              {mutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </div>
-
-        {mutation.error && (
-          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-            {mutation.error.message}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            onClick={onClose}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => mutation.mutate()}
-            disabled={!title.trim() || mutation.isPending}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {mutation.isPending ? 'Saving...' : 'Save'}
-          </button>
-        </div>
-      </div>
+      </DialogContent>
     </Dialog>
   )
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { ToolCallEntry, Stage, TaskProgressMap, LoopProgress } from '../../../shared/api/types'
 import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress } from '../model/useSessionTimeline'
 import { deriveToolCallTitle } from '../model/useSessionTimeline'
@@ -73,9 +74,11 @@ export function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
         <div className="w-px flex-1 bg-gray-200 mt-1" />
       </div>
       <div className="flex-1 min-w-0 pb-3">
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => entry.state !== 'started' && setExpanded(!expanded)}
-          className={`flex items-center gap-2 w-full text-left ${entry.state !== 'started' ? 'cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1' : 'cursor-default'}`}
+          className={`flex h-auto items-center justify-start gap-2 w-full text-left py-0 ${entry.state !== 'started' ? 'cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1' : 'cursor-default px-0'}`}
         >
           <span className="font-mono text-xs text-gray-700">
             {entry.toolName}
@@ -103,7 +106,7 @@ export function ToolCallTimelineEntry({ entry }: { entry: ToolCallEntry }) {
               <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
             </svg>
           )}
-        </button>
+        </Button>
 
         {expanded && (
           <div className="mt-1.5 space-y-1.5 text-xs">
@@ -223,9 +226,11 @@ export function RoundSection({
 
   return (
     <div className={`rounded-lg border ${colors.border} ${colors.bg}`}>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-2 hover:bg-gray-50/50 rounded-t-lg"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-2 hover:bg-gray-50/50 rounded-t-lg"
       >
         <svg
           className={`h-3 w-3 text-gray-400 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
@@ -247,7 +252,7 @@ export function RoundSection({
         {!round.completedAt && !isLiveRound && round.agentText && (
           <span className="text-xs text-gray-400 ml-auto">In progress</span>
         )}
-      </button>
+      </Button>
 
       {expanded && (
         <div className="px-3 pb-3 space-y-2 border-t border-gray-100">

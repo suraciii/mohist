@@ -4,6 +4,8 @@ import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const VALID_SECTIONS = ['ai', 'agent', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]
@@ -64,57 +66,59 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 bg-gray-50">
+    <div className="flex-1 bg-muted">
       <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+          <h1 className="text-xl font-semibold text-foreground">Settings</h1>
         </div>
 
         <div className="md:hidden mb-4">
-          <select
-            value={section}
-            onChange={(e) => navigate(`/settings/${e.target.value}`)}
-            className="w-full px-4 py-3 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px]"
-          >
-            {SECTION_META.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+          <Select value={section} onValueChange={(value) => navigate(`/settings/${value}`)}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select section" />
+            </SelectTrigger>
+            <SelectContent>
+              {SECTION_META.map((s) => (
+                <SelectItem key={s.key} value={s.key}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="hidden md:flex gap-6">
           <nav className="w-48 shrink-0">
             <div className="sticky top-6 space-y-1">
               {SECTION_META.map((s) => (
-                <button
+                <Button
                   key={s.key}
-                  onClick={() => navigate(`/settings/${s.key}`)}
-                  className={`flex items-center gap-2 w-full px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                  variant="ghost"
+                  className={`flex items-center gap-2 w-full px-3 py-2 text-sm font-medium rounded-md justify-start ${
                     section === s.key
                       ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
+                  onClick={() => navigate(`/settings/${s.key}`)}
                 >
-                  <span className={section === s.key ? 'text-blue-500' : 'text-gray-400'}>
+                  <span className={section === s.key ? 'text-blue-500' : 'text-muted-foreground/70'}>
                     {s.icon}
                   </span>
                   {s.label}
-                </button>
+                </Button>
               ))}
             </div>
           </nav>
 
           <div className="flex-1 min-w-0">
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+            <div className="bg-background rounded-lg border shadow-sm p-6">
               <SectionContent section={section} />
             </div>
           </div>
         </div>
 
         <div className="md:hidden">
-          <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+          <div className="bg-background rounded-lg border shadow-sm p-6">
             <SectionContent section={section} />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
+import { Button } from '@/components/ui/button'
 import type { DisplayAssistantPart, DisplayChangedFile } from '../model/session-transcript-display'
 import { getToolRegistryEntry, getToolDisplayType } from './tool-registry'
 import { parseJsonSafely, getFallbackSubtitle, parsePatchOperations, parseEditInput } from '../model/transcript-tool-utils'
@@ -55,12 +56,13 @@ export function AssistantTextPartView({ text, completedAt, isStreaming }: Assist
         {(isIncomplete || isStreaming) && (
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
         )}
-        <button
+        <Button
+          variant="link"
           onClick={handleCopy}
-          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          className="h-auto p-0 text-xs text-gray-400 hover:text-gray-600 transition-colors"
         >
           {copied ? 'Copied!' : 'Copy'}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -471,15 +473,17 @@ function PatchDiffView({ changedFiles }: PatchDiffViewProps) {
 
   return (
     <div className="border-t border-gray-100">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-blue-600 hover:text-blue-800 hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 text-xs text-blue-600 hover:text-blue-800 hover:bg-gray-50 transition-colors rounded-none"
       >
         <svg className={`h-3 w-3 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
         {expanded ? 'Hide' : 'Show'} diff {hasRawDetail && '(expanded view)'}
-      </button>
+      </Button>
       {expanded && (
         <div className="px-3 pb-2 space-y-2">
           {changedFiles.map((change, i) => {
@@ -582,12 +586,13 @@ function DiffContentView({ changedFiles, rawInput, rawOutput, details, normalize
               Changed files ({displayFiles.length})
             </span>
             {hasDiff && (
-              <button
+              <Button
+                variant="link"
                 onClick={() => setShowRaw(!showRaw)}
-                className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                className="h-auto p-0 text-xs text-gray-400 hover:text-gray-600 transition-colors"
               >
                 {showRaw ? 'Show diff' : 'Show raw'}
-              </button>
+              </Button>
             )}
           </div>
           <div className="space-y-1">
@@ -867,9 +872,11 @@ function DiffBlockView({ block }: { block: FileBlock }) {
 
   return (
     <div className="rounded border border-gray-200 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-2 py-1 hover:bg-gray-50 transition-colors text-xs"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-2 py-1 hover:bg-gray-50 transition-colors text-xs rounded-none"
       >
         <svg className={`h-3 w-3 shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
@@ -877,7 +884,7 @@ function DiffBlockView({ block }: { block: FileBlock }) {
         <span className="font-mono text-gray-700 truncate flex-1">{block.newPath || block.oldPath}</span>
         <span className="text-green-600">+{block.additions}</span>
         <span className="text-red-500">-{block.deletions}</span>
-      </button>
+      </Button>
       {expanded && (
         <div className="border-t border-gray-100">
           {large ? (
@@ -1026,9 +1033,11 @@ function ToolRowView({ part }: ToolRowViewProps) {
 
   return (
     <div className={`rounded-md border overflow-hidden ${part.hasError ? 'border-red-200' : 'border-gray-200'}`}>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={showExpandableDetails ? () => setExpanded(!expanded) : undefined}
-        className={`flex items-center gap-2 w-full text-left px-3 py-1.5 transition-colors ${showExpandableDetails ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}`}
+        className={`flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none transition-colors ${showExpandableDetails ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'}`}
       >
         <ToolStatusDot status={part.status} />
         <ToolIcon normalizedName={part.normalizedName} />
@@ -1063,7 +1072,7 @@ function ToolRowView({ part }: ToolRowViewProps) {
             <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
           </svg>
         )}
-      </button>
+      </Button>
       {expanded && showExpandableDetails && (
         <div className="border-t border-gray-100">
           {renderSemanticContent()}
@@ -1092,9 +1101,11 @@ function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
       >
         <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
@@ -1109,7 +1120,7 @@ function ContextGroupView({ title, tools, hasError }: ContextGroupViewProps) {
         <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
-      </button>
+      </Button>
       {expanded && (
         <div className="px-3 pb-2 border-t border-gray-100 space-y-1.5">
           {singleContextTool && canExpandSingleContextTool ? (

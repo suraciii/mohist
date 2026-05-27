@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { StageTaskState, WorkflowStage } from '../../../shared/api/types'
 import { useWorkflowTimeline } from '../../../entities/issue/api/queries'
 
@@ -23,7 +25,7 @@ function StageTaskStatusIcon({ status }: { status: StageTaskState['status'] }) {
       </svg>
     )
   }
-  return <span className="inline-block h-2 w-2 rounded-full bg-gray-300 flex-shrink-0" />
+  return <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30 flex-shrink-0" />
 }
 
 function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolean }) {
@@ -32,13 +34,14 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
   const isInProgress = isRunning && task.status === 'running'
 
   return (
-    <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border-gray-100'} overflow-hidden`}>
-      <button
+    <div className={`rounded-md border ${isFailed ? 'border-red-200' : 'border'} overflow-hidden`}>
+      <Button
+        variant="ghost"
         onClick={() => isFailed && setExpanded(!expanded)}
-        className={`w-full flex items-center gap-2 px-2.5 py-2 text-left ${isFailed ? 'hover:bg-red-50 cursor-pointer' : ''}`}
+        className={`w-full flex items-center gap-2 px-2.5 py-2 text-left h-auto justify-start font-normal ${isFailed ? 'hover:bg-red-50 cursor-pointer' : ''}`}
       >
         <StageTaskStatusIcon status={task.status} />
-        <span className={`text-sm flex-1 truncate ${isFailed ? 'text-red-700' : task.status === 'completed' ? 'text-gray-700' : 'text-gray-500'}`}>
+        <span className={`text-sm flex-1 truncate ${isFailed ? 'text-red-700' : task.status === 'completed' ? 'text-foreground/80' : 'text-muted-foreground'}`}>
           {task.title}
         </span>
         {isInProgress && (
@@ -48,16 +51,16 @@ function TaskItem({ task, isRunning }: { task: StageTaskState; isRunning: boolea
           </svg>
         )}
         {task.attempts > 1 && (
-          <span className="text-[10px] text-gray-400 flex-shrink-0">
+          <span className="text-[10px] text-muted-foreground/70 flex-shrink-0">
             {task.attempts} attempts
           </span>
         )}
         {isFailed && (
-          <svg className={`h-3 w-3 text-gray-400 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+          <svg className={`h-3 w-3 text-muted-foreground/70 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.23 8.27a.75.75 0 01.02-1.06z" clipRule="evenodd" />
           </svg>
         )}
-      </button>
+      </Button>
       {expanded && isFailed && (
         <div className="px-2.5 pb-2 border-t border-red-100 bg-red-50/50">
           {task.reason && (
@@ -80,13 +83,13 @@ function ProgressBar({ completed, failed, total }: { completed: number; failed: 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
-        <span className="text-gray-500">
+        <span className="text-muted-foreground">
           {completed}/{total} completed
           {failed > 0 && <span className="text-red-500 ml-1">({failed} failed)</span>}
         </span>
-        <span className="text-gray-400">{Math.round((completed / total) * 100)}%</span>
+        <span className="text-muted-foreground/70">{Math.round((completed / total) * 100)}%</span>
       </div>
-      <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+      <div className="h-2 rounded-full bg-muted overflow-hidden">
         <div className="flex h-full">
           <div className="h-full bg-green-500 transition-all duration-300" style={{ width: `${completedPct}%` }} />
           <div className="h-full bg-red-400 transition-all duration-300" style={{ width: `${failedPct}%` }} />
@@ -118,10 +121,14 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
 
   if (tasks.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-gray-700 mb-2">Task Progress</h2>
-        <div className="text-sm text-gray-400">No tasks available yet</div>
-      </div>
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Task Progress</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground/70">No tasks available yet</div>
+        </CardContent>
+      </Card>
     )
   }
 
@@ -131,30 +138,33 @@ export function TaskProgressPanel({ issueNumber, currentStage, isAgentRunning }:
   const runningTask = tasks.find(t => t.status === 'running')
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-700">Task Progress</h2>
-        {isAgentRunning && (
-          <span className="inline-flex items-center gap-1 text-xs text-blue-600">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
-            Running
-          </span>
-        )}
-      </div>
-
-      <ProgressBar completed={completed} failed={failed} total={total} />
-
-      {runningTask && isAgentRunning && (
-        <div className="text-xs text-blue-600 bg-blue-50 rounded-md px-2.5 py-1.5">
-          Current: {runningTask.title}
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm">Task Progress</CardTitle>
+          {isAgentRunning && (
+            <span className="inline-flex items-center gap-1 text-xs text-blue-600">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+              Running
+            </span>
+          )}
         </div>
-      )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ProgressBar completed={completed} failed={failed} total={total} />
 
-      <div className="space-y-1">
-        {tasks.map((task) => (
-          <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} />
-        ))}
-      </div>
-    </div>
+        {runningTask && isAgentRunning && (
+          <div className="text-xs text-blue-600 bg-blue-50 rounded-md px-2.5 py-1.5">
+            Current: {runningTask.title}
+          </div>
+        )}
+
+        <div className="space-y-1">
+          {tasks.map((task) => (
+            <TaskItem key={task.taskId} task={task} isRunning={isAgentRunning} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

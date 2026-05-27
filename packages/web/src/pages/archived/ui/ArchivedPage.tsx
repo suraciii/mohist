@@ -5,6 +5,8 @@ import { useProject } from '../../../entities/project/model/ProjectContext'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 export function ArchivedPage() {
   const { projectId } = useProject()
@@ -34,9 +36,10 @@ export function ArchivedPage() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-3xl mx-auto px-6 py-6">
-        <button
+        <Button
+          variant="link"
           onClick={() => navigate('/')}
-          className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+          className="mb-4 inline-flex h-auto gap-1 px-0 text-muted-foreground"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
             <path
@@ -46,7 +49,7 @@ export function ArchivedPage() {
             />
           </svg>
           Back to board
-        </button>
+        </Button>
 
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-gray-900">Archived Issues</h1>
@@ -57,12 +60,10 @@ export function ArchivedPage() {
 
         {sorted.length > 0 && (
           <div className="mb-4">
-            <input
-              type="text"
+            <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search archived issues..."
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
         )}

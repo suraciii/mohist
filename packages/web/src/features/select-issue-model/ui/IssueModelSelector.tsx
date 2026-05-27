@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef, Fragment } from 'react'
-import { Popover, Transition } from '@headlessui/react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
 import { useAvailableModelIds, useOpencodeModel } from '../../../entities/settings/api/queries'
 import { api } from '../../../shared/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { useProject } from '../../../entities/project/model/ProjectContext'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
 const MAX_RECENT = 5
@@ -35,7 +37,7 @@ function addRecent(modelId: string) {
 
 function SearchIcon() {
   return (
-    <svg className="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+    <svg className="h-4 w-4 text-muted-foreground/70" viewBox="0 0 20 20" fill="currentColor">
       <path
         fillRule="evenodd"
         d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
@@ -79,18 +81,19 @@ interface ModelListItemProps {
 
 function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEnter }: ModelListItemProps) {
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={onSelect}
       onMouseEnter={onMouseEnter}
-      className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors ${
-        isHighlighted ? 'bg-blue-50 text-blue-700' : isSelected ? 'bg-gray-50 text-gray-900' : 'text-gray-700 hover:bg-gray-50'
+      className={`w-full flex items-center justify-between px-3 py-2 text-sm h-auto font-normal ${
+        isHighlighted ? 'bg-blue-50 text-blue-700' : isSelected ? 'bg-muted text-foreground' : 'text-foreground/80 hover:bg-muted'
       }`}
     >
       <div className="flex flex-col items-start gap-1">
         <span className="font-medium">{modelDisplayName(modelId)}</span>
-        <span className="text-xs text-gray-400">{modelId}</span>
+        <span className="text-xs text-muted-foreground/70">{modelId}</span>
       </div>
-    </button>
+    </Button>
   )
 }
 
@@ -106,6 +109,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [localStageModels, setLocalStageModels] = useState<Record<string, string>>({})
   const [localWorkflowModel, setLocalWorkflowModel] = useState<string | null>(null)
+  const [popoverOpen, setPopoverOpen] = useState(false)
 
   useEffect(() => {
     if (currentStageModels) {
@@ -138,6 +142,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
+        setPopoverOpen(false)
       } catch (err) {
         console.error('Failed to update issue model:', err)
       }
@@ -158,6 +163,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         }
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
+        setPopoverOpen(false)
       } catch (err) {
         console.error('Failed to clear issue model:', err)
       }
@@ -239,160 +245,152 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
 
   return (
     <div className="space-y-1">
-      <label className="block text-sm text-gray-500">Coder Model</label>
-      <Popover as="div" className="relative">
-        {({ open }) => (
-          <>
-            <Popover.Button
-              className={`w-full inline-flex items-center justify-between gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors shadow-sm min-h-[44px] md:min-h-0 ${
-                open
+      <label className="block text-sm text-muted-foreground">Coder Model</label>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              variant="outline"
+              className={`w-full justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
+                popoverOpen
                   ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : configuredModel
-                    ? 'border-blue-200 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                  : configuredModel
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 bg-background text-foreground/80 hover:bg-muted'
               }`}
-            >
-              <span className="truncate">{currentModelDisplay}</span>
-              <ChevronDownIcon />
-            </Popover.Button>
+            />
+          }
+        >
+          <span className="truncate">{currentModelDisplay}</span>
+          <ChevronDownIcon />
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-0" align="end">
+          <div className="p-2">
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                <SearchIcon />
+              </div>
+              <Input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search models..."
+                className="w-full pl-9"
+                autoFocus
+              />
+            </div>
+          </div>
 
-            <Transition
-              as={Fragment}
-              enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
-              leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
-            >
-              <Popover.Panel portal={false} className="fixed inset-x-2 top-auto z-50 mt-2 md:absolute md:inset-x-auto md:right-0 md:w-80 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
-                <div className="p-2">
-                  <div className="relative">
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                      <SearchIcon />
-                    </div>
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="Search models..."
-                      className="w-full rounded-md border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      autoFocus
-                    />
-                  </div>
+          <div ref={listRef} className="max-h-80 overflow-y-auto border-t">
+            {isLoading && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
+                Loading models...
+              </div>
+            )}
+
+            {error && !isLoading && (
+              <div className="px-3 py-6 text-center text-sm text-red-500">
+                Failed to load models: {(error as Error).message}
+              </div>
+            )}
+
+            {!isLoading && !error && configuredModel && !searchQuery.trim() && (
+              <div>
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
+                  Override
                 </div>
+                <Button
+                  variant="ghost"
+                  onClick={handleClear}
+                  className="w-full justify-start px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 h-auto font-normal"
+                >
+                  <span className="font-medium">Use default{defaultModelName ? ` (${defaultModelName})` : ''}</span>
+                </Button>
+                <div className="border-t my-1" />
+              </div>
+            )}
 
-                <div ref={listRef} className="max-h-80 overflow-y-auto border-t border-gray-100">
-                  {isLoading && (
-                    <div className="px-3 py-6 text-center text-sm text-gray-400">
-                      Loading models...
-                    </div>
-                  )}
-
-                  {error && !isLoading && (
-                    <div className="px-3 py-6 text-center text-sm text-red-500">
-                      Failed to load models: {(error as Error).message}
-                    </div>
-                  )}
-
-              {!isLoading && !error && configuredModel && !searchQuery.trim() && (
-                    <div>
-                      <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
-                        Override
-                      </div>
-                      <button
-                        onClick={handleClear}
-                        className="w-full flex items-center px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 transition-colors"
-                      >
-                        <span className="font-medium">Use default{defaultModelName ? ` (${defaultModelName})` : ''}</span>
-                      </button>
-                      <div className="border-t border-gray-100 my-1" />
-                    </div>
-                  )}
-
-                  {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
-                    <div>
-                      <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50">
-                        Recent
-                      </div>
-                      {recentModels.map((modelId, i) => (
-                        <ModelListItem
-                          key={modelId}
-                          modelId={modelId}
-                          isSelected={modelId === configuredModel}
-                          isHighlighted={i === highlightedIndex}
-                          onSelect={() => handleSelect(modelId)}
-                          onMouseEnter={() => setHighlightedIndex(i)}
-                        />
-                      ))}
-                      <div className="border-t border-gray-100 my-1" />
-                    </div>
-                  )}
-
-                  {!isLoading && !error && displayedModels.length === 0 && (
-                    <div className="px-3 py-6 text-center text-sm text-gray-400">
-                      No models found
-                    </div>
-                  )}
-
-                  {!isLoading && !error && !searchQuery.trim() &&
-                    allModels.map((modelId, i) => (
-                      <ModelListItem
-                        key={modelId}
-                        modelId={modelId}
-                        isSelected={modelId === configuredModel}
-                        isHighlighted={i === highlightedIndex}
-                        onSelect={() => handleSelect(modelId)}
-                        onMouseEnter={() => setHighlightedIndex(i)}
-                      />
-                    ))}
-
-                  {!isLoading && !error && searchQuery.trim() &&
-                    displayedModels.map((modelId, i) => (
-                      <ModelListItem
-                        key={modelId}
-                        modelId={modelId}
-                        isSelected={modelId === configuredModel}
-                        isHighlighted={i === highlightedIndex}
-                        onSelect={() => handleSelect(modelId)}
-                        onMouseEnter={() => setHighlightedIndex(i)}
-                      />
-                    ))}
+            {!isLoading && !error && recentModels.length > 0 && !searchQuery.trim() && (
+              <div>
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground/70 uppercase tracking-wider bg-muted">
+                  Recent
                 </div>
+                {recentModels.map((modelId, i) => (
+                  <ModelListItem
+                    key={modelId}
+                    modelId={modelId}
+                    isSelected={modelId === configuredModel}
+                    isHighlighted={i === highlightedIndex}
+                    onSelect={() => handleSelect(modelId)}
+                    onMouseEnter={() => setHighlightedIndex(i)}
+                  />
+                ))}
+                <div className="border-t my-1" />
+              </div>
+            )}
 
-                <div className="border-t border-gray-100 p-2 text-xs text-gray-400 text-center">
-                  Use ↑↓ to navigate, Enter to select, Esc to close
-                </div>
-              </Popover.Panel>
-            </Transition>
-          </>
-        )}
+            {!isLoading && !error && displayedModels.length === 0 && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground/70">
+                No models found
+              </div>
+            )}
+
+            {!isLoading && !error && !searchQuery.trim() &&
+              allModels.map((modelId, i) => (
+                <ModelListItem
+                  key={modelId}
+                  modelId={modelId}
+                  isSelected={modelId === configuredModel}
+                  isHighlighted={i === highlightedIndex}
+                  onSelect={() => handleSelect(modelId)}
+                  onMouseEnter={() => setHighlightedIndex(i)}
+                />
+              ))}
+
+            {!isLoading && !error && searchQuery.trim() &&
+              displayedModels.map((modelId, i) => (
+                <ModelListItem
+                  key={modelId}
+                  modelId={modelId}
+                  isSelected={modelId === configuredModel}
+                  isHighlighted={i === highlightedIndex}
+                  onSelect={() => handleSelect(modelId)}
+                  onMouseEnter={() => setHighlightedIndex(i)}
+                />
+              ))}
+          </div>
+
+          <div className="border-t p-2 text-xs text-muted-foreground/70 text-center">
+            Use ↑↓ to navigate, Enter to select, Esc to close
+          </div>
+        </PopoverContent>
       </Popover>
       {configuredModel && (
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-muted-foreground/70">
           Override active. Falls back to default when cleared.
         </p>
       )}
 
-      <div className="pt-2 border-t border-gray-100">
-        <button
+      <div className="pt-2 border-t">
+        <Button
+          variant="ghost"
           onClick={() => setAdvancedOpen(!advancedOpen)}
-          className="flex items-center gap-1.5 w-full text-left"
+          className="flex items-center gap-1.5 w-full justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
         >
-          <ChevronRightIcon className={`h-3.5 w-3.5 text-gray-400 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
-          <span className="text-xs text-gray-500">Per-stage overrides</span>
+          <ChevronRightIcon className={`h-3.5 w-3.5 text-muted-foreground/70 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
+          <span className="text-xs text-muted-foreground">Per-stage overrides</span>
           {Object.keys(localStageModels).length > 0 && (
             <span className="text-xs text-blue-500">({Object.keys(localStageModels).length})</span>
           )}
-        </button>
+        </Button>
 
         {advancedOpen && (
           <div className="mt-3 space-y-2 pl-5">
             {ISSUE_STAGES.map((stage) => (
               <div key={stage} className="flex items-center gap-2">
-                <span className="text-xs font-medium text-gray-500 w-16 capitalize shrink-0">{stage}</span>
+                <span className="text-xs font-medium text-muted-foreground w-16 capitalize shrink-0">{stage}</span>
                 <div className="flex-1 flex items-center gap-1">
                   <ModelSelect
                     value={localStageModels[stage] ?? null}

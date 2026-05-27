@@ -18,6 +18,9 @@ import { TaskProgressPanel } from '../../../widgets/issue-workflow/ui/TaskProgre
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusBadge, statusLabel } from '../../../shared/lib/status-badge'
 import { useProject } from '../../../entities/project/model/ProjectContext'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
@@ -257,9 +260,10 @@ export function IssueDetailPage() {
     <>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
-          <button
+          <Button
+            variant="link"
             onClick={() => navigate('/')}
-            className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            className="mb-4 inline-flex h-auto gap-1 px-0 text-muted-foreground"
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path
@@ -269,7 +273,7 @@ export function IssueDetailPage() {
               />
             </svg>
             Back to board
-          </button>
+          </Button>
 
           <div className="mb-6">
             <div className="flex items-center gap-2 mb-1">
@@ -288,15 +292,16 @@ export function IssueDetailPage() {
             </div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">{issue.title}</h1>
-              <button
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setEditOpen(true)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
                 title="Edit issue"
               >
                 <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
                 </svg>
-              </button>
+              </Button>
             </div>
             {issue.labels.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
@@ -312,14 +317,15 @@ export function IssueDetailPage() {
 )}
             </div>
             {issue.primaryEpic && (
-              <button
+              <Button
+                variant="link"
                 onClick={() => navigate(`/epic/${issue.primaryEpic!.id}`)}
-                className="mt-3 inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                className="mt-3 inline-flex h-auto gap-2 px-0"
               >
                 <span className="text-gray-400">Part of Epic:</span>
                 <span className="font-medium">#{issue.primaryEpic.id.slice(0, 8)}</span>
                 <span>{issue.primaryEpic.title}</span>
-              </button>
+              </Button>
             )}
           </div>
 
@@ -377,12 +383,13 @@ export function IssueDetailPage() {
                     </div>
                     {isOverflowing && (
                       <div className="mt-2">
-                        <button
+                        <Button
+                          variant="link"
+                          size="xs"
                           onClick={() => setDescriptionExpanded(!descriptionExpanded)}
-                          className="text-xs text-blue-600 hover:text-blue-700 font-medium"
                         >
                           {descriptionExpanded ? 'Collapse' : 'Expand'}
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -400,12 +407,14 @@ export function IssueDetailPage() {
                       <span className="text-gray-300">·</span>
                       <span>{diffData.summary.filesChanged} files changed · +{diffData.summary.additions} -{diffData.summary.deletions}</span>
                     </div>
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => navigate(`/issue/${issueNumber}/files`)}
-                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-md transition-colors"
+                      className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
                     >
                       View files
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -416,12 +425,14 @@ export function IssueDetailPage() {
                     <h2 className="text-sm font-semibold text-gray-700">
                       Commits ({commitsData.summary.commits})
                     </h2>
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => navigate(`/issue/${issueNumber}/files`)}
-                      className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:text-blue-700 border border-blue-200 hover:border-blue-300 rounded-md transition-colors"
+                      className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
                     >
                       View all commits
-                    </button>
+                    </Button>
                   </div>
                   {commitsData.commits.length === 0 ? (
                     <p className="text-sm text-gray-400">No commits yet.</p>
@@ -474,7 +485,9 @@ export function IssueDetailPage() {
                             </div>
                             <div className="text-sm text-gray-700"><MarkdownContent content={comment.body} /></div>
                           </div>
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="xs"
                             onClick={() => {
                               setDeleteCommentError(null)
                               if (window.confirm('Delete this comment?')) {
@@ -483,11 +496,11 @@ export function IssueDetailPage() {
                               }
                             }}
                             disabled={deletingCommentId === comment.id}
-                            className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50 transition-colors"
+                            className="text-muted-foreground hover:text-red-500"
                             title="Delete comment"
                           >
                             {deletingCommentId === comment.id ? 'Deleting...' : 'Delete'}
-                          </button>
+                          </Button>
                         </div>
                         {deleteCommentError && deletingCommentId === null && (
                           <div className="mt-1 text-xs text-red-500">{deleteCommentError}</div>
@@ -498,12 +511,12 @@ export function IssueDetailPage() {
                 )}
 
                 <div className="mt-4 pt-3 border-t border-gray-100">
-                  <textarea
+                  <Textarea
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
                     placeholder="Add a comment..."
                     rows={2}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                    className="resize-none"
                   />
                   <div className="flex items-center justify-between mt-2">
                     {addCommentMutation.error && (
@@ -512,13 +525,12 @@ export function IssueDetailPage() {
                       </span>
                     )}
                     <div className="ml-auto">
-                      <button
+                      <Button
                         onClick={() => addCommentMutation.mutate(commentText)}
                         disabled={!commentText.trim() || addCommentMutation.isPending}
-                        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                       >
                         {addCommentMutation.isPending ? 'Sending...' : 'Comment'}
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -658,10 +670,10 @@ export function IssueDetailPage() {
                               {agentStatus?.runnerMessage ?? 'No runner is connected. Start a runner before starting workflow work.'}
                             </div>
                           )}
-                          <button
+                          <Button
                             onClick={() => startMutation.mutate()}
                             disabled={runnerUnavailable || isAgentRunningOnThis || isCapacityFull || startMutation.isPending}
-                            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                            className="w-full"
                           >
                             {startMutation.isPending
                               ? 'Starting...'
@@ -672,20 +684,21 @@ export function IssueDetailPage() {
                                   : isCapacityFull
                                     ? 'Capacity full...'
                                     : 'Start'}
-                          </button>
+                          </Button>
                         </div>
                       )}
                     </>
                   )}
 
                   {issue.status === IssueStatus.Active && !isBacklog && !isAgentRunningOnThis && (
-                    <button
+                    <Button
+                      variant="outline"
                       onClick={() => closeMutation.mutate()}
                       disabled={closeMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      className="w-full"
                     >
                       {closeMutation.isPending ? 'Closing...' : 'Close'}
-                    </button>
+                    </Button>
                   )}
 
                   {(isAgentRunningOnThis || recoveryCanWait || recoveryCanStop) && (
@@ -721,7 +734,7 @@ export function IssueDetailPage() {
                         </div>
                       )}
                       {recoveryCanStop && (
-                        <button
+                        <Button
                           onClick={() => {
                             if (forceStopConfirming) {
                               forceStopMutation.mutate()
@@ -730,18 +743,19 @@ export function IssueDetailPage() {
                             }
                           }}
                           disabled={forceStopMutation.isPending}
-                          className={`w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          variant={forceStopConfirming ? 'destructive' : 'outline'}
+                          className={`w-full ${
                             forceStopConfirming
-                              ? 'bg-red-600 text-white hover:bg-red-700'
-                              : 'border border-red-300 bg-white text-red-600 hover:bg-red-50'
-                          } disabled:opacity-50`}
+                              ? ''
+                              : 'border-red-300 text-red-600 hover:bg-red-50'
+                          }`}
                         >
                           {forceStopMutation.isPending
                             ? 'Stopping...'
                             : forceStopConfirming
                               ? 'Confirm Force Stop'
                               : 'Force Stop'}
-                        </button>
+                        </Button>
                       )}
                       {forceStopMutation.error && (
                         <div className="text-xs text-red-600">
@@ -774,31 +788,33 @@ export function IssueDetailPage() {
                         {showProjectedCheckRepairActions ? null : (
                           <>
                             {canRetry && (
-                              <button
+                              <Button
+                                variant="destructive"
                                 onClick={() => retryMutation.mutate()}
                                 disabled={retryMutation.isPending}
-                                className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                                className="w-full"
                               >
                                 {retryMutation.isPending ? 'Retrying...' : 'Retry'}
-                              </button>
+                              </Button>
                             )}
                             {canResume && (
-                              <button
+                              <Button
                                 onClick={() => resumeMutation.mutate()}
                                 disabled={resumeMutation.isPending}
-                                className="w-full rounded-md bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                                className="w-full bg-orange-500 hover:bg-orange-600 text-white"
                               >
                                 {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
-                              </button>
+                              </Button>
                             )}
                             {canRerun && (
-                              <button
+                              <Button
+                                variant="outline"
                                 onClick={() => rerunMutation.mutate()}
                                 disabled={rerunMutation.isPending}
-                                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                                className="w-full"
                               >
                                 {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
-                              </button>
+                              </Button>
                             )}
                             {canInspect && recovery?.currentWorkItem && (
                               <div className="text-xs text-gray-500">
@@ -812,13 +828,14 @@ export function IssueDetailPage() {
                   })()}
 
                   {!isBacklog && issue.stage !== IssueStage.Done && workflowStage && !isAgentRunningOnThis && canRerunWorkflow && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted && !showCheckRepairActions && (
-                    <button
+                    <Button
+                      variant="outline"
                       onClick={() => rerunMutation.mutate()}
                       disabled={rerunMutation.isPending}
-                      className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                      className="w-full"
                     >
                       {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
-                    </button>
+                    </Button>
                   )}
 
                   {(closeMutation.error || reopenMutation.error || startMutation.error || rerunMutation.error || retryMutation.error) && (
@@ -871,7 +888,7 @@ export function IssueDetailPage() {
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <h2 className="text-sm font-semibold text-gray-700 mb-2">Add Prerequisite</h2>
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       type="number"
                       value={prereqInput}
                       onChange={(e) => {
@@ -879,9 +896,9 @@ export function IssueDetailPage() {
                         setPrereqError(null)
                       }}
                       placeholder="Issue #"
-                      className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                      className="flex-1"
                     />
-                    <button
+                    <Button
                       onClick={() => {
                         const num = parseInt(prereqInput, 10)
                         if (isNaN(num) || num === issueNumber) {
@@ -893,10 +910,10 @@ export function IssueDetailPage() {
                         setPrereqInput('')
                       }}
                       disabled={!prereqInput || addPrerequisiteMutation.isPending}
-                      className="rounded-md bg-amber-600 px-3 py-1 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
                     >
                       {addPrerequisiteMutation.isPending ? 'Adding...' : 'Add'}
-                    </button>
+                    </Button>
                   </div>
                   {prereqError && (
                     <p className="mt-1 text-xs text-red-600">{prereqError}</p>
@@ -913,15 +930,16 @@ export function IssueDetailPage() {
                       <p className="text-xs text-gray-500 mb-2">Remove prerequisite:</p>
                       <div className="flex flex-wrap gap-1">
                         {issue.prerequisites.map((prereq) => (
-                          <button
+                          <Button
                             key={prereq.number}
+                            variant="secondary"
+                            size="xs"
                             onClick={() => removePrerequisiteMutation.mutate(prereq.number)}
                             disabled={removePrerequisiteMutation.isPending}
-                            className="inline-flex items-center gap-1 text-xs bg-gray-100 hover:bg-gray-200 px-2 py-0.5 rounded transition-colors"
                           >
                             #{prereq.number}
                             <span className="text-gray-400">×</span>
-                          </button>
+                          </Button>
                         ))}
                       </div>
                     </div>

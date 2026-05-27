@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { FileBlock } from '../model/diffModel'
 import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 interface DiffSearchPaneProps {
   block: FileBlock | null
@@ -121,30 +123,34 @@ export function DiffSearchPane({
       </div>
 
       <div className="sticky top-[41px] z-10 bg-white border-b border-gray-200 px-4 py-1.5 flex items-center gap-2 text-xs">
-        <input
+        <Input
           type="text"
           placeholder="Search diff..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+          className="h-7 flex-1 text-xs font-mono"
         />
         {searchMatches.length > 0 && (
           <>
             <span className="text-yellow-700">
               {currentMatchIndex + 1} of {searchMatches.length} matches
             </span>
-            <button
+            <Button
+              variant="outline"
+              size="xs"
               onClick={handlePrevMatch}
-              className="px-1.5 py-0.5 bg-yellow-100 hover:bg-yellow-200 rounded border border-yellow-300 transition-colors"
+              className="border-yellow-300 bg-yellow-100 hover:bg-yellow-200"
             >
               Prev
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              size="xs"
               onClick={handleNextMatch}
-              className="px-1.5 py-0.5 bg-yellow-100 hover:bg-yellow-200 rounded border border-yellow-300 transition-colors"
+              className="border-yellow-300 bg-yellow-100 hover:bg-yellow-200"
             >
               Next
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -161,12 +167,13 @@ export function DiffSearchPane({
               {classified.collapseReason === 'large' && 'Large diff'}
               {' — '}{block.changedLineCount} lines changed
             </div>
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={onRenderAnyway}
-              className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors"
             >
               Render anyway
-            </button>
+            </Button>
           </div>
         ) : (
           <table className="w-full text-xs font-mono border-collapse">

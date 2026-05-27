@@ -7,6 +7,18 @@ import { IssueChangedFilesPage } from './IssueChangedFilesPage'
 import { api } from '../../../shared/api/client'
 import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files/model/diffModel'
 
+async function selectOption(label: string, option: string) {
+  fireEvent.click(screen.getByRole('combobox', { name: label }))
+  await waitFor(() => expect(screen.getByText(option)).toBeTruthy())
+  const item = screen.getAllByText(option)
+    .map((element) => element.closest('[data-slot="select-item"]') as HTMLElement | null)
+    .find((element): element is HTMLElement => element !== null)
+  expect(item).toBeTruthy()
+  fireEvent.pointerDown(item!)
+  fireEvent.pointerUp(item!)
+  fireEvent.click(item!)
+}
+
 const mockUseNavigate = vi.fn()
 let mockRouteParams: { number?: string } | null = null
 vi.mock('react-router-dom', async (importOriginal) => {
@@ -272,8 +284,7 @@ describe('IssueChangedFilesPage', () => {
       })
 
       renderPage()
-      const select = screen.getByText('View commit...').closest('select')!
-      fireEvent.change(select, { target: { value: 'abc123' } })
+      await selectOption('Commit view', 'abc123: Initial commit')
 
       await waitFor(() => {
         expect(screen.getByText('Failed to load commit diff.')).toBeTruthy()
@@ -440,18 +451,15 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       fireEvent.click(screen.getByRole('button', { name: /split view/i }))
       expect(screen.queryByText(/Large diff/)).toBeNull()
 
-      const modeSelect = screen.getAllByRole('combobox').find(
-        s => (s as HTMLSelectElement).querySelector('option[value="raw"]') !== null
-      )!
-      fireEvent.change(modeSelect, { target: { value: 'raw' } })
+      await selectOption('Reader mode', 'Raw')
       expect(screen.queryByText(/Large diff/)).toBeNull()
       expect(screen.getByText('Copy')).toBeTruthy()
 
-      fireEvent.change(modeSelect, { target: { value: 'search' } })
+      await selectOption('Reader mode', 'Search')
       expect(screen.queryByText(/Large diff/)).toBeNull()
       expect(screen.getByPlaceholderText('Search diff...')).toBeTruthy()
 
-      fireEvent.change(modeSelect, { target: { value: 'full' } })
+      await selectOption('Reader mode', 'Full file')
       await waitFor(() => {
         expect(screen.queryByText(/Large diff/)).toBeNull()
         expect(getFileContent).toHaveBeenCalledWith(123, 'src/large.txt', null)
@@ -470,10 +478,11 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   describe('prev/next hunk navigation', () => {
     it('renders mode buttons', () => {
       renderPage()
-      expect(screen.getByText('Diff')).toBeTruthy()
-      expect(screen.getByText('Raw')).toBeTruthy()
-      expect(screen.getByText('Full file')).toBeTruthy()
-      expect(screen.getByText('Search')).toBeTruthy()
+      fireEvent.click(screen.getByRole('combobox', { name: 'Reader mode' }))
+      expect(screen.getAllByText('Diff').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Raw').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Full file').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Search').length).toBeGreaterThan(0)
     })
   })
 
@@ -482,10 +491,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       renderPage()
       const fooFile = screen.getByText('foo.ts')
       fireEvent.click(fooFile)
-      const modeSelect = screen.getAllByRole('combobox').find(
-        s => (s as HTMLSelectElement).querySelector('option[value="raw"]') !== null
-      )!
-      fireEvent.change(modeSelect, { target: { value: 'raw' } })
+      await selectOption('Reader mode', 'Raw')
       await waitFor(() => {
         expect(screen.getByText('Copy')).toBeTruthy()
       })
@@ -495,8 +501,8 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
   describe('search within diff', () => {
     it('can interact with the Search button', () => {
       renderPage()
-      const searchButton = screen.getByText('Search')
-      expect(searchButton).toBeTruthy()
+      fireEvent.click(screen.getByRole('combobox', { name: 'Reader mode' }))
+      expect(screen.getByText('Search')).toBeTruthy()
     })
   })
 
@@ -508,9 +514,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('enters commit mode when a commit is selected', async () => {
       renderPage()
-      const commitOption = screen.getByText('View commit...')
-      const select = commitOption.closest('select')!
-      fireEvent.change(select, { target: { value: 'abc123' } })
+      await selectOption('Commit view', 'abc123: Initial commit')
       await waitFor(() => {
         expect(screen.getByText('Exit commit mode')).toBeTruthy()
       })
@@ -518,9 +522,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
 
     it('exits commit mode when Exit commit mode is clicked', async () => {
       renderPage()
-      const commitOption = screen.getByText('View commit...')
-      const select = commitOption.closest('select')!
-      fireEvent.change(select, { target: { value: 'abc123' } })
+      await selectOption('Commit view', 'abc123: Initial commit')
       await waitFor(() => {
         expect(screen.getByText('Exit commit mode')).toBeTruthy()
       })
@@ -914,10 +916,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
       renderPage()
       fireEvent.click(screen.getByText('large.txt'))
-      const modeSelect = screen.getAllByRole('combobox').find(
-        s => (s as HTMLSelectElement).querySelector('option[value="raw"]') !== null
-      )!
-      fireEvent.change(modeSelect, { target: { value: 'raw' } })
+      await selectOption('Reader mode', 'Raw')
       await waitFor(() => {
         expect(screen.getByText(/Large diff/)).toBeTruthy()
         expect(screen.getByText(/Render anyway/)).toBeTruthy()
@@ -937,10 +936,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
       renderPage()
       fireEvent.click(screen.getByText('large.txt'))
-      const modeSelect = screen.getAllByRole('combobox').find(
-        s => (s as HTMLSelectElement).querySelector('option[value="full"]') !== null
-      )!
-      fireEvent.change(modeSelect, { target: { value: 'full' } })
+      await selectOption('Reader mode', 'Full file')
       await waitFor(() => {
         expect(screen.getByText(/Large diff/)).toBeTruthy()
         expect(screen.getByText(/Render anyway/)).toBeTruthy()
@@ -959,10 +955,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       mockUseIssueDiff.mockReturnValue({ data: largeDiffData })
       renderPage()
       fireEvent.click(screen.getByText('large.txt'))
-      const modeSelect = screen.getAllByRole('combobox').find(
-        s => (s as HTMLSelectElement).querySelector('option[value="search"]') !== null
-      )!
-      fireEvent.change(modeSelect, { target: { value: 'search' } })
+      await selectOption('Reader mode', 'Search')
       await waitFor(() => {
         expect(screen.getByText(/Large diff/)).toBeTruthy()
         expect(screen.getByText(/Render anyway/)).toBeTruthy()

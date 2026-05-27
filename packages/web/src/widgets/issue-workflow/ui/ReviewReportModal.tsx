@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import Markdown from 'react-markdown'
+import { Button } from '@/components/ui/button'
 import type { ReviewOutput } from './ReviewSummary'
 
 export function ResultBadge({ classified }: { classified: 'PASS' | 'FAIL' | 'UNKNOWN' }) {
@@ -56,20 +57,22 @@ export function FullReportModal({
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
       />
-      <div className="relative z-10 w-[80vw] max-h-[90vh] bg-white rounded-lg shadow-xl flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+      <div className="relative z-10 w-[80vw] max-h-[90vh] bg-background rounded-lg shadow-xl flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
           <div className="flex items-center gap-3">
             <ResultBadge classified={classified} />
-            <h3 className="text-base font-semibold text-gray-900">Full Review Report</h3>
+            <h3 className="text-base font-semibold text-foreground">Full Review Report</h3>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
-            className="rounded-md p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            className="rounded-md p-1 text-muted-foreground/70 hover:text-muted-foreground hover:bg-muted transition-colors"
           >
             <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
             </svg>
-          </button>
+          </Button>
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {content ? (
@@ -78,13 +81,13 @@ export function FullReportModal({
             </div>
           ) : fallback ? (
             <div>
-              <p className="text-sm text-gray-500 mb-3">No detailed report available</p>
+              <p className="text-sm text-muted-foreground mb-3">No detailed report available</p>
               <div className="prose prose-sm max-w-none">
                 <Markdown>{fallback}</Markdown>
               </div>
             </div>
           ) : (
-            <p className="text-sm text-gray-500">No detailed report available</p>
+            <p className="text-sm text-muted-foreground">No detailed report available</p>
           )}
         </div>
       </div>

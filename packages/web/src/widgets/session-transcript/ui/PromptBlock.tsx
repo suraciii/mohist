@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { DisplayPrompt } from '../model/session-transcript-display'
 
 const KIND_LABELS: Record<string, string> = {
@@ -76,27 +77,30 @@ export function PromptBlock({ prompt }: PromptBlockProps) {
 
         <div className="flex items-center gap-2 mt-2">
           {!expanded && prompt.text && (
-            <button
+            <Button
+              variant="link"
               onClick={() => setExpanded(true)}
-              className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+              className="h-auto p-0 text-xs text-gray-500 hover:text-gray-700 transition-colors"
             >
               Show full prompt
-            </button>
+            </Button>
           )}
           {expanded && (
-            <button
+            <Button
+              variant="link"
               onClick={() => setExpanded(false)}
-              className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+              className="h-auto p-0 text-xs text-gray-500 hover:text-gray-700 transition-colors"
             >
               Show less
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="link"
             onClick={handleCopy}
-            className="text-xs text-gray-500 hover:text-gray-700 transition-colors"
+            className="h-auto p-0 text-xs text-gray-500 hover:text-gray-700 transition-colors"
           >
             {copied ? 'Copied!' : 'Copy'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

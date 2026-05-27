@@ -11,6 +11,10 @@ import {
 } from '../../../entities/epic/api/queries'
 import { EpicStatus, IssueStatus, type LinkedIssue } from '../../../shared/api/types'
 import { ApiError } from '../../../shared/api/client'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -22,9 +26,9 @@ function PriorityBadge({ priority }: { priority: string }) {
   }
 
   return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${colors[priority] || 'bg-gray-100 text-gray-700'}`}>
+    <Badge className={colors[priority] || 'bg-gray-100 text-gray-700'}>
       {priority.toUpperCase()}
-    </span>
+    </Badge>
   )
 }
 
@@ -36,9 +40,9 @@ function StatusBadge({ status }: { status: EpicStatus }) {
   }
 
   return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${colors[status]}`}>
+    <Badge className={colors[status]}>
       {status}
-    </span>
+    </Badge>
   )
 }
 
@@ -60,27 +64,27 @@ function issueStatusTone(status: IssueStatus) {
 
 function LinkedIssueRow({ issue, onRemove, disabled }: { issue: LinkedIssue; onRemove: (issueId: string) => void; disabled: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white p-4">
+    <Card className="flex items-center justify-between gap-4 p-4">
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <Link to={`/issue/${issue.number}`} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
             #{issue.number}
           </Link>
           <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.status)}`}>{issue.status}</span>
-          <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{toTitleCase(issue.stage)}</span>
-          {issue.priority && <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">{issue.priority.toUpperCase()}</span>}
+          <Badge variant="secondary">{toTitleCase(issue.stage)}</Badge>
+          {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
         </div>
-        <div className="mt-1 truncate text-sm font-medium text-gray-900">{issue.title}</div>
+        <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>
       </div>
-      <button
+      <Button
         type="button"
+        variant="outline"
         onClick={() => onRemove(issue.id)}
         disabled={disabled}
-        className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
       >
         Remove
-      </button>
-    </div>
+      </Button>
+    </Card>
   )
 }
 
@@ -119,22 +123,23 @@ export function EpicDetailPage() {
   }, [epic, issues])
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-12 text-gray-400">Loading...</div>
+    return <div className="flex items-center justify-center py-12 text-muted-foreground">Loading...</div>
   }
 
   if (!epic) {
     return (
       <div className="mx-auto max-w-4xl p-6">
-        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
-          <div className="text-lg font-medium text-gray-900">Epic not found</div>
-          <button
+        <Card className="p-8 text-center">
+          <div className="text-lg font-medium text-foreground">Epic not found</div>
+          <Button
             type="button"
+            variant="link"
             onClick={() => navigate('/epics')}
-            className="mt-4 text-sm text-blue-600 hover:text-blue-700 hover:underline"
+            className="mt-4"
           >
             Back to Epics
-          </button>
-        </div>
+          </Button>
+        </Card>
       </div>
     )
   }
@@ -156,62 +161,62 @@ export function EpicDetailPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
-        <button
+        <Button
           type="button"
+          variant="link"
           onClick={() => navigate('/epics')}
-          className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+          className="px-0"
         >
           Back to Epics
-        </button>
+        </Button>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
+      <Card className="p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span>#{epic.id.slice(0, 8)}</span>
               <StatusBadge status={epic.status} />
               <PriorityBadge priority={epic.priority} />
             </div>
-            <h1 className="mt-2 text-2xl font-bold text-gray-900">{epic.title}</h1>
-            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-700">{epic.description}</p>
+            <h1 className="mt-2 text-2xl font-bold text-foreground">{epic.title}</h1>
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground/80">{epic.description}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {epic.status === EpicStatus.Active && (
-              <button
+              <Button
                 type="button"
                 onClick={() => markEpicDone.mutate(epic.id)}
                 disabled={markEpicDone.isPending}
-                className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {markEpicDone.isPending ? 'Marking...' : 'Mark Done'}
-              </button>
+              </Button>
             )}
             {epic.status !== EpicStatus.Closed && (
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => closeEpic.mutate(epic.id)}
                 disabled={closeEpic.isPending}
-                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               >
                 {closeEpic.isPending ? 'Closing...' : 'Close Epic'}
-              </button>
+              </Button>
             )}
           </div>
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-lg bg-gray-50 p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Progress</div>
-            <div className="mt-2 text-2xl font-semibold text-gray-900">
+          <div className="rounded-lg bg-muted p-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Progress</div>
+            <div className="mt-2 text-2xl font-semibold text-foreground">
               {epic.progress.completedCount} / {epic.progress.totalIssueCount}
             </div>
-            <div className="mt-3 h-2 rounded-full bg-gray-200">
+            <div className="mt-3 h-2 rounded-full bg-background">
               <div className="h-2 rounded-full bg-blue-600" style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Next Issue</div>
+          <div className="rounded-lg bg-muted p-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next Issue</div>
             {epic.progress.nextIssue ? (
               <Link to={`/issue/${epic.progress.nextIssue.number}`} className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
                 #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
@@ -219,40 +224,42 @@ export function EpicDetailPage() {
             ) : epic.progress.readyToMarkDone ? (
               <div className="mt-2 text-sm font-medium text-green-700">Ready to mark done</div>
             ) : (
-              <div className="mt-2 text-sm text-gray-500">No linked issues yet</div>
+              <div className="mt-2 text-sm text-muted-foreground">No linked issues yet</div>
             )}
           </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-gray-500">Current Activity</div>
-            <div className="mt-2 text-sm text-gray-700">
+          <div className="rounded-lg bg-muted p-4">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current Activity</div>
+            <div className="mt-2 text-sm text-foreground/80">
               {epic.progress.blockedIssues.length} blocked, {epic.progress.activeIssues.length} active
             </div>
           </div>
         </div>
-      </div>
+      </Card>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">Linked Issues</h2>
+      <Card className="p-6">
+        <h2 className="text-lg font-semibold text-foreground">Linked Issues</h2>
         <form onSubmit={handleAddIssue} className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <select
+          <Select
             value={selectedIssueId}
-            onChange={(event) => setSelectedIssueId(event.target.value)}
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            onValueChange={(value) => setSelectedIssueId(value ?? '')}
           >
-            <option value="">Select an issue to link</option>
-            {availableIssues.map(issue => (
-              <option key={issue.id} value={issue.id}>
-                #{issue.number} {issue.title}
-              </option>
-            ))}
-          </select>
-          <button
+            <SelectTrigger className="flex-1">
+              <SelectValue placeholder="Select an issue to link" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableIssues.map(issue => (
+                <SelectItem key={issue.id} value={issue.id}>
+                  #{issue.number} {issue.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
             type="submit"
             disabled={!selectedIssueId || addEpicIssue.isPending}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {addEpicIssue.isPending ? 'Adding...' : 'Add Issue'}
-          </button>
+          </Button>
         </form>
 
         {addEpicIssue.isError && (
@@ -263,7 +270,7 @@ export function EpicDetailPage() {
 
         <div className="mt-6 space-y-3">
           {epic.linkedIssues.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-gray-200 p-6 text-sm text-gray-500">
+            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
               No linked issues yet.
             </div>
           ) : (
@@ -283,7 +290,7 @@ export function EpicDetailPage() {
             {removeEpicIssue.error?.message || 'Failed to remove issue'}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

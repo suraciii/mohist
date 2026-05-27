@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { parseDiff, FileBlock } from '../model/diffModel'
+import { Button } from '@/components/ui/button'
 
 function FileEntry({ block }: { block: FileBlock }) {
   const [expanded, setExpanded] = useState(false)
@@ -8,9 +9,10 @@ function FileEntry({ block }: { block: FileBlock }) {
 
   return (
     <div className="border border-gray-200 rounded-md overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-gray-50 transition-colors text-left bg-gray-50/50"
+        className="h-auto w-full justify-start gap-3 rounded-none px-3 py-2 text-sm hover:bg-gray-50 text-left bg-gray-50/50"
       >
         <svg
           className={`h-3.5 w-3.5 text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`}
@@ -30,7 +32,7 @@ function FileEntry({ block }: { block: FileBlock }) {
         {block.deletions > 0 && (
           <span className="text-red-500 text-xs font-medium flex-shrink-0">-{block.deletions}</span>
         )}
-      </button>
+      </Button>
 
       {expanded && (
         <div className="border-t border-gray-200 overflow-x-auto">

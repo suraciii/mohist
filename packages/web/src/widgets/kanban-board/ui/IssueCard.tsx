@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import type { Issue, AgentStatus } from '../../../shared/api/types'
 import { IssueStage, WorkflowStage, IssueStatus } from '../../../shared/api/types'
 import { api } from '../../../shared/api/client'
@@ -46,7 +48,7 @@ function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   return null
 }
 
-function Badge({
+function StatusBadge({
   type,
   driftDecision,
 }: {
@@ -55,39 +57,39 @@ function Badge({
 }) {
   if (type === 'conflict') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-white bg-red-500 px-1.5 py-0.5 rounded">
+      <Badge variant="destructive" className="text-xs">
         Failed
-      </span>
+      </Badge>
     )
   }
   if (type === 'approval') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-white px-1.5 py-0.5 rounded" style={{ backgroundColor: '#f59e0b' }}>
+      <Badge className="text-xs bg-amber-500 text-white hover:bg-amber-600">
         Approval
-      </span>
+      </Badge>
     )
   }
   if (type === 'running') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-        <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+      <Badge variant="secondary" className="text-xs text-blue-600 bg-blue-50">
+        <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse mr-1" />
         Running
-      </span>
+      </Badge>
     )
   }
   if (type === 'waiting') {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
+      <Badge variant="secondary" className="text-xs text-amber-600 bg-amber-50">
         Waiting
-      </span>
+      </Badge>
     )
   }
   if (type === 'drift') {
     const label = driftDecision === 'needs-attention' ? 'Needs Attention' : driftDecision === 'defer' ? 'Rebase Deferred' : driftDecision === 'suggest' ? 'Rebase Suggested' : 'Base Drift'
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">
+      <Badge variant="secondary" className="text-xs text-orange-600 bg-orange-50">
         {label}
-      </span>
+      </Badge>
     )
   }
   return null
@@ -95,10 +97,10 @@ function Badge({
 
 function IntegrationBadge({ blockedReason }: { blockedReason?: string | null }) {
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-      <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+    <Badge variant="secondary" className="text-xs text-blue-600 bg-blue-50">
+      <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse mr-1" />
       {blockedReason ? 'Integration Failed' : 'Integrating'}
-    </span>
+    </Badge>
   )
 }
 
@@ -153,12 +155,12 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   return (
     <Link
       to={`/issue/${issue.number}`}
-      className="block rounded-lg border border-gray-200 border-l-4 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors relative overflow-hidden"
+      className="block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden"
       style={{ borderLeftColor: getStripColor(issue.labels) }}
     >
       {isCancelled && (
-        <div className="absolute inset-0 bg-gray-400/50 z-10 flex items-center justify-center">
-          <span className="text-sm font-semibold text-gray-700">Cancelled</span>
+        <div className="absolute inset-0 bg-muted-foreground/50 z-10 flex items-center justify-center">
+          <span className="text-sm font-semibold text-foreground/80">Cancelled</span>
         </div>
       )}
 
@@ -171,11 +173,11 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
       <div className={`p-3 ${isCancelled ? 'opacity-50' : ''}`}>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-gray-400">
+            <span className="text-xs font-mono text-muted-foreground/70">
               #{issue.number}
             </span>
             {priorityText && (
-              <span className="text-xs font-semibold text-gray-700">
+              <span className="text-xs font-semibold text-foreground/80">
                 {priorityText}
               </span>
             )}
@@ -185,27 +187,29 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
               <IntegrationBadge blockedReason={issue.blockedReason} />
             )}
             {badge && badge !== 'attention' && badge !== 'running' && (
-              <Badge type={badge} driftDecision={issue.drift?.decision ?? undefined} />
+              <StatusBadge type={badge} driftDecision={issue.drift?.decision ?? undefined} />
             )}
             {showArchiveButton && issue.stage === IssueStage.Done && (
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground/70 hover:text-muted-foreground disabled:opacity-50 text-sm"
                 onClick={(e) => {
                   e.preventDefault()
                   e.stopPropagation()
                   archiveMutation.mutate()
                 }}
                 disabled={archiveMutation.isPending}
-                className="text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors text-sm"
                 title="Archive issue"
               >
                 📦
-              </button>
+              </Button>
             )}
           </div>
         </div>
 
         <h3
-          className="text-sm font-medium text-gray-900"
+          className="text-sm font-medium text-foreground"
           style={{
             display: '-webkit-box',
             WebkitLineClamp: 2,
@@ -238,7 +242,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
 
         <div className="mt-1.5 flex justify-end">
           {relativeTime && (
-            <span className="text-[10px] text-gray-400">{relativeTime}</span>
+            <span className="text-[10px] text-muted-foreground/70">{relativeTime}</span>
           )}
         </div>
 
@@ -247,33 +251,37 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             <span className="text-xs text-orange-600">
               Workflow was interrupted
             </span>
-            <button
+            <Button
+              variant="default"
+              size="sm"
+              className="h-6 text-xs bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 resumeMutation.mutate()
               }}
               disabled={resumeMutation.isPending}
-              className="rounded bg-orange-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
             >
               {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
-            </button>
+            </Button>
           </div>
         )}
 
         {!isCancelled && !isBlocked && !isInterrupted && !isAwaitingApproval && issue.workflowStage && issue.stage !== IssueStage.Done && !isAgentRunning && (
           <div className="mt-2 flex justify-end">
-            <button
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 rerunMutation.mutate()
               }}
               disabled={rerunMutation.isPending}
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
             >
               {rerunMutation.isPending ? 'Rerunning...' : 'Rerun'}
-            </button>
+            </Button>
           </div>
         )}
 

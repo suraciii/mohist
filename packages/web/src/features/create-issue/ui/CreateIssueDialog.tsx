@@ -1,7 +1,19 @@
-import { useState, useMemo, useRef, useCallback, Fragment } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Popover, Transition } from '@headlessui/react'
-import { Dialog } from '../../../shared/ui/Dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { api } from '../../../shared/api/client'
 import { useLabels } from '../../../entities/issue/api/queries'
 import { useAvailableModelIds } from '../../../entities/settings/api/queries'
@@ -17,7 +29,7 @@ interface Props {
 
 function SearchIcon() {
   return (
-    <svg className="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+    <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 20 20" fill="currentColor">
       <path
         fillRule="evenodd"
         d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
@@ -51,6 +63,7 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
   const { data: availableModelIds, isLoading } = useAvailableModelIds()
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
+  const [popoverOpen, setPopoverOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const allModels: string[] = availableModelIds ?? []
@@ -72,7 +85,10 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
       } else if (e.key === 'Enter') {
         e.preventDefault()
         const m = filtered[highlightedIndex]
-        if (m) onChange(m)
+        if (m) {
+          onChange(m)
+          setPopoverOpen(false)
+        }
       }
     },
     [filtered, highlightedIndex, onChange],
@@ -84,89 +100,81 @@ function ModelPresetSelect({ value, onChange, onClear }: { value: string | null;
 
   return (
     <div className="flex items-center gap-2">
-      <Popover as="div" className="relative flex-1">
-        {({ open }) => (
-          <>
-            <Popover.Button
-              className={`w-full inline-flex items-center justify-between gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors min-h-[44px] md:min-h-0 ${
-                open
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : value
-                    ? 'border-blue-200 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
-              }`}
-            >
-              <span className="truncate">{displayText}</span>
-              <ChevronDownIcon />
-            </Popover.Button>
-
-            <Transition
-              as={Fragment}
-              enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
-              leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
-            >
-              <Popover.Panel portal={false} className="fixed inset-x-2 top-auto z-50 mt-1 md:absolute md:inset-x-auto md:right-0 md:w-72 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none">
-                <div className="p-2">
-                  <div className="relative">
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                      <SearchIcon />
-                    </div>
-                    <input
-                      ref={searchRef}
-                      type="text"
-                      value={search}
-                      onChange={e => setSearch(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder="Search models..."
-                      className="w-full rounded-md border border-gray-300 pl-9 pr-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      autoFocus
-                    />
-                  </div>
+      <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+        <PopoverTrigger>
+          <Button
+            variant="outline"
+            className={`w-full inline-flex items-center justify-between gap-1.5 text-sm font-medium min-h-[44px] md:min-h-0 ${
+              value
+                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                : ''
+            }`}
+          >
+            <span className="truncate">{displayText}</span>
+            <ChevronDownIcon />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-0" align="end">
+          <div className="p-2">
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                <SearchIcon />
+              </div>
+              <Input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search models..."
+                className="pl-9"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-60 overflow-y-auto border-t">
+            {isLoading && (
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">Loading...</div>
+            )}
+            {!isLoading && filtered.length === 0 && (
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No models found</div>
+            )}
+            {!isLoading && filtered.map((modelId, i) => (
+              <Button
+                key={modelId}
+                variant="ghost"
+                onClick={() => {
+                  onChange(modelId)
+                  setPopoverOpen(false)
+                }}
+                onMouseEnter={() => setHighlightedIndex(i)}
+                className={`w-full justify-between rounded-none h-auto px-3 py-1.5 ${
+                  i === highlightedIndex
+                    ? 'bg-blue-50 text-blue-700'
+                    : modelId === value
+                      ? 'bg-muted text-foreground'
+                      : 'text-foreground hover:bg-muted'
+                }`}
+              >
+                <div className="flex flex-col items-start">
+                  <span className="font-medium">{modelId.split('/').pop() || modelId}</span>
+                  <span className="text-xs text-muted-foreground">{modelId}</span>
                 </div>
-                <div className="max-h-60 overflow-y-auto border-t border-gray-100">
-                  {isLoading && (
-                    <div className="px-3 py-4 text-center text-sm text-gray-400">Loading...</div>
-                  )}
-                  {!isLoading && filtered.length === 0 && (
-                    <div className="px-3 py-4 text-center text-sm text-gray-400">No models found</div>
-                  )}
-                  {!isLoading && filtered.map((modelId, i) => (
-                    <button
-                      key={modelId}
-                      onClick={() => onChange(modelId)}
-                      onMouseEnter={() => setHighlightedIndex(i)}
-                      className={`w-full flex items-center justify-between px-3 py-1.5 text-sm transition-colors ${
-                        i === highlightedIndex
-                          ? 'bg-blue-50 text-blue-700'
-                          : modelId === value
-                            ? 'bg-gray-50 text-gray-900'
-                            : 'text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex flex-col items-start">
-                        <span className="font-medium">{modelId.split('/').pop() || modelId}</span>
-                        <span className="text-xs text-gray-400">{modelId}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </Popover.Panel>
-            </Transition>
-          </>
-        )}
+              </Button>
+            ))}
+          </div>
+        </PopoverContent>
       </Popover>
       {value && (
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onClear}
-          className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+          className="text-muted-foreground hover:text-red-500 hover:bg-red-50"
           title="Clear"
         >
           <XIcon className="h-4 w-4" />
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -214,112 +222,120 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   }
 
   return (
-    <Dialog open={open} onClose={resetAndClose} title="Create Issue">
-      <div className="space-y-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Title *</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Issue title"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            autoFocus
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Optional description"
-            rows={3}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
-          />
-        </div>
-
-        {allLabels && allLabels.length > 0 && (
+    <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create Issue</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Labels</label>
-            <div className="flex flex-wrap gap-1.5">
-              {allLabels.map((label) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => toggleLabel(label)}
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                    labels.includes(label)
-                      ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+            <label className="block text-xs font-medium text-foreground mb-1">Title *</label>
+            <Input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Issue title"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Description</label>
+            <Textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="Optional description"
+              rows={3}
+              className="resize-none"
+            />
+          </div>
+
+          {allLabels && allLabels.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Labels</label>
+              <div className="flex flex-wrap gap-1.5">
+                {allLabels.map((label) => (
+                  <Button
+                    key={label}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => toggleLabel(label)}
+                    className={`rounded-full ${
+                      labels.includes(label)
+                        ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    }`}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Coder Model</label>
+            <ModelPresetSelect
+              value={model}
+              onChange={setModel}
+              onClear={() => setModel(null)}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Priority</label>
+            <div className="flex gap-1.5">
+              {PRIORITIES.map((p) => {
+                const style = getPriorityStyle(p)
+                return (
+                  <Button
+                    key={p}
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setPriority(p)}
+                    className={`rounded-full ${
+                      priority === p
+                        ? 'ring-1 ring-offset-1'
+                        : 'hover:opacity-80'
+                    }`}
+                    style={{
+                      backgroundColor: style.bg,
+                      color: style.text,
+                      ...(priority === p ? { ringColor: style.text } : {}),
+                    }}
+                  >
+                    {p.toUpperCase()}
+                  </Button>
+                )
+              })}
             </div>
           </div>
-        )}
 
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Coder Model</label>
-          <ModelPresetSelect
-            value={model}
-            onChange={setModel}
-            onClear={() => setModel(null)}
-          />
-        </div>
+          {mutation.error && (
+            <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+              {mutation.error.message}
+            </div>
+          )}
 
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Priority</label>
-          <div className="flex gap-1.5">
-            {PRIORITIES.map((p) => {
-              const style = getPriorityStyle(p)
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                    priority === p
-                      ? 'ring-1 ring-offset-1'
-                      : 'hover:opacity-80'
-                  }`}
-                  style={{
-                    backgroundColor: style.bg,
-                    color: style.text,
-                    ...(priority === p ? { ringColor: style.text } : {}),
-                  }}
-                >
-                  {p.toUpperCase()}
-                </button>
-              )
-            })}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="outline"
+              onClick={resetAndClose}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => mutation.mutate()}
+              disabled={!title.trim() || mutation.isPending}
+              className="min-h-[44px]"
+            >
+              {mutation.isPending ? 'Creating...' : 'Create'}
+            </Button>
           </div>
         </div>
-
-        {mutation.error && (
-          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-            {mutation.error.message}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            onClick={resetAndClose}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => mutation.mutate()}
-            disabled={!title.trim() || mutation.isPending}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors min-h-[44px]"
-          >
-            {mutation.isPending ? 'Creating...' : 'Create'}
-          </button>
-        </div>
-      </div>
+      </DialogContent>
     </Dialog>
   )
 }

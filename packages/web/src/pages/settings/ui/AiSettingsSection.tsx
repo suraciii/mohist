@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings/api/queries'
 import type { Model } from '../../../shared/api/types'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
+import { Button } from '@/components/ui/button'
 
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
 
@@ -53,10 +54,10 @@ export function AiSettingsSection() {
   if (runtimeLoading || modelsLoading) {
     return (
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">Coder Agent & Models</h3>
+        <h3 className="text-sm font-medium text-foreground">Coder Agent & Models</h3>
         <div className="space-y-3">
           {[1, 2].map((i) => (
-            <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
+            <div key={i} className="h-16 bg-muted rounded-lg animate-pulse" />
           ))}
         </div>
       </div>
@@ -67,7 +68,7 @@ export function AiSettingsSection() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">Coder Agent & Models</h3>
+        <h3 className="text-sm font-medium text-foreground">Coder Agent & Models</h3>
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           Failed to load opencode runtime: {(error as Error).message}
         </div>
@@ -78,31 +79,31 @@ export function AiSettingsSection() {
   return (
     <div className="space-y-8">
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">External Coder Agent</h3>
+        <h3 className="text-sm font-medium text-foreground">External Coder Agent</h3>
 
-        <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+        <div className="rounded-md border bg-muted px-3 py-2">
           <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
             <div>
-              <div className="text-gray-500">Runtime</div>
-              <div className="font-mono text-gray-900">{runtime?.mode ?? 'local-opencode'}</div>
+              <div className="text-muted-foreground">Runtime</div>
+              <div className="font-mono text-foreground">{runtime?.mode ?? 'local-opencode'}</div>
             </div>
             <div>
-              <div className="text-gray-500">Command</div>
-              <div className="font-mono text-gray-900">{runtime?.command ?? 'opencode'}</div>
+              <div className="text-muted-foreground">Command</div>
+              <div className="font-mono text-foreground">{runtime?.command ?? 'opencode'}</div>
             </div>
             <div>
-              <div className="text-gray-500">Models</div>
-              <div className="font-mono text-gray-900">{coderModels.length}</div>
+              <div className="text-muted-foreground">Models</div>
+              <div className="font-mono text-foreground">{coderModels.length}</div>
             </div>
           </div>
-          <p className="mt-2 text-xs text-gray-500">
+          <p className="mt-2 text-xs text-muted-foreground">
             Mohist does not configure AI providers. It delegates coder work to the connected opencode runner.
           </p>
         </div>
 
         <div className="space-y-1.5">
-          <label className="block text-xs font-medium text-gray-700">Default Coder Agent Model</label>
-          <p className="text-xs text-gray-500">Passed to opencode when workflow tasks run.</p>
+          <label className="block text-xs font-medium text-foreground/80">Default Coder Agent Model</label>
+          <p className="text-xs text-muted-foreground">Passed to opencode when workflow tasks run.</p>
           <ModelSelect
             value={opencodeModelData?.model ?? null}
             placeholder="Opencode default"
@@ -112,23 +113,24 @@ export function AiSettingsSection() {
         </div>
       </div>
 
-      <hr className="border-gray-100" />
+      <hr className="border" />
 
       <div>
-        <button
+        <Button
+          variant="ghost"
           onClick={() => setStageOverridesOpen(!stageOverridesOpen)}
-          className="flex items-center gap-2 w-full text-left"
+          className="flex items-center gap-2 w-full text-left justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
         >
-          <ChevronRightIcon className={`h-4 w-4 text-gray-400 transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`} />
-          <span className="text-sm font-medium text-gray-900">Stage Model Overrides</span>
-          <span className="text-xs text-gray-400 ml-1">Advanced</span>
-        </button>
+          <ChevronRightIcon className={`h-4 w-4 text-muted-foreground/70 transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`} />
+          <span className="text-sm font-medium text-foreground">Stage Model Overrides</span>
+          <span className="text-xs text-muted-foreground/70 ml-1">Advanced</span>
+        </Button>
 
         {stageOverridesOpen && (
           <div className="mt-4 space-y-3 pl-6">
             {STAGES.map((stage) => (
               <div key={stage} className="space-y-1">
-                <label className="block text-xs font-medium text-gray-600 capitalize">{stage}</label>
+                <label className="block text-xs font-medium text-muted-foreground capitalize">{stage}</label>
                 <ModelSelect
                   value={localStageModels[stage] ?? null}
                   placeholder="Default"

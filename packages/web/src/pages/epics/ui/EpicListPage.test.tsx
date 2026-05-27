@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { EpicStatus } from '../../../shared/api/types'
@@ -106,13 +106,18 @@ describe('EpicListPage', () => {
     expect(screen.getByText('Ready to mark done')).toBeTruthy()
   })
 
-  it('opens create dialog and submits title description and priority', () => {
+  it('opens create dialog and submits title description and priority', async () => {
     renderPage()
 
     fireEvent.click(screen.getByRole('button', { name: 'New Epic' }))
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'New Goal' } })
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Ship the goal' } })
-    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'p1' } })
+    fireEvent.click(screen.getByRole('combobox', { name: 'Priority' }))
+    await waitFor(() => expect(screen.getByText('P1 - High')).toBeTruthy())
+    const option = screen.getByText('P1 - High').closest('[data-slot="select-item"]') as HTMLElement
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
     fireEvent.click(screen.getByRole('button', { name: 'Create Epic' }))
 
     expect(createMutate).toHaveBeenCalledWith(
