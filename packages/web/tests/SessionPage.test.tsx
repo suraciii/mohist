@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, baseRender, screen, fireEvent, waitFor, renderHook, act, within } from './test-utils'
-import { SessionPage } from '../src/components/SessionPage'
-import { SessionTranscriptView } from '../src/components/SessionTranscriptView'
-import { useSessionTranscript } from '../src/hooks/useSessionTranscript'
-import { dispatchAgentEvent } from '../src/lib/agent-events'
+import { SessionPage } from '../src/pages/session/ui/SessionPage'
+import { SessionTranscriptView } from '../src/widgets/session-transcript/ui/SessionTranscriptView'
+import { useSessionTranscript } from '../src/widgets/session-transcript/model/useSessionTranscript'
+import { dispatchAgentEvent } from '../src/shared/api/agent-events'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProjectProvider } from '../src/context/ProjectContext'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/lib/types'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/shared/api/types'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
@@ -28,15 +28,15 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-vi.mock('../src/hooks/useCoderSessions', () => ({
+vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
 }))
 
-vi.mock('../src/hooks/useQueries', () => ({
+vi.mock('../src/entities/project/api/queries', () => ({
   useIssue: () => ({ data: sessionPageMocks.issue }),
 }))
 
-vi.mock('../src/lib/api', () => ({
+vi.mock('../src/shared/api/client', () => ({
   api: {
     getCoderSessionDetail: vi.fn(() => {
       if (sessionPageMocks.detailPending) return new Promise(() => {})
@@ -1754,7 +1754,7 @@ describe('SessionPage header and states', () => {
 
 describe('SessionHeader navigation', () => {
   it('session header link routes to /issue/:number/session/:sessionId', async () => {
-    const { SessionHeader } = await import('../src/components/SessionHeader')
+    const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = {
       id: 'session-abc',
       acpSessionId: 'acp-123',
@@ -1781,7 +1781,7 @@ describe('SessionHeader navigation', () => {
   })
 
   it('session header shows session label', async () => {
-    const { SessionHeader } = await import('../src/components/SessionHeader')
+    const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = {
       id: 'session-abc',
       acpSessionId: 'acp-123',
@@ -1807,7 +1807,7 @@ describe('SessionHeader navigation', () => {
   })
 
   it('showTranscriptLink renders View transcript link instead of full row link', async () => {
-    const { SessionHeader } = await import('../src/components/SessionHeader')
+    const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = {
       id: 'session-abc',
       acpSessionId: 'acp-123',
@@ -1835,31 +1835,31 @@ describe('SessionHeader navigation', () => {
   })
 
   it('getSessionLabel returns title when present', async () => {
-    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const { getSessionLabel } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = { id: 's1', title: 'T-001 My Task', executionId: null, stage: null, taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
     expect(getSessionLabel(session)).toBe('T-001 My Task')
   })
 
   it('getSessionLabel extracts T-N pattern from executionId', async () => {
-    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const { getSessionLabel } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = { id: 's1', title: null, executionId: 'build-T-042-description', stage: null, taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
     expect(getSessionLabel(session)).toBe('T-042')
   })
 
   it('getSessionLabel uses stage label when no title or executionId', async () => {
-    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const { getSessionLabel } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = { id: 's1', title: null, executionId: null, stage: 'plan', taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
     expect(getSessionLabel(session)).toBe('Plan')
   })
 
   it('getSessionLabel falls back to taskDescription', async () => {
-    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const { getSessionLabel } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = { id: 's1', title: null, executionId: null, stage: null, taskDescription: 'Do something important', status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
     expect(getSessionLabel(session)).toBe('Do something important')
   })
 
   it('getSessionLabel defaults to Session', async () => {
-    const { getSessionLabel } = await import('../src/components/SessionHeader')
+    const { getSessionLabel } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = { id: 's1', title: null, executionId: null, stage: null, taskDescription: null, status: 'completed', createdAt: '', completedAt: null, model: null, coderType: null, acpSessionId: '', workflowLogs: [] } as any
     expect(getSessionLabel(session)).toBe('Session')
   })

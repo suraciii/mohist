@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { baseRender, screen, fireEvent, waitFor } from './test-utils'
-import { IssueDetailPage } from '../src/components/IssueDetailPage'
+import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import { IssueStatus, Stage } from '../src/lib/types'
+import { IssueStatus, Stage } from '../src/shared/api/types'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -37,8 +37,8 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-vi.mock('../src/hooks/useQueries', async () => {
-  const actual = await vi.importActual<typeof import('../src/hooks/useQueries')>('../src/hooks/useQueries')
+vi.mock('../src/entities/project/api/queries', async () => {
+  const actual = await vi.importActual<typeof import('../src/entities/project/api/queries')>('../src/entities/project/api/queries')
   return {
     ...actual,
     useIssue: () => ({ data: mocks.issue, isLoading: !mocks.issue, isError: false }),
@@ -52,7 +52,7 @@ vi.mock('../src/hooks/useQueries', async () => {
   }
 })
 
-vi.mock('../src/lib/api', () => ({
+vi.mock('../src/shared/api/client', () => ({
   api: {
     startIssue: vi.fn(() => Promise.resolve()),
     closeIssue: vi.fn(() => Promise.resolve()),
@@ -456,7 +456,7 @@ describe('IssueDetailPage Markdown rendering', () => {
         status: IssueStatus.Blocked,
         recovery: { allowedActions: ['retry'], latestAttemptState: 'failed' },
       })
-      const { api: originalApi } = await import('../src/lib/api')
+      const { api: originalApi } = await import('../src/shared/api/client')
       vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
@@ -475,7 +475,7 @@ describe('IssueDetailPage Markdown rendering', () => {
         status: IssueStatus.Blocked,
         recovery: { allowedActions: ['retry', 'rerun'], latestAttemptState: 'failed' },
       })
-      const { api: originalApi } = await import('../src/lib/api')
+      const { api: originalApi } = await import('../src/shared/api/client')
       vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {

@@ -3,14 +3,14 @@ import {
   projectTurn,
   projectSessionToDisplayTurns,
   extractTurnChangedFiles,
-} from '../src/lib/session-transcript-display'
-import type { CoderSessionDetail, SessionTurn } from '../src/lib/types'
+} from '../src/widgets/session-transcript/model/session-transcript-display'
+import type { CoderSessionDetail, SessionTurn } from '../src/shared/api/types'
 
-function makeTextPart(id: string, text: string, startedAt = '2024-01-01T00:00:00Z'): import('../src/lib/types').TextPart {
+function makeTextPart(id: string, text: string, startedAt = '2024-01-01T00:00:00Z'): import('../src/shared/api/types').TextPart {
   return { id, type: 'text', text, startedAt, completedAt: null }
 }
 
-function makeReasoningPart(id: string, text: string, startedAt = '2024-01-01T00:00:01Z'): import('../src/lib/types').ReasoningPart {
+function makeReasoningPart(id: string, text: string, startedAt = '2024-01-01T00:00:01Z'): import('../src/shared/api/types').ReasoningPart {
   return { id, type: 'reasoning', text, startedAt, completedAt: null }
 }
 
@@ -23,10 +23,10 @@ function makeToolPart(
   opts?: {
     title?: string
     target?: string
-    changedFiles?: import('../src/lib/types').FileChangeSummary[]
+    changedFiles?: import('../src/shared/api/types').FileChangeSummary[]
     error?: string
   },
-): import('../src/lib/types').ToolPart {
+): import('../src/shared/api/types').ToolPart {
   return {
     id,
     type: 'tool',
@@ -47,14 +47,14 @@ function makeToolPart(
   }
 }
 
-function makeErrorPart(id: string, kind: 'timeout' | 'failed' | 'cancelled' | 'recovery', message: string): import('../src/lib/types').ErrorPart {
+function makeErrorPart(id: string, kind: 'timeout' | 'failed' | 'cancelled' | 'recovery', message: string): import('../src/shared/api/types').ErrorPart {
   return { id, type: 'error', message, kind, at: '2024-01-01T00:00:04Z' }
 }
 
 function makeTurn(
   id: string,
   promptText: string,
-  assistant: import('../src/lib/types').SessionPart[],
+  assistant: import('../src/shared/api/types').SessionPart[],
   completedAt: string | null = null,
   incomplete?: boolean,
 ): SessionTurn {
