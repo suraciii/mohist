@@ -3,9 +3,9 @@ import { screen } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
 import { WorkflowView } from './WorkflowView'
 import { IssueStage, IssueStatus, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../shared/api/types'
-import { useWorkflowTimeline } from '../../../entities/project/api/queries'
+import { useWorkflowTimeline } from '../../../entities/issue/api/queries'
 
-vi.mock('../../../entities/project/api/queries', () => ({
+vi.mock('../../../entities/issue/api/queries', () => ({
   useWorkflowTimeline: vi.fn(),
 }))
 

@@ -37,8 +37,8 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-vi.mock('../src/entities/project/api/queries', async () => {
-  const actual = await vi.importActual<typeof import('../src/entities/project/api/queries')>('../src/entities/project/api/queries')
+vi.mock('../src/entities/issue/api/queries', async () => {
+  const actual = await vi.importActual<typeof import('../src/entities/issue/api/queries')>('../src/entities/issue/api/queries')
   return {
     ...actual,
     useIssue: () => ({ data: mocks.issue, isLoading: !mocks.issue, isError: false }),

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { useIssue } from '../../../entities/project/api/queries'
+import { useIssue } from '../../../entities/issue/api/queries'
 import { useCoderSessions } from '../../../entities/coder-session/model/useCoderSessions'
 import { api } from '../../../shared/api/client'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'

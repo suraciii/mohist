@@ -23,7 +23,7 @@ const mockUseIssueDiff = vi.fn()
 const mockUseIssueCommits = vi.fn()
 const mockUseCommitDiff = vi.fn()
 
-vi.mock('../../../entities/project/api/queries', () => ({
+vi.mock('../../../entities/issue/api/queries', () => ({
   useIssue: (...args: unknown[]) => mockUseIssue(...args),
   useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
   useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),

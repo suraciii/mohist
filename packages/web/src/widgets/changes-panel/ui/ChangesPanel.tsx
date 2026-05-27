@@ -1,7 +1,7 @@
 import type { DiffFile, CommitEntry, IssueDiffResponse, IssueCommitsResponse } from '../../../shared/api/types'
 import { formatTimeAgo } from '../../../shared/lib/format-time'
 import { DiffViewer } from '../../issue-changed-files/ui/DiffViewer'
-import { useCommitDiff } from '../../../entities/project/api/queries'
+import { useCommitDiff } from '../../../entities/issue/api/queries'
 
 function CommitRow({
   issueNumber,

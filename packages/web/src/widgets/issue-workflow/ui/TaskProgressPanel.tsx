@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { StageTaskState, WorkflowStage } from '../../../shared/api/types'
-import { useWorkflowTimeline } from '../../../entities/project/api/queries'
+import { useWorkflowTimeline } from '../../../entities/issue/api/queries'
 
 interface TaskProgressPanelProps {
   issueNumber: number

@@ -10,7 +10,7 @@ type WorktreeStatus = {
   isRebaseInProgress: boolean
 }
 
-vi.mock('../src/entities/project/api/queries', async () => {
+vi.mock('../src/entities/issue/api/queries', async () => {
   return {
     useWorktreeStatus: vi.fn(),
   }
@@ -33,7 +33,7 @@ vi.mock('../src/shared/api/client', async () => ({
   },
 }))
 
-import { useWorktreeStatus } from '../src/entities/project/api/queries'
+import { useWorktreeStatus } from '../src/entities/issue/api/queries'
 import { WorktreePanel } from '../src/widgets/worktree/ui/WorktreePanel'
 
 const mockedUseWorktreeStatus = vi.mocked(useWorktreeStatus)

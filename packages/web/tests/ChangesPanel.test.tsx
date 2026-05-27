@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from './test-utils'
 import type { IssueDiffResponse, IssueCommitsResponse } from '../src/shared/api/types'
 
-vi.mock('../src/entities/project/api/queries', async () => {
+vi.mock('../src/entities/issue/api/queries', async () => {
   return {
     useCommitDiff: vi.fn(() => ({
       data: undefined,

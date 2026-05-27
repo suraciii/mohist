@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/project/api/queries'
+import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings/api/queries'
 import type { Model } from '../../../shared/api/types'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 

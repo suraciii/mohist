@@ -21,8 +21,8 @@ vi.mock('react-router-dom', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../entities/project/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project/api/queries')>()
+vi.mock('../../../entities/epic/api/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/epic/api/queries')>()
   return {
     ...actual,
     useEpics: mocks.useEpics,

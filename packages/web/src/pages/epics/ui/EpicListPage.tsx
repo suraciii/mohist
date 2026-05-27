@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEpics } from '../../../entities/project/api/queries'
+import { useEpics } from '../../../entities/epic/api/queries'
 import { EpicStatus, type EpicWithProgress } from '../../../shared/api/types'
 import { EpicCreateDialog } from '../../../features/create-epic/ui/EpicCreateDialog'
 

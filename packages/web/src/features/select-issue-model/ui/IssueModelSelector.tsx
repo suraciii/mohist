@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { Popover, Transition } from '@headlessui/react'
 import fuzzysort from 'fuzzysort'
-import { useAvailableModelIds, useOpencodeModel } from '../../../entities/project/api/queries'
+import { useAvailableModelIds, useOpencodeModel } from '../../../entities/settings/api/queries'
 import { api } from '../../../shared/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
