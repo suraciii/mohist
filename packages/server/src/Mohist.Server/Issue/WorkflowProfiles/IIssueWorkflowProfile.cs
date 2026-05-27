@@ -11,7 +11,8 @@ public interface IIssueWorkflowProfile
     string Description { get; }
     bool IsDefault { get; }
     WorkflowDefinitionInput Definition { get; }
-    string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project);
+    string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Dictionary<string, object?>? globalAgentConfig = null);
+    Dictionary<string, Dictionary<string, string>>? BuildStageVariables(Domain.Issue issue, Dictionary<string, Dictionary<string, object?>>? globalStageAgentConfigs = null);
     MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusSnapshot? workflow);
     MohistDefaultWorkflowState ProjectWorkflowState(Queries.IssueReadModel issue, WorkflowStatusSnapshot? workflow);
 }

@@ -1,18 +1,21 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Mohist.Cli;
 
 internal static class MohistCliCommands
 {
-    public static RootCommand Build(MohistCliApi api)
+    public static RootCommand Build(MohistCliApi api, IServiceProvider provider)
     {
         var root = new RootCommand("Mohist CLI");
 
         root.Subcommands.Add(BuildStatusCommand(api));
         root.Subcommands.Add(BuildLogsCommand(api));
-        root.Subcommands.Add(ServerCommands.Build(api));
-        root.Subcommands.Add(RunnerCommands.Build(api));
+        root.Subcommands.Add(ServerCommands.Build(api, provider));
+        root.Subcommands.Add(RunnerCommands.Build(api, provider));
+        root.Subcommands.Add(InstallCommands.Build(provider));
+        root.Subcommands.Add(UpdateCommands.Build(provider));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
@@ -49,8 +52,19 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static SystemdServiceInstaller CreateSystemd(MohistCliApi api) =>
-        new(api.Output, api.Error, api.FileSystem);
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor)
+    {
+        var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor);
+        var services = new ServiceCollection();
+        services.AddSingleton(api);
+        services.AddSingleton(fileSystem);
+        services.AddSingleton(commandExecutor);
+        services.AddSingleton<SystemdServiceInstaller>();
+        services.AddSingleton<SourceCodeUpdater>();
+        var provider = services.BuildServiceProvider();
+        var root = Build(api, provider);
+        return root.Parse(args).InvokeAsync();
+    }
 
     internal static string Query(
         string? ProjectId = null,
@@ -74,27 +88,6 @@ internal static class MohistCliCommands
             if (!string.IsNullOrWhiteSpace(value))
                 parts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
         }
-    }
-
-    public static Task<int> RunAsync(string[] args)
-    {
-        var api = new MohistCliApi();
-        var root = Build(api);
-        return root.Parse(args).InvokeAsync();
-    }
-
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error)
-    {
-        var api = new MohistCliApi(http, output, error);
-        var root = Build(api);
-        return root.Parse(args).InvokeAsync();
-    }
-
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem)
-    {
-        var api = new MohistCliApi(http, output, error, fileSystem);
-        var root = Build(api);
-        return root.Parse(args).InvokeAsync();
     }
 
     private static Command BuildStatusCommand(MohistCliApi api)

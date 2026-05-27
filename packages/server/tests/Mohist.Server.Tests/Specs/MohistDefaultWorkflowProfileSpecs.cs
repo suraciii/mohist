@@ -59,6 +59,44 @@ public class MohistDefaultWorkflowProfileSpecs
     }
 
     [Fact]
+    public void AgentConfig_BuildsFlatAgentVariableAndStageOverrides()
+    {
+        var profile = new MohistDefaultIssueWorkflowProfile();
+        var issue = new Mohist.Server.Issue.Domain.Issue(
+            "issue-1",
+            "project-1",
+            1,
+            "Agent config",
+            agentConfig: new Dictionary<string, object?> { ["timeout"] = 1200 },
+            stageModels: new Dictionary<string, string> { ["plan"] = "anthropic/claude" });
+
+        var variables = profile.BuildVariables(
+            "wr-1",
+            issue,
+            new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"),
+            new Dictionary<string, object?> { ["model"] = "openai/gpt-4o", ["probeTimeoutMs"] = 30000 });
+        var stageVariables = profile.BuildStageVariables(
+            issue,
+            new Dictionary<string, Dictionary<string, object?>>
+            {
+                ["check"] = new() { ["model"] = "openai/o3" },
+            });
+
+        using var document = JsonDocument.Parse(variables);
+        var opencode = document.RootElement.GetProperty("agent").GetProperty("opencode");
+        Assert.Equal("openai/gpt-4o", opencode.GetProperty("model").GetString());
+        Assert.Equal(1200, opencode.GetProperty("timeout").GetInt32());
+        Assert.Equal(30000, opencode.GetProperty("probeTimeoutMs").GetInt32());
+        Assert.False(opencode.TryGetProperty("stage", out _));
+
+        Assert.NotNull(stageVariables);
+        using var planAgent = JsonDocument.Parse(stageVariables!["plan"]["agent"]);
+        Assert.Equal("anthropic/claude", planAgent.RootElement.GetProperty("opencode").GetProperty("model").GetString());
+        using var checkAgent = JsonDocument.Parse(stageVariables["check"]["agent"]);
+        Assert.Equal("openai/o3", checkAgent.RootElement.GetProperty("opencode").GetProperty("model").GetString());
+    }
+
+    [Fact]
     public void WorkflowYamlParser_ParsesRetryTasksAndWithObjects()
     {
         var definition = MohistWorkflow.ParseYaml("""

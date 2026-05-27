@@ -14,7 +14,9 @@ public sealed class IssueSnapshot
     public string[] Labels { get; set; } = [];
     public string Priority { get; set; } = "p2";
     public string? Model { get; set; }
+    public Dictionary<string, object?>? AgentConfig { get; set; }
     public Dictionary<string, string>? StageModels { get; set; }
+    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? ArchivedAt { get; set; }
@@ -48,7 +50,9 @@ public sealed class IssueSnapshot
         Labels = issue.Labels,
         Priority = issue.Priority,
         Model = issue.Model,
+        AgentConfig = issue.AgentConfig,
         StageModels = issue.StageModels,
+        StageVariables = issue.StageVariables,
         CreatedAt = issue.CreatedAt,
         UpdatedAt = issue.UpdatedAt,
         ArchivedAt = issue.ArchivedAt,
@@ -101,7 +105,9 @@ public sealed class IssueSnapshot
             Labels,
             Priority,
             Model,
+            AgentConfig,
             StageModels,
+            StageVariables,
             CreatedAt == default ? DateTime.UtcNow : CreatedAt,
             UpdatedAt == default ? DateTime.UtcNow : UpdatedAt,
             ArchivedAt,

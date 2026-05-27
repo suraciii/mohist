@@ -1,33 +1,26 @@
-using Microsoft.Data.Sqlite;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Mohist.Server.Config;
-using Mohist.Server.Storage.Db;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class ConfigServiceSpecs : IAsyncLifetime
 {
-    private SqliteConnection _connection = null!;
     private ConfigService _svc = null!;
+    private string _configPath = null!;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        await _connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_connection)
-            .Options;
-        var db = new MohistDbContext(options);
-        await db.Database.EnsureCreatedAsync();
-        _svc = new ConfigService(new TestFactory(_connection), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance);
+        var config = new ConfigurationBuilder().Build();
+        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
+        _svc = new ConfigService(config, Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance, _configPath);
+        return Task.CompletedTask;
     }
 
-    public async Task DisposeAsync()
+    public Task DisposeAsync()
     {
-        await _connection.CloseAsync();
-        await _connection.DisposeAsync();
+        if (File.Exists(_configPath)) File.Delete(_configPath);
+        return Task.CompletedTask;
     }
 
     [Fact]
@@ -68,18 +61,5 @@ public class ConfigServiceSpecs : IAsyncLifetime
         await _svc.SetAsync("model", "anthropic/claude");
         var all = await _svc.GetAllAsync();
         Assert.Equal("anthropic/claude", all["model"]);
-    }
-
-    private class TestFactory : IDbContextFactory<MohistDbContext>
-    {
-        private readonly SqliteConnection _connection;
-        public TestFactory(SqliteConnection connection) => _connection = connection;
-        public MohistDbContext CreateDbContext()
-        {
-            var options = new DbContextOptionsBuilder<MohistDbContext>()
-                .UseSqlite(_connection)
-                .Options;
-            return new MohistDbContext(options);
-        }
     }
 }

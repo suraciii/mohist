@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Mohist.Server.Config;
 using Mohist.Server.Events;
 using Xunit;
 
@@ -54,6 +57,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly IEventBus _eventBus;
     private readonly string _runnerRoot;
+    private readonly string _configPath;
     private string? _webRoot;
 
     public MohistWebApplicationFactory(string connectionString, IEventBus eventBus, string runnerRoot)
@@ -61,6 +65,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         _connectionString = connectionString;
         _eventBus = eventBus;
         _runnerRoot = runnerRoot;
+        _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -83,6 +88,11 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<IEventBus>(_eventBus);
+            services.RemoveAll<ConfigService>();
+            services.AddSingleton(provider => new ConfigService(
+                provider.GetRequiredService<IConfiguration>(),
+                provider.GetRequiredService<ILogger<ConfigService>>(),
+                _configPath));
         });
     }
 

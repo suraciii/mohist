@@ -3,7 +3,7 @@ import { Readable, Writable } from "node:stream"
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { numberInput, stringInput } from "../core/json.js"
+import { numberInput, objectInput, stringInput } from "../core/json.js"
 import { killProcess, sanitizedEnvironment } from "../system/process.js"
 import { verifyExpectations } from "./expectations.js"
 
@@ -12,6 +12,13 @@ const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
+
+interface AgentConfig {
+  model?: string
+  timeoutMs?: number
+  livenessQuietThresholdMs?: number
+  probeTimeoutMs?: number
+}
 
 interface AcpSessionResult {
   text: string
@@ -46,12 +53,33 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const result = await runAcpSession(context, prompt)
   const verification = await verifyExpectations(context)
   const ok = result.success && verification.satisfied
+  const agentConfig = resolveAgentConfig(context.with)
   if (context.session) await emitSessionCompleted(context, ok ? "completed" : "failed", ok ? "Agent completed" : result.error ?? verification.message, result.exitCode ?? (ok ? 0 : 1))
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
-    output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: stringInput(context.with, "model"), text: result.text, error: result.error, expectation: verification }),
+    output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: agentConfig?.model, text: result.text, error: result.error, expectation: verification }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
+  }
+}
+
+function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined {
+  if (!with_) return undefined
+  const agent = objectInput(with_, "agent")
+  if (agent && typeof agent === "object") {
+    return {
+      model: stringInput(agent as JsonObject, "model") ?? undefined,
+      timeoutMs: numberInput(agent as JsonObject, "timeout") ?? undefined,
+      livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
+      probeTimeoutMs: numberInput(agent as JsonObject, "probeTimeoutMs") ?? undefined,
+    }
+  }
+  // Fallback: read directly from with (legacy format)
+  return {
+    model: stringInput(with_, "model") ?? undefined,
+    timeoutMs: numberInput(with_, "timeout") ?? undefined,
+    livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
+    probeTimeoutMs: numberInput(with_, "probeTimeoutMs") ?? undefined,
   }
 }
 
@@ -86,6 +114,7 @@ function formatValue(value: unknown): string {
 
 async function runAcpSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const acpProcess = acpProcessFactory(context)
+  const agentConfig = resolveAgentConfig(context.with)
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
@@ -127,7 +156,7 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
   )
 
   try {
-    const timeoutMs = numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
+    const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
     const initialize = await Promise.race([
       connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "mohist-runner", version: "0.1.0" } }),
       timeout(timeoutMs),
@@ -146,7 +175,7 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
     sessionId = session.sessionId
     notifyData()
 
-    const model = stringInput(context.with, "model")
+    const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
         await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
@@ -160,14 +189,14 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
     }
 
     if (context.session) {
-      await emitSessionStarted(context, sessionId, acpProcess.processPid)
+      await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig)
       await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
     }
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
       timeoutMs,
-      livenessQuietThresholdMs: numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
-      probeTimeoutMs: numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
+      livenessQuietThresholdMs: agentConfig?.livenessQuietThresholdMs ?? numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
+      probeTimeoutMs: agentConfig?.probeTimeoutMs ?? numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
       lastDataAt: () => lastDataAt,
       dataVersion: () => dataVersion,
       waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
@@ -294,8 +323,8 @@ function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"da
   return new Promise((resolve) => waiters.add(() => resolve("data")))
 }
 
-async function emitSessionStarted(context: ActionContext, externalSessionId: string, processPid: number | null) {
-  if (context.telemetry && context.session) await context.telemetry.started(context.session.id, { externalSessionId, workDir: context.workDir, changeDir: null, processPid, model: stringInput(context.with, "model") }, context.signal)
+async function emitSessionStarted(context: ActionContext, externalSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined) {
+  if (context.telemetry && context.session) await context.telemetry.started(context.session.id, { externalSessionId, workDir: context.workDir, changeDir: null, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
 }
 
 async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {

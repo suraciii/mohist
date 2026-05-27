@@ -89,6 +89,7 @@ export interface Issue {
   stage: IssueStage
   workflowStage?: WorkflowStage | null
   workflowStatus?: string | null
+  workflowRunId?: string | null
   status: IssueStatus
   projectId: string
   labels: string[]
@@ -100,6 +101,7 @@ export interface Issue {
   approvalState?: ApprovalState
   priority?: string | null
   model?: string | null
+  agentConfig?: Record<string, unknown> | null
   stageModels?: Record<string, string> | null
   archivedAt?: string
   blockedReason?: string

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 
+namespace Mohist.Cli;
+
 internal sealed class SystemdServiceInstaller
 {
     private const string ServerUnit = "mohist.service";
@@ -9,12 +11,18 @@ internal sealed class SystemdServiceInstaller
     private readonly TextWriter _out;
     private readonly TextWriter _err;
     private readonly IFileSystem _fileSystem;
+    private readonly ICommandExecutor _commandExecutor;
 
-    public SystemdServiceInstaller(TextWriter output, TextWriter error, IFileSystem? fileSystem = null)
+    public SystemdServiceInstaller(
+        TextWriter output,
+        TextWriter error,
+        IFileSystem? fileSystem = null,
+        ICommandExecutor? commandExecutor = null)
     {
         _out = output;
         _err = error;
         _fileSystem = fileSystem ?? RealFileSystem.Instance;
+        _commandExecutor = commandExecutor ?? new SystemCommandExecutor();
     }
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
@@ -83,14 +91,26 @@ internal sealed class SystemdServiceInstaller
             return 0;
         }
 
-        var daemonReload = await RunAsync("systemctl", ["--user", "daemon-reload"]);
-        if (daemonReload != 0) return daemonReload;
+        var (daemonReload, _, daemonReloadErr) = await _commandExecutor.ExecuteAsync("systemctl", ["--user", "daemon-reload"]);
+        if (daemonReload != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(daemonReloadErr)) _err.Write(daemonReloadErr);
+            return daemonReload;
+        }
 
-        var enable = await RunAsync("systemctl", ["--user", "enable", unit.Name]);
-        if (enable != 0) return enable;
+        var (enable, _, enableErr) = await _commandExecutor.ExecuteAsync("systemctl", ["--user", "enable", unit.Name]);
+        if (enable != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(enableErr)) _err.Write(enableErr);
+            return enable;
+        }
 
-        var start = await RunAsync("systemctl", ["--user", "restart", unit.Name]);
-        if (start != 0) return start;
+        var (start, _, startErr) = await _commandExecutor.ExecuteAsync("systemctl", ["--user", "restart", unit.Name]);
+        if (start != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(startErr)) _err.Write(startErr);
+            return start;
+        }
 
         _out.WriteLine($"Installed and started {unit.Name}");
         await TryEnableLingerAsync();
@@ -134,7 +154,10 @@ internal sealed class SystemdServiceInstaller
             return 0;
         }
 
-        return await RunAsync("journalctl", args.ToArray());
+        var (code, stdout, stderr) = await _commandExecutor.ExecuteAsync("journalctl", args.ToArray());
+        if (!string.IsNullOrWhiteSpace(stdout)) _out.Write(stdout);
+        if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
+        return code;
     }
 
     private async Task<int> UninstallAsync(string unitName, ServiceCommandOptions options)
@@ -150,8 +173,12 @@ internal sealed class SystemdServiceInstaller
             return 0;
         }
 
-        var disable = await RunAsync("systemctl", ["--user", "disable", "--now", unitName]);
-        if (disable != 0) return disable;
+        var (disable, _, disableErr) = await _commandExecutor.ExecuteAsync("systemctl", ["--user", "disable", "--now", unitName]);
+        if (disable != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(disableErr)) _err.Write(disableErr);
+            return disable;
+        }
 
         if (_fileSystem.Exists(unitPath))
         {
@@ -163,7 +190,9 @@ internal sealed class SystemdServiceInstaller
             _out.WriteLine($"Unit file not found: {unitPath}");
         }
 
-        return await RunAsync("systemctl", ["--user", "daemon-reload"]);
+        var (reload, _, reloadErr) = await _commandExecutor.ExecuteAsync("systemctl", ["--user", "daemon-reload"]);
+        if (reload != 0 && !string.IsNullOrWhiteSpace(reloadErr)) _err.Write(reloadErr);
+        return reload;
     }
 
     private async Task<int> RunSystemctlAsync(string unitName, ServiceCommandOptions options, params string[] command)
@@ -178,7 +207,10 @@ internal sealed class SystemdServiceInstaller
             return 0;
         }
 
-        return await RunAsync("systemctl", args.ToArray());
+        var (code, stdout, stderr) = await _commandExecutor.ExecuteAsync("systemctl", args.ToArray());
+        if (!string.IsNullOrWhiteSpace(stdout)) _out.Write(stdout);
+        if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
+        return code;
     }
 
     private bool EnsureSystemdSupported(bool dryRun)
@@ -188,42 +220,11 @@ internal sealed class SystemdServiceInstaller
         return false;
     }
 
-    private async Task<int> RunAsync(string fileName, string[] args)
-    {
-        using var process = new Process();
-        process.StartInfo = new ProcessStartInfo(fileName)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var arg in args)
-            process.StartInfo.ArgumentList.Add(arg);
-
-        try
-        {
-            process.Start();
-        }
-        catch (Exception ex)
-        {
-            _err.WriteLine($"Failed to run {fileName}: {ex.Message}");
-            return 1;
-        }
-
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (!string.IsNullOrWhiteSpace(stdout)) _out.Write(stdout);
-        if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
-        return process.ExitCode;
-    }
-
     private async Task TryEnableLingerAsync()
     {
         var user = Environment.UserName;
         if (string.IsNullOrWhiteSpace(user)) return;
-        var code = await RunAsync("loginctl", ["enable-linger", user]);
+        var (code, _, stderr) = await _commandExecutor.ExecuteAsync("loginctl", ["enable-linger", user]);
         if (code != 0)
             _err.WriteLine("Warning: loginctl enable-linger failed; service may stop when the user logs out.");
     }

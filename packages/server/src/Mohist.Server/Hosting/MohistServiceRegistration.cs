@@ -36,7 +36,7 @@ public static class MohistServiceRegistration
         services.AddHostedService<WorkflowBacklogRecoveryService>();
         services.AddHostedService<AgentSessionRecoveryService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
-        services.AddScoped<ConfigService>();
+        services.AddSingleton<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
 

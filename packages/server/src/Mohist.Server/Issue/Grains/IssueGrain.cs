@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
@@ -13,13 +14,15 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IStateStore<Issue.Domain.Issue> _issueStore;
     private readonly IEventStore _events;
     private readonly IssueWorkflowProfileRegistry _profiles;
+    private readonly Config.ConfigService _config;
     private readonly ILogger<IssueGrain> _log;
 
-    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, IEventStore events, IssueWorkflowProfileRegistry profiles, ILogger<IssueGrain> log)
+    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, IEventStore events, IssueWorkflowProfileRegistry profiles, Config.ConfigService config, ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
         _events = events;
         _profiles = profiles;
+        _config = config;
         _log = log;
     }
 
@@ -49,12 +52,16 @@ public class IssueGrain : Grain, IIssueGrain
         var correlation = new WorkflowCorrelationContext(projectId, "issue", _issue.Id, _issue.Number);
         var projectContext = new WorkflowProjectContext(projectId, projectName, projectPath, baseBranch);
         var profile = _profiles.Get(_issue.WorkflowProfileId);
+        var globalAgentConfig = await _config.GetAgentConfigAsync();
+        var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(
             profile.Definition,
             correlation,
-            new WorkflowStartInput(profile.BuildVariables(wrId, _issue, projectContext)));
+            new WorkflowStartInput(
+                profile.BuildVariables(wrId, _issue, projectContext, globalAgentConfig),
+                profile.BuildStageVariables(_issue, globalStageAgentConfigs)));
 
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
@@ -87,7 +94,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task UpdateAsync(string title, string? body)
     {
         EnsureIssue();
-        _issue!.Update(title, body, null, null, null, null);
+        _issue!.Update(title, body, null, null, null, null, null, null);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
@@ -119,7 +126,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task UpdateFullAsync(UpdateIssueData data)
     {
         EnsureIssue();
-        _issue!.Update(data.Title, data.Body, data.Labels, data.Priority, data.Model, data.StageModels);
+        _issue!.Update(data.Title, data.Body, data.Labels, data.Priority, data.Model, data.AgentConfig, data.StageModels, data.StageVariables);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
@@ -147,7 +154,7 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null)
+    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, object?>? agentConfig = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -161,7 +168,9 @@ public class IssueGrain : Grain, IIssueGrain
             labels,
             priority ?? "p2",
             model,
+            agentConfig,
             stageModels,
+            null,
             workflowProfileId);
         await _issueStore.SaveAsync(GrainKey, _issue);
         await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
@@ -269,5 +278,7 @@ public record UpdateIssueData(
     [property: Id(2)] string[]? Labels = null,
     [property: Id(3)] string? Priority = null,
     [property: Id(4)] string? Model = null,
-    [property: Id(5)] Dictionary<string, string>? StageModels = null
+    [property: Id(5)] Dictionary<string, object?>? AgentConfig = null,
+    [property: Id(6)] Dictionary<string, string>? StageModels = null,
+    [property: Id(7)] Dictionary<string, Dictionary<string, string>>? StageVariables = null
 );

@@ -1,6 +1,7 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
-using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Issue.Queries;
 
@@ -19,6 +20,8 @@ public class IssueInfo
     [Id(9)]  public string Priority { get; set; } = "p2";
     [Id(10)] public string? Model { get; set; }
     [Id(11)] public Dictionary<string, string>? StageModels { get; set; }
+    [Id(26)] public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
+    [Id(27)] public Dictionary<string, object?>? AgentConfig { get; set; }
     [Id(12)] public string CreatedAt { get; set; } = "";
     [Id(13)] public string UpdatedAt { get; set; } = "";
     [Id(14)] public string? ArchivedAt { get; set; }

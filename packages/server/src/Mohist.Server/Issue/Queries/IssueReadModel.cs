@@ -18,6 +18,7 @@ public class IssueReadModel
     public string[] Labels { get; set; } = [];
     public string Priority { get; set; } = "p2";
     public string? Model { get; set; }
+    public Dictionary<string, object?>? AgentConfig { get; set; }
     public Dictionary<string, string>? StageModels { get; set; }
     public string CreatedAt { get; set; } = "";
     public string UpdatedAt { get; set; } = "";

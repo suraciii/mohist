@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -17,12 +18,16 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkDispatch?> GetWorkAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
     Task FailInFlightWorkAsync(string runnerId, string reason);
+    Task<WorkflowVariablesSnapshot?> GetVariablesAsync();
+    Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson);
+    Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
 }
 
 [GenerateSerializer]
 public sealed record WorkflowStartInput(
-    [property: Id(0)] string? Variables = null);
+    [property: Id(0)] string? Variables = null,
+    [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null);
 
 [GenerateSerializer]
 public sealed record WorkflowCorrelationContext(
@@ -30,6 +35,11 @@ public sealed record WorkflowCorrelationContext(
     [property: Id(1)] string? OwnerType = null,
     [property: Id(2)] string? OwnerId = null,
     [property: Id(3)] int? OwnerNumber = null);
+
+[GenerateSerializer]
+public sealed record WorkflowVariablesSnapshot(
+    [property: Id(0)] string Variables,
+    [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null);
 
 [GenerateSerializer]
 public sealed record WorkflowDefinitionInput(List<StageDefinitionInput> Stages);

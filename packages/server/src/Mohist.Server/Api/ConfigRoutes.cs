@@ -8,30 +8,46 @@ public static class ConfigRoutes
     {
         app.MapGet("/api/model", async (ConfigService svc) =>
         {
-            var all = await svc.GetAllAsync();
-            all.TryGetValue("model", out var model);
+            var agent = await svc.GetAgentConfigAsync();
+            var model = agent?.GetValueOrDefault("model")?.ToString();
             return ApiResults.Ok(new { model = string.IsNullOrWhiteSpace(model) ? null : model });
         });
 
         app.MapPut("/api/model", async (ModelRequest req, ConfigService svc) =>
         {
-            if (req.Model is null) await svc.ClearAsync("model");
-            else await svc.SetAsync("model", req.Model);
+            await svc.SetAgentModelAsync(req.Model);
             return ApiResults.Ok(new { req.Model });
         });
 
         app.MapGet("/api/opencode-model", async (ConfigService svc) =>
         {
-            var all = await svc.GetAllAsync();
-            all.TryGetValue("model", out var model);
+            var agent = await svc.GetAgentConfigAsync();
+            var model = agent?.GetValueOrDefault("model")?.ToString();
             return ApiResults.Ok(new { model = string.IsNullOrWhiteSpace(model) ? null : model });
         });
 
         app.MapPut("/api/opencode-model", async (ModelRequest req, ConfigService svc) =>
         {
-            if (req.Model is null) await svc.ClearAsync("model");
-            else await svc.SetAsync("model", req.Model);
+            await svc.SetAgentModelAsync(req.Model);
             return ApiResults.Ok(new { req.Model });
+        });
+
+        app.MapGet("/api/agent-config", async (ConfigService svc) =>
+        {
+            var agent = await svc.GetAgentConfigAsync();
+            var stageAgents = await svc.GetStageAgentConfigsAsync();
+            return ApiResults.Ok(new { agent, stageAgents = stageAgents.Count == 0 ? null : stageAgents });
+        });
+
+        app.MapPut("/api/agent-config", async (AgentConfigRequest req, ConfigService svc) =>
+        {
+            if (req.Agent is null) await svc.ClearAsync("agent");
+            else await svc.SetAsync("agent", req.Agent);
+
+            if (req.StageAgents is null) await svc.ClearAsync("stageAgents");
+            else await svc.SetAsync("stageAgents", req.StageAgents);
+
+            return ApiResults.Ok(new { agent = await svc.GetAgentConfigAsync(), stageAgents = await svc.GetStageAgentConfigsAsync() });
         });
 
         app.MapGet("/api/stage-models", async (ConfigService svc) =>
@@ -93,3 +109,4 @@ public static class ConfigRoutes
 public record ConfigValueRequest(object? Value);
 public record ModelRequest(string? Model);
 public record StageModelsRequest(Dictionary<string, string>? StageModels);
+public record AgentConfigRequest(Dictionary<string, object?>? Agent, Dictionary<string, Dictionary<string, object?>>? StageAgents = null);
