@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import { ProjectProvider } from '../../../entities/project/model/ProjectContext'
+import { ProjectProvider } from '../../../entities/project'
 import { Header } from './Header'
 
-vi.mock('../../../entities/project/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project/api/queries')>()
+vi.mock('../../../entities/project', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/project')>()
   return {
     ...actual,
     useDeleteProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),

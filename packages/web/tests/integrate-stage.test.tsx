@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
-import { Stage } from '../src/shared/api/types'
+import { Stage } from '../src/entities/issue'
 import { WorkflowStatusTimeline } from '../src/widgets/coder-session/ui/SessionTimeline'
 
 describe('Integrate stage rendering', () => {

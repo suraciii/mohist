@@ -5,8 +5,8 @@ import { act, cleanup, render, screen, fireEvent, waitFor, within } from '@testi
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { KanbanBoard } from './KanbanBoard'
-import { IssueStage, IssueStatus, WorkflowStage } from '../../../shared/api/types'
-import type { Issue, AgentStatus, ApprovalState } from '../../../shared/api/types'
+import type { AgentStatus } from '../../../entities/agent'
+import { IssueStage, IssueStatus, WorkflowStage, type Issue, type ApprovalState } from '../../../entities/issue'
 import {
   parseBoardQuery,
   serializeBoardQuery,
@@ -20,8 +20,8 @@ const { LABELS_MOCK } = vi.hoisted(() => ({
   LABELS_MOCK: ['bug', 'feature', 'docs', 'workflow', 'ux', 'webui', 'improvement', 'reliability', 'session', 'agent'],
 }))
 
-vi.mock('../../../entities/issue/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/issue/api/queries')>()
+vi.mock('../../../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue')>()
   return {
     ...actual,
     useLabels: vi.fn().mockReturnValue({ data: LABELS_MOCK, isLoading: false }),

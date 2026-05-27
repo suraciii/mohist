@@ -1,16 +1,15 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { useIssue } from '../../../entities/issue/api/queries'
-import { useCoderSessions } from '../../../entities/coder-session/model/useCoderSessions'
-import { api } from '../../../shared/api/client'
+import { useIssue } from '../../../entities/issue'
+import { useCoderSessions } from '../../../entities/coder-session'
+import { getCoderSessionDetail } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { useSessionTranscript } from '../../../widgets/session-transcript/model/useSessionTranscript'
-import { projectTurn } from '../../../widgets/session-transcript/model/session-transcript-display'
-import type { CoderSessionDetail, SessionStatusKind } from '../../../shared/api/types'
-import { SessionTranscriptLayout } from '../../../widgets/session-transcript/ui/SessionTranscriptLayout'
-import { Button } from '@/components/ui/button'
+import { useProject } from '../../../entities/project'
+import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
+import type { CoderSessionDetail, SessionStatusKind } from '../../../entities/coder-session'
+import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
+import { Button } from '@/shared/ui/components/button'
 
 type StatusKind = SessionStatusKind
 
@@ -310,7 +309,7 @@ export function SessionPage() {
     isError: detailError,
   } = useQuery<CoderSessionDetail, Error>({
     queryKey: ['issues', issueNumber, projectId, 'coder-sessions', sessionId],
-    queryFn: () => api.getCoderSessionDetail(issueNumber, sessionId!, projectId),
+    queryFn: () => getCoderSessionDetail(issueNumber, sessionId!, projectId),
     enabled: !!sessionId && sessionId.length > 0 && issueNumber > 0 && !!projectId,
   })
 

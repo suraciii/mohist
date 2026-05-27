@@ -1,4 +1,4 @@
-import type { WorkflowConvergenceState } from '../../../shared/api/types'
+import type { WorkflowConvergenceState } from '../../../entities/issue'
 
 interface WorkflowConvergencePanelProps {
   convergence: WorkflowConvergenceState | null | undefined

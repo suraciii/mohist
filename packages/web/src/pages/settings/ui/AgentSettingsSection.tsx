@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/settings/api/queries'
-import type { AgentRuntimeConfig } from '../../../shared/api/types'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/settings'
+import type { AgentRuntimeConfig } from '../../../entities/settings'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
 
 const DEFAULTS: AgentRuntimeConfig = {
   timeout: 1800000,

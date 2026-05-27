@@ -5,13 +5,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { api } from '../../../shared/api/client'
-import { useLabels } from '../../../entities/issue/api/queries'
-import type { Issue } from '../../../shared/api/types'
+} from '@/shared/ui/components/dialog'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Textarea } from '@/shared/ui/components/textarea'
+import { updateIssue, useLabels } from '../../../entities/issue'
+import type { Issue } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
@@ -43,7 +42,7 @@ export function EditIssueDialog({ open, onClose, issue }: Props) {
     mutationFn: () => {
       const add = labels.filter((l) => !issue.labels.includes(l))
       const remove = issue.labels.filter((l) => !labels.includes(l))
-      return api.updateIssue(issue.number, {
+      return updateIssue(issue.number, {
         title,
         body: body || undefined,
         ...(add.length > 0 ? { addLabels: add } : {}),

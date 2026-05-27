@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { EpicStatus } from '../../../shared/api/types'
+import { EpicStatus } from '../../../entities/epic'
 import { EpicListPage } from './EpicListPage'
 
 const mockNavigate = vi.fn()
@@ -21,8 +21,8 @@ vi.mock('react-router-dom', async (importOriginal) => {
   }
 })
 
-vi.mock('../../../entities/epic/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic/api/queries')>()
+vi.mock('../../../entities/epic', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/epic')>()
   return {
     ...actual,
     useEpics: mocks.useEpics,

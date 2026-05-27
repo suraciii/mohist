@@ -5,7 +5,7 @@ import type {
   ReasoningPart,
   ToolPart,
   ErrorPart,
-} from '../../../shared/api/types'
+} from '../../../entities/coder-session'
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'
 

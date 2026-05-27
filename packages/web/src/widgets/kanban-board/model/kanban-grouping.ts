@@ -1,5 +1,4 @@
-import type { Issue } from '../../../shared/api/types'
-import { IssueStage } from '../../../shared/api/types'
+import { IssueStage, type Issue } from '../../../entities/issue'
 
 export interface Column {
   key: IssueStage

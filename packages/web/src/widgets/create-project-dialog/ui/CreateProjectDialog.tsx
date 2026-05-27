@@ -4,13 +4,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { DialogSelectDirectory } from '../../../shared/ui/DialogSelectDirectory'
-import { useCreateProject, useUseProject } from '../../../entities/project/api/queries'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+} from '@/shared/ui/components/dialog'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Label } from '@/shared/ui/components/label'
+import { DialogSelectDirectory } from './DialogSelectDirectory'
+import { useCreateProject, useUseProject, useProject } from '../../../entities/project'
 
 interface Props {
   open: boolean

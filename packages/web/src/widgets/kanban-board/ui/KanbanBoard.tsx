@@ -1,9 +1,9 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import type { Issue, AgentStatus } from '../../../shared/api/types'
-import { IssueStage } from '../../../shared/api/types'
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import type { AgentStatus } from '../../../entities/agent'
+import { IssueStage, type Issue } from '../../../entities/issue'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -19,7 +19,7 @@ import {
   type BoardQueryState,
   type SortMode,
 } from '../model/board-query'
-import { useLabels } from '../../../entities/issue/api/queries'
+import { useLabels } from '../../../entities/issue'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { deriveAttentionItems } from '../model/homepage-attention'
 

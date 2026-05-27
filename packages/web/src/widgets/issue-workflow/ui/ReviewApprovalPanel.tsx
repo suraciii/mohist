@@ -1,14 +1,14 @@
 import { useState, useCallback } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Card, CardContent } from '@/components/ui/card'
-import { api } from '../../../shared/api/client'
+import { Button } from '@/shared/ui/components/button'
+import { Textarea } from '@/shared/ui/components/textarea'
+import { Card, CardContent } from '@/shared/ui/components/card'
+import { approveIssue, rejectIssue } from '../../../entities/issue'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
-import { useLiveTask } from '../../../shared/model/live-task'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useLiveTask } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -106,7 +106,7 @@ export function ReviewApprovalPanel({
   const [actionError, setActionError] = useState<string | null>(null)
 
   const approveMutation = useMutation({
-    mutationFn: () => api.approveIssue(issueNumber, projectId),
+    mutationFn: () => approveIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -117,7 +117,7 @@ export function ReviewApprovalPanel({
   })
 
   const sendBackMutation = useMutation({
-    mutationFn: (message: string) => api.rejectIssue(issueNumber, { message }, projectId),
+    mutationFn: (message: string) => rejectIssue(issueNumber, { message }, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })

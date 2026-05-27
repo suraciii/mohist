@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { onAgentEvent } from '../../../shared/api/agent-events'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../../../shared/api/types'
+import { onAgentEvent } from '../../../entities/agent'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../../../entities/coder-session'
 import { parseEditInput, parsePatchOperations, parseJsonSafely } from './transcript-tool-utils'
 import {
   normalizeToolName,

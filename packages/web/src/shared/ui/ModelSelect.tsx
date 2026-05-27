@@ -1,8 +1,14 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import type { Model } from '../api/types'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
+
+export interface SelectableModel {
+  id: string
+  name: string
+  badges: string[]
+  contextWindow: number
+}
 
 function SearchIcon({ className }: { className?: string }) {
   return (
@@ -31,24 +37,24 @@ function XIcon({ className }: { className?: string }) {
 export interface ModelSelectProps {
   value: string | null
   placeholder: string
-  models: Model[] | string[]
+  models: SelectableModel[] | string[]
   onChange: (model: string) => void
   onClear?: () => void
   allowClear?: boolean
   size?: 'default' | 'compact'
 }
 
-function normalizeModels(models: Model[] | string[]): Model[] {
+function normalizeModels(models: SelectableModel[] | string[]): SelectableModel[] {
   if (models.length === 0) return []
   if (typeof models[0] === 'string') {
-    return (models as string[]).map((id): Model => ({
+    return (models as string[]).map((id): SelectableModel => ({
       id,
       name: id.split('/').pop() || id,
       badges: [],
       contextWindow: 0,
     }))
   }
-  return models as Model[]
+  return models as SelectableModel[]
 }
 
 export function ModelSelect({ value, placeholder, models, onChange, onClear, allowClear, size = 'default' }: ModelSelectProps) {
@@ -100,7 +106,7 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
   )
 
   const grouped = useMemo(() => {
-    const map = new Map<string, Model[]>()
+    const map = new Map<string, SelectableModel[]>()
     for (const m of filtered) {
       const provider = m.id.split('/')[0] || 'other'
       const list = map.get(provider) || []

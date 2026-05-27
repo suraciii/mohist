@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings/api/queries'
-import type { Model } from '../../../shared/api/types'
+import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings'
+import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
 

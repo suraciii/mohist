@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { useAgentActivity } from '../../../entities/agent/api/queries'
-import type { AgentActivitySession, AgentActivityWaiting } from '../../../shared/api/types'
+import { useAgentActivity } from '../../../entities/agent'
+import type { AgentActivitySession, AgentActivityWaiting } from '../../../entities/agent'
 
 export interface TaskProgress {
   completed: number

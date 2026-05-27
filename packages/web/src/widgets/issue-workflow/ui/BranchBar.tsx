@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
-import { WorkflowStage } from '../../../shared/api/types'
-import { api, ApiError } from '../../../shared/api/client'
-import { useWorktreeStatus } from '../../../entities/issue/api/queries'
-import { useLiveTask } from '../../../shared/model/live-task'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { Button } from '@/shared/ui/components/button'
+import { WorkflowStage, useLiveTask } from '../../../entities/issue'
+import { ApiError } from '../../../shared/api/client'
+import { rebaseIssue } from '../../../entities/issue'
+import { useWorktreeStatus } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
 
 const BRANCH_BAR_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Done])
 
@@ -23,7 +23,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const { data, isLoading } = useWorktreeStatus(issueNumber, hasWorktreeStage)
 
   const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber, projectId),
+    mutationFn: () => rebaseIssue(issueNumber, projectId),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'worktree-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })

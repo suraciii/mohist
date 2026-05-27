@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { StageTaskState, WorkflowStage } from '../../../shared/api/types'
-import { useWorkflowTimeline } from '../../../entities/issue/api/queries'
+import { Button } from '@/shared/ui/components/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/components/card'
+import type { StageTaskState, WorkflowStage } from '../../../entities/issue'
+import { useWorkflowTimeline } from '../../../entities/issue'
 
 interface TaskProgressPanelProps {
   issueNumber: number

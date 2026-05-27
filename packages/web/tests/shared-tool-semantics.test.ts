@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { FileChangeSummary } from '../src/shared/api/types'
+import type { FileChangeSummary } from '../src/entities/coder-session'
 import {
   getDisplayType,
   getToolLabel,

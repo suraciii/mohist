@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 import type { DisplayTurn, DisplayChangedFile } from '../model/session-transcript-display'
 import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'

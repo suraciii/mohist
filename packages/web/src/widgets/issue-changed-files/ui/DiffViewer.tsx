@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { parseDiff, FileBlock } from '../model/diffModel'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 
 function FileEntry({ block }: { block: FileBlock }) {
   const [expanded, setExpanded] = useState(false)

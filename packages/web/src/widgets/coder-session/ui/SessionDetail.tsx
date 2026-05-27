@@ -1,4 +1,4 @@
-import type { CoderSessionSummary } from '../../../shared/api/types'
+import type { CoderSessionSummary } from '../../../entities/coder-session'
 
 interface SessionDetailProps {
   session: CoderSessionSummary

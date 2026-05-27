@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { StatusBar } from '../../../shared/ui/StatusBar'
-import { ActiveSessionCard, WaitingCard, RecentCard } from '../../../widgets/coder-session/ui/SessionCard'
-import { useActivityCards } from '../../../widgets/coder-session/model/activity-cards'
+import { ActiveSessionCard, WaitingCard, RecentCard, useActivityCards } from '../../../widgets/coder-session'
 
 function EmptySection({ message }: { message: string }) {
   return (

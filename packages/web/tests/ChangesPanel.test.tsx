@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from './test-utils'
-import type { IssueDiffResponse, IssueCommitsResponse } from '../src/shared/api/types'
+import type { IssueDiffResponse, IssueCommitsResponse } from '../src/entities/issue'
 
 vi.mock('../src/entities/issue/api/queries', async () => {
   return {

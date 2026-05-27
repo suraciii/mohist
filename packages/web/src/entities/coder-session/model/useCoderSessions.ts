@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../../../shared/api/client'
-import { onAgentEvent } from '../../../shared/api/agent-events'
-import type { CoderSessionSummary } from '../../../shared/api/types'
-import { useProject } from '../../project/model/ProjectContext'
+import { onAgentEvent } from '../../agent/@x/events'
+import type { CoderSessionSummary } from './types'
+import { useProject } from '../../project/@x/project-context'
+import { getCoderSessions } from '../api/client'
 
 export function useCoderSessions(issueNumber: number) {
   const { projectId } = useProject()
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ['issues', issueNumber, projectId, 'coder-sessions'],
-    queryFn: () => api.getCoderSessions(issueNumber, projectId),
+    queryFn: () => getCoderSessions(issueNumber, projectId),
     enabled: issueNumber > 0 && !!projectId,
     staleTime: 30 * 1000,
   })

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { EventName, EventMap, LiveTaskState, RebaseConflictState, Issue } from '../../shared/api/types'
-import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../shared/api/agent-events'
-import type { AgentDetailEventMap } from '../../shared/api/types'
-import { useProject } from '../../entities/project/model/ProjectContext'
-import { LiveTaskContext } from '../../shared/model/live-task'
+import type { EventName, EventMap, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
+import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../entities/agent'
+import type { AgentDetailEventMap } from '../../entities/agent'
+import { useProject } from '../../entities/project'
+import { LiveTaskContext } from '../../entities/issue'
 
 const SSE_URL = '/api/events'
 const LIVE_TIMER_INTERVAL = 500

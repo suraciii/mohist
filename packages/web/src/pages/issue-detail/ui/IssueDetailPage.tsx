@@ -3,24 +3,22 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { IssueStage, IssueStatus, type RecoveryProjection } from '../../../shared/api/types'
-import { api } from '../../../shared/api/client'
-import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue/api/queries'
-import { useAgentStatus } from '../../../entities/agent/api/queries'
-import { EditIssueDialog } from '../../../features/edit-issue/ui/EditIssueDialog'
-import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow/ui/WorkflowConvergencePanel'
+import { IssueStage, IssueStatus, type RecoveryProjection } from '../../../entities/issue'
+import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue } from '../../../entities/issue'
+import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
+import { useAgentStatus } from '../../../entities/agent'
+import { EditIssueDialog } from '../../../features/edit-issue'
+import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
 import { NotFoundPage } from '../../not-found/ui/NotFoundPage'
-import { IssueModelSelector } from '../../../features/select-issue-model/ui/IssueModelSelector'
-import { BranchBar } from '../../../widgets/issue-workflow/ui/BranchBar'
-import { WorkflowView } from '../../../widgets/issue-workflow/ui/WorkflowView'
-import { SessionList } from '../../../widgets/coder-session/ui/SessionList'
-import { TaskProgressPanel } from '../../../widgets/issue-workflow/ui/TaskProgressPanel'
+import { IssueModelSelector } from '../../../features/select-issue-model'
+import { BranchBar, WorkflowView, TaskProgressPanel } from '../../../widgets/issue-workflow'
+import { SessionList } from '../../../widgets/coder-session'
 import { formatTime } from '../../../shared/lib/format-time'
-import { statusBadge, statusLabel } from '../../../shared/lib/status-badge'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+import { statusBadge, statusLabel } from '../../../entities/issue/lib/status-badge'
+import { useProject } from '../../../entities/project'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Textarea } from '@/shared/ui/components/textarea'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
@@ -129,7 +127,7 @@ export function IssueDetailPage() {
   const showCheckRepairActions = false
 
   const startMutation = useMutation({
-    mutationFn: () => api.startIssue(issueNumber, projectId),
+    mutationFn: () => startIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -142,7 +140,7 @@ export function IssueDetailPage() {
   })
 
   const addPrerequisiteMutation = useMutation({
-    mutationFn: (prerequisiteNumber: number) => api.addPrerequisite(issueNumber, prerequisiteNumber, projectId),
+    mutationFn: (prerequisiteNumber: number) => addPrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -150,7 +148,7 @@ export function IssueDetailPage() {
   })
 
   const removePrerequisiteMutation = useMutation({
-    mutationFn: (prerequisiteNumber: number) => api.removePrerequisite(issueNumber, prerequisiteNumber, projectId),
+    mutationFn: (prerequisiteNumber: number) => removePrerequisite(issueNumber, prerequisiteNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -158,14 +156,14 @@ export function IssueDetailPage() {
   })
 
   const closeMutation = useMutation({
-    mutationFn: () => api.closeIssue(issueNumber, projectId),
+    mutationFn: () => closeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })
 
   const forceStopMutation = useMutation({
-    mutationFn: () => api.forceStopIssue(issueNumber, projectId),
+    mutationFn: () => forceStopIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -174,14 +172,14 @@ export function IssueDetailPage() {
   })
 
   const reopenMutation = useMutation({
-    mutationFn: () => api.reopenIssue(issueNumber, projectId),
+    mutationFn: () => reopenIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },
   })
 
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeIssue(issueNumber, projectId),
+    mutationFn: () => resumeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -189,7 +187,7 @@ export function IssueDetailPage() {
   })
 
   const retryMutation = useMutation({
-    mutationFn: () => api.retryIssue(issueNumber, projectId),
+    mutationFn: () => retryIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -197,7 +195,7 @@ export function IssueDetailPage() {
   })
 
   const rerunMutation = useMutation({
-    mutationFn: () => api.rerunIssue(issueNumber, projectId),
+    mutationFn: () => rerunIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -205,7 +203,7 @@ export function IssueDetailPage() {
   })
 
   const addCommentMutation = useMutation({
-    mutationFn: (body: string) => api.addComment(issueNumber, body, projectId),
+    mutationFn: (body: string) => addComment(issueNumber, body, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       setCommentText('')
@@ -216,7 +214,7 @@ export function IssueDetailPage() {
   const [deleteCommentError, setDeleteCommentError] = useState<string | null>(null)
 
   const deleteCommentMutation = useMutation({
-    mutationFn: (commentId: string) => api.deleteComment(issueNumber, commentId, projectId),
+    mutationFn: (commentId: string) => deleteComment(issueNumber, commentId, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       setDeletingCommentId(null)

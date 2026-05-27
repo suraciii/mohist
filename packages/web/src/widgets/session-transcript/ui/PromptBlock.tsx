@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 import type { DisplayPrompt } from '../model/session-transcript-display'
 
 const KIND_LABELS: Record<string, string> = {

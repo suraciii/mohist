@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
-import { Button } from '@/components/ui/button'
-import type { ToolCallEntry, FileChangeSummary } from '../../../shared/api/types'
+import { Button } from '@/shared/ui/components/button'
+import type { ToolCallEntry, FileChangeSummary } from '../../../entities/coder-session'
 import {
   getToolLabel,
   getToolArgs,

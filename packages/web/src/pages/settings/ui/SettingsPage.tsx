@@ -4,8 +4,8 @@ import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Button } from '@/shared/ui/components/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
 const VALID_SECTIONS = ['ai', 'agent', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]

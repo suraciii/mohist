@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { FileBlock } from '../model/diffModel'
 import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
 
 interface DiffSearchPaneProps {
   block: FileBlock | null

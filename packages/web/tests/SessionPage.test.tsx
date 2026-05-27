@@ -3,12 +3,12 @@ import { TEST_PROJECT, baseRender, screen, fireEvent, waitFor, renderHook, act, 
 import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { SessionTranscriptView } from '../src/widgets/session-transcript/ui/SessionTranscriptView'
 import { useSessionTranscript } from '../src/widgets/session-transcript/model/useSessionTranscript'
-import { dispatchAgentEvent } from '../src/shared/api/agent-events'
+import { dispatchAgentEvent } from '../src/entities/agent'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/shared/api/types'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/entities/coder-session'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
@@ -36,14 +36,13 @@ vi.mock('../src/entities/issue/api/queries', () => ({
   useIssue: () => ({ data: sessionPageMocks.issue }),
 }))
 
-vi.mock('../src/shared/api/client', () => ({
-  api: {
-    getCoderSessionDetail: vi.fn(() => {
-      if (sessionPageMocks.detailPending) return new Promise(() => {})
-      if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-      return Promise.resolve(sessionPageMocks.detail)
-    }),
-  },
+vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
+  getCoderSessionDetail: vi.fn(() => {
+    if (sessionPageMocks.detailPending) return new Promise(() => {})
+    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
+    return Promise.resolve(sessionPageMocks.detail)
+  }),
 }))
 
 Object.defineProperty(navigator, 'clipboard', {
