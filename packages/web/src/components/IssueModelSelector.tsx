@@ -5,6 +5,7 @@ import { useAvailableModelIds, useOpencodeModel } from '../hooks/useQueries'
 import { api } from '../lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect } from './ModelSelect'
+import { useProject } from '../context/ProjectContext'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
 const MAX_RECENT = 5
@@ -95,6 +96,7 @@ function ModelListItem({ modelId, isSelected, isHighlighted, onSelect, onMouseEn
 
 export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentModel, currentAgentConfig, currentStageModels }: Props) {
   const queryClient = useQueryClient()
+  const { projectId } = useProject()
   const { data: availableModelIds, isLoading, error } = useAvailableModelIds()
   const { data: opencodeModelData } = useOpencodeModel()
   const [searchQuery, setSearchQuery] = useState('')
@@ -128,10 +130,10 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async (modelId: string) => {
       try {
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId })
+          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId }, projectId)
           setLocalWorkflowModel(modelId)
         } else {
-          await api.updateIssue(issueNumber, { agentConfig: { ...(currentAgentConfig ?? {}), model: modelId } })
+          await api.updateIssue(issueNumber, { agentConfig: { ...(currentAgentConfig ?? {}), model: modelId } }, projectId)
         }
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -140,19 +142,19 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         console.error('Failed to update issue model:', err)
       }
     },
-    [issueNumber, currentWorkflowRunId, currentAgentConfig, queryClient],
+    [issueNumber, currentWorkflowRunId, currentAgentConfig, projectId, queryClient],
   )
 
   const handleClear = useCallback(
     async () => {
       try {
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null })
+          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null }, projectId)
           setLocalWorkflowModel(null)
         } else {
           const updatedAgent = { ...(currentAgentConfig ?? {}) }
           delete updatedAgent.model
-          await api.updateIssue(issueNumber, { model: null, agentConfig: Object.keys(updatedAgent).length > 0 ? updatedAgent : null })
+          await api.updateIssue(issueNumber, { model: null, agentConfig: Object.keys(updatedAgent).length > 0 ? updatedAgent : null }, projectId)
         }
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -160,7 +162,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         console.error('Failed to clear issue model:', err)
       }
     },
-    [issueNumber, currentWorkflowRunId, currentAgentConfig, queryClient],
+    [issueNumber, currentWorkflowRunId, currentAgentConfig, projectId, queryClient],
   )
 
   const handleSetStageModel = useCallback(
@@ -168,9 +170,9 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId })
+          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId }, projectId)
         } else {
-          await api.updateIssue(issueNumber, { stageModels: updated })
+          await api.updateIssue(issueNumber, { stageModels: updated }, projectId)
         }
         setLocalStageModels(updated)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -179,7 +181,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         console.error('Failed to update stage model:', err)
       }
     },
-    [issueNumber, currentWorkflowRunId, localStageModels, queryClient],
+    [issueNumber, currentWorkflowRunId, localStageModels, projectId, queryClient],
   )
 
   const handleClearStageModel = useCallback(
@@ -188,10 +190,10 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         const updated = { ...localStageModels }
         delete updated[stage]
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null })
+          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null }, projectId)
         } else {
           const stageModelsValue = Object.keys(updated).length > 0 ? updated : null
-          await api.updateIssue(issueNumber, { stageModels: stageModelsValue })
+          await api.updateIssue(issueNumber, { stageModels: stageModelsValue }, projectId)
         }
         setLocalStageModels(updated)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -200,7 +202,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         console.error('Failed to clear stage model:', err)
       }
     },
-    [issueNumber, currentWorkflowRunId, localStageModels, queryClient],
+    [issueNumber, currentWorkflowRunId, localStageModels, projectId, queryClient],
   )
 
   const handleKeyDown = useCallback(
