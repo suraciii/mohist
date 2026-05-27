@@ -1,17 +1,25 @@
-import type { RunnerOptions } from "../core/types.js"
+import type { RunnerOptions, WorkItemResult } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
+import { AcpSessionPool } from "./session-pool.js"
+import type { WorkItem } from "../core/types.js"
+
+export interface ReportResult {
+  workflowRunId?: string | null
+  workflowStatus?: string | null
+}
 
 export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly executor: WorkExecutor
+  private readonly pool = new AcpSessionPool()
 
   constructor(private readonly options: RunnerOptions) {
     this.connection = new ServerConnection(options)
-    this.executor = new WorkExecutor(createDefaultRegistry(), new WorkspaceManager(options.runnerRoot), this.connection)
+    this.executor = new WorkExecutor(createDefaultRegistry(), new WorkspaceManager(options.runnerRoot), this.connection, this.pool)
   }
 
   async run(signal: AbortSignal) {
@@ -25,7 +33,8 @@ export class RunnerHost {
             await delay(this.options.pollIntervalMs, signal)
             continue
           }
-          await this.connection.report(work, await this.executor.execute(work, signal), signal)
+          const report = await this.connection.report(work, await this.executor.execute(work, signal), signal)
+          this.handleReport(work, report)
         }
       } catch (error) {
         if (signal.aborted) break
@@ -39,6 +48,8 @@ export class RunnerHost {
       }
     }
   }
+
+  private handleReport(_work: WorkItem, _report: ReportResult) {}
 
   private async connectWhenServerIsReady(signal: AbortSignal) {
     while (!signal.aborted) {

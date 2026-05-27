@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -62,7 +63,15 @@ public static class RunnerRoutes
             var workflowRunId = await runner.ReportAsync(req.WorkId, result);
             if (workflowRunId is not null)
                 await sessions.MarkWorkReportedAsync(workflowRunId, req.WorkId, result);
-            return Results.Ok();
+
+            string? workflowStatus = null;
+            if (workflowRunId is not null)
+            {
+                var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
+                workflowStatus = (await workflow.GetStatusAsync())?.Status;
+            }
+
+            return Results.Ok(new RunnerReportResponse(workflowRunId, workflowStatus));
         });
 
         group.MapPost("/sessions/{sessionId}/started", async (string sessionId, SessionStartedRequest req, AgentSessionService sessions) =>
@@ -89,12 +98,31 @@ public static class RunnerRoutes
             return session is null ? ApiResults.NotFound($"Session {sessionId} not found") : ApiResults.Ok(session);
         });
 
+        group.MapGet("/workflow-sessions/{workflowRunId}/{sessionName}", async (string workflowRunId, string sessionName, IGrainFactory grains) =>
+        {
+            var key = $"{workflowRunId}:{sessionName}";
+            var grain = grains.GetGrain<IWorkflowSessionGrain>(key);
+            var entry = await grain.GetAsync();
+            return entry is null ? Results.NoContent() : Results.Ok(new WorkflowSessionResponse(entry.AcpSessionId, entry.WorkDir, entry.RegisteredAt));
+        });
+
+        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}", async (string workflowRunId, string sessionName, WorkflowSessionRegisterRequest req, IGrainFactory grains) =>
+        {
+            var key = $"{workflowRunId}:{sessionName}";
+            var grain = grains.GetGrain<IWorkflowSessionGrain>(key);
+            await grain.RegisterAsync(req.AcpSessionId, req.WorkDir);
+            return Results.Ok();
+        });
+
         return app;
     }
 }
 
 public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null, string[]? CoderModels = null);
 public record RunnerReportRequest(string WorkId, string Status, string? Message = null, string? Output = null, int? ExitCode = null);
+public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
+public record WorkflowSessionResponse(string AcpSessionId, string WorkDir, string RegisteredAt);
+public record WorkflowSessionRegisterRequest(string AcpSessionId, string WorkDir);
 public record SessionTranscriptEntriesRequest([property: JsonPropertyName("events")] IReadOnlyList<SessionTranscriptEntryRequest> TranscriptEntries);
 public record WorkDispatchResponse(
     string WorkflowRunId,

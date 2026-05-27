@@ -24,8 +24,14 @@ export class ServerConnection {
     return toWorkItem((await response.json()) as WorkDispatchResponse)
   }
 
-  async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal) {
-    await this.post("report", { workId: work.workId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode }, signal)
+  async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
+    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workId: work.workId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode }), signal })
+    if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
+    try {
+      return await response.json() as Record<string, unknown>
+    } catch {
+      return {}
+    }
   }
 
   async sessionStarted(sessionId: string, body: unknown, signal: AbortSignal) {
@@ -42,6 +48,17 @@ export class ServerConnection {
 
   async sessionStatus(sessionId: string, body: unknown, signal: AbortSignal) {
     await this.post(`sessions/${sessionId}/status`, body, signal)
+  }
+
+  async getSession(workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<{ acpSessionId: string; workDir: string } | null> {
+    const response = await fetch(this.url(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { signal })
+    if (response.status === 204) return null
+    if (!response.ok) return null
+    return response.json() as Promise<{ acpSessionId: string; workDir: string }>
+  }
+
+  async registerSession(workflowRunId: string, sessionName: string, acpSessionId: string, workDir: string, signal: AbortSignal) {
+    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`, { acpSessionId, workDir }, signal)
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal) {
