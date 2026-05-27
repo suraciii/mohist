@@ -17,7 +17,7 @@ import {
   type BoardQueryState,
   type SortMode,
 } from '../model/board-query'
-import { useLabels } from '../../../entities/project/api/queries'
+import { useLabels } from '../../../entities/issue/api/queries'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { deriveAttentionItems } from '../model/homepage-attention'
 

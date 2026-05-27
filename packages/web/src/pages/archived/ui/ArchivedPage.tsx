@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useArchivedIssues } from '../../../entities/project/api/queries'
+import { useArchivedIssues } from '../../../entities/issue/api/queries'
 import { useProject } from '../../../entities/project/model/ProjectContext'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'

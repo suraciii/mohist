@@ -1,8 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { WorkflowStage } from '../../../shared/api/types'
 import { api, ApiError } from '../../../shared/api/client'
-import { useWorktreeStatus } from '../../../entities/project/api/queries'
-import { useLiveTask } from '../../../entities/project/model/LiveTaskProvider'
+import { useWorktreeStatus } from '../../../entities/issue/api/queries'
+import { useLiveTask } from '../../../shared/model/live-task'
 import { useProject } from '../../../entities/project/model/ProjectContext'
 
 const BRANCH_BAR_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check, WorkflowStage.Done])

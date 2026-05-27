@@ -25,12 +25,15 @@ vi.mock('../../../entities/project/model/ProjectContext', async (importOriginal)
   }
 })
 
-vi.mock('../../../entities/project/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project/api/queries')>()
+vi.mock('../../../entities/issue/api/queries', () => ({
+  useIssues: mocks.useIssues,
+}))
+
+vi.mock('../../../entities/epic/api/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/epic/api/queries')>()
   return {
     ...actual,
     useEpic: mocks.useEpic,
-    useIssues: mocks.useIssues,
     useAddEpicIssue: mocks.useAddEpicIssue,
     useRemoveEpicIssue: mocks.useRemoveEpicIssue,
     useMarkEpicDone: mocks.useMarkEpicDone,

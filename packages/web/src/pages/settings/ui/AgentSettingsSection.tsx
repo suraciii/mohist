@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/project/api/queries'
+import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/settings/api/queries'
 import type { AgentRuntimeConfig } from '../../../shared/api/types'
 
 const DEFAULTS: AgentRuntimeConfig = {

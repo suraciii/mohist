@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useCreateEpic } from '../../../entities/project/api/queries'
+import { useCreateEpic } from '../../../entities/epic/api/queries'
 import { Dialog } from '../../../shared/ui/Dialog'
 import type { EpicPriority } from '../../../shared/api/types'
 

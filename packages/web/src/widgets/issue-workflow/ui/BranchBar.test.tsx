@@ -4,13 +4,13 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BranchBar } from './BranchBar'
 import { WorkflowStage } from '../../../shared/api/types'
-import { useWorktreeStatus } from '../../../entities/project/api/queries'
+import { useWorktreeStatus } from '../../../entities/issue/api/queries'
 
-vi.mock('../../../entities/project/api/queries', () => ({
+vi.mock('../../../entities/issue/api/queries', () => ({
   useWorktreeStatus: vi.fn(),
 }))
 
-vi.mock('../../../entities/project/model/LiveTaskProvider', () => ({
+vi.mock('../../../shared/model/live-task', () => ({
   useLiveTask: () => ({}),
 }))
 

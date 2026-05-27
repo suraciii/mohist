@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import fuzzysort from 'fuzzysort'
 import { Dialog } from './Dialog'
 import { api } from '../api/client'
-import { useProject } from '../../entities/project/model/ProjectContext'
-import type { DirEntry } from '../api/types'
+import type { DirEntry, Project } from '../api/types'
 
 interface Props {
   open: boolean
+  recentProjects?: Project[]
   onClose: () => void
   onSelect: (path: string) => void
 }
@@ -53,8 +53,7 @@ function FolderIcon() {
   )
 }
 
-export function DialogSelectDirectory({ open, onClose, onSelect }: Props) {
-  const { projects } = useProject()
+export function DialogSelectDirectory({ open, recentProjects = [], onClose, onSelect }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [inputValue, setInputValue] = useState('')
   const [home, setHome] = useState('')
@@ -63,7 +62,7 @@ export function DialogSelectDirectory({ open, onClose, onSelect }: Props) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  const recentProjects = projects.slice(0, 5)
+  const displayedRecentProjects = recentProjects.slice(0, 5)
 
   useEffect(() => {
     if (!open) {
@@ -130,8 +129,8 @@ export function DialogSelectDirectory({ open, onClose, onSelect }: Props) {
     }
   }, [inputValue, open, fetchPathResults])
 
-  const allItems = recentProjects.length > 0 && !inputValue.trim()
-    ? recentProjects.map(p => ({ name: p.name, absolute: p.path } as DirEntry))
+  const allItems = displayedRecentProjects.length > 0 && !inputValue.trim()
+    ? displayedRecentProjects.map(p => ({ name: p.name, absolute: p.path } as DirEntry))
     : results
 
   const maxIndex = Math.max(0, allItems.length - 1)
@@ -210,18 +209,18 @@ export function DialogSelectDirectory({ open, onClose, onSelect }: Props) {
         </div>
 
         <div className="max-h-72 overflow-y-auto rounded-md border border-gray-200">
-          {recentProjects.length > 0 && !inputValue.trim() && (
+          {displayedRecentProjects.length > 0 && !inputValue.trim() && (
             <div>
               <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-200">
                 Recent Projects
               </div>
-              {recentProjects.map(p => (
+              {displayedRecentProjects.map(p => (
                 <button
                   key={p.id}
                   onClick={() => onSelect(p.path)}
-                  onMouseEnter={() => setSelectedIndex(recentProjects.indexOf(p))}
+                  onMouseEnter={() => setSelectedIndex(displayedRecentProjects.indexOf(p))}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors border-b border-gray-100 last:border-0 ${
-                    selectedIndex === recentProjects.indexOf(p)
+                    selectedIndex === displayedRecentProjects.indexOf(p)
                       ? 'bg-blue-50 text-blue-700'
                       : 'text-gray-700 hover:bg-gray-50'
                   }`}
@@ -270,7 +269,7 @@ export function DialogSelectDirectory({ open, onClose, onSelect }: Props) {
             </div>
           )}
 
-          {!inputValue.trim() && recentProjects.length === 0 && !loading && (
+          {!inputValue.trim() && displayedRecentProjects.length === 0 && !loading && (
             <div className="px-3 py-6 text-center text-sm text-gray-400">
               Type to search directories or enter a path
             </div>

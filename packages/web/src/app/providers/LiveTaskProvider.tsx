@@ -1,10 +1,11 @@
-import { useEffect, useRef, useCallback, useState, createContext, useContext } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { EventName, EventMap, LiveTaskState, RebaseConflictState, Issue } from '../../../shared/api/types'
-import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../../shared/api/agent-events'
-import type { AgentDetailEventMap } from '../../../shared/api/types'
-import { useProject } from './ProjectContext'
+import type { EventName, EventMap, LiveTaskState, RebaseConflictState, Issue } from '../../shared/api/types'
+import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../shared/api/agent-events'
+import type { AgentDetailEventMap } from '../../shared/api/types'
+import { useProject } from '../../entities/project/model/ProjectContext'
+import { LiveTaskContext } from '../../shared/model/live-task'
 
 const SSE_URL = '/api/events'
 const LIVE_TIMER_INTERVAL = 500
@@ -15,15 +16,6 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
-export const LiveTaskContext = createContext<LiveTaskState>({
-  activeTaskId: null,
-  activeTaskElapsedMs: null,
-  rebaseConflict: null,
-})
-
-export function useLiveTask(): LiveTaskState {
-  return useContext(LiveTaskContext)
-}
 
 function getCurrentIssueNumber(): number | null {
   const match = window.location.pathname.match(/\/issue\/(\d+)/)

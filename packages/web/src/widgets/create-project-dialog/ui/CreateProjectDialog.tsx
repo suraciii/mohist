@@ -13,7 +13,7 @@ export function CreateProjectDialog({ open, onClose }: Props) {
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
   const [browseOpen, setBrowseOpen] = useState(false)
-  const { setProjectId } = useProject()
+  const { setProjectId, projects } = useProject()
 
   const createProject = useCreateProject()
   const switchProject = useUseProject()
@@ -132,6 +132,7 @@ export function CreateProjectDialog({ open, onClose }: Props) {
 
       <DialogSelectDirectory
         open={browseOpen}
+        recentProjects={projects}
         onClose={() => setBrowseOpen(false)}
         onSelect={(selectedPath) => {
           setPath(selectedPath)

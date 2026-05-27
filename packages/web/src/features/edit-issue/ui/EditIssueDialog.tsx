@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Dialog } from '../../../shared/ui/Dialog'
 import { api } from '../../../shared/api/client'
-import { useLabels } from '../../../entities/project/api/queries'
+import { useLabels } from '../../../entities/issue/api/queries'
 import type { Issue } from '../../../shared/api/types'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 

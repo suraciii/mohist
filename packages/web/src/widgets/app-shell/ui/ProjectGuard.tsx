@@ -1,7 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import { useProjects } from '../../../entities/project/api/queries'
 import { useProject } from '../../../entities/project/model/ProjectContext'
-import { CreateProjectDialog } from '../../../features/create-project/ui/CreateProjectDialog'
+import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
 import { useEffect, useState } from 'react'
 
 export function ProjectGuard() {

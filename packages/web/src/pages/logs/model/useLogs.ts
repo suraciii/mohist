@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { api } from './client'
-import type { LogTailResult, WorkflowEvent } from './types'
-import { useProject } from '../../entities/project/model/ProjectContext'
+import { api } from '../../../shared/api/client'
+import type { LogTailResult, WorkflowEvent } from '../../../shared/api/types'
+import { useProject } from '../../../entities/project/model/ProjectContext'
 
 export interface ParsedLogEntry {
   raw: string

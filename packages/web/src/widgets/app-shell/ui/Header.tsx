@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useProject } from '../../../entities/project/model/ProjectContext'
 import type { Project } from '../../../shared/api/types'
-import { CreateProjectDialog } from '../../../features/create-project/ui/CreateProjectDialog'
+import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
 import { Dialog } from '../../../shared/ui/Dialog'
 import { useDeleteProject, useUseProject } from '../../../entities/project/api/queries'
 

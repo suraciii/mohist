@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff } from '../../../entities/project/api/queries'
+import { useIssue, useIssueDiff, useIssueCommits, useCommitDiff } from '../../../entities/issue/api/queries'
 import { statusBadge, statusLabel } from '../../../shared/lib/status-badge'
 import { parseDiff, parseDiffFiles, selectFirstReadableFile, getFileBlockIdentity } from '../../../widgets/issue-changed-files/model/diffModel'
 import { ChangedFilesTree, UnifiedDiffPane, SplitDiffPane, RawPatchPane, FullFilePane, DiffSearchPane } from '../../../widgets/issue-changed-files/ui'

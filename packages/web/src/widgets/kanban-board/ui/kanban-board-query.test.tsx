@@ -20,8 +20,8 @@ const { LABELS_MOCK } = vi.hoisted(() => ({
   LABELS_MOCK: ['bug', 'feature', 'docs', 'workflow', 'ux', 'webui', 'improvement', 'reliability', 'session', 'agent'],
 }))
 
-vi.mock('../../../entities/project/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project/api/queries')>()
+vi.mock('../../../entities/issue/api/queries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue/api/queries')>()
   return {
     ...actual,
     useLabels: vi.fn().mockReturnValue({ data: LABELS_MOCK, isLoading: false }),

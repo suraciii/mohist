@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../../../shared/api/client'
-import { useWorktreeStatus } from '../../../entities/project/api/queries'
+import { useWorktreeStatus } from '../../../entities/issue/api/queries'
 import { onRebaseEvent } from '../../../shared/api/rebase-events'
-import { useLiveTask } from '../../../entities/project/model/LiveTaskProvider'
+import { useLiveTask } from '../../../shared/model/live-task'
 import { useProject } from '../../../entities/project/model/ProjectContext'
 
 interface WorktreePanelProps {

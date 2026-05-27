@@ -4,7 +4,7 @@ import { api } from '../../../shared/api/client'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
-import { useLiveTask } from '../../../entities/project/model/LiveTaskProvider'
+import { useLiveTask } from '../../../shared/model/live-task'
 import { useProject } from '../../../entities/project/model/ProjectContext'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {

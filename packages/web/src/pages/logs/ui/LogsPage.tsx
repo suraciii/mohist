@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { useLogs } from '../../../shared/api/useLogs'
-import type { ParsedLogEntry } from '../../../shared/api/useLogs'
+import { useLogs } from '../model/useLogs'
+import type { ParsedLogEntry } from '../model/useLogs'
 import { LEVEL_COLORS, LEVEL_CHIP_COLORS, ALL_LEVELS, type LogLevel } from '../../../shared/lib/log-levels'
 import { formatLogTime } from '../../../shared/lib/format-time'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'

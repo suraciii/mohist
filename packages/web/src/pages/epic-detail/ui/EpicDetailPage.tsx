@@ -1,14 +1,14 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useIssues } from '../../../entities/issue/api/queries'
 import {
   useAddEpicIssue,
   useCloseEpic,
   useEpic,
-  useIssues,
   useMarkEpicDone,
   useRemoveEpicIssue,
-} from '../../../entities/project/api/queries'
+} from '../../../entities/epic/api/queries'
 import { EpicStatus, IssueStatus, type LinkedIssue } from '../../../shared/api/types'
 import { ApiError } from '../../../shared/api/client'
 

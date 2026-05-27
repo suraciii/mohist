@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../../../entities/project/api/queries'
+import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../../../entities/settings/api/queries'
 
 const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
 const DEFAULT_LOG_LEVEL = 'INFO'
