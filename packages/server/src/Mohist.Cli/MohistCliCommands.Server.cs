@@ -10,9 +10,11 @@ internal static class ServerCommands
     {
         var server = new Command("server", "Server management");
         var systemd = provider.GetRequiredService<SystemdServiceInstaller>();
+        var updater = provider.GetRequiredService<SourceCodeUpdater>();
 
         server.Subcommands.Add(BuildHealth(api));
         server.Subcommands.Add(BuildInstall(systemd));
+        server.Subcommands.Add(BuildUpdate(updater));
         server.Subcommands.Add(BuildSystemd("start", systemd.StartServerAsync, systemd));
         server.Subcommands.Add(BuildSystemd("stop", systemd.StopServerAsync, systemd));
         server.Subcommands.Add(BuildSystemd("restart", systemd.RestartServerAsync, systemd));
@@ -48,6 +50,22 @@ internal static class ServerCommands
             var repoRoot = ctx.GetValue(repoRootOpt);
             var listenUrl = ctx.GetValue(listenUrlOpt);
             return systemd.InstallServerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, listenUrl, null, null));
+        });
+        return cmd;
+    }
+
+    private static Command BuildUpdate(SourceCodeUpdater updater)
+    {
+        var cmd = new Command("update", "Build current source and restart server service");
+        var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
+        var dryRunOpt = MohistCliCommands.DryRunOption();
+        cmd.Options.Add(repoRootOpt);
+        cmd.Options.Add(dryRunOpt);
+        cmd.SetAction(async ctx =>
+        {
+            var dryRun = ctx.GetValue(dryRunOpt);
+            var repoRoot = ctx.GetValue(repoRootOpt);
+            return await updater.UpdateServerAsync(repoRoot, dryRun);
         });
         return cmd;
     }
