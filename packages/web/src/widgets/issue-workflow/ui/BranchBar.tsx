@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
 import { WorkflowStage } from '../../../shared/api/types'
 import { api, ApiError } from '../../../shared/api/client'
 import { useWorktreeStatus } from '../../../entities/issue/api/queries'
@@ -71,23 +72,24 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <span className="text-sm font-mono font-medium text-gray-800 truncate">{branch}</span>
-            <span className="text-xs text-gray-500 shrink-0">onto</span>
-            <span className="text-xs font-mono text-gray-600 shrink-0">{baseBranch}</span>
+            <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
+            <span className="text-xs text-muted-foreground shrink-0">onto</span>
+            <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <span className="text-xs font-medium text-amber-700">
-              {ahead > 0 && <span className="text-gray-500">↑{ahead} </span>}
+              {ahead > 0 && <span className="text-muted-foreground">↑{ahead} </span>}
               <span>↓{behind} behind</span>
             </span>
-            <button
+            <Button
+              variant="outline"
               onClick={() => rebaseMutation.mutate()}
               disabled={isAgentRunning || isConflictResolving}
               title={isAgentRunning ? 'Cannot rebase while agent is running' : isConflictResolving ? 'Conflict resolution in progress' : undefined}
-              className="rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5"
+              className="rounded-md border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50 transition-colors inline-flex items-center gap-1.5 h-auto"
             >
               Rebase onto {baseBranch}
-            </button>
+            </Button>
           </div>
         </div>
         {isAgentRunning && (
@@ -125,20 +127,20 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+    <div className="rounded-lg border bg-background px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-sm font-mono font-medium text-gray-800 truncate">{branch}</span>
-          <span className="text-xs text-gray-500 shrink-0">onto</span>
-          <span className="text-xs font-mono text-gray-600 shrink-0">{baseBranch}</span>
+          <span className="text-sm font-mono font-medium text-foreground truncate">{branch}</span>
+          <span className="text-xs text-muted-foreground shrink-0">onto</span>
+          <span className="text-xs font-mono text-muted-foreground/80 shrink-0">{baseBranch}</span>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {ahead > 0 && <span className="text-xs text-gray-500">↑{ahead} ahead</span>}
+          {ahead > 0 && <span className="text-xs text-muted-foreground">↑{ahead} ahead</span>}
           <span className="text-xs font-medium text-green-600">up to date</span>
         </div>
       </div>
       {isDone && (
-        <p className="mt-2 text-xs text-gray-500">
+        <p className="mt-2 text-xs text-muted-foreground">
           This Done worktree is retained for review, traceability, diff inspection, and debugging. Archiving will remove the retained worktree.
         </p>
       )}

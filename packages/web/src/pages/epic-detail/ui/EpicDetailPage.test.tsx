@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project/model/ProjectContext'
@@ -117,10 +117,15 @@ describe('EpicDetailPage', () => {
     expect(screen.getByText('Done issue')).toBeTruthy()
   })
 
-  it('adds an available issue from the detail page', () => {
+  it('adds an available issue from the detail page', async () => {
     renderPage()
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'issue-3' } })
+    fireEvent.click(screen.getByRole('combobox'))
+    await waitFor(() => expect(screen.getByText('#3 Candidate issue')).toBeTruthy())
+    const option = screen.getByText('#3 Candidate issue').closest('[data-slot="select-item"]') as HTMLElement
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
     fireEvent.click(screen.getByRole('button', { name: 'Add Issue' }))
 
     expect(addMutate).toHaveBeenCalledWith(

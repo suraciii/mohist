@@ -10,6 +10,7 @@ import { useSessionTranscript } from '../../../widgets/session-transcript/model/
 import { projectTurn } from '../../../widgets/session-transcript/model/session-transcript-display'
 import type { CoderSessionDetail, SessionStatusKind } from '../../../shared/api/types'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript/ui/SessionTranscriptLayout'
+import { Button } from '@/components/ui/button'
 
 type StatusKind = SessionStatusKind
 
@@ -178,15 +179,15 @@ function SessionLegacyMissingState() {
 
 function JumpToBottomButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
+    <Button
       onClick={onClick}
-      className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 text-white text-xs font-medium rounded-full shadow-lg hover:bg-gray-700 transition-colors"
+      className="absolute bottom-4 right-4 rounded-full bg-gray-800 text-xs text-white shadow-lg hover:bg-gray-700"
     >
       <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M10 17a.75.75 0 01-.75-.75V5.612L5.29 9.77a.75.75 0 01-1.08-1.04l5.25-5.5a.75.75 0 011.08 0l5.25 5.5a.75.75 0 11-1.08 1.04l-3.96-4.158V16.25A.75.75 0 0110 17z" clipRule="evenodd" />
       </svg>
       Jump to bottom
-    </button>
+    </Button>
   )
 }
 

@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
 
 const tabs = [
   {
@@ -50,25 +51,27 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="fixed bottom-0 inset-x-0 md:hidden bg-white border-t border-gray-200 z-50"
+      className="fixed bottom-0 inset-x-0 md:hidden bg-background border-t z-50"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       <div className="flex items-center justify-around h-14">
         {tabs.map((tab) => {
           const active = isActive(location.pathname, tab.path)
           return (
-            <button
+            <Button
               key={tab.path}
+              variant="ghost"
+              size="icon"
               onClick={() => navigate(tab.path)}
               className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[44px] px-3 transition-colors ${
                 active
                   ? 'text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
+                  : 'text-muted-foreground hover:text-foreground/80'
               }`}
             >
               {tab.icon}
               <span className="text-[10px] font-medium leading-none">{tab.label}</span>
-            </button>
+            </Button>
           )
         })}
       </div>

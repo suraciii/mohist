@@ -1,6 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import fuzzysort from 'fuzzysort'
-import { Dialog } from './Dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { api } from '../api/client'
 import type { DirEntry, Project } from '../api/types'
 
@@ -46,7 +53,7 @@ function parsePathInput(input: string, home: string): { parent: string; fragment
 
 function FolderIcon() {
   return (
-    <svg className="h-4 w-4 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+    <svg className="h-4 w-4 text-muted-foreground shrink-0" viewBox="0 0 20 20" fill="currentColor">
       <path d="M3.75 3A1.75 1.75 0 002 4.75v3.26a3.235 3.235 0 011.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0016.25 5h-4.836a.25.25 0 01-.177-.073L9.823 3.513A1.75 1.75 0 008.586 3H3.75z" />
       <path d="M3.75 9A1.75 1.75 0 002 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0018 15.25v-4.5A1.75 1.75 0 0016.25 9H3.75z" />
     </svg>
@@ -164,7 +171,7 @@ export function DialogSelectDirectory({ open, recentProjects = [], onClose, onSe
           setResults([])
           setSelectedIndex(0)
         } catch {
-          // ignore
+          // ignore autocomplete errors
         }
       } else if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -185,115 +192,117 @@ export function DialogSelectDirectory({ open, recentProjects = [], onClose, onSe
   const displayPath = (abs: string) => (home ? collapseHome(abs, home) : abs)
 
   return (
-    <Dialog open={open} onClose={onClose} title="Select Project Directory">
-      <div className="space-y-3">
-        <div className="relative">
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-                clipRule="evenodd"
-              />
-            </svg>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Select Project Directory</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <Input
+              ref={inputRef}
+              value={inputValue}
+              onChange={e => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search or enter path..."
+              className="pl-9"
+            />
           </div>
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputValue}
-            onChange={e => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Search or enter path..."
-            className="w-full rounded-md border border-gray-300 pl-9 pr-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
-        </div>
 
-        <div className="max-h-72 overflow-y-auto rounded-md border border-gray-200">
-          {displayedRecentProjects.length > 0 && !inputValue.trim() && (
-            <div>
-              <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-200">
-                Recent Projects
-              </div>
-              {displayedRecentProjects.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => onSelect(p.path)}
-                  onMouseEnter={() => setSelectedIndex(displayedRecentProjects.indexOf(p))}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors border-b border-gray-100 last:border-0 ${
-                    selectedIndex === displayedRecentProjects.indexOf(p)
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <FolderIcon />
-                  <span className="truncate">{displayPath(p.path)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {loading && (
-            <div className="px-3 py-6 text-center text-sm text-gray-400">
-              Searching...
-            </div>
-          )}
-
-          {!loading && results.length > 0 && (
-            <div>
-              {inputValue.trim() && (
-                <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-200">
-                  Directories
+          <div className="max-h-72 overflow-y-auto rounded-md border">
+            {displayedRecentProjects.length > 0 && !inputValue.trim() && (
+              <div>
+                <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted border-b">
+                  Recent Projects
                 </div>
-              )}
-              {results.map((entry, i) => (
-                <button
-                  key={entry.absolute}
-                  onClick={() => onSelect(entry.absolute)}
-                  onMouseEnter={() => setSelectedIndex(i)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors border-b border-gray-100 last:border-0 ${
-                    i === selectedIndex
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  <FolderIcon />
-                  <span className="truncate">{displayPath(entry.absolute)}</span>
-                </button>
-              ))}
-            </div>
-          )}
+                {displayedRecentProjects.map(p => (
+                  <Button
+                    key={p.id}
+                    variant="ghost"
+                    onClick={() => onSelect(p.path)}
+                    onMouseEnter={() => setSelectedIndex(displayedRecentProjects.indexOf(p))}
+                    className={`w-full justify-start rounded-none border-b last:border-0 ${
+                      selectedIndex === displayedRecentProjects.indexOf(p)
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-foreground/80 hover:bg-muted'
+                    }`}
+                  >
+                    <FolderIcon />
+                    <span className="truncate">{displayPath(p.path)}</span>
+                  </Button>
+                ))}
+              </div>
+            )}
 
-          {!loading && inputValue.trim() && results.length === 0 && (
-            <div className="px-3 py-6 text-center text-sm text-gray-400">
-              No directories found
-            </div>
-          )}
+            {loading && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                Searching...
+              </div>
+            )}
 
-          {!inputValue.trim() && displayedRecentProjects.length === 0 && !loading && (
-            <div className="px-3 py-6 text-center text-sm text-gray-400">
-              Type to search directories or enter a path
-            </div>
-          )}
+            {!loading && results.length > 0 && (
+              <div>
+                {inputValue.trim() && (
+                  <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted border-b">
+                    Directories
+                  </div>
+                )}
+                {results.map((entry, i) => (
+                  <Button
+                    key={entry.absolute}
+                    variant="ghost"
+                    onClick={() => onSelect(entry.absolute)}
+                    onMouseEnter={() => setSelectedIndex(i)}
+                    className={`w-full justify-start rounded-none border-b last:border-0 ${
+                      i === selectedIndex
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-foreground/80 hover:bg-muted'
+                    }`}
+                  >
+                    <FolderIcon />
+                    <span className="truncate">{displayPath(entry.absolute)}</span>
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {!loading && inputValue.trim() && results.length === 0 && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No directories found
+              </div>
+            )}
+
+            {!inputValue.trim() && displayedRecentProjects.length === 0 && !loading && (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                Type to search directories or enter a path
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (allItems[selectedIndex]) onSelect(allItems[selectedIndex].absolute)
+              }}
+              disabled={!allItems[selectedIndex]}
+            >
+              Select
+            </Button>
+          </div>
         </div>
-
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            onClick={onClose}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => {
-              if (allItems[selectedIndex]) onSelect(allItems[selectedIndex].absolute)
-            }}
-            disabled={!allItems[selectedIndex]}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            Select
-          </button>
-        </div>
-      </div>
+      </DialogContent>
     </Dialog>
   )
 }

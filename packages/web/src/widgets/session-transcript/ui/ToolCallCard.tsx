@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
+import { Button } from '@/components/ui/button'
 import type { ToolCallEntry, FileChangeSummary } from '../../../shared/api/types'
 import {
   getToolLabel,
@@ -215,9 +216,11 @@ function PatchFilesView({ changes }: { changes: FileChangeSummary[] }) {
 
   return (
     <div className="rounded border border-gray-200 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
       >
         <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
@@ -231,7 +234,7 @@ function PatchFilesView({ changes }: { changes: FileChangeSummary[] }) {
           </span>
         )}
         <ChevronIcon expanded={expanded} />
-      </button>
+      </Button>
       {expanded && (
         <div className="border-t border-gray-100 max-h-48 overflow-auto">
           {changes.map((change, i) => (
@@ -360,12 +363,13 @@ function EditToolCard({ entry }: { entry: ToolCallEntry }) {
       )}
 
       {hasFileSummary && (parsed?.patch || entry.rawInput || entry.rawOutput || parsed?.oldString || parsed?.newString) && (
-        <button
+        <Button
+          variant="link"
           onClick={() => setShowRaw(!showRaw)}
-          className="w-full text-xs text-blue-500 hover:text-blue-700 py-1 text-center border-t border-gray-100 hover:bg-gray-50 transition-colors"
+          className="h-auto w-full rounded-none text-xs text-blue-500 hover:text-blue-700 py-1 text-center border-t border-gray-100 hover:bg-gray-50 transition-colors"
         >
           {showRaw ? 'Hide raw' : 'Show raw patch'}
-        </button>
+        </Button>
       )}
 
       {entry.state === 'failed' && entry.error && (
@@ -413,20 +417,22 @@ function BashToolCard({ entry }: { entry: ToolCallEntry }) {
         <div className={isFailed ? 'border-l-2 border-red-400' : ''}>
           <TerminalBlock output={output} collapsed={expanded} />
           {shouldCollapse && !expanded && (
-            <button
+            <Button
+              variant="link"
               onClick={() => setExpanded(true)}
-              className="w-full text-xs text-blue-500 hover:text-blue-700 py-1 text-center bg-gray-800 hover:bg-gray-700 transition-colors"
+              className="h-auto w-full rounded-none text-xs text-blue-500 hover:text-blue-700 py-1 text-center bg-gray-800 hover:bg-gray-700 transition-colors"
             >
               Show more ({outputLines.length - COLLAPSE_THRESHOLD} more lines)
-            </button>
+            </Button>
           )}
           {expanded && shouldCollapse && (
-            <button
+            <Button
+              variant="link"
               onClick={() => setExpanded(false)}
-              className="w-full text-xs text-blue-500 hover:text-blue-700 py-1 text-center bg-gray-800 hover:bg-gray-700 transition-colors"
+              className="h-auto w-full rounded-none text-xs text-blue-500 hover:text-blue-700 py-1 text-center bg-gray-800 hover:bg-gray-700 transition-colors"
             >
               Show less
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -470,9 +476,11 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-2 py-1 hover:bg-gray-50 rounded transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-2 py-1 hover:bg-gray-50 rounded transition-colors"
       >
         <StatusIcon state={entry.state} />
         <span className="font-mono text-xs text-gray-600">{summary}</span>
@@ -489,7 +497,7 @@ function SummaryToolCard({ entry }: { entry: ToolCallEntry }) {
           <span className="text-xs text-gray-400">{formatDuration(entry.duration)}</span>
         )}
         <ChevronIcon expanded={expanded} />
-      </button>
+      </Button>
       {expanded && (
         <div className="ml-6 mt-1 space-y-1.5 text-xs">
           {displayInput && (
@@ -620,9 +628,11 @@ function GenericToolCard({ entry }: { entry: ToolCallEntry }) {
 
   return (
     <div className={`rounded-md border overflow-hidden ${isFailed ? 'border-red-200' : 'border-gray-200'}`}>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
       >
         <StatusIcon state={entry.state} />
         <ToolIcon toolName={entry.toolName} className="h-3.5 w-3.5 text-gray-400 shrink-0" />
@@ -643,7 +653,7 @@ function GenericToolCard({ entry }: { entry: ToolCallEntry }) {
           <span className="text-xs text-gray-400 ml-auto shrink-0">{formatDuration(entry.duration)}</span>
         )}
         <ChevronIcon expanded={expanded} />
-      </button>
+      </Button>
 
       {isFailed && entry.error && (
         <div className="px-3 py-1.5 text-xs text-red-600 bg-red-50 border-t border-red-100">

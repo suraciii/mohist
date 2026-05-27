@@ -3,6 +3,7 @@ import { useProjects } from '../../../entities/project/api/queries'
 import { useProject } from '../../../entities/project/model/ProjectContext'
 import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 
 export function ProjectGuard() {
   const location = useLocation()
@@ -33,13 +34,12 @@ export function ProjectGuard() {
       <>
         <div className="flex items-center justify-center flex-1">
           <div className="text-center">
-            <div className="text-gray-400 text-lg mb-4">No projects yet</div>
-            <button
+            <div className="text-muted-foreground text-lg mb-4">No projects yet</div>
+            <Button
               onClick={() => setShowCreateProject(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
             >
               Create Project
-            </button>
+            </Button>
           </div>
         </div>
         <CreateProjectDialog

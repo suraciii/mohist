@@ -20,6 +20,7 @@ import { ProjectGuard } from '../widgets/app-shell/ui/ProjectGuard'
 import { MobileBottomNav } from '../widgets/app-shell/ui/MobileBottomNav'
 import { FAB } from '../widgets/app-shell/ui/FAB'
 import { Toaster } from 'sonner'
+import { Button } from '@/components/ui/button'
 import { useDocumentTitle } from '../shared/lib/useDocumentTitle'
 import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
@@ -43,13 +44,12 @@ function KanbanView() {
       <>
         <div className="flex items-center justify-center flex-1">
           <div className="text-center">
-            <div className="text-gray-400 text-lg mb-4">No projects yet</div>
-            <button
+            <div className="text-muted-foreground text-lg mb-4">No projects yet</div>
+            <Button
               onClick={() => setShowCreateProject(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
             >
               Create Project
-            </button>
+            </Button>
           </div>
         </div>
         <CreateProjectDialog open={showCreateProject} onClose={() => setShowCreateProject(false)} />
@@ -61,7 +61,7 @@ function KanbanView() {
     <>
       {isLoading ? (
         <div className="flex items-center justify-center flex-1">
-          <div className="text-gray-400">Loading...</div>
+          <div className="text-muted-foreground">Loading...</div>
         </div>
       ) : (
         <KanbanBoard

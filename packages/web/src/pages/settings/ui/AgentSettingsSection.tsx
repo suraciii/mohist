@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/settings/api/queries'
 import type { AgentRuntimeConfig } from '../../../shared/api/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 const DEFAULTS: AgentRuntimeConfig = {
   timeout: 1800000,
@@ -157,8 +159,8 @@ function TimeoutDiagram({ session, stage, task }: { session: number; stage: numb
   ]
 
   return (
-    <div className="rounded-md bg-gray-50 border border-gray-200 px-4 py-3">
-      <pre className="text-xs text-gray-600 font-mono leading-5 whitespace-pre">{lines.join('\n')}</pre>
+    <div className="rounded-md bg-muted border px-4 py-3">
+      <pre className="text-xs text-muted-foreground font-mono leading-5 whitespace-pre">{lines.join('\n')}</pre>
     </div>
   )
 }
@@ -178,18 +180,18 @@ function InputField({
 }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs font-medium text-gray-700">{label}</label>
+      <label className="block text-xs font-medium text-foreground/80">{label}</label>
       <div className="flex items-center gap-2">
-        <input
+        <Input
           type="number"
           value={value}
           onChange={(e) => {
             const v = parseInt(e.target.value, 10)
             onChange(isNaN(v) ? 0 : v)
           }}
-          className="w-24 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="w-24"
         />
-        <span className="text-sm text-gray-500">{unit}</span>
+        <span className="text-sm text-muted-foreground">{unit}</span>
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
@@ -309,12 +311,12 @@ export function AgentSettingsSection() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <h3 className="text-sm font-medium text-gray-900">Coder Agent Runtime</h3>
+        <h3 className="text-sm font-medium text-foreground">Coder Agent Runtime</h3>
         <div className="space-y-6">
           {[1, 2, 3].map((i) => (
             <div key={i} className="space-y-1.5">
-              <div className="h-4 w-32 bg-gray-100 rounded animate-pulse" />
-              <div className="h-9 w-full bg-gray-100 rounded-md animate-pulse" />
+              <div className="h-4 w-32 bg-muted rounded animate-pulse" />
+              <div className="h-9 w-full bg-muted rounded-md animate-pulse" />
             </div>
           ))}
         </div>
@@ -325,16 +327,13 @@ export function AgentSettingsSection() {
   if (error) {
     return (
       <div className="space-y-4">
-        <h3 className="text-sm font-medium text-gray-900">Coder Agent Runtime</h3>
+        <h3 className="text-sm font-medium text-foreground">Coder Agent Runtime</h3>
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           Failed to load settings: {error.message}
         </div>
-        <button
-          onClick={() => refetch()}
-          className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
-        >
+        <Button onClick={() => refetch()}>
           Retry
-        </button>
+        </Button>
       </div>
     )
   }
@@ -342,12 +341,12 @@ export function AgentSettingsSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h3 className="text-sm font-medium text-gray-900">Coder Agent Runtime</h3>
-        <p className="text-xs text-gray-500 mt-1">Configure how Mohist schedules external coder agent sessions.</p>
+        <h3 className="text-sm font-medium text-foreground">Coder Agent Runtime</h3>
+        <p className="text-xs text-muted-foreground mt-1">Configure how Mohist schedules external coder agent sessions.</p>
       </div>
 
       <div className="space-y-4">
-        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Timeouts</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeouts</h4>
         <TimeoutDiagram
           session={localValues.timeout}
           stage={localValues.stageTimeout}
@@ -378,10 +377,10 @@ export function AgentSettingsSection() {
         </div>
       </div>
 
-      <hr className="border-gray-100" />
+      <hr className="border" />
 
       <div className="space-y-4">
-        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Concurrency</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Concurrency</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <InputField
             label="Max Concurrent"
@@ -400,10 +399,10 @@ export function AgentSettingsSection() {
         </div>
       </div>
 
-      <hr className="border-gray-100" />
+      <hr className="border" />
 
       <div className="space-y-4">
-        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Recovery</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Recovery</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <InputField
             label="Retry Budget"
@@ -413,12 +412,12 @@ export function AgentSettingsSection() {
             onChange={(v) => handleChange('maxGracePeriods', v)}
           />
         </div>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted-foreground">
           Number of times an external coder agent can fail and be retried before the issue is marked as interrupted.
         </p>
       </div>
 
-      <hr className="border-gray-200" />
+      <hr className="border" />
 
       {saveError && (
         <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
@@ -433,47 +432,43 @@ export function AgentSettingsSection() {
       )}
 
       <div className="flex items-center gap-3">
-        <button
+        <Button
           onClick={handleSave}
           disabled={!dirty || hasValidationErrors || saving}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            dirty && !hasValidationErrors && !saving
-              ? 'text-white bg-blue-600 hover:bg-blue-700'
-              : 'text-gray-400 bg-gray-100 cursor-not-allowed'
-          }`}
+          className={dirty && !hasValidationErrors && !saving ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
         >
           {saving ? 'Saving...' : 'Save Changes'}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="outline"
           onClick={handleReset}
           disabled={saving}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md transition-colors disabled:opacity-50"
         >
           Reset to Defaults
-        </button>
+        </Button>
       </div>
 
       {showResetConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
-            <h4 className="text-lg font-medium text-gray-900 mb-2">Reset Coder Agent Settings</h4>
-            <p className="text-sm text-gray-600 mb-4">
+          <div className="bg-background rounded-lg shadow-xl p-6 w-full max-w-sm mx-4">
+            <h4 className="text-lg font-medium text-foreground mb-2">Reset Coder Agent Settings</h4>
+            <p className="text-sm text-muted-foreground mb-4">
               Reset all agent runtime settings to their default values?
             </p>
             <div className="flex justify-end gap-2">
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => setShowResetConfirm(false)}
-                className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={confirmReset}
                 disabled={saving}
-                className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-md transition-colors"
+                className="bg-red-600 hover:bg-red-700 text-white"
               >
                 {saving ? 'Resetting...' : 'Reset'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

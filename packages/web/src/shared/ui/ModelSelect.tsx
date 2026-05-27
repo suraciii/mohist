@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { Popover } from '@headlessui/react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Model } from '../api/types'
 
 function SearchIcon({ className }: { className?: string }) {
@@ -37,6 +39,7 @@ export interface ModelSelectProps {
 }
 
 function normalizeModels(models: Model[] | string[]): Model[] {
+  if (models.length === 0) return []
   if (typeof models[0] === 'string') {
     return (models as string[]).map((id): Model => ({
       id,
@@ -49,6 +52,7 @@ function normalizeModels(models: Model[] | string[]): Model[] {
 }
 
 export function ModelSelect({ value, placeholder, models, onChange, onClear, allowClear, size = 'default' }: ModelSelectProps) {
+  const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -64,10 +68,19 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
   }, [normalizedModels, search])
 
   useEffect(() => { setHighlightedIndex(0) }, [search])
+  useEffect(() => {
+    if (!open) return
+    setTimeout(() => searchRef.current?.focus(), 0)
+  }, [open])
 
   const displayText = value
     ? normalizedModels.find((m) => m.id === value)?.name || value.split('/').pop() || value
     : placeholder
+
+  const selectModel = useCallback((modelId: string) => {
+    onChange(modelId)
+    setOpen(false)
+  }, [onChange])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -80,10 +93,10 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
       } else if (e.key === 'Enter') {
         e.preventDefault()
         const m = filtered[highlightedIndex]
-        if (m) onChange(m.id)
+        if (m) selectModel(m.id)
       }
     },
-    [filtered, highlightedIndex, onChange],
+    [filtered, highlightedIndex, selectModel],
   )
 
   const grouped = useMemo(() => {
@@ -100,91 +113,92 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
   const isCompact = size === 'compact'
 
   return (
-    <Popover as="div" className="relative">
-      {({ open }) => (
-        <>
-          <div className="flex items-center gap-2">
-            <Popover.Button
-              className={`flex-1 inline-flex items-center justify-between gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors min-h-[44px] md:min-h-0 ${
+    <div className="flex items-center gap-2">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              variant="outline"
+              className={`flex-1 justify-between gap-1.5 min-h-[44px] md:min-h-0 ${
                 open
                   ? 'border-blue-500 bg-blue-50 text-blue-700'
                   : value
-                    ? 'border-gray-300 bg-white text-gray-900 hover:bg-gray-50'
-                    : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50'
+                    ? 'text-foreground'
+                    : 'text-muted-foreground'
               }`}
-            >
-              <span className="truncate">{displayText}</span>
-              <ChevronDownIcon className="h-4 w-4 shrink-0 text-gray-400" />
-            </Popover.Button>
-            {allowClear && value && onClear && (
-              <button
-                onClick={onClear}
-                className="inline-flex items-center justify-center p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                title="Clear"
-              >
-                <XIcon className="h-4 w-4" />
-              </button>
-            )}
+            />
+          }
+        >
+          <span className="truncate">{displayText}</span>
+          <ChevronDownIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </PopoverTrigger>
+        <PopoverContent className={`p-0 ${isCompact ? 'w-56' : 'w-72'}`} align="end">
+          <div className="p-2">
+            <div className="relative">
+              <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                <SearchIcon className={isCompact ? 'h-3.5 w-3.5 text-muted-foreground' : 'h-4 w-4 text-muted-foreground'} />
+              </div>
+              <Input
+                ref={searchRef}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Search models..."
+                className={`pl-9 ${isCompact ? 'h-7 text-xs' : ''}`}
+              />
+            </div>
           </div>
 
-          <Popover.Panel portal={false} className={`fixed inset-x-2 top-auto z-50 mt-1 md:absolute md:inset-x-auto md:right-0 md:w-72 origin-top-right rounded-lg bg-white shadow-lg ring-1 ring-black/5 focus:outline-none ${isCompact ? 'md:w-56' : ''}`}>
-              <div className="p-2">
-                <div className="relative">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                    <SearchIcon className={isCompact ? 'h-3.5 w-3.5 text-gray-400' : 'h-4 w-4 text-gray-400'} />
-                  </div>
-                  <input
-                    ref={searchRef}
-                    type="text"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Search models..."
-                    className={`w-full rounded-md border border-gray-300 pl-9 pr-3 text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 ${isCompact ? 'py-1.5 text-xs' : 'py-1.5 text-sm'}`}
-                    autoFocus
-                  />
+          <div className={`overflow-y-auto border-t ${isCompact ? 'max-h-48' : 'max-h-64'}`}>
+            {filtered.length === 0 && (
+              <div className={`px-3 py-4 text-center text-muted-foreground ${isCompact ? 'text-xs' : 'text-sm'}`}>
+                No models found
+              </div>
+            )}
+            {Array.from(grouped.entries()).map(([provider, providerModels]) => (
+              <div key={provider}>
+                <div className={`px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-muted ${isCompact ? 'py-0.5' : ''}`}>
+                  {provider}
                 </div>
+                {providerModels.map((model) => {
+                  const globalIdx = filtered.indexOf(model)
+                  return (
+                    <Button
+                      key={model.id}
+                      variant="ghost"
+                      onClick={() => selectModel(model.id)}
+                      onMouseEnter={() => setHighlightedIndex(globalIdx)}
+                      className={`w-full justify-between rounded-none h-auto ${
+                        globalIdx === highlightedIndex
+                          ? 'bg-blue-50 text-blue-700'
+                          : model.id === value
+                            ? 'bg-muted text-foreground'
+                            : 'text-foreground/80 hover:bg-muted'
+                      } ${isCompact ? 'px-2 py-1' : 'px-3 py-1.5'}`}
+                    >
+                      <div className="flex min-w-0 flex-col items-start">
+                        <span className={`font-medium ${isCompact ? 'text-xs' : 'text-sm'}`}>{model.name}</span>
+                        <span className={`truncate text-muted-foreground ${isCompact ? 'text-[10px]' : 'text-xs'}`}>{model.id}</span>
+                      </div>
+                    </Button>
+                  )
+                })}
               </div>
-
-              <div className={`overflow-y-auto border-t border-gray-100 ${isCompact ? 'max-h-48' : 'max-h-64'}`}>
-                {filtered.length === 0 && (
-                  <div className={`px-3 py-4 text-center text-gray-400 ${isCompact ? 'text-xs' : 'text-sm'}`}>
-                    No models found
-                  </div>
-                )}
-                {Array.from(grouped.entries()).map(([provider, providerModels]) => (
-                  <div key={provider}>
-                    <div className={`px-3 py-1 text-xs font-medium text-gray-400 uppercase tracking-wider bg-gray-50 ${isCompact ? 'py-0.5' : ''}`}>
-                      {provider}
-                    </div>
-                    {providerModels.map((model) => {
-                      const globalIdx = filtered.indexOf(model)
-                      return (
-                        <button
-                          key={model.id}
-                          onClick={() => onChange(model.id)}
-                          onMouseEnter={() => setHighlightedIndex(globalIdx)}
-                          className={`w-full flex items-center justify-between transition-colors ${
-                            globalIdx === highlightedIndex
-                              ? 'bg-blue-50 text-blue-700'
-                              : model.id === value
-                                ? 'bg-gray-50 text-gray-900'
-                                : 'text-gray-700 hover:bg-gray-50'
-                          } ${isCompact ? 'px-2 py-1' : 'px-3 py-1.5'}`}
-                        >
-                          <div className="flex flex-col items-start">
-                            <span className={`font-medium ${isCompact ? 'text-xs' : 'text-sm'}`}>{model.name}</span>
-                            <span className={`text-gray-400 ${isCompact ? 'text-[10px]' : 'text-xs'}`}>{model.id}</span>
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
-            </Popover.Panel>
-        </>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {allowClear && value && onClear && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClear}
+          className="text-muted-foreground hover:bg-red-50 hover:text-red-500"
+          title="Clear"
+        >
+          <XIcon className="h-4 w-4" />
+        </Button>
       )}
-    </Popover>
+    </div>
   )
 }

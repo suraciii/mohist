@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { api } from '../../../shared/api/client'
 import { onAgentEvent } from '../../../shared/api/agent-events'
 import { IssueStage, WorkflowStage, IssueStatus } from '../../../shared/api/types'
@@ -213,28 +215,29 @@ function StageBarCell({
   readOnly: boolean
   onClick: () => void
 }) {
-  const bgColor = selected ? 'bg-gray-50 border-gray-300' : 'bg-white border-gray-200'
+  const bgColor = selected ? 'bg-muted border-gray-300' : 'bg-background border'
   const stageLabel = stage.charAt(0).toUpperCase() + stage.slice(1)
 
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={onClick}
       disabled={readOnly && status === 'pending'}
-      className={`flex-1 min-w-0 rounded-lg border p-3 text-left transition-colors ${bgColor} ${
-        !readOnly && status !== 'pending' ? 'cursor-pointer hover:bg-gray-100' : ''
+      className={`flex-1 min-w-0 rounded-lg border p-3 text-left transition-colors h-auto justify-start font-normal ${bgColor} ${
+        !readOnly && status !== 'pending' ? 'cursor-pointer hover:bg-muted' : ''
       } ${status === 'pending' && !selected ? 'opacity-60' : ''}`}
     >
       <div className="flex items-center gap-2 mb-1">
         <StageStatusIcon status={status} />
-        <span className="text-sm font-medium text-gray-900 truncate">{stageLabel}</span>
+        <span className="text-sm font-medium text-foreground truncate">{stageLabel}</span>
       </div>
       {status === 'completed' && duration != null && (
-        <span className="text-xs text-gray-400 ml-7">{formatDuration(duration)}</span>
+        <span className="text-xs text-muted-foreground/70 ml-7">{formatDuration(duration)}</span>
       )}
       {status === 'running' && duration != null && (
         <span className="text-xs text-blue-500 ml-7">{formatDuration(duration)}</span>
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -328,12 +331,13 @@ function TaskItem({
 
   return (
     <div
-      className={`rounded-md border border-gray-200 overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-red-200' : ''}`}
+      className={`rounded-md border overflow-hidden ${isPending ? 'opacity-50' : ''} ${isFailed ? 'border-red-200' : ''}`}
     >
-      <button
+      <Button
+        variant="ghost"
         onClick={() => !readOnly && canExpand && setExpanded(!expanded)}
         disabled={readOnly}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors h-auto justify-start font-normal"
       >
         {icon}
         <span className="text-sm text-gray-900 flex-1 truncate">{task.title}</span>
@@ -362,9 +366,9 @@ function TaskItem({
             />
           </svg>
         )}
-      </button>
+      </Button>
       {expanded && canExpand && (
-        <div className="px-3 pb-2 border-t border-gray-100 bg-gray-50">
+        <div className="px-3 pb-2 border-t bg-muted">
           <div className="mt-2 space-y-1">
             {hasReason && (
               <div className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
@@ -372,7 +376,7 @@ function TaskItem({
               </div>
             )}
             {task.artifacts.map((a) => (
-              <div key={a} className="flex items-center gap-1.5 text-xs text-gray-500">
+              <div key={a} className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <svg className="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
                 </svg>
@@ -587,141 +591,146 @@ function InlineApproval({
 
       {hasApprovalOutput && (
         <div className="flex gap-4 text-xs">
-          <button
+          <Button
+            variant="link"
             onClick={() => setReportModalOpen(true)}
-            className="text-blue-600 hover:text-blue-800 transition-colors"
+            className="h-auto p-0 text-xs"
           >
             View Full Report
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="link"
             onClick={handleViewChanges}
-            className="text-blue-600 hover:text-blue-800 transition-colors"
+            className="h-auto p-0 text-xs"
           >
             View Changes
-          </button>
+          </Button>
         </div>
       )}
 
       {!hasApprovalOutput && (
         <div className="space-y-2">
           <div className="flex gap-2">
-            <button
+            <Button
               onClick={() => approveMutation.mutate()}
               disabled={approveMutation.isPending}
-              className="flex-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              className="flex-1"
             >
               {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => rejectMutation.mutate()}
               disabled={rejectMutation.isPending}
-              className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              className="flex-1"
             >
               {rejectMutation.isPending ? 'Sending...' : 'Send back'}
-            </button>
+            </Button>
           </div>
-          <textarea
+          <Textarea
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
             placeholder="Optional feedback..."
             rows={2}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+            className="resize-none"
           />
         </div>
       )}
 
       {hasApprovalOutput && classified === 'PASS' && (
         <div className="space-y-2">
-          <button
+          <Button
             onClick={() => approveMutation.mutate()}
             disabled={approveMutation.isPending}
-            className="w-full rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+            className="w-full bg-green-600 hover:bg-green-700 text-white"
           >
             {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
-          </button>
+          </Button>
         </div>
       )}
 
       {hasApprovalOutput && classified === 'FAIL' && (
         <div className="space-y-2">
-          <button
+          <Button
+            variant="destructive"
             onClick={handleSendBackForFixes}
             disabled={sendBackMutation.isPending}
-            className="w-full rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+            className="w-full"
           >
             {sendBackMutation.isPending ? 'Sending back...' : 'Send back for fixes'}
-          </button>
+          </Button>
 
           <div>
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setInstructionsExpanded(!instructionsExpanded)}
-              className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              className="h-auto px-0 text-sm text-muted-foreground hover:text-foreground"
             >
               {instructionsExpanded ? '▾' : '▸'} Add instructions...
-            </button>
+            </Button>
             {instructionsExpanded && (
               <div className="mt-2 space-y-2">
-                <textarea
+                <Textarea
                   value={instructionsText}
                   onChange={(e) => setInstructionsText(e.target.value)}
                   placeholder="Add your instructions for the fix..."
                   rows={3}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  className="resize-none"
                 />
-                <button
+                <Button
                   onClick={handleSendWithInstructions}
                   disabled={!instructionsText.trim() || sendBackMutation.isPending}
-                  className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {sendBackMutation.isPending ? 'Sending back...' : 'Send with instructions'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
 
-          <button
+          <Button
+            variant="outline"
             onClick={handleApproveAnyway}
             disabled={approveMutation.isPending}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            className="w-full"
           >
             {approveMutation.isPending ? 'Approving...' : 'Approve anyway'}
-          </button>
+          </Button>
         </div>
       )}
 
       {hasApprovalOutput && classified === 'UNKNOWN' && (
         <div className="space-y-2">
-          <button
+          <Button
             onClick={() => approveMutation.mutate()}
             disabled={approveMutation.isPending}
-            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="w-full"
           >
             {approveMutation.isPending ? 'Approving...' : getApproveLabel()}
-          </button>
+          </Button>
 
           <div>
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setNotesExpanded(!notesExpanded)}
-              className="text-sm text-gray-600 hover:text-gray-800 transition-colors"
+              className="h-auto px-0 text-sm text-muted-foreground hover:text-foreground"
             >
               {notesExpanded ? '▾' : '▸'} Send back with notes...
-            </button>
+            </Button>
             {notesExpanded && (
               <div className="mt-2 space-y-2">
-                <textarea
+                <Textarea
                   value={notesText}
                   onChange={(e) => setNotesText(e.target.value)}
                   placeholder="Describe what needs to be changed..."
                   rows={3}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+                  className="resize-none"
                 />
-                <button
+                <Button
                   onClick={handleSendBackWithNotes}
                   disabled={!notesText.trim() || sendBackMutation.isPending}
-                  className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   {sendBackMutation.isPending ? 'Sending back...' : 'Send back'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -867,13 +876,13 @@ function SpecialStatePanel({
   if (issue.stage === IssueStage.Backlog) {
     return (
       <div className="flex justify-center py-4">
-        <button
+        <Button
           onClick={() => startMutation.mutate()}
           disabled={startMutation.isPending}
-          className="rounded-md bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+          className="px-6"
         >
           {startMutation.isPending ? 'Starting...' : 'Start'}
-        </button>
+        </Button>
       </div>
     )
   }
@@ -902,13 +911,13 @@ function SpecialStatePanel({
         <p className="text-xs text-orange-600">
           The workflow was interrupted. Click &quot;Resume&quot; to continue from where it left off.
         </p>
-        <button
+        <Button
           onClick={() => resumeMutation.mutate()}
           disabled={resumeMutation.isPending}
-          className="rounded-md bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50 transition-colors"
+          className="bg-orange-500 hover:bg-orange-600 text-white"
         >
           {resumeMutation.isPending ? 'Resuming...' : 'Resume'}
-        </button>
+        </Button>
       </div>
     )
   }

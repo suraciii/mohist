@@ -2,6 +2,7 @@ import type { DiffFile, CommitEntry, IssueDiffResponse, IssueCommitsResponse } f
 import { formatTimeAgo } from '../../../shared/lib/format-time'
 import { DiffViewer } from '../../issue-changed-files/ui/DiffViewer'
 import { useCommitDiff } from '../../../entities/issue/api/queries'
+import { Button } from '@/components/ui/button'
 
 function CommitRow({
   issueNumber,
@@ -18,9 +19,11 @@ function CommitRow({
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onToggle}
-        className="w-full flex items-center gap-3 text-sm py-1.5 px-2 rounded hover:bg-gray-50 transition-colors text-left"
+        className="h-auto w-full justify-start gap-3 py-1.5 px-2 text-left font-normal hover:bg-gray-50"
       >
         <svg
           className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-90' : ''}`}
@@ -38,7 +41,7 @@ function CommitRow({
         <span className="text-gray-400 text-xs flex-shrink-0">{formatTimeAgo(new Date(commit.date))}</span>
         <span className="text-green-600 text-xs font-medium flex-shrink-0">+{commit.additions}</span>
         <span className="text-red-500 text-xs font-medium flex-shrink-0">-{commit.deletions}</span>
-      </button>
+      </Button>
       {commit.files && commit.files.length > 0 && !expanded && (
         <div className="ml-5 flex flex-wrap gap-1 px-2 pb-1">
           {commit.files.slice(0, 5).map((f) => (
@@ -147,26 +150,30 @@ export function ChangesPanel({
       {showUnavailable || (
         <>
           <div className="flex items-center gap-1 mb-3 border-b border-gray-100">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setDiffTab('files')}
-              className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              className={`h-auto rounded-none px-3 py-1.5 border-b-2 -mb-px ${
                 diffTab === 'files'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Files{files.length > 0 ? ` (${files.length})` : ''}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setDiffTab('commits')}
-              className={`px-3 py-1.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              className={`h-auto rounded-none px-3 py-1.5 border-b-2 -mb-px ${
                 diffTab === 'commits'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               Commits{commits.length > 0 ? ` (${commits.length})` : ''}
-            </button>
+            </Button>
           </div>
 
           {diffTab === 'files' && (
@@ -176,7 +183,9 @@ export function ChangesPanel({
               ) : (
                 files.map((f: DiffFile, i: number) => (
                   <div key={i}>
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => {
                         setExpandedFiles((prev) => {
                           const next = new Set(prev)
@@ -188,7 +197,7 @@ export function ChangesPanel({
                           return next
                         })
                       }}
-                      className="w-full flex items-center gap-2 text-sm py-1 px-2 rounded hover:bg-gray-50 transition-colors text-left"
+                      className="h-auto w-full justify-start gap-2 py-1 px-2 text-left font-normal hover:bg-gray-50"
                     >
                       <svg
                         className={`h-3 w-3 text-gray-400 transition-transform flex-shrink-0 ${expandedFiles.has(f.file) ? 'rotate-90' : ''}`}
@@ -206,7 +215,7 @@ export function ChangesPanel({
                       </span>
                       <span className="text-green-600 text-xs font-medium">+{f.additions}</span>
                       <span className="text-red-500 text-xs font-medium">-{f.deletions}</span>
-                    </button>
+                    </Button>
                     {expandedFiles.has(f.file) && f.diff && (
                       <div className="ml-5">
                         <DiffViewer diff={f.diff} />

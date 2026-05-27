@@ -6,6 +6,8 @@ import { parseDiff, parseDiffFiles, selectFirstReadableFile, getFileBlockIdentit
 import { ChangedFilesTree, UnifiedDiffPane, SplitDiffPane, RawPatchPane, FullFilePane, DiffSearchPane } from '../../../widgets/issue-changed-files/ui'
 import type { FileBlock } from '../../../widgets/issue-changed-files/model/diffModel'
 import type { IssueCommitsResponse, CommitEntry } from '../../../shared/api/types'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type ExpandState = 'all' | 'none' | 'mixed'
 type DiffMode = 'unified' | 'split'
@@ -57,9 +59,10 @@ function formatRelativeTime(iso: string): string {
 function BackToIssueButton({ issueNumber }: { issueNumber: number }) {
   const navigate = useNavigate()
   return (
-    <button
+    <Button
+      variant="link"
       onClick={() => navigate(`/issue/${issueNumber}`)}
-      className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+      className="mb-4 h-auto p-0 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
     >
       <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
         <path
@@ -69,7 +72,7 @@ function BackToIssueButton({ issueNumber }: { issueNumber: number }) {
         />
       </svg>
       Back to issue
-    </button>
+    </Button>
   )
 }
 
@@ -167,9 +170,9 @@ function ErrorState({ issueNumber, issueError, diffError }: { issueNumber: numbe
           <p className="text-sm text-red-700 mb-4">
             {issueError ? 'Failed to load issue details.' : diffError ? 'Failed to load issue diff.' : 'Failed to load issue commits.'}
           </p>
-          <button onClick={() => navigate(`/issue/${issueNumber}`)} className="text-sm text-blue-600 hover:text-blue-700">
+          <Button variant="link" onClick={() => navigate(`/issue/${issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
             View issue detail
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -183,9 +186,9 @@ function InvalidIssueState() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 w-full">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6">
           <p className="text-sm text-red-700 mb-4">Invalid issue number</p>
-          <button onClick={() => navigate('/')} className="text-sm text-blue-600 hover:text-blue-700">
+          <Button variant="link" onClick={() => navigate('/')} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
             Back to board
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -210,31 +213,43 @@ interface ReaderToolbarProps {
   onExitCommitMode: () => void
 }
 
+const readerModeLabels: Record<ReaderMode, string> = {
+  diff: 'Diff',
+  raw: 'Raw',
+  full: 'Full file',
+  search: 'Search',
+}
+
 function ReaderToolbar(props: ReaderToolbarProps) {
   return (
     <div className="flex items-center gap-2 mb-2 flex-wrap">
-      <button onClick={props.onExpandAll} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors">Expand all</button>
-      <button onClick={props.onCollapseAll} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors">Collapse all</button>
+      <Button variant="outline" size="xs" onClick={props.onExpandAll}>Expand all</Button>
+      <Button variant="outline" size="xs" onClick={props.onCollapseAll}>Collapse all</Button>
       <div className="h-4 w-px bg-gray-200 mx-1" />
-      <button onClick={props.onToggleDiffMode} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors">
+      <Button variant="outline" size="xs" onClick={props.onToggleDiffMode}>
         {props.diffMode === 'unified' ? 'Split' : 'Unified'} view
-      </button>
+      </Button>
       <div className="h-4 w-px bg-gray-200 mx-1" />
       <label className="flex items-center gap-1 text-xs text-gray-500">
         <span>Mode:</span>
-        <select value={props.readerMode} onChange={(e) => props.onReaderModeChange(e.target.value as ReaderMode)} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors">
-          <option value="diff">Diff</option>
-          <option value="raw">Raw</option>
-          <option value="full">Full file</option>
-          <option value="search">Search</option>
-        </select>
+        <Select value={props.readerMode} onValueChange={(value) => value && props.onReaderModeChange(value as ReaderMode)}>
+          <SelectTrigger aria-label="Reader mode" className="h-7 w-[110px] text-xs">
+            <SelectValue>{readerModeLabels[props.readerMode]}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="diff">Diff</SelectItem>
+            <SelectItem value="raw">Raw</SelectItem>
+            <SelectItem value="full">Full file</SelectItem>
+            <SelectItem value="search">Search</SelectItem>
+          </SelectContent>
+        </Select>
       </label>
       {props.selectedFile && props.totalHunks > 1 && (
         <>
           <div className="h-4 w-px bg-gray-200 mx-1" />
-          <button onClick={props.onPrevHunk} disabled={props.activeHunkIndex <= 0} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Prev hunk</button>
+          <Button variant="outline" size="xs" onClick={props.onPrevHunk} disabled={props.activeHunkIndex <= 0}>Prev hunk</Button>
           <span className="text-xs text-gray-500">{props.activeHunkIndex + 1} / {props.totalHunks}</span>
-          <button onClick={props.onNextHunk} disabled={props.activeHunkIndex >= props.totalHunks - 1} className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Next hunk</button>
+          <Button variant="outline" size="xs" onClick={props.onNextHunk} disabled={props.activeHunkIndex >= props.totalHunks - 1}>Next hunk</Button>
         </>
       )}
       <CommitSelector {...props} />
@@ -247,9 +262,9 @@ function CommitSelector({ commitMode, commits, onSelectCommit, onExitCommitMode 
     return (
       <>
         <div className="h-4 w-px bg-gray-200 mx-1" />
-        <button onClick={onExitCommitMode} className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded border border-blue-200 transition-colors text-blue-700">
+        <Button variant="outline" size="xs" onClick={onExitCommitMode} className="border-blue-200 bg-blue-100 text-blue-700 hover:bg-blue-200 hover:text-blue-700">
           Exit commit mode
-        </button>
+        </Button>
       </>
     )
   }
@@ -257,19 +272,22 @@ function CommitSelector({ commitMode, commits, onSelectCommit, onExitCommitMode 
   return (
     <>
       <div className="h-4 w-px bg-gray-200 mx-1" />
-      <select
+      <Select
         value=""
-        onChange={(e) => {
-          const commit = commits.find(c => c.hash === e.target.value)
+        onValueChange={(value) => {
+          const commit = commits.find(c => c.hash === value)
           if (commit) onSelectCommit(commit)
         }}
-        className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors"
       >
-        <option value="">View commit...</option>
+        <SelectTrigger aria-label="Commit view" className="h-7 w-[180px] text-xs">
+          <SelectValue placeholder="View commit..." />
+        </SelectTrigger>
+        <SelectContent>
         {commits.slice(0, 10).map(commit => (
-          <option key={commit.hash} value={commit.hash}>{commit.shortHash}: {commit.message.split('\n')[0].slice(0, 40)}</option>
+          <SelectItem key={commit.hash} value={commit.hash}>{commit.shortHash}: {commit.message.split('\n')[0].slice(0, 40)}</SelectItem>
         ))}
-      </select>
+        </SelectContent>
+      </Select>
     </>
   )
 }
@@ -299,8 +317,8 @@ function ReaderPane(props: ReaderPaneProps) {
       <div className="flex flex-col items-center justify-center h-full text-gray-500 text-sm gap-3 px-4 text-center">
         <div>Failed to load commit diff.</div>
         <div className="flex items-center gap-2">
-          <button onClick={props.onExitCommitMode} className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-200 transition-colors">Exit commit mode</button>
-          <button onClick={() => navigate(`/issue/${props.issueNumber}`)} className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700">Back to issue</button>
+          <Button variant="outline" size="sm" onClick={props.onExitCommitMode}>Exit commit mode</Button>
+          <Button variant="link" onClick={() => navigate(`/issue/${props.issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">Back to issue</Button>
         </div>
       </div>
     )

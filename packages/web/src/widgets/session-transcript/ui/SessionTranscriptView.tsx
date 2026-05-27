@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
+import { Button } from '@/components/ui/button'
 import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary, FileChangeSummary } from '../../../shared/api/types'
 import { ToolCallCard, getToolLabel, getToolArgs } from './ToolCallCard'
 import type { ToolCallEntry } from '../../../shared/api/types'
@@ -113,27 +114,30 @@ function PromptSummaryCard({
 
         <div className="flex items-center gap-2 mt-2">
           {!expanded && rawText && (
-            <button
+            <Button
+              variant="link"
               onClick={() => setExpanded(true)}
-              className="text-xs text-blue-200 hover:text-white transition-colors"
+              className="h-auto p-0 text-xs text-blue-200 hover:text-white transition-colors"
             >
               Show full prompt
-            </button>
+            </Button>
           )}
           {expanded && (
-            <button
+            <Button
+              variant="link"
               onClick={() => setExpanded(false)}
-              className="text-xs text-blue-200 hover:text-white transition-colors"
+              className="h-auto p-0 text-xs text-blue-200 hover:text-white transition-colors"
             >
               Show less
-            </button>
+            </Button>
           )}
-          <button
+          <Button
+            variant="link"
             onClick={handleCopy}
-            className="text-xs text-blue-200 hover:text-white transition-colors"
+            className="h-auto p-0 text-xs text-blue-200 hover:text-white transition-colors"
           >
             {copied ? 'Copied!' : 'Copy'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -181,12 +185,13 @@ function AssistantTextPartView({ part }: { part: TextPart }) {
         )}
       </div>
       {hasText && (
-        <button
+        <Button
+          variant="link"
           onClick={handleCopy}
-          className="mt-1 text-xs text-gray-400 hover:text-gray-700 transition-colors"
+          className="mt-1 h-auto p-0 text-xs text-gray-400 hover:text-gray-700 transition-colors"
         >
           {copied ? 'Copied!' : 'Copy'}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -222,9 +227,11 @@ function TurnFileChangesView({ changes }: { changes: FileChangeSummary[] }) {
 
   return (
     <div className="max-w-[90%] rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-green-100/50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-green-100/50 transition-colors"
       >
         <svg className="h-3.5 w-3.5 text-green-600 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
@@ -240,7 +247,7 @@ function TurnFileChangesView({ changes }: { changes: FileChangeSummary[] }) {
         <svg className={`h-3 w-3 text-green-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
-      </button>
+      </Button>
       {expanded && (
         <div className="border-t border-green-200/50 px-3 py-2 space-y-1">
           {changes.map((change, i) => {
@@ -350,9 +357,11 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
       >
         <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path d="M10 3a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM7.5 4.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm5 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" />
@@ -365,7 +374,7 @@ function ContextGroupCard({ tools }: ContextGroupCardProps) {
         <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
-      </button>
+      </Button>
       {expanded && (
         <div className="px-3 pb-2 border-t border-gray-100 space-y-1.5">
           {tools.map((tool) => (
@@ -430,9 +439,11 @@ function TodoUpdateCard({ part }: TodoUpdateCardProps) {
 
   return (
     <div className="rounded-md border border-gray-200 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-gray-50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-gray-50 transition-colors"
       >
         <svg className="h-3.5 w-3.5 text-gray-400 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
@@ -444,7 +455,7 @@ function TodoUpdateCard({ part }: TodoUpdateCardProps) {
         <svg className={`h-3 w-3 text-gray-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
-      </button>
+      </Button>
       {expanded && (
         <div className="px-3 pb-2 border-t border-gray-100">
           <div className="rounded-md border border-gray-200 overflow-hidden">

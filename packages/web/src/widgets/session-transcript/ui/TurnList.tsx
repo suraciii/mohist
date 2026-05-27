@@ -1,4 +1,5 @@
 import React from 'react'
+import { Button } from '@/components/ui/button'
 import type { DisplayTurn, DisplayChangedFile } from '../model/session-transcript-display'
 import { PromptBlock } from './PromptBlock'
 import { AssistantParts } from './AssistantParts'
@@ -51,9 +52,11 @@ export function TurnDiffs({ files }: TurnDiffsProps) {
 
   return (
     <div className="max-w-[90%] rounded-md border border-green-200 bg-green-50/50 overflow-hidden">
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left px-3 py-1.5 hover:bg-green-100/50 transition-colors"
+        className="flex h-auto items-center justify-start gap-2 w-full text-left px-3 py-1.5 rounded-none hover:bg-green-100/50 transition-colors"
       >
         <svg className="h-3.5 w-3.5 text-green-600 shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
@@ -69,7 +72,7 @@ export function TurnDiffs({ files }: TurnDiffsProps) {
         <svg className={`h-3 w-3 text-green-400 shrink-0 ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
         </svg>
-      </button>
+      </Button>
       {expanded && (
         <div className="border-t border-green-200/50 px-3 py-2 space-y-1">
           {files.map((change, i) => {
