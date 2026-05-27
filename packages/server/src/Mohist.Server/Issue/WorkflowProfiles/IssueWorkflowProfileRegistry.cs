@@ -4,9 +4,9 @@ public class IssueWorkflowProfileRegistry
 {
     private readonly Dictionary<string, IIssueWorkflowProfile> _profiles;
 
-    public IssueWorkflowProfileRegistry()
+    public IssueWorkflowProfileRegistry(Workflow.Prompts.IPromptLoader promptLoader)
     {
-        var defaults = new MohistDefaultIssueWorkflowProfile();
+        var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
             [defaults.Id] = defaults,

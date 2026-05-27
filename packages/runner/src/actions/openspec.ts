@@ -20,7 +20,7 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   const tasks = sourceTasks.flatMap((task) => {
     const id = stringInput(task, "id") ?? stringInput(task, "taskId")
     if (!id?.trim()) return []
-    return [{ id, title: stringInput(task, "title") ?? id, uses: stringInput(task, "uses") ?? defaultUses, with: mergeTaskWith(defaultWith, task) }]
+    return [{ id, title: stringInput(task, "title") ?? id, uses: stringInput(task, "uses") ?? defaultUses, with: mergeTaskWith(defaultWith, task, context.variables) }]
   })
 
   return { status: "loaded", message: `Loaded ${tasks.length} tasks`, output: JSON.stringify({ tasks }) }
@@ -49,7 +49,7 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   return { status: "success", message: "Change archived", output: JSON.stringify({ kind: "archive-change", source: changeDir, destination }) }
 }
 
-function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject) {
+function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject, variables?: JsonObject) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
   const title = stringInput(task, "title") ?? stringInput(task, "id") ?? stringInput(task, "taskId") ?? "OpenSpec task"
   addString(merged, task, "description")
@@ -64,22 +64,42 @@ function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject) {
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
   if (!stringInput(merged, "prompt")?.trim()) {
-    merged.prompt = buildOpenSpecTaskPrompt(title, task)
+    merged.prompt = buildOpenSpecTaskPrompt(title, task, variables)
   }
   return Object.keys(merged).length === 0 ? null : merged
 }
 
-function buildOpenSpecTaskPrompt(title: string, task: JsonObject) {
-  const sections = [
-    `Implement this OpenSpec task: ${title}`,
+function buildOpenSpecTaskPrompt(title: string, task: JsonObject, variables?: JsonObject) {
+  const buildPrompt = resolveBuildPrompt(variables)
+  const taskSections = [
+    stringSection("Task Title", title),
     stringSection("Description", stringInput(task, "description")),
     valueSection("Acceptance Criteria", task.acceptanceCriteria),
     valueSection("Depends On", task.dependsOn),
     stringSection("Output", stringInput(task, "output")),
     stringSection("Notes", stringInput(task, "notes")),
+  ].filter(Boolean)
+
+  if (buildPrompt) {
+    // Use the full build.md prompt as the base, appending task-specific details
+    return [buildPrompt, ...taskSections].join("\n\n")
+  }
+
+  // Fallback to the simple prompt when no build.md is available
+  const sections = [
+    `Implement this OpenSpec task: ${title}`,
+    ...taskSections,
     "Follow the repository conventions. Make the smallest complete change that satisfies the task, and run the relevant verification before reporting completion.",
   ].filter(Boolean)
   return sections.join("\n\n")
+}
+
+function resolveBuildPrompt(variables?: JsonObject): string | undefined {
+  if (!variables) return undefined
+  const prompts = variables["prompts"]
+  if (typeof prompts !== "object" || prompts === null || Array.isArray(prompts)) return undefined
+  const build = (prompts as JsonObject)["build"]
+  return typeof build === "string" ? build : undefined
 }
 
 function stringSection(title: string, value: string | undefined) {

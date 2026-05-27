@@ -429,55 +429,55 @@ public static class IssueRoutes
             }
         });
 
-        // Issue-scoped active workflow variables. Mohist does not expose workflow runs as standalone product resources.
-        issues.MapGet("/{number:int}/workflow/variables", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        // Issue-scoped active workflow definition vars. Mohist does not expose workflow runs as standalone product resources.
+        issues.MapGet("/{number:int}/workflow/vars", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
             var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).GetVariablesAsync();
-            return ApiResults.Ok(WorkflowVariablesResponse(number, wrId, snapshot));
+            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, vars = SectionValue(snapshot?.Variables, "vars") });
         });
 
-        issues.MapGet("/{number:int}/workflow/variables/{section}", async (int number, string section, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        issues.MapGet("/{number:int}/workflow/vars/{name}", async (int number, string name, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
             var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).GetVariablesAsync();
-            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, section, value = SectionValue(snapshot?.Variables, section) });
+            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, name, value = VarValue(snapshot?.Variables, name) });
         });
 
-        issues.MapPatch("/{number:int}/workflow/variables/{section}", async (int number, string section, JsonElement patch, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        issues.MapPatch("/{number:int}/workflow/vars/{name}", async (int number, string name, JsonElement patch, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).PatchVariablesAsync(section, patch.GetRawText());
-            return ApiResults.Ok(WorkflowVariablesResponse(number, wrId, snapshot));
+            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).PatchVariablesAsync("vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
+            return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
         });
 
-        issues.MapGet("/{number:int}/workflow/stages/{stage}/variables/{section}", async (int number, string stage, string section, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        issues.MapGet("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
             var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).GetVariablesAsync();
-            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, stage, section, value = StageSectionValue(snapshot?.StageVariables, stage, section) });
+            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, stage, name, value = StageVarValue(snapshot?.StageVariables, stage, name) });
         });
 
-        issues.MapPatch("/{number:int}/workflow/stages/{stage}/variables/{section}", async (int number, string stage, string section, JsonElement patch, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        issues.MapPatch("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, JsonElement patch, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).PatchStageVariablesAsync(stage, section, patch.GetRawText());
-            return ApiResults.Ok(WorkflowVariablesResponse(number, wrId, snapshot));
+            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).PatchStageVariablesAsync(stage, "vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
+            return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
         });
 
         return app;
@@ -523,13 +523,13 @@ public static class IssueRoutes
         return JsonSerializer.Serialize(with, WorkflowVariableJson.Options);
     }
 
-    private static object WorkflowVariablesResponse(int issueNumber, string workflowRunId, WorkflowVariablesSnapshot? snapshot) => new
+    private static object WorkflowVarsResponse(int issueNumber, string workflowRunId, WorkflowVariablesSnapshot? snapshot) => new
     {
         issueNumber,
         workflowRunId,
         affected = "future-dispatches",
-        variables = JsonValue(snapshot?.Variables),
-        stageVariables = StageVariableValues(snapshot?.StageVariables),
+        vars = SectionValue(snapshot?.Variables, "vars"),
+        stageVars = StageVarsValues(snapshot?.StageVariables),
     };
 
     private static JsonElement? SectionValue(string? variables, string section)
@@ -542,12 +542,30 @@ public static class IssueRoutes
             : null;
     }
 
+    private static JsonElement? VarValue(string? variables, string name)
+    {
+        var vars = SectionValue(variables, "vars");
+        return vars is { ValueKind: JsonValueKind.Object }
+            && vars.Value.TryGetProperty(name, out var value)
+            ? value.Clone()
+            : null;
+    }
+
     private static JsonElement? StageSectionValue(Dictionary<string, Dictionary<string, string>>? stageVariables, string stage, string section) =>
         stageVariables is not null
         && stageVariables.TryGetValue(stage, out var sections)
         && sections.TryGetValue(section, out var value)
             ? JsonValue(value)
             : null;
+
+    private static JsonElement? StageVarValue(Dictionary<string, Dictionary<string, string>>? stageVariables, string stage, string name)
+    {
+        var vars = StageSectionValue(stageVariables, stage, "vars");
+        return vars is { ValueKind: JsonValueKind.Object }
+            && vars.Value.TryGetProperty(name, out var value)
+            ? value.Clone()
+            : null;
+    }
 
     private static JsonElement? JsonValue(string? json)
     {
@@ -564,6 +582,16 @@ public static class IssueRoutes
             stage => stage.Key,
             stage => stage.Value.ToDictionary(section => section.Key, section => JsonValue(section.Value), StringComparer.Ordinal),
             StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, JsonElement?>? StageVarsValues(Dictionary<string, Dictionary<string, string>>? stageVariables)
+    {
+        if (stageVariables is null || stageVariables.Count == 0) return null;
+
+        return stageVariables
+            .Select(stage => (stage.Key, Vars: StageSectionValue(stageVariables, stage.Key, "vars")))
+            .Where(stage => stage.Vars is not null)
+            .ToDictionary(stage => stage.Key, stage => stage.Vars, StringComparer.OrdinalIgnoreCase);
     }
 
     private static RuntimeTaskRequest DefaultConflictResolver() => new(

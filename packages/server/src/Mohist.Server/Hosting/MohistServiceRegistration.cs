@@ -27,6 +27,7 @@ public static class MohistServiceRegistration
         services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
         services.AddScoped<IStateStore<Issue.Domain.Issue>, IssueStateStore>();
         services.AddScoped<IssueQueryService>();
+        services.AddSingleton<Workflow.Prompts.IPromptLoader, Workflow.Prompts.FilePromptLoader>();
         services.AddSingleton<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();
         services.AddScoped<IEventStore, EventStore>();

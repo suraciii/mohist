@@ -6,11 +6,8 @@ stages:
         title: Generate proposal
         uses: mohist/acp-agent
         with:
-          prompt: |
-            Create ${{ openspecChangeDir }}/proposal.md.
-            The proposal explains why the change is needed, what will change, capabilities affected, and implementation impact.
-            Keep it concise and avoid copying prompt instructions into the file.
-          agent: ${{ agent.opencode }}
+          prompt: ${{ prompts.proposal }}
+          agent: ${{ vars.agent }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/proposal.md
@@ -18,11 +15,8 @@ stages:
         title: Write specs
         uses: mohist/acp-agent
         with:
-          prompt: |
-            Read ${{ openspecChangeDir }}/proposal.md and create spec delta files under ${{ openspecChangeDir }}/specs/<capability>/spec.md.
-            Use ADDED/MODIFIED/REMOVED/RENAMED Requirements sections.
-            Every requirement must include at least one #### Scenario with WHEN/THEN behavior.
-          agent: ${{ agent.opencode }}
+          prompt: ${{ prompts.specs }}
+          agent: ${{ vars.agent }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/specs
@@ -30,11 +24,8 @@ stages:
         title: Create design
         uses: mohist/acp-agent
         with:
-          prompt: |
-            Create ${{ openspecChangeDir }}/design.md.
-            Include Context, Goals/Non-Goals, Decisions with rationale, Risks/Trade-offs, Migration Plan, and Open Questions.
-            Focus on how to implement the proposal and specs.
-          agent: ${{ agent.opencode }}
+          prompt: ${{ prompts.design }}
+          agent: ${{ vars.agent }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/design.md
@@ -42,12 +33,8 @@ stages:
         title: Generate tasks
         uses: mohist/acp-agent
         with:
-          prompt: |
-            Create ${{ openspecChangeDir }}/tasks.json.
-            The file must contain a JSON object with a tasks array.
-            Each task must have id, title, description, acceptanceCriteria, priority, mode, type, output, dependsOn, passes=false, and notes.
-            Tasks must be ordered by dependency and every non-first task should depend on earlier task IDs.
-          agent: ${{ agent.opencode }}
+          prompt: ${{ prompts.tasks }}
+          agent: ${{ vars.agent }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/tasks.json
@@ -55,12 +42,8 @@ stages:
         title: Self review
         uses: mohist/acp-agent
         with:
-          prompt: |
-            Review proposal.md, specs, design.md, and tasks.json in ${{ openspecChangeDir }}.
-            Fix any issues directly when possible.
-            Create ${{ openspecChangeDir }}/self-review.md with Result, repaired/blocking/follow-up items, and exactly one final marker:
-            <promise>PASS</promise> or <promise>FAIL</promise>.
-          agent: ${{ agent.opencode }}
+          prompt: ${{ prompts.self-review }}
+          agent: ${{ vars.agent }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/self-review.md
@@ -103,7 +86,7 @@ stages:
             prompt: |
               Fix the plan review findings in ${{ openspecChangeDir }}.
               Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
-            agent: ${{ agent.opencode }}
+            agent: ${{ vars.agent }}
       - name: health
         title: Health
         uses: core/script
@@ -133,7 +116,7 @@ stages:
             prompt: |
               Fix the build-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ agent.opencode }}
+            agent: ${{ vars.agent }}
 
   - stage: check
     requiresApproval: true
@@ -142,15 +125,8 @@ stages:
         title: AI review
         uses: mohist/acp-agent
         with:
-          prompt: |
-            Review the current workspace implementation and the change artifacts in ${{ openspecChangeDir }}.
-            Write the review result to ${{ openspecChangeDir }}/review.md.
-            The review must identify blocking correctness, test, integration, or product contract issues.
-            End the file with exactly one marker:
-            <promise>PASS</promise>
-            or
-            <promise>FAIL</promise>.
-          agent: ${{ agent.opencode }}
+          prompt: ${{ prompts.review }}
+          agent: ${{ vars.agent }}
           expect:
             files:
               - path: ${{ openspecChangeDir }}/review.md
@@ -170,7 +146,7 @@ stages:
             prompt: |
               Fix the check-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ agent.opencode }}
+            agent: ${{ vars.agent }}
       - name: review-passed
         title: Review passed
         uses: core/marker
@@ -186,7 +162,7 @@ stages:
             prompt: |
               Read ${{ openspecChangeDir }}/review.md and fix the blocking findings.
               Keep changes focused on review failures and preserve existing passing behavior.
-            agent: ${{ agent.opencode }}
+            agent: ${{ vars.agent }}
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
@@ -227,4 +203,4 @@ stages:
             prompt: |
               Fix the integrate-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
-            agent: ${{ agent.opencode }}
+            agent: ${{ vars.agent }}
