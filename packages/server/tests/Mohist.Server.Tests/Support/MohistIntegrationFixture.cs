@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Config;
 using Mohist.Server.Events;
+using Mohist.Server.Workspace;
 using Xunit;
 
 namespace Mohist.Server.Tests.Support;
@@ -25,6 +26,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public IEventBus EventBus => _eventBus;
+    public FakeGitService Git => _factory.Services.GetRequiredService<FakeGitService>();
     public string ConnectionString { get; private set; } = null!;
     public string RunnerRoot => _runnerRoot ?? throw new InvalidOperationException("Fixture is not initialized");
 
@@ -88,6 +90,9 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<IEventBus>(_eventBus);
+            services.RemoveAll<IGitService>();
+            services.AddSingleton<FakeGitService>();
+            services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
             services.RemoveAll<ConfigService>();
             services.AddSingleton(provider => new ConfigService(
                 provider.GetRequiredService<IConfiguration>(),

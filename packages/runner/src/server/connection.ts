@@ -50,15 +50,26 @@ export class ServerConnection {
     await this.post(`sessions/${sessionId}/status`, body, signal)
   }
 
-  async getSession(workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<{ acpSessionId: string; workDir: string } | null> {
-    const response = await fetch(this.url(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { signal })
-    if (response.status === 204) return null
-    if (!response.ok) return null
-    return response.json() as Promise<{ acpSessionId: string; workDir: string }>
+  async ensureWorkflowSession(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
+    const response = await fetch(this.url(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/ensure`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`workflow session ensure failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
   }
 
-  async registerSession(workflowRunId: string, sessionName: string, acpSessionId: string, workDir: string, signal: AbortSignal) {
-    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`, { acpSessionId, workDir }, signal)
+  async attachWorkflowSession(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
+  }
+
+  async workflowSessionEvents(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/events`, body, signal)
+  }
+
+  async workflowSessionStatus(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/status`, body, signal)
+  }
+
+  async workflowSessionComplete(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/complete`, body, signal)
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal) {

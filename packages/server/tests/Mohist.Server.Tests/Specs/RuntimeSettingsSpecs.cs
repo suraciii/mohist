@@ -4,17 +4,17 @@ using Xunit;
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("MohistIntegration")]
-public class SettingsCompatibilitySpecs
+public class RuntimeSettingsSpecs
 {
     private readonly HttpClient _client;
 
-    public SettingsCompatibilitySpecs(MohistIntegrationFixture fixture)
+    public RuntimeSettingsSpecs(MohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }
 
     [Fact]
-    public async Task ModelAndStageModels_RoundTripThroughCompatibilityEndpoints()
+    public async Task GivenUserChoosesDefaultAndStageModels_WhenSettingsAreSaved_ThenMohistUsesThoseRuntimePreferences()
     {
         await _client.PostOkAsync("/api/projects", new { name = $"settings-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 

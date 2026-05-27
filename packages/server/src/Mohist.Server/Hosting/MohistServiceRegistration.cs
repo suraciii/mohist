@@ -34,6 +34,7 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentSessionService>();
         services.AddScoped<AgentActivityService>();
         services.AddScoped<WorkflowProjectionService>();
+        services.AddScoped<Workflow.Sessions.Queries.WorkflowSessionQueryService>();
         services.AddHostedService<WorkflowBacklogRecoveryService>();
         services.AddHostedService<AgentSessionRecoveryService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();

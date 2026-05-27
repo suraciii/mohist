@@ -98,20 +98,38 @@ public static class RunnerRoutes
             return session is null ? ApiResults.NotFound($"Session {sessionId} not found") : ApiResults.Ok(session);
         });
 
-        group.MapGet("/workflow-sessions/{workflowRunId}/{sessionName}", async (string workflowRunId, string sessionName, IGrainFactory grains) =>
+        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}/ensure", async (string runnerId, string workflowRunId, string sessionName, WorkflowSessionEnsureRequest req, IGrainFactory grains) =>
         {
-            var key = $"{workflowRunId}:{sessionName}";
+            var key = WorkflowSessionGrainKeys.ForName(workflowRunId, sessionName);
             var grain = grains.GetGrain<IWorkflowSessionGrain>(key);
-            var entry = await grain.GetAsync();
-            return entry is null ? Results.NoContent() : Results.Ok(new WorkflowSessionResponse(entry.AcpSessionId, entry.WorkDir, entry.RegisteredAt));
+            var session = await grain.EnsureAsync(new EnsureWorkflowSessionCommand(workflowRunId, sessionName, runnerId, req.ProjectId, req.IssueNumber, req.WorkId, req.WorkType, req.Stage, req.Title));
+            return Results.Ok(session);
         });
 
-        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}", async (string workflowRunId, string sessionName, WorkflowSessionRegisterRequest req, IGrainFactory grains) =>
+        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}/attach", async (string workflowRunId, string sessionName, WorkflowSessionAttachRequest req, IGrainFactory grains) =>
         {
-            var key = $"{workflowRunId}:{sessionName}";
+            var key = WorkflowSessionGrainKeys.ForName(workflowRunId, sessionName);
             var grain = grains.GetGrain<IWorkflowSessionGrain>(key);
-            await grain.RegisterAsync(req.AcpSessionId, req.WorkDir);
-            return Results.Ok();
+            return Results.Ok(await grain.AttachAcpSessionAsync(new AttachAcpSessionCommand(req.AcpSessionId, req.WorkDir, req.Model, req.ProcessPid)));
+        });
+
+        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}/events", async (string workflowRunId, string sessionName, WorkflowSessionEventsRequest req, IGrainFactory grains) =>
+        {
+            var grain = grains.GetGrain<IWorkflowSessionGrain>(WorkflowSessionGrainKeys.ForName(workflowRunId, sessionName));
+            var inputs = req.Events.Select(e => new WorkflowSessionEventInput(e.Type, e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
+            return Results.Ok(await grain.AppendEventsAsync(new AppendWorkflowSessionEventsCommand(req.WorkId, req.WorkType, req.Stage, inputs)));
+        });
+
+        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}/status", async (string workflowRunId, string sessionName, WorkflowSessionStatusRequest req, IGrainFactory grains) =>
+        {
+            var grain = grains.GetGrain<IWorkflowSessionGrain>(WorkflowSessionGrainKeys.ForName(workflowRunId, sessionName));
+            return Results.Ok(await grain.MarkStatusAsync(new WorkflowSessionStatusCommand(req.Status, req.LastDataAt, req.FailureReason)));
+        });
+
+        group.MapPost("/workflow-sessions/{workflowRunId}/{sessionName}/complete", async (string workflowRunId, string sessionName, WorkflowSessionCompleteRequest req, IGrainFactory grains) =>
+        {
+            var grain = grains.GetGrain<IWorkflowSessionGrain>(WorkflowSessionGrainKeys.ForName(workflowRunId, sessionName));
+            return Results.Ok(await grain.CompleteAsync(new CompleteWorkflowSessionCommand(req.Status, req.FailureReason, req.ExitCode)));
         });
 
         return app;
@@ -121,8 +139,12 @@ public static class RunnerRoutes
 public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null, string[]? CoderModels = null);
 public record RunnerReportRequest(string WorkId, string Status, string? Message = null, string? Output = null, int? ExitCode = null);
 public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
-public record WorkflowSessionResponse(string AcpSessionId, string WorkDir, string RegisteredAt);
-public record WorkflowSessionRegisterRequest(string AcpSessionId, string WorkDir);
+public record WorkflowSessionEnsureRequest(string WorkId, string WorkType, string? Stage = null, string? Title = null, string? ProjectId = null, int? IssueNumber = null);
+public record WorkflowSessionAttachRequest(string AcpSessionId, string? WorkDir = null, string? Model = null, int? ProcessPid = null);
+public record WorkflowSessionEventsRequest(string WorkId, string WorkType, string? Stage, IReadOnlyList<WorkflowSessionEventRequest> Events);
+public record WorkflowSessionEventRequest(string Type, System.Text.Json.JsonElement Payload);
+public record WorkflowSessionStatusRequest([property: JsonPropertyName("status")] string Status, DateTime? LastDataAt = null, string? FailureReason = null);
+public record WorkflowSessionCompleteRequest([property: JsonPropertyName("status")] string Status, string? FailureReason = null, int? ExitCode = null);
 public record SessionTranscriptEntriesRequest([property: JsonPropertyName("events")] IReadOnlyList<SessionTranscriptEntryRequest> TranscriptEntries);
 public record WorkDispatchResponse(
     string WorkflowRunId,

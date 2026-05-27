@@ -6,11 +6,11 @@ using System.Net.Http.Json;
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("MohistIntegration")]
-public class WebCompatibilitySpecs
+public class IssueApiSpecs
 {
     private readonly HttpClient _client;
 
-    public WebCompatibilitySpecs(MohistIntegrationFixture fixture)
+    public IssueApiSpecs(MohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
     }
@@ -90,7 +90,7 @@ public class WebCompatibilitySpecs
     }
 
     [Fact]
-    public async Task SettingsCompatibilityEndpoints_DoNotReturnMissingRoutes()
+    public async Task GivenUserUpdatesRuntimePreferences_WhenDashboardLoadsSystemSettings_ThenCurrentValuesAreReturned()
     {
         await _client.PutAsJsonOkAsync("/api/log-level", new { level = "DEBUG" });
         await _client.PutAsJsonOkAsync("/api/agent-runtime", new { timeout = 900, maxConcurrent = 5 });
