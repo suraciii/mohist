@@ -1,21 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, screen, waitFor, baseRender, renderHook, act } from './test-utils'
 import { SessionHeader, getSessionStatusLabel } from '../src/widgets/coder-session/ui/SessionHeader'
-import { dispatchAgentEvent } from '../src/shared/api/agent-events'
+import { dispatchAgentEvent } from '../src/entities/agent'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import type { CoderSessionItem } from '../src/shared/api/types'
+import type { CoderSessionItem } from '../src/entities/coder-session'
 
 const apiMocks = vi.hoisted(() => ({
   sessions: [] as CoderSessionItem[],
 }))
 
-vi.mock('../src/shared/api/client', () => ({
-  api: {
-    getCoderSessions: vi.fn(() => Promise.resolve(apiMocks.sessions)),
-  },
+vi.mock('../src/entities/coder-session/api/client', () => ({
+  getCoderSessions: vi.fn(() => Promise.resolve(apiMocks.sessions)),
 }))
 
 const queryClients: QueryClient[] = []

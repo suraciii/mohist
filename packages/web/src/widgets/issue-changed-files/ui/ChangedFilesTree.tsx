@@ -1,7 +1,7 @@
 import { useState, useMemo, useContext, createContext, useEffect, useRef } from 'react'
 import { getFileBlockIdentity, type FileBlock } from '../model/diffModel'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
 
 interface DirectoryNode {
   name: string

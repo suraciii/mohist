@@ -1,6 +1,6 @@
 import type { FileBlock } from '../model/diffModel'
 import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 
 interface RawPatchPaneProps {
   block: FileBlock | null

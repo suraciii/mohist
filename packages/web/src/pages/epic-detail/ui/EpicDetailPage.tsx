@@ -1,20 +1,21 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { useIssues } from '../../../entities/issue/api/queries'
+import { useProject } from '../../../entities/project'
+import { useIssues } from '../../../entities/issue'
 import {
   useAddEpicIssue,
   useCloseEpic,
   useEpic,
   useMarkEpicDone,
   useRemoveEpicIssue,
-} from '../../../entities/epic/api/queries'
-import { EpicStatus, IssueStatus, type LinkedIssue } from '../../../shared/api/types'
+} from '../../../entities/epic'
+import { EpicStatus, type LinkedIssue } from '../../../entities/epic'
+import { IssueStatus } from '../../../entities/issue'
 import { ApiError } from '../../../shared/api/client'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Button } from '@/shared/ui/components/button'
+import { Card } from '@/shared/ui/components/card'
+import { Badge } from '@/shared/ui/components/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {

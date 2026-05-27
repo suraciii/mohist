@@ -1,9 +1,8 @@
 import { Outlet, useLocation } from 'react-router-dom'
-import { useProjects } from '../../../entities/project/api/queries'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useProjects, useProject } from '../../../entities/project'
 import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
 import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 
 export function ProjectGuard() {
   const location = useLocation()

@@ -4,13 +4,13 @@ import {
   projectSessionToDisplayTurns,
   extractTurnChangedFiles,
 } from '../src/widgets/session-transcript/model/session-transcript-display'
-import type { CoderSessionDetail, SessionTurn } from '../src/shared/api/types'
+import type { CoderSessionDetail, SessionTurn, TextPart, ReasoningPart, FileChangeSummary, ToolPart, ErrorPart, SessionPart } from '../src/entities/coder-session'
 
-function makeTextPart(id: string, text: string, startedAt = '2024-01-01T00:00:00Z'): import('../src/shared/api/types').TextPart {
+function makeTextPart(id: string, text: string, startedAt = '2024-01-01T00:00:00Z'): TextPart {
   return { id, type: 'text', text, startedAt, completedAt: null }
 }
 
-function makeReasoningPart(id: string, text: string, startedAt = '2024-01-01T00:00:01Z'): import('../src/shared/api/types').ReasoningPart {
+function makeReasoningPart(id: string, text: string, startedAt = '2024-01-01T00:00:01Z'): ReasoningPart {
   return { id, type: 'reasoning', text, startedAt, completedAt: null }
 }
 
@@ -23,10 +23,10 @@ function makeToolPart(
   opts?: {
     title?: string
     target?: string
-    changedFiles?: import('../src/shared/api/types').FileChangeSummary[]
+    changedFiles?: FileChangeSummary[]
     error?: string
   },
-): import('../src/shared/api/types').ToolPart {
+): ToolPart {
   return {
     id,
     type: 'tool',
@@ -47,14 +47,14 @@ function makeToolPart(
   }
 }
 
-function makeErrorPart(id: string, kind: 'timeout' | 'failed' | 'cancelled' | 'recovery', message: string): import('../src/shared/api/types').ErrorPart {
+function makeErrorPart(id: string, kind: 'timeout' | 'failed' | 'cancelled' | 'recovery', message: string): ErrorPart {
   return { id, type: 'error', message, kind, at: '2024-01-01T00:00:04Z' }
 }
 
 function makeTurn(
   id: string,
   promptText: string,
-  assistant: import('../src/shared/api/types').SessionPart[],
+  assistant: SessionPart[],
   completedAt: string | null = null,
   incomplete?: boolean,
 ): SessionTurn {

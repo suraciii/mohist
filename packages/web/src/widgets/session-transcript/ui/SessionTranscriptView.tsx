@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
-import { Button } from '@/components/ui/button'
-import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary, FileChangeSummary } from '../../../shared/api/types'
+import { Button } from '@/shared/ui/components/button'
+import type { SessionTurn, TextPart, ReasoningPart, ErrorPart, ToolPart, PromptSummary, FileChangeSummary } from '../../../entities/coder-session'
 import { ToolCallCard, getToolLabel, getToolArgs } from './ToolCallCard'
-import type { ToolCallEntry } from '../../../shared/api/types'
+import type { ToolCallEntry } from '../../../entities/coder-session'
 
 const CONTEXT_TOOL_NAMES = new Set(['read', 'glob', 'grep', 'list', 'membrowse', 'memread', 'memsearch'])
 

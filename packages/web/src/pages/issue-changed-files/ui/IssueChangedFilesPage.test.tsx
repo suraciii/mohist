@@ -4,8 +4,8 @@ import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { IssueChangedFilesPage } from './IssueChangedFilesPage'
-import { api } from '../../../shared/api/client'
-import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files/model/diffModel'
+import { getFileContent } from '../../../entities/issue'
+import { parseDiff, parseDiffFiles } from '../../../widgets/issue-changed-files'
 
 async function selectOption(label: string, option: string) {
   fireEvent.click(screen.getByRole('combobox', { name: label }))
@@ -35,18 +35,17 @@ const mockUseIssueDiff = vi.fn()
 const mockUseIssueCommits = vi.fn()
 const mockUseCommitDiff = vi.fn()
 
-vi.mock('../../../entities/issue/api/queries', () => ({
-  useIssue: (...args: unknown[]) => mockUseIssue(...args),
-  useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
-  useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
-  useCommitDiff: (...args: unknown[]) => mockUseCommitDiff(...args),
-}))
-
-vi.mock('../../../shared/api/client', () => ({
-  api: {
+vi.mock('../../../entities/issue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/issue')>()
+  return {
+    ...actual,
+    useIssue: (...args: unknown[]) => mockUseIssue(...args),
+    useIssueDiff: (...args: unknown[]) => mockUseIssueDiff(...args),
+    useIssueCommits: (...args: unknown[]) => mockUseIssueCommits(...args),
+    useCommitDiff: (...args: unknown[]) => mockUseCommitDiff(...args),
     getFileContent: vi.fn(),
-  },
-}))
+  }
+})
 
 const SAMPLE_ISSUE = {
   id: '1',
@@ -428,8 +427,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('keeps Render anyway active for the selected file across reader modes', async () => {
-      const getFileContent = vi.mocked(api.getFileContent)
-      getFileContent.mockResolvedValue({ base: 'old line', head: 'new line' })
+      vi.mocked(getFileContent).mockResolvedValue({ base: 'old line', head: 'new line' })
       const largeDiffData = {
         ...SAMPLE_DIFF_DATA,
         files: [
@@ -924,8 +922,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('applies large-diff collapse in full file mode', async () => {
-      const getFileContent = vi.mocked(api.getFileContent)
-      getFileContent.mockResolvedValue({ base: '', head: '' })
+      vi.mocked(getFileContent).mockResolvedValue({ base: '', head: '' })
       const largeDiff = `diff --git a/src/large.txt b/src/large.txt\nindex 1234567..abcdefg 100644\n--- a/src/large.txt\n+++ b/src/large.txt\n@@ -1,350 +1,350 @@\n${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i}`)).join('\n')}`
       const largeDiffData = {
         ...SAMPLE_DIFF_DATA,

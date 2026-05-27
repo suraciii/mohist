@@ -16,14 +16,17 @@ vi.mock('../src/entities/issue/api/queries', async () => {
   }
 })
 
-vi.mock('../src/shared/api/rebase-events', async () => ({
+vi.mock('../src/entities/issue/model/rebase-events', async () => ({
   onRebaseEvent: vi.fn(() => () => {}),
 }))
 
-vi.mock('../src/shared/api/client', async () => ({
-  api: {
-    rebaseIssue: vi.fn(),
-  },
+vi.mock('../src/entities/issue/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/entities/issue/api/client')>()),
+  rebaseIssue: vi.fn(),
+}))
+
+vi.mock('../src/shared/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/shared/api/client')>()),
   ApiError: class ApiError extends Error {
     data: unknown
     constructor(message: string, data: unknown) {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { ProjectProvider } from '../../../entities/project/model/ProjectContext'
+import { ProjectProvider } from '../../../entities/project'
 import { EpicDetailPage } from './EpicDetailPage'
 import { ApiError } from '../../../shared/api/client'
 
@@ -17,20 +17,21 @@ const mocks = vi.hoisted(() => ({
   useCloseEpic: vi.fn(),
 }))
 
-vi.mock('../../../entities/project/model/ProjectContext', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/project/model/ProjectContext')>()
+vi.mock('../../../entities/project', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/project')>()
   return {
     ...actual,
     useProject: mocks.useProject,
   }
 })
 
-vi.mock('../../../entities/issue/api/queries', () => ({
+vi.mock('../../../entities/issue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useIssues: mocks.useIssues,
 }))
 
-vi.mock('../../../entities/epic/api/queries', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../entities/epic/api/queries')>()
+vi.mock('../../../entities/epic', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../entities/epic')>()
   return {
     ...actual,
     useEpic: mocks.useEpic,

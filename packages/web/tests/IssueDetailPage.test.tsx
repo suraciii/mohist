@@ -5,7 +5,7 @@ import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import { IssueStatus, Stage } from '../src/shared/api/types'
+import { IssueStatus, Stage } from '../src/entities/issue'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -52,23 +52,22 @@ vi.mock('../src/entities/issue/api/queries', async () => {
   }
 })
 
-vi.mock('../src/shared/api/client', () => ({
-  api: {
-    startIssue: vi.fn(() => Promise.resolve()),
-    closeIssue: vi.fn(() => Promise.resolve()),
-    forceStopIssue: vi.fn(() => Promise.resolve()),
-    reopenIssue: vi.fn(() => Promise.resolve()),
-    rerunIssue: vi.fn(() => Promise.resolve()),
-    retryIssue: vi.fn(() => Promise.resolve()),
-    addComment: vi.fn((_issueNumber, _body) => {
-      mocks.addCommentMutation.mutate()
-      return Promise.resolve()
-    }),
-    deleteComment: vi.fn((_issueNumber, _commentId) => {
-      mocks.deleteCommentMutation.mutate()
-      return Promise.resolve()
-    }),
-  },
+vi.mock('../src/entities/issue/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/entities/issue/api/client')>()),
+  startIssue: vi.fn(() => Promise.resolve()),
+  closeIssue: vi.fn(() => Promise.resolve()),
+  forceStopIssue: vi.fn(() => Promise.resolve()),
+  reopenIssue: vi.fn(() => Promise.resolve()),
+  rerunIssue: vi.fn(() => Promise.resolve()),
+  retryIssue: vi.fn(() => Promise.resolve()),
+  addComment: vi.fn((_issueNumber, _body) => {
+    mocks.addCommentMutation.mutate()
+    return Promise.resolve()
+  }),
+  deleteComment: vi.fn((_issueNumber, _commentId) => {
+    mocks.deleteCommentMutation.mutate()
+    return Promise.resolve()
+  }),
 }))
 
 let queryClient: QueryClient
@@ -456,8 +455,8 @@ describe('IssueDetailPage Markdown rendering', () => {
         status: IssueStatus.Blocked,
         recovery: { allowedActions: ['retry'], latestAttemptState: 'failed' },
       })
-      const { api: originalApi } = await import('../src/shared/api/client')
-      vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
+      const issueApi = await import('../src/entities/issue/api/client')
+      vi.mocked(issueApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
@@ -475,8 +474,8 @@ describe('IssueDetailPage Markdown rendering', () => {
         status: IssueStatus.Blocked,
         recovery: { allowedActions: ['retry', 'rerun'], latestAttemptState: 'failed' },
       })
-      const { api: originalApi } = await import('../src/shared/api/client')
-      vi.mocked(originalApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
+      const issueApi = await import('../src/entities/issue/api/client')
+      vi.mocked(issueApi.retryIssue).mockRejectedValueOnce(new Error('no retryable failed work'))
       renderWithQueryClient(<IssueDetailPage />)
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()

@@ -1,78 +1,22 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
-import { useIssues, useArchivedIssues } from '../entities/issue/api/queries'
-import { useProjects } from '../entities/project/api/queries'
-import { useAgentStatus } from '../entities/agent/api/queries'
+import { useProjects } from '../entities/project'
 import { LiveTaskProvider } from './providers/LiveTaskProvider'
-import { ProjectProvider, useProject } from '../entities/project/model/ProjectContext'
-import { KanbanBoard } from '../widgets/kanban-board/ui/KanbanBoard'
-import { Header } from '../widgets/app-shell/ui/Header'
+import { ProjectProvider, useProject } from '../entities/project'
+import { Header } from '../widgets/app-shell'
 import { IssueDetailPage } from '../pages/issue-detail/ui/IssueDetailPage'
 import { IssueChangedFilesPage } from '../pages/issue-changed-files/ui/IssueChangedFilesPage'
 import { SessionPage } from '../pages/session/ui/SessionPage'
-import { CreateProjectDialog } from '../widgets/create-project-dialog/ui/CreateProjectDialog'
-import { CreateIssueDialog } from '../features/create-issue/ui/CreateIssueDialog'
+import { CreateIssueDialog } from '../features/create-issue'
 import { SettingsPage } from '../pages/settings/ui/SettingsPage'
 import { ActivityPage } from '../pages/activity/ui/ActivityPage'
 import { LogsPage } from '../pages/logs/ui/LogsPage'
 import { ArchivedPage } from '../pages/archived/ui/ArchivedPage'
-import { ProjectGuard } from '../widgets/app-shell/ui/ProjectGuard'
-import { MobileBottomNav } from '../widgets/app-shell/ui/MobileBottomNav'
-import { FAB } from '../widgets/app-shell/ui/FAB'
+import { ProjectGuard, MobileBottomNav, FAB } from '../widgets/app-shell'
 import { Toaster } from 'sonner'
-import { Button } from '@/components/ui/button'
-import { useDocumentTitle } from '../shared/lib/useDocumentTitle'
+import { HomePage } from '../pages/home/ui/HomePage'
 import { EpicListPage } from '../pages/epics/ui/EpicListPage'
 import { EpicDetailPage } from '../pages/epic-detail/ui/EpicDetailPage'
-
-function KanbanView() {
-  const { projectId } = useProject()
-  const { data: projects, isLoading: projectsLoading } = useProjects()
-  const { data: issues, isLoading } = useIssues(projectId ? { projectId } : undefined)
-  const { data: archivedIssues } = useArchivedIssues(projectId ? { projectId } : undefined)
-  const { data: agentStatus } = useAgentStatus()
-  const [showCreateProject, setShowCreateProject] = useState(false)
-
-  useDocumentTitle('Mohist', agentStatus?.running ?? false)
-
-  if (projectsLoading) {
-    return null
-  }
-
-  if (projects && projects.length === 0) {
-    return (
-      <>
-        <div className="flex items-center justify-center flex-1">
-          <div className="text-center">
-            <div className="text-muted-foreground text-lg mb-4">No projects yet</div>
-            <Button
-              onClick={() => setShowCreateProject(true)}
-            >
-              Create Project
-            </Button>
-          </div>
-        </div>
-        <CreateProjectDialog open={showCreateProject} onClose={() => setShowCreateProject(false)} />
-      </>
-    )
-  }
-
-  return (
-    <>
-      {isLoading ? (
-        <div className="flex items-center justify-center flex-1">
-          <div className="text-muted-foreground">Loading...</div>
-        </div>
-      ) : (
-        <KanbanBoard
-          issues={issues ?? []}
-          agentStatus={agentStatus ?? { running: false, issueId: null, issueNumber: null, activeAgents: [], capacity: { active: 0, max: 8 } }}
-          archivedCount={archivedIssues?.length ?? 0}
-        />
-      )}
-    </>
-  )
-}
 
 function AppContent() {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -101,7 +45,7 @@ function AppContent() {
       <MobileBottomNav />
       <Routes>
         <Route element={<ProjectGuard />}>
-          <Route path="/" element={<KanbanView />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/issue/:number" element={<IssueDetailPage />} />
           <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
           <Route path="/issue/:number/session/:sessionId" element={<SessionPage />} />

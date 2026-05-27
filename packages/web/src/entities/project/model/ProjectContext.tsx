@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import type { Project } from '../../../shared/api/types'
+import type { Project } from './types'
 
 interface ProjectContextValue {
   projectId: string | null

@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useEpics } from '../../../entities/epic/api/queries'
-import { EpicStatus, type EpicWithProgress } from '../../../shared/api/types'
-import { EpicCreateDialog } from '../../../features/create-epic/ui/EpicCreateDialog'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
+import { useEpics } from '../../../entities/epic'
+import { EpicStatus, type EpicWithProgress } from '../../../entities/epic'
+import { EpicCreateDialog } from '../../../features/create-epic'
+import { Button } from '@/shared/ui/components/button'
+import { Badge } from '@/shared/ui/components/badge'
+import { Card } from '@/shared/ui/components/card'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {

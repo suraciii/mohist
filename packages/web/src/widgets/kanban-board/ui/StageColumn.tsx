@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
-import type { Issue, AgentStatus } from '../../../shared/api/types'
+import { Button } from '@/shared/ui/components/button'
+import type { AgentStatus } from '../../../entities/agent'
+import type { Issue } from '../../../entities/issue'
 import type { SortMode } from '../model/board-query'
-import { api } from '../../../shared/api/client'
+import { archiveAllCompleted } from '../../../entities/issue'
 import { IssueCard } from './IssueCard'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useProject } from '../../../entities/project'
 
 const DONE_COLLAPSE_LIMIT = 5
 
@@ -33,7 +34,7 @@ export function StageColumn({ label, issues, agentStatus, isDone, archivedCount 
     : issues
 
   const archiveAllMutation = useMutation({
-    mutationFn: () => api.archiveAllCompleted(projectId),
+    mutationFn: () => archiveAllCompleted(projectId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })

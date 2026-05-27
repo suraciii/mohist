@@ -1,5 +1,5 @@
-import type { Issue, AgentStatus } from '../../../shared/api/types'
-import { IssueStatus, WorkflowStage } from '../../../shared/api/types'
+import type { AgentStatus } from '../../../entities/agent'
+import { IssueStatus, WorkflowStage, type Issue } from '../../../entities/issue'
 
 export interface AttentionItem {
   issueNumber: number

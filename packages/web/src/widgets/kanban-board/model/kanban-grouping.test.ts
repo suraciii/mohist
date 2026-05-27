@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { groupIssuesByStage, filterClosedFromDone, getDoneColumnCounts } from './kanban-grouping'
-import type { Issue } from '../../../shared/api/types'
-import { IssueStage, WorkflowStage, IssueStatus } from '../../../shared/api/types'
+import { IssueStage, WorkflowStage, IssueStatus, type Issue } from '../../../entities/issue'
 
 function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
   return {

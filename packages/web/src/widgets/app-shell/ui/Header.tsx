@@ -1,16 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import type { Project } from '../../../shared/api/types'
+import { useProject } from '../../../entities/project'
+import type { Project } from '../../../entities/project'
 import { CreateProjectDialog } from '../../create-project-dialog/ui/CreateProjectDialog'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { useDeleteProject, useUseProject } from '../../../entities/project/api/queries'
+} from '@/shared/ui/components/dialog'
+import { Button } from '@/shared/ui/components/button'
+import { useDeleteProject, useUseProject } from '../../../entities/project'
 
 interface HeaderProps {
   onCreateIssue: () => void

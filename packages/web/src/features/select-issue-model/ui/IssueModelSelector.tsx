@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import fuzzysort from 'fuzzysort'
-import { useAvailableModelIds, useOpencodeModel } from '../../../entities/settings/api/queries'
-import { api } from '../../../shared/api/client'
+import { useAvailableModelIds, useOpencodeModel } from '../../../entities/settings'
+import { patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar, updateIssue } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useProject } from '../../../entities/project'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
 
 const RECENT_KEY = 'mohist:recent-issue-models'
 const MAX_RECENT = 5
@@ -134,10 +134,10 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async (modelId: string) => {
       try {
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId }, projectId)
+          await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId }, projectId)
           setLocalWorkflowModel(modelId)
         } else {
-          await api.updateIssue(issueNumber, { agentConfig: { ...(currentAgentConfig ?? {}), model: modelId } }, projectId)
+          await updateIssue(issueNumber, { agentConfig: { ...(currentAgentConfig ?? {}), model: modelId } }, projectId)
         }
         addRecent(modelId)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -154,12 +154,12 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async () => {
       try {
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null }, projectId)
+          await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null }, projectId)
           setLocalWorkflowModel(null)
         } else {
           const updatedAgent = { ...(currentAgentConfig ?? {}) }
           delete updatedAgent.model
-          await api.updateIssue(issueNumber, { model: null, agentConfig: Object.keys(updatedAgent).length > 0 ? updatedAgent : null }, projectId)
+          await updateIssue(issueNumber, { model: null, agentConfig: Object.keys(updatedAgent).length > 0 ? updatedAgent : null }, projectId)
         }
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
         queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -176,9 +176,9 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId }, projectId)
         } else {
-          await api.updateIssue(issueNumber, { stageModels: updated }, projectId)
+          await updateIssue(issueNumber, { stageModels: updated }, projectId)
         }
         setLocalStageModels(updated)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -196,10 +196,10 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         const updated = { ...localStageModels }
         delete updated[stage]
         if (currentWorkflowRunId) {
-          await api.patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null }, projectId)
+          await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null }, projectId)
         } else {
           const stageModelsValue = Object.keys(updated).length > 0 ? updated : null
-          await api.updateIssue(issueNumber, { stageModels: stageModelsValue }, projectId)
+          await updateIssue(issueNumber, { stageModels: stageModelsValue }, projectId)
         }
         setLocalStageModels(updated)
         queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })

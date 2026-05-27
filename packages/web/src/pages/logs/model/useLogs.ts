@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { api } from '../../../shared/api/client'
-import type { LogTailResult, WorkflowEvent } from '../../../shared/api/types'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { getLogTail, getRecentEvents, type LogTailResult, type WorkflowEvent } from './api'
+import { useProject } from '../../../entities/project'
 
 export interface ParsedLogEntry {
   raw: string
@@ -78,14 +77,14 @@ export function useLogs(): UseLogsReturn {
     try {
       const c = useCursor ?? cursorRef.current
       const result: LogTailResult = c === 0
-        ? await api.getLogTail()
-        : await api.getLogTail(c)
+        ? await getLogTail()
+        : await getLogTail(c)
 
       const parsed: ParsedLogEntry[] = result.lines.map(parseLogLine)
       const hasFileLogs = result.lines.length > 0 || result.cursor > 0 || !!result.file
 
       if (!hasFileLogs && projectId) {
-        const recentEvents = await api.getRecentEvents({ projectId, limit: 500 })
+        const recentEvents = await getRecentEvents({ projectId, limit: 500 })
         setEntries(recentEvents.map(eventToLogEntry))
       } else if (result.reset) {
         setEntries(parsed)

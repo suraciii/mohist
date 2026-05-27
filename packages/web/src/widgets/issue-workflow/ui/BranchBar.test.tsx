@@ -3,14 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BranchBar } from './BranchBar'
-import { WorkflowStage } from '../../../shared/api/types'
-import { useWorktreeStatus } from '../../../entities/issue/api/queries'
+import { WorkflowStage } from '../../../entities/issue'
+import { useWorktreeStatus } from '../../../entities/issue'
 
-vi.mock('../../../entities/issue/api/queries', () => ({
+vi.mock('../../../entities/issue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useWorktreeStatus: vi.fn(),
-}))
-
-vi.mock('../../../shared/model/live-task', () => ({
   useLiveTask: () => ({}),
 }))
 

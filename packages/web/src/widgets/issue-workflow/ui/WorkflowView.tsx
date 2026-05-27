@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { api } from '../../../shared/api/client'
-import { onAgentEvent } from '../../../shared/api/agent-events'
-import { IssueStage, WorkflowStage, IssueStatus } from '../../../shared/api/types'
-import type { Issue, StageTaskState, StageCheckState, StageStateRead, AgentDetailEventMap, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../shared/api/types'
-import { useWorkflowTimeline } from '../../../entities/issue/api/queries'
+import { Button } from '@/shared/ui/components/button'
+import { Textarea } from '@/shared/ui/components/textarea'
+import { approveIssue, rejectIssue, resumeIssue, startIssue } from '../../../entities/issue'
+import { onAgentEvent } from '../../../entities/agent'
+import { IssueStage, WorkflowStage, IssueStatus } from '../../../entities/issue'
+import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
+import type { AgentDetailEventMap } from '../../../entities/agent'
+import { useWorkflowTimeline } from '../../../entities/issue'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useProject } from '../../../entities/project'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -487,7 +488,7 @@ function InlineApproval({
   const classified = useMemo(() => classifyResult(review.result), [review.result])
 
   const approveMutation = useMutation({
-    mutationFn: () => api.approveIssue(issueNumber, projectId),
+    mutationFn: () => approveIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -496,7 +497,7 @@ function InlineApproval({
   })
 
   const rejectMutation = useMutation({
-    mutationFn: () => api.rejectIssue(issueNumber, { message: feedback.trim() || undefined }, projectId),
+    mutationFn: () => rejectIssue(issueNumber, { message: feedback.trim() || undefined }, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -506,7 +507,7 @@ function InlineApproval({
   })
 
   const sendBackMutation = useMutation({
-    mutationFn: (message: string) => api.rejectIssue(issueNumber, { message }, projectId),
+    mutationFn: (message: string) => rejectIssue(issueNumber, { message }, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
@@ -856,7 +857,7 @@ function SpecialStatePanel({
   const { projectId } = useProject()
 
   const startMutation = useMutation({
-    mutationFn: () => api.startIssue(issueNumber, projectId),
+    mutationFn: () => startIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -864,7 +865,7 @@ function SpecialStatePanel({
   })
 
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeIssue(issueNumber, projectId),
+    mutationFn: () => resumeIssue(issueNumber, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })

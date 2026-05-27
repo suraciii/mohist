@@ -5,19 +5,18 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
+} from '@/shared/ui/components/dialog'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import { Textarea } from '@/shared/ui/components/textarea'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-} from '@/components/ui/popover'
-import { api } from '../../../shared/api/client'
-import { useLabels } from '../../../entities/issue/api/queries'
-import { useAvailableModelIds } from '../../../entities/settings/api/queries'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+} from '@/shared/ui/components/popover'
+import { createIssue, useLabels } from '../../../entities/issue'
+import { useAvailableModelIds } from '../../../entities/settings'
+import { useProject } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
@@ -192,7 +191,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.createIssue({
+      createIssue({
         title,
         body: body || undefined,
         labels: labels.length > 0 ? labels : undefined,

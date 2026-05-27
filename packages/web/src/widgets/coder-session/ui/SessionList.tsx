@@ -1,4 +1,4 @@
-import { useCoderSessions } from '../../../entities/coder-session/model/useCoderSessions'
+import { useCoderSessions } from '../../../entities/coder-session'
 import { SessionHeader } from './SessionHeader'
 import { SessionDetail } from './SessionDetail'
 

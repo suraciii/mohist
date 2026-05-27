@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { api } from '../../../shared/api/client'
+import { getFileContent } from '../../../entities/issue'
 import type { FileBlock } from '../model/diffModel'
 import { classifyFile, DEFAULT_LARGE_DIFF_THRESHOLD } from '../model/diffModel'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { Button } from '@/components/ui/button'
+import { useProject } from '../../../entities/project'
+import { Button } from '@/shared/ui/components/button'
 
 interface FullFilePaneProps {
   block: FileBlock | null
@@ -47,7 +47,7 @@ export function FullFilePane({ block, issueNumber, threshold = DEFAULT_LARGE_DIF
     setLoading(true)
     setError(null)
 
-    api.getFileContent(issueNumber, path, projectId)
+    getFileContent(issueNumber, path, projectId)
       .then((data) => {
         setContent(data)
         setLoading(false)

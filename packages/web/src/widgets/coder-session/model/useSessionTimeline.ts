@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../../../shared/api/client'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { onAgentEvent } from '../../../shared/api/agent-events'
+import { getAgentStatus } from '../../../entities/agent'
+import { getWorkflowLogs } from '../../../entities/coder-session'
+import { useProject } from '../../../entities/project'
+import { onAgentEvent } from '../../../entities/agent'
 import type {
   ToolCallEntry,
   WorkflowLogItem,
-  AgentDetailEventMap,
   TaskProgressMap,
   LoopProgress,
   CoderSessionItem,
-} from '../../../shared/api/types'
+} from '../../../entities/coder-session'
+import type { AgentDetailEventMap } from '../../../entities/agent'
 
 const FLUSH_INTERVAL = 100
 
@@ -230,7 +231,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   const { data: logs = [], isLoading: loadingLogs } = useQuery({
     queryKey: ['workflow-logs', issueNumber, projectId],
-    queryFn: () => api.getWorkflowLogs(issueNumber, projectId),
+    queryFn: () => getWorkflowLogs(issueNumber, projectId),
     enabled: issueNumber > 0 && shouldFetchLogs && !!projectId,
   })
 
@@ -239,7 +240,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   const { data: agentStatus } = useQuery({
     queryKey: ['agent-status'],
-    queryFn: () => api.getAgentStatus(),
+    queryFn: () => getAgentStatus(),
     refetchInterval: 5000,
   })
 

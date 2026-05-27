@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../../../entities/settings/api/queries'
-import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../../../entities/settings'
+import { Button } from '@/shared/ui/components/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
 const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
 const DEFAULT_LOG_LEVEL = 'INFO'

@@ -1,4 +1,4 @@
-import type { Issue } from '../../../shared/api/types'
+import type { Issue } from '../../../entities/issue'
 import type { Column } from './kanban-grouping'
 
 export type SortMode = 'priority' | 'number' | 'updated'

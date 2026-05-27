@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import Markdown from 'react-markdown'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 import type { ReviewOutput } from './ReviewSummary'
 
 export function ResultBadge({ classified }: { classified: 'PASS' | 'FAIL' | 'UNKNOWN' }) {

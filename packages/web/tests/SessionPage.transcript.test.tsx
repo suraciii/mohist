@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import { dispatchAgentEvent } from '../src/shared/api/agent-events'
-import type { CoderSessionDetail, SessionMetadata, SessionTurn, TextPart, ToolPart } from '../src/shared/api/types'
+import { dispatchAgentEvent } from '../src/entities/agent'
+import type { CoderSessionDetail, SessionMetadata, SessionTurn, TextPart, ToolPart } from '../src/entities/coder-session'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
@@ -34,14 +34,13 @@ vi.mock('../src/entities/issue/api/queries', () => ({
   useIssue: () => ({ data: sessionPageMocks.issue }),
 }))
 
-vi.mock('../src/shared/api/client', () => ({
-  api: {
-    getCoderSessionDetail: vi.fn(() => {
-      if (sessionPageMocks.detailPending) return new Promise(() => {})
-      if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-      return Promise.resolve(sessionPageMocks.detail)
-    }),
-  },
+vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
+  getCoderSessionDetail: vi.fn(() => {
+    if (sessionPageMocks.detailPending) return new Promise(() => {})
+    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
+    return Promise.resolve(sessionPageMocks.detail)
+  }),
 }))
 
 Object.defineProperty(navigator, 'clipboard', {

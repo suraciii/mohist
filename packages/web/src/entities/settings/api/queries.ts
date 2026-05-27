@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { api } from '../../../shared/api/client'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../../../shared/api/types'
+import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../model/types'
+import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, setLogLevel, setModel, setOpencodeModel, setStageModels, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
   return useQuery<GeneralConfig, Error>({
     queryKey: ['config'],
-    queryFn: () => api.getConfig(),
+    queryFn: () => getConfig(),
   })
 }
 
@@ -24,7 +24,7 @@ export function useUpdateConfig() {
   const queryClient = useQueryClient()
 
   return useMutation<GeneralConfig, Error, { key: string; value: number }, UpdateConfigContext>({
-    mutationFn: ({ key, value }) => api.updateConfig(key, value),
+    mutationFn: ({ key, value }) => updateConfig(key, value),
     onMutate: async ({ key, value }) => {
       await queryClient.cancelQueries({ queryKey: ['config'] })
       const previousConfig = queryClient.getQueryData<GeneralConfig>(['config'])
@@ -57,14 +57,14 @@ export function useUpdateConfig() {
 export function useOpencodeModel() {
   return useQuery<{ model: string | null }>({
     queryKey: ['opencode-model'],
-    queryFn: () => api.getOpencodeModel(),
+    queryFn: () => getOpencodeModel(),
   })
 }
 
 export function useUpdateOpencodeModel() {
   const queryClient = useQueryClient()
   return useMutation<{ model: string | null }, Error, string | null>({
-    mutationFn: (model) => api.updateOpencodeModel(model),
+    mutationFn: (model) => updateOpencodeModel(model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-model'] })
       toast.success('Model updated')
@@ -79,7 +79,7 @@ export function useAvailableModelIds() {
   return useQuery<string[]>({
     queryKey: ['opencode-model-ids'],
     queryFn: async () => {
-      const response = await api.getOpencodeModels()
+      const response = await getOpencodeModels()
       return response.models
     },
   })
@@ -88,7 +88,7 @@ export function useAvailableModelIds() {
 export function useOpencodeRuntime() {
   return useQuery<{ mode: string; command: string; model: string | null; note: string }, Error>({
     queryKey: ['opencode-runtime'],
-    queryFn: () => api.getOpencodeRuntime(),
+    queryFn: () => getOpencodeRuntime(),
   })
 }
 
@@ -111,14 +111,14 @@ export function useRebuildSystem() {
 export function useModel() {
   return useQuery<{ model: string | null }>({
     queryKey: ['model'],
-    queryFn: () => api.getModel(),
+    queryFn: () => getModel(),
   })
 }
 
 export function useSetModel() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (model: string | null) => api.setModel(model),
+    mutationFn: (model: string | null) => setModel(model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['model'] })
       toast.success('Model updated')
@@ -132,14 +132,14 @@ export function useSetModel() {
 export function useOpencodeModelConfig() {
   return useQuery<{ model: string | null }>({
     queryKey: ['opencode-model-config'],
-    queryFn: () => api.getOpencodeModelConfig(),
+    queryFn: () => getOpencodeModelConfig(),
   })
 }
 
 export function useSetOpencodeModelConfig() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (model: string | null) => api.setOpencodeModel(model),
+    mutationFn: (model: string | null) => setOpencodeModel(model),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-model-config'] })
       toast.success('Model updated')
@@ -153,14 +153,14 @@ export function useSetOpencodeModelConfig() {
 export function useLogLevel() {
   return useQuery<{ level: string }>({
     queryKey: ['log-level'],
-    queryFn: () => api.getLogLevel(),
+    queryFn: () => getLogLevel(),
   })
 }
 
 export function useSetLogLevel() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (level: string) => api.setLogLevel(level),
+    mutationFn: (level: string) => setLogLevel(level),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['log-level'] })
       toast.success('Log level updated')
@@ -174,14 +174,14 @@ export function useSetLogLevel() {
 export function useAgentRuntime() {
   return useQuery<AgentRuntimeConfig>({
     queryKey: ['agent-runtime'],
-    queryFn: () => api.getAgentRuntime(),
+    queryFn: () => getAgentRuntime(),
   })
 }
 
 export function useSetAgentRuntime() {
   const queryClient = useQueryClient()
   return useMutation<AgentRuntimeConfig, Error, Partial<AgentRuntimeConfig>>({
-    mutationFn: (data) => api.updateAgentRuntime(data),
+    mutationFn: (data) => updateAgentRuntime(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-runtime'] })
       toast.success('Coder agent runtime updated')
@@ -195,14 +195,14 @@ export function useSetAgentRuntime() {
 export function useStageModels() {
   return useQuery<{ stageModels: Record<string, string> | null }>({
     queryKey: ['stage-models'],
-    queryFn: () => api.getStageModels(),
+    queryFn: () => getStageModels(),
   })
 }
 
 export function useSetStageModels() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (stageModels: Record<string, string> | null) => api.setStageModels(stageModels),
+    mutationFn: (stageModels: Record<string, string> | null) => setStageModels(stageModels),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stage-models'] })
       toast.success('Stage models updated')
@@ -216,6 +216,6 @@ export function useSetStageModels() {
 export function useSystemInfo() {
   return useQuery<SystemInfo>({
     queryKey: ['system-info'],
-    queryFn: () => api.getSystemInfo(),
+    queryFn: () => getSystemInfo(),
   })
 }

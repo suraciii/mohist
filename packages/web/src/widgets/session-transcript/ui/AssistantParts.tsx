@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import Markdown from 'react-markdown'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/shared/ui/components/button'
 import type { DisplayAssistantPart, DisplayChangedFile } from '../model/session-transcript-display'
 import { getToolRegistryEntry, getToolDisplayType } from './tool-registry'
 import { parseJsonSafely, getFallbackSubtitle, parsePatchOperations, parseEditInput } from '../model/transcript-tool-utils'

@@ -1,14 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import type { Issue, AgentStatus } from '../../../shared/api/types'
-import { IssueStage, WorkflowStage, IssueStatus } from '../../../shared/api/types'
-import { api } from '../../../shared/api/client'
+import { Badge } from '@/shared/ui/components/badge'
+import { Button } from '@/shared/ui/components/button'
+import type { AgentStatus } from '../../../entities/agent'
+import { IssueStage, WorkflowStage, IssueStatus, type Issue } from '../../../entities/issue'
+import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useProject } from '../../../entities/project'
 
 export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
 
@@ -117,7 +117,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const isAwaitingApproval = issue.approvalState?.status === 'awaiting'
 
   const resumeMutation = useMutation({
-    mutationFn: () => api.resumeIssue(issue.number, projectId),
+    mutationFn: () => resumeIssue(issue.number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -125,7 +125,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   })
 
   const rerunMutation = useMutation({
-    mutationFn: () => api.rerunIssue(issue.number, projectId),
+    mutationFn: () => rerunIssue(issue.number, projectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
@@ -133,7 +133,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   })
 
   const archiveMutation = useMutation({
-    mutationFn: () => api.archiveIssue(issue.number, projectId),
+    mutationFn: () => archiveIssue(issue.number, projectId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
       queryClient.invalidateQueries({ queryKey: ['archived-issues'] })

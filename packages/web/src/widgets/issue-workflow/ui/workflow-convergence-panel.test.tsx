@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { WorkflowConvergencePanel } from './WorkflowConvergencePanel'
-import type { WorkflowConvergenceState } from '../../../shared/api/types'
+import type { WorkflowConvergenceState } from '../../../entities/issue'
 
 function makeConvergence(overrides: Partial<WorkflowConvergenceState> = {}): WorkflowConvergenceState {
   return {

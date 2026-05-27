@@ -1,4 +1,4 @@
-import type { FileChangeSummary } from '../../../shared/api/types'
+import type { FileChangeSummary } from '../../../entities/coder-session'
 
 export interface EditInput {
   filePath: string

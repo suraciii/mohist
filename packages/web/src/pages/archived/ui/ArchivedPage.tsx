@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useArchivedIssues } from '../../../entities/issue/api/queries'
-import { useProject } from '../../../entities/project/model/ProjectContext'
+import { useArchivedIssues } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
 
 export function ArchivedPage() {
   const { projectId } = useProject()

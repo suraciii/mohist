@@ -5,19 +5,17 @@ import { useCoderSessions } from '../src/entities/coder-session/model/useCoderSe
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import type { ReactNode } from 'react'
-import type { CoderSessionItem } from '../src/shared/api/types'
+import type { CoderSessionItem } from '../src/entities/coder-session'
 
 const apiMocks = vi.hoisted(() => ({
   getCoderSessions: vi.fn(),
 }))
 
-vi.mock('../src/shared/api/client', () => ({
-  api: {
-    getCoderSessions: (...args: any[]) => apiMocks.getCoderSessions(...args),
-  },
+vi.mock('../src/entities/coder-session/api/client', () => ({
+  getCoderSessions: (...args: any[]) => apiMocks.getCoderSessions(...args),
 }))
 
-vi.mock('../src/shared/api/agent-events', () => ({
+vi.mock('../src/entities/agent/@x/events', () => ({
   onAgentEvent: vi.fn(() => vi.fn()),
 }))
 

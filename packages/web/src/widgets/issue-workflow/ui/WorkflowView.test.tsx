@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
 import { WorkflowView } from './WorkflowView'
-import { IssueStage, IssueStatus, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../shared/api/types'
-import { useWorkflowTimeline } from '../../../entities/issue/api/queries'
+import { IssueStage, IssueStatus, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../entities/issue'
+import { useWorkflowTimeline } from '../../../entities/issue'
 
-vi.mock('../../../entities/issue/api/queries', () => ({
+vi.mock('../../../entities/issue', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../entities/issue')>()),
   useWorkflowTimeline: vi.fn(),
 }))
 

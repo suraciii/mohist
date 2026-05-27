@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, ApiError } from '../../../shared/api/client'
-import { useWorktreeStatus } from '../../../entities/issue/api/queries'
-import { onRebaseEvent } from '../../../shared/api/rebase-events'
-import { useLiveTask } from '../../../shared/model/live-task'
-import { useProject } from '../../../entities/project/model/ProjectContext'
-import { Button } from '@/components/ui/button'
+import { ApiError } from '../../../shared/api/client'
+import { cleanupIssueWorktree, onRebaseEvent, rebaseIssue, useLiveTask, useWorktreeStatus } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
+import { Button } from '@/shared/ui/components/button'
 
 interface WorktreePanelProps {
   issueNumber: number
@@ -69,7 +67,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
   }, [issueNumber])
 
   const rebaseMutation = useMutation({
-    mutationFn: () => api.rebaseIssue(issueNumber, projectId),
+    mutationFn: () => rebaseIssue(issueNumber, projectId),
     onSuccess: (data) => {
       if (data.status === 'queued') {
         setRebaseResult({ type: 'queued', message: 'Rebase task queued' })
@@ -103,7 +101,7 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
   })
 
   const cleanupMutation = useMutation({
-    mutationFn: () => api.cleanupIssueWorktree(issueNumber, projectId),
+    mutationFn: () => cleanupIssueWorktree(issueNumber, projectId),
     onSuccess: (data) => {
       setCleanupResult({
         type: data.removed ? 'success' : 'info',
