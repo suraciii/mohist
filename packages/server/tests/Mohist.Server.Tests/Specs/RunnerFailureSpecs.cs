@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -192,12 +193,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task InFlightLoad_LosesRunner_WorkflowFails()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [],
                 [new("check-1", "Check 1", "spec/check")],
-                TasksFromUses: "spec/loader")
+                new WorkflowTasksFromDefinition("spec/loader"))
         ]));
 
         var (loadWork, _) = await PollWorkAnyAsync();
@@ -292,12 +293,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task LoadWorkFails_UserViewsStatus_RetryActionIsNotAvailable()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [],
                 [new("check-1", "Check 1", "spec/check")],
-                TasksFromUses: "spec/loader")
+                new WorkflowTasksFromDefinition("spec/loader"))
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
@@ -314,12 +315,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task LoadWorkFails_UserViewsStatus_RerunActionIsAvailable()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [],
                 [new("check-1", "Check 1", "spec/check")],
-                TasksFromUses: "spec/loader")
+                new WorkflowTasksFromDefinition("spec/loader"))
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
@@ -335,12 +336,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task LoadWorkFails_UserRerunsStage_LoadRunsAgain()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [],
                 [new("check-1", "Check 1", "spec/check")],
-                TasksFromUses: "spec/loader")
+                new WorkflowTasksFromDefinition("spec/loader"))
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
@@ -360,12 +361,12 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task LoadWorkFails_UserRetriesWorkflow_RetryIsRejected()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [],
                 [new("check-1", "Check 1", "spec/check")],
-                TasksFromUses: "spec/loader")
+                new WorkflowTasksFromDefinition("spec/loader"))
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();

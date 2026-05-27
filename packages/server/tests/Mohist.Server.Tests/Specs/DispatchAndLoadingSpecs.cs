@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -44,9 +45,9 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithDynamicTasks_LoadCompletes_DynamicTasksMaterializedBeforeChecks()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build", [], [new("check-1", "Check 1", "spec/check")], TasksFromUses: "spec/load")
+            new StageDefinition("build", [], [new("check-1", "Check 1", "spec/check")], new WorkflowTasksFromDefinition("spec/load"))
         ]));
 
         var (load, r1) = await PollWorkAnyAsync();
@@ -85,9 +86,9 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithDynamicTasks_LoadedTaskWithContract_DispatchPreservesWithContract()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build", [], [], TasksFromUses: "spec/load")
+            new StageDefinition("build", [], [], new WorkflowTasksFromDefinition("spec/load"))
         ]));
 
         var (load, r1) = await PollWorkAnyAsync();
@@ -125,13 +126,13 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithStaticAndDynamicTasks_LoadCompletes_StaticTasksRunBeforeDynamicTasks()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput(
+            new StageDefinition(
                 "build",
                 [new("static-1", "Static 1", "spec/task")],
                 [new("check-1", "Check 1", "spec/check")],
-                TasksFromUses: "spec/load")
+                new WorkflowTasksFromDefinition("spec/load"))
         ]));
 
         var (load, r1) = await PollWorkAnyAsync();
@@ -281,9 +282,9 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task StageWithDynamicTasks_LoadFails_WorkflowFails()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build", [], [new("check-1", "Check 1", "spec/check")], TasksFromUses: "spec/load")
+            new StageDefinition("build", [], [new("check-1", "Check 1", "spec/check")], new WorkflowTasksFromDefinition("spec/load"))
         ]));
 
         var (load, runnerId) = await PollWorkAnyAsync();

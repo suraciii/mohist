@@ -1,11 +1,12 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Grains;
 
 public interface IWorkflowGrain : IGrainWithStringKey
 {
-    Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null);
+    Task StartAsync(WorkflowDefinition? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task ApproveAsync();
@@ -22,6 +23,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson);
     Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
+    Task<string?> GetDefinitionYamlAsync();
 }
 
 [GenerateSerializer]
@@ -42,25 +44,6 @@ public sealed record WorkflowVariablesSnapshot(
     [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null);
 
 [GenerateSerializer]
-public sealed record WorkflowDefinitionInput(List<StageDefinitionInput> Stages);
-
-[GenerateSerializer]
-public sealed record StageDefinitionInput(
-    string Stage,
-    List<TaskDefinitionInput> Tasks,
-    List<CheckDefinitionInput> Checks,
-    string? TasksFromUses = null,
-    string? TasksFromWith = null,
-    bool RequiresApproval = false);
-
-[GenerateSerializer]
-public sealed record TaskDefinitionInput(
-    string Id,
-    string Title,
-    string? Uses = null,
-    string? With = null);
-
-[GenerateSerializer]
 public sealed record RuntimeTaskInput(
     [property: Id(0)] string Id,
     [property: Id(1)] string Title,
@@ -74,15 +57,6 @@ public sealed record RuntimeTaskAddedResult(
     [property: Id(0)] string WorkflowRunId,
     [property: Id(1)] string Stage,
     [property: Id(2)] string TaskId);
-
-[GenerateSerializer]
-public sealed record CheckDefinitionInput(
-    string Name,
-    string Title,
-    string? Uses = null,
-    string? With = null,
-    int RetryLimit = 0,
-    TaskDefinitionInput? RetryTask = null);
 
 [GenerateSerializer]
 public sealed record WorkflowStatusSnapshot(

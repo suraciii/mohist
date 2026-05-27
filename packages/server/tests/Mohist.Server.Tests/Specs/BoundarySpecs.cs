@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -11,9 +12,9 @@ public class BoundarySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyStage_NoTasksOrChecks_WorkflowCompletes()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build", [], [])
+            new StageDefinition("build", [], [])
         ]));
 
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);

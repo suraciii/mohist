@@ -5,6 +5,7 @@ using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Hooks;
+using Mohist.Server.Workflow.Infrastructure;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -53,12 +54,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             _run = WorkflowRun.Restore(_stageDefinitions, state.Run);
     }
 
-    public async Task StartAsync(WorkflowDefinitionInput? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null)
+    public async Task StartAsync(WorkflowDefinition? definition = null, WorkflowCorrelationContext? correlation = null, WorkflowStartInput? input = null)
     {
         var statusBefore = _run?.Status;
 
         if (definition is not null)
-            _stageDefinitions = MapStageDefinitions(definition);
+            _stageDefinitions = definition.Stages;
         if (correlation is not null)
             _correlation = correlation;
 
@@ -314,6 +315,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         await PersistAsync();
         return new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables);
+    }
+
+    public Task<string?> GetDefinitionYamlAsync()
+    {
+        if (_stageDefinitions is null) return Task.FromResult<string?>(null);
+        var definition = new WorkflowDefinition(GrainKey, _stageDefinitions);
+        return Task.FromResult<string?>(WorkflowYamlSerializer.ToYaml(definition));
     }
 
     public Task<WorkflowStatusSnapshot?> GetStatusAsync()
@@ -788,19 +796,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         return int.TryParse(task.Id[marker.Length..], out var attempt) ? attempt : 1;
     }
-
-    private static List<StageDefinition> MapStageDefinitions(WorkflowDefinitionInput input) =>
-        input.Stages.Select(s => new StageDefinition(
-            s.Stage,
-            s.Tasks.Select(t => new TaskDefinition(t.Id, t.Title, t.Uses, ParseWith(t.With))).ToList(),
-            s.Checks.Select(c => new CheckDefinition(c.Name, c.Title, c.Uses, ParseWith(c.With),
-                c.RetryLimit > 0 && c.RetryTask is not null
-                    ? new CheckFailureAction(new CheckFailureRetry(c.RetryLimit, new TaskDefinition(c.RetryTask.Id, c.RetryTask.Title, c.RetryTask.Uses, ParseWith(c.RetryTask.With))))
-                    : null
-            )).ToList(),
-            s.TasksFromUses is not null ? new WorkflowTasksFromDefinition(s.TasksFromUses, ParseWith(s.TasksFromWith)) : null,
-            s.RequiresApproval
-        )).ToList();
 
     private void EmitStageChanged(string action, string? reason = null)
     {

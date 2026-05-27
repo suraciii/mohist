@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -12,12 +13,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task WorkflowDispatchKeepsTemplates()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
-                [new("task-1", "Task 1", "spec/task", """
+            new StageDefinition("build",
+                [new("task-1", "Task 1", "spec/task", With("""
                 { "path": "${{ artifacts.changeDir }}/proposal.md" }
-                """)],
+                """))],
                 [])
         ]));
 
@@ -40,8 +41,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
             ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>()),
         });
         await workflow.StartAsync(
-            new WorkflowDefinitionInput([
-                new StageDefinitionInput("build",
+            new WorkflowDefinition("spec/workflow", [
+                new StageDefinition("build",
                     [new("task-1", "Task 1", "spec/task")],
                     [])
             ]),
@@ -73,8 +74,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
         await workflow.StartAsync(
-            new WorkflowDefinitionInput([
-                new StageDefinitionInput("release",
+            new WorkflowDefinition("spec/workflow", [
+                new StageDefinition("release",
                     [new("publish", "Publish", "spec/task")],
                     [])
             ]),
