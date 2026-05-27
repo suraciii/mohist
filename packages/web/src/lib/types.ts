@@ -404,13 +404,6 @@ export interface Model {
   contextWindow: number
 }
 
-export interface ModelProvider {
-  id: string
-  name: string
-  configured: boolean
-  models: Model[]
-}
-
 export interface AgentSessionMessageItem {
   id: string
   role: string

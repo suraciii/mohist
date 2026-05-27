@@ -176,7 +176,7 @@ export const api = {
     upToDate: boolean
   }>(withProject('/status', projectId)),
 
-  getAvailableModels: () => request<import('./types').ModelProvider[]>('/providers/models'),
+  getOpencodeModels: () => request<{ models: string[] }>('/opencode/models'),
 
   getCoderSessions: (number: number, projectId?: string | null) =>
     request<import('./types').CoderSessionSummary[]>(withProject(`/issues/${number}/coder-sessions`, projectId)),
@@ -312,6 +312,9 @@ export const api = {
 
   getAgentRuntime: () =>
     request<import('./types').AgentRuntimeConfig>('/agent-runtime'),
+
+  getOpencodeRuntime: () =>
+    request<{ mode: string; command: string; model: string | null; note: string }>('/opencode/runtime'),
 
   updateAgentRuntime: (data: Partial<import('./types').AgentRuntimeConfig>) =>
     request<import('./types').AgentRuntimeConfig>('/agent-runtime', {

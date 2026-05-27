@@ -15,7 +15,11 @@ public interface IRunnerGrain : IGrainWithStringKey
 }
 
 [GenerateSerializer]
-public record RunnerInfo(string RunnerId, string[] Capabilities, string Hostname);
+public record RunnerInfo(
+    string RunnerId,
+    string[] Capabilities,
+    string Hostname,
+    string[]? CoderModels = null);
 
 [GenerateSerializer]
 public record WorkDispatch(

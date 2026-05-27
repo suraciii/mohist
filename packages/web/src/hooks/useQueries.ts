@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '../lib/api'
 import type { AgentActivity, AgentRuntimeConfig, AgentSessionInfo, GeneralConfig, SystemInfo } from '../lib/types'
-import { providerApi, type CoderAgentRuntime, type Provider, type ProviderConfigValidationResult, type ProviderFormData } from '../lib/provider-api'
 import { useProject } from '../context/ProjectContext'
 
 export function useProjects() {
@@ -203,115 +202,6 @@ export function useUpdateConfig() {
   })
 }
 
-export function useProviders() {
-  return useQuery<Provider[], Error>({
-    queryKey: ['providers'],
-    queryFn: () => providerApi.getProviders(),
-  })
-}
-
-export function useProviderRuntime() {
-  return useQuery<CoderAgentRuntime, Error>({
-    queryKey: ['provider-runtime'],
-    queryFn: () => providerApi.getRuntime(),
-  })
-}
-
-export interface SaveProviderVariables {
-  id: string
-  data: ProviderFormData
-}
-
-interface SaveProviderContext {
-  previousProviders?: Provider[]
-}
-
-export function useSaveProvider() {
-  const queryClient = useQueryClient()
-
-  return useMutation<{ id: string; configured: boolean }, Error, SaveProviderVariables, SaveProviderContext>({
-    mutationFn: ({ id, data }) => providerApi.saveProvider(id, data),
-    onMutate: async ({ id, data }) => {
-      await queryClient.cancelQueries({ queryKey: ['providers'] })
-      const previousProviders = queryClient.getQueryData<Provider[]>(['providers'])
-
-      queryClient.setQueryData<Provider[]>(['providers'], (old) => {
-        if (!old) return old
-        return old.map((p) =>
-          p.id === id
-            ? { ...p, configured: true, apiKeyMasked: data.apiKey ? maskApiKey(data.apiKey) : p.apiKeyMasked, ...data }
-            : p
-        )
-      })
-
-      return { previousProviders }
-    },
-    onError: (_err, _variables, context) => {
-      if (context?.previousProviders) {
-        queryClient.setQueryData(['providers'], context.previousProviders)
-      }
-      toast.error(_err.message || 'Request failed')
-    },
-    onSuccess: () => {
-      toast.success('Provider saved')
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['providers'] })
-    },
-  })
-}
-
-interface DeleteProviderContext {
-  previousProviders?: Provider[]
-}
-
-export function useDeleteProvider() {
-  const queryClient = useQueryClient()
-
-  return useMutation<{ id: string }, Error, string, DeleteProviderContext>({
-    mutationFn: (id) => providerApi.deleteProvider(id),
-    onMutate: async (id) => {
-      await queryClient.cancelQueries({ queryKey: ['providers'] })
-      const previousProviders = queryClient.getQueryData<Provider[]>(['providers'])
-
-      queryClient.setQueryData<Provider[]>(['providers'], (old) => {
-        if (!old) return old
-        return old.map((p) =>
-          p.id === id ? { ...p, configured: false, apiKeyMasked: null } : p
-        )
-      })
-
-      return { previousProviders }
-    },
-    onError: (_err, _id, context) => {
-      if (context?.previousProviders) {
-        queryClient.setQueryData(['providers'], context.previousProviders)
-      }
-      toast.error(_err.message || 'Request failed')
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['providers'] })
-      toast.success('Provider deleted')
-    },
-  })
-}
-
-export interface TestProviderVariables {
-  data: ProviderFormData & { id?: string }
-}
-
-export function useTestProvider() {
-  return useMutation<ProviderConfigValidationResult, Error, TestProviderVariables>({
-    mutationFn: ({ data }) => providerApi.testProvider(data),
-    onSuccess: () => {
-      toast.success('Provider configuration accepted')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
 export function useWorktreeStatus(issueNumber: number, enabled: boolean) {
   const { projectId } = useProject()
   return useQuery({
@@ -372,11 +262,18 @@ export function useUpdateOpencodeModel() {
 
 export function useAvailableModelIds() {
   return useQuery<string[]>({
-    queryKey: ['model-ids'],
+    queryKey: ['opencode-model-ids'],
     queryFn: async () => {
-      const providers = await api.getAvailableModels()
-      return providers.flatMap((provider) => provider.models.map((model) => model.id))
+      const response = await api.getOpencodeModels()
+      return response.models
     },
+  })
+}
+
+export function useOpencodeRuntime() {
+  return useQuery<{ mode: string; command: string; model: string | null; note: string }, Error>({
+    queryKey: ['opencode-runtime'],
+    queryFn: () => api.getOpencodeRuntime(),
   })
 }
 
@@ -394,11 +291,6 @@ export function useRebuildSystem() {
       toast.error(err.message || 'Request failed')
     },
   })
-}
-
-function maskApiKey(apiKey: string): string {
-  if (apiKey.length <= 8) return '********'
-  return apiKey.slice(0, 4) + '*'.repeat(apiKey.length - 8) + apiKey.slice(-4)
 }
 
 export function useModel() {

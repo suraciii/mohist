@@ -20,7 +20,9 @@ public class ApiContractSpecs
     [InlineData("/api/projects/current")]
     [InlineData("/api/questions")]
     [InlineData("/api/questions/question-1")]
-    [InlineData("/api/opencode/models")]
+    [InlineData("/api/providers")]
+    [InlineData("/api/providers/models")]
+    [InlineData("/api/providers/runtime")]
     [InlineData("/api/issues/1/agent-session")]
     [InlineData("/api/agent/session-status")]
     public async Task RemovedLegacyApi_WhenRequested_ReturnsNotFound(string path)
@@ -33,6 +35,8 @@ public class ApiContractSpecs
     [Theory]
     [InlineData("/api/questions/question-1/reply")]
     [InlineData("/api/questions/question-1/expire")]
+    [InlineData("/api/providers/test")]
+    [InlineData("/api/providers/custom-openai")]
     [InlineData("/api/settings/system/rebuild")]
     [InlineData("/api/issues/1/messages")]
     public async Task RemovedLegacyApiPost_WhenRequested_ReturnsNotFound(string path)
@@ -40,6 +44,23 @@ public class ApiContractSpecs
         using var response = await _fixture.Client.PostAsJsonAsync(path, new { });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task OpencodeModels_ReturnsRunnerReportedModels()
+    {
+        var runnerId = $"model-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "test-host",
+            coderModels = new[] { "zai/glm-5", "openai/gpt-5.5" },
+        });
+
+        var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>("/api/opencode/models");
+
+        Assert.Contains("zai/glm-5", response.Models);
+        Assert.Contains("openai/gpt-5.5", response.Models);
     }
 
     [Fact]
@@ -68,4 +89,6 @@ public class ApiContractSpecs
         var duplicatePayload = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("rebase_already_pending", duplicatePayload.GetProperty("code").GetString());
     }
+
+    private sealed record OpencodeModelsDto(string[] Models);
 }

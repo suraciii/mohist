@@ -25,7 +25,7 @@ public static class MohistApiRegistration
         app.MapWorkflowEventRoutes();
         app.MapEventRoutes();
         app.MapConfigRoutes();
-        app.MapProvidersRoutes();
+        app.MapOpencodeRoutes();
         app.MapLabelsRoutes();
         app.MapLogsRoutes();
         app.MapFsRoutes();
