@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { FileChangeSummary } from '../src/lib/types'
+import type { FileChangeSummary } from '../src/shared/api/types'
 import {
   getDisplayType,
   getToolLabel,
@@ -12,8 +12,8 @@ import {
   normalizeToolName,
   type ToolDisplayType,
   type EditInput,
-} from '../src/lib/transcript-tool-utils'
-import { getToolRegistryEntry, getToolTitle, getToolBadges, getToolDisplayType } from '../src/components/session-transcript/tool-registry'
+} from '../src/widgets/session-transcript/model/transcript-tool-utils'
+import { getToolRegistryEntry, getToolTitle, getToolBadges, getToolDisplayType } from '../src/widgets/session-transcript/ui/tool-registry'
 
 interface ToolCallEntry {
   id: string

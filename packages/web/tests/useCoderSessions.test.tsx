@@ -1,23 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, waitFor } from './test-utils'
 import { renderHook } from '@testing-library/react'
-import { useCoderSessions } from '../src/hooks/useCoderSessions'
+import { useCoderSessions } from '../src/entities/coder-session/model/useCoderSessions'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProjectProvider } from '../src/context/ProjectContext'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import type { ReactNode } from 'react'
-import type { CoderSessionItem } from '../src/lib/types'
+import type { CoderSessionItem } from '../src/shared/api/types'
 
 const apiMocks = vi.hoisted(() => ({
   getCoderSessions: vi.fn(),
 }))
 
-vi.mock('../src/lib/api', () => ({
+vi.mock('../src/shared/api/client', () => ({
   api: {
     getCoderSessions: (...args: any[]) => apiMocks.getCoderSessions(...args),
   },
 }))
 
-vi.mock('../src/lib/agent-events', () => ({
+vi.mock('../src/shared/api/agent-events', () => ({
   onAgentEvent: vi.fn(() => vi.fn()),
 }))
 

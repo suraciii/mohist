@@ -1,18 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, screen, waitFor, baseRender, renderHook, act } from './test-utils'
-import { SessionHeader, getSessionStatusLabel } from '../src/components/SessionHeader'
-import { dispatchAgentEvent } from '../src/lib/agent-events'
+import { SessionHeader, getSessionStatusLabel } from '../src/widgets/coder-session/ui/SessionHeader'
+import { dispatchAgentEvent } from '../src/shared/api/agent-events'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProjectProvider } from '../src/context/ProjectContext'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import type { CoderSessionItem } from '../src/lib/types'
+import type { CoderSessionItem } from '../src/shared/api/types'
 
 const apiMocks = vi.hoisted(() => ({
   sessions: [] as CoderSessionItem[],
 }))
 
-vi.mock('../src/lib/api', () => ({
+vi.mock('../src/shared/api/client', () => ({
   api: {
     getCoderSessions: vi.fn(() => Promise.resolve(apiMocks.sessions)),
   },
@@ -161,7 +161,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     const initialSession = makeSession({ id: 'session-1', status: 'running' })
     apiMocks.sessions = [initialSession]
 
-    const { useCoderSessions } = await import('../src/hooks/useCoderSessions')
+    const { useCoderSessions } = await import('../src/entities/coder-session/model/useCoderSessions')
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
     await waitFor(() => {
@@ -193,7 +193,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     const initialSession = makeSession({ id: 'session-1', status: 'probing', probeSentAt: '2024-01-01T10:05:00.000Z' })
     apiMocks.sessions = [initialSession]
 
-    const { useCoderSessions } = await import('../src/hooks/useCoderSessions')
+    const { useCoderSessions } = await import('../src/entities/coder-session/model/useCoderSessions')
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
     await waitFor(() => {
@@ -220,7 +220,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     const initialSession = makeSession({ id: 'session-1', status: 'probing' })
     apiMocks.sessions = [initialSession]
 
-    const { useCoderSessions } = await import('../src/hooks/useCoderSessions')
+    const { useCoderSessions } = await import('../src/entities/coder-session/model/useCoderSessions')
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
     await waitFor(() => {
@@ -248,7 +248,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     const initialSession = makeSession({ id: 'session-1', status: 'running' })
     apiMocks.sessions = [initialSession]
 
-    const { useCoderSessions } = await import('../src/hooks/useCoderSessions')
+    const { useCoderSessions } = await import('../src/entities/coder-session/model/useCoderSessions')
     const { result } = renderHookWithProviders(() => useCoderSessions(1))
 
     await waitFor(() => {

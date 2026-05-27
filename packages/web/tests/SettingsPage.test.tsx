@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { baseRender, screen, fireEvent } from './test-utils'
-import { SettingsPage } from '../src/components/SettingsPage'
+import { SettingsPage } from '../src/pages/settings/ui/SettingsPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import React from 'react'
 
-vi.mock('../src/hooks/useQueries', async () => {
-  const actual = await import('../src/hooks/useQueries')
+vi.mock('../src/entities/project/api/queries', async () => {
+  const actual = await import('../src/entities/project/api/queries')
   return {
     ...actual,
     useOpencodeRuntime: vi.fn(),
@@ -37,7 +37,7 @@ const {
   useRebuildSystem,
   useAgentRuntime,
   useSetAgentRuntime,
-} = await import('../src/hooks/useQueries')
+} = await import('../src/entities/project/api/queries')
 
 function createMockQueryClient() {
   return new QueryClient({

@@ -2,7 +2,7 @@ import React, { type ReactElement, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
 import { render, type RenderOptions } from '@testing-library/react'
-import { ProjectProvider } from '../src/context/ProjectContext'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 
 const TEST_PROJECT = {
   id: 'test-project',

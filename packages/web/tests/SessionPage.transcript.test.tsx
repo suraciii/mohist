@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TEST_PROJECT, baseRender, screen, fireEvent, waitFor, act } from './test-utils'
-import { SessionPage } from '../src/components/SessionPage'
+import { SessionPage } from '../src/pages/session/ui/SessionPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProjectProvider } from '../src/context/ProjectContext'
+import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import { dispatchAgentEvent } from '../src/lib/agent-events'
-import type { CoderSessionDetail, SessionMetadata, SessionTurn, TextPart, ToolPart } from '../src/lib/types'
+import { dispatchAgentEvent } from '../src/shared/api/agent-events'
+import type { CoderSessionDetail, SessionMetadata, SessionTurn, TextPart, ToolPart } from '../src/shared/api/types'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
@@ -26,15 +26,15 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
-vi.mock('../src/hooks/useCoderSessions', () => ({
+vi.mock('../src/entities/coder-session/model/useCoderSessions', () => ({
   useCoderSessions: () => ({ sessions: sessionPageMocks.sessions, isLoading: sessionPageMocks.sessionsLoading }),
 }))
 
-vi.mock('../src/hooks/useQueries', () => ({
+vi.mock('../src/entities/project/api/queries', () => ({
   useIssue: () => ({ data: sessionPageMocks.issue }),
 }))
 
-vi.mock('../src/lib/api', () => ({
+vi.mock('../src/shared/api/client', () => ({
   api: {
     getCoderSessionDetail: vi.fn(() => {
       if (sessionPageMocks.detailPending) return new Promise(() => {})
