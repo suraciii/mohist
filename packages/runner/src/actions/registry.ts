@@ -159,9 +159,19 @@ function trim(value: string) {
 function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
   const controller = new AbortController()
   const abort = () => controller.abort(parent.reason)
-  if (parent.aborted) abort()
-  else parent.addEventListener("abort", abort, { once: true })
-  setTimeout(() => controller.abort(new Error(`Timed out after ${timeoutMs / 1000}s`)), timeoutMs).unref?.()
+  if (parent.aborted) {
+    abort()
+  } else {
+    const onAbort = () => {
+      clearTimeout(timer)
+      abort()
+    }
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`Timed out after ${timeoutMs / 1000}s`))
+      parent.removeEventListener("abort", onAbort)
+    }, timeoutMs)
+    parent.addEventListener("abort", onAbort, { once: true })
+  }
   return controller.signal
 }
 

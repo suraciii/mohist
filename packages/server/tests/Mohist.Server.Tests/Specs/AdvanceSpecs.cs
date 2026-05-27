@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -11,13 +12,13 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task ApprovalStage_CompletesWork_WaitsForApproval()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan",
+            new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("review", "Review", "spec/check")],
                 RequiresApproval: true),
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [])
         ]));
@@ -37,12 +38,12 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task NonApprovalStage_CompletesWork_AutoAdvancesToNextStage()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan",
+            new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("review", "Review", "spec/check")]),
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [])
         ]));
@@ -65,10 +66,10 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyStage_SkipsToNextStage()
     {
-        await StartWorkflowAsync(new WorkflowDefinitionInput(
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan", [], []),
-            new StageDefinitionInput("build",
+            new StageDefinition("plan", [], []),
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [])
         ]));
@@ -83,10 +84,10 @@ public class AdvanceSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task EmptyApprovalStage_UserApproves_AdvancesToNextStage()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan", [], [], RequiresApproval: true),
-            new StageDefinitionInput("build",
+            new StageDefinition("plan", [], [], RequiresApproval: true),
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [])
         ]));

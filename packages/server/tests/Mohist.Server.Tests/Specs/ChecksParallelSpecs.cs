@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -8,14 +9,14 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 {
     public ChecksParallelSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    private static WorkflowDefinitionInput MultiCheckStage(
-        List<TaskDefinitionInput>? tasks = null,
-        List<CheckDefinitionInput>? checks = null,
+    private static WorkflowDefinition MultiCheckStage(
+        List<TaskDefinition>? tasks = null,
+        List<CheckDefinition>? checks = null,
         string stage = "build")
     {
-        return new WorkflowDefinitionInput(
+        return new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput(stage,
+            new StageDefinition(stage,
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
                 checks ?? [
                     new("typecheck", "TypeCheck", "spec/typecheck"),
@@ -152,8 +153,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
             checks: [
                 new("typecheck", "TypeCheck", "spec/typecheck"),
                 new("lint", "Lint", "spec/lint",
-                    RetryLimit: 2,
-                    RetryTask: new("fix-lint", "Fix lint", "spec/fix-lint"))
+                    OnFailure: new CheckFailureAction(new CheckFailureRetry(2, new TaskDefinition("fix-lint", "Fix lint", "spec/fix-lint"))))
             ]));
 
         var (task, r1) = await PollWorkAnyAsync();
@@ -223,12 +223,12 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task TwoStages_EachStageDispatchesOwnChecksBatch()
     {
-        var workflow = await StartWorkflowAsync(new WorkflowDefinitionInput(
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan",
+            new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")]),
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("typecheck", "TypeCheck", "spec/typecheck"), new("test", "Test", "spec/test")])
         ]));

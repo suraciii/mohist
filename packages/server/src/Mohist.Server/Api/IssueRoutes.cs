@@ -430,6 +430,18 @@ public static class IssueRoutes
         });
 
         // Issue-scoped active workflow definition vars. Mohist does not expose workflow runs as standalone product resources.
+        issues.MapGet("/{number:int}/workflow/yaml", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
+        {
+            var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
+
+            var yaml = await grains.GetGrain<IWorkflowGrain>(wrId).GetDefinitionYamlAsync();
+            return yaml is null
+                ? ApiResults.NotFound("Workflow definition not found")
+                : ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, yaml });
+        });
+
         issues.MapGet("/{number:int}/workflow/vars", async (int number, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery) =>
         {
             var (pid, wrId) = await ResolveWorkflowRunIdAsync(number, projectId, grains, issuesQuery);

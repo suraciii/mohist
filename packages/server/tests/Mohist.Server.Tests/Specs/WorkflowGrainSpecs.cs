@@ -5,6 +5,7 @@ using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
 using Xunit;
@@ -73,7 +74,7 @@ public abstract class WorkflowGrainSpecs
         return Grains.GetGrain<IWorkflowGrain>(id);
     }
 
-    protected async Task<IWorkflowGrain> StartWorkflowAsync(WorkflowDefinitionInput definition, string? id = null)
+    protected async Task<IWorkflowGrain> StartWorkflowAsync(WorkflowDefinition definition, string? id = null)
     {
         await ClearBacklogAsync();
         var runnerId = await RegisterRunnerAsync();
@@ -86,7 +87,7 @@ public abstract class WorkflowGrainSpecs
         return workflow;
     }
 
-    protected async Task<IWorkflowGrain> StartWorkflowWithoutRunnerAsync(WorkflowDefinitionInput definition, string? id = null)
+    protected async Task<IWorkflowGrain> StartWorkflowWithoutRunnerAsync(WorkflowDefinition definition, string? id = null)
     {
         await ClearBacklogAsync();
         var workflow = await CreateWorkflowAsync(id);
@@ -162,43 +163,46 @@ public abstract class WorkflowGrainSpecs
         await ReportChecksAsync(runnerId, checksWork, results.ToArray());
     }
 
-    protected static WorkflowDefinitionInput SingleStage(
-        List<TaskDefinitionInput>? tasks = null,
-        List<CheckDefinitionInput>? checks = null,
+    protected static WorkflowDefinition SingleStage(
+        List<TaskDefinition>? tasks = null,
+        List<CheckDefinition>? checks = null,
         bool requiresApproval = false,
         string stage = "build")
     {
-        return new WorkflowDefinitionInput(
+        return new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput(stage,
+            new StageDefinition(stage,
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
                 checks ?? [new("check-1", "Check 1", "spec/check")],
                 RequiresApproval: requiresApproval)
         ]);
     }
 
-    protected static WorkflowDefinitionInput TwoStages()
+    protected static Dictionary<string, JsonElement?> With(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
+
+    protected static WorkflowDefinition TwoStages()
     {
-        return new WorkflowDefinitionInput(
+        return new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan",
+            new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")]),
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("build-ok", "Build OK", "spec/check")])
         ]);
     }
 
-    protected static WorkflowDefinitionInput ApprovalStage()
+    protected static WorkflowDefinition ApprovalStage()
     {
-        return new WorkflowDefinitionInput(
+        return new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("plan",
+            new StageDefinition("plan",
                 [new("draft", "Draft", "spec/task")],
                 [new("plan-ok", "Plan OK", "spec/check")],
                 RequiresApproval: true),
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 [new("compile", "Compile", "spec/task")],
                 [new("build-ok", "Build OK", "spec/check")])
         ]);

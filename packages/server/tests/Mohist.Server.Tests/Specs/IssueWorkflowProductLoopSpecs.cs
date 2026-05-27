@@ -111,6 +111,25 @@ public class IssueWorkflowProductLoopSpecs
         Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
     }
 
+    [Fact]
+    public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"yaml-{Guid.NewGuid():N}", path = "/tmp/mohist-yaml", baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Show workflow yaml", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+
+        var response = await _client.GetDataAsync<WorkflowYamlDto>($"/api/issues/{issue.Number}/workflow/yaml?projectId={project.Id}");
+
+        Assert.Equal(issue.Number, response.IssueNumber);
+        Assert.False(string.IsNullOrWhiteSpace(response.WorkflowRunId));
+        Assert.Contains("stages:", response.Yaml);
+        Assert.Contains("agent: ${{ vars.agent }}", response.Yaml);
+        Assert.Contains("prompt: ${{ prompts.proposal }}", response.Yaml);
+    }
+
     private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)
     {
         for (var i = 0; i < 100; i++)
@@ -226,6 +245,7 @@ public class IssueWorkflowProductLoopSpecs
     private sealed record WorkflowLogDto(string Id, string EventType, string CreatedAt);
     private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
     private sealed record WorkflowVariablesDto(int IssueNumber, string WorkflowRunId, string Affected);
+    private sealed record WorkflowYamlDto(int IssueNumber, string WorkflowRunId, string Yaml);
     private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? Approval);
     private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
     private sealed record ApprovalDto(string Status);

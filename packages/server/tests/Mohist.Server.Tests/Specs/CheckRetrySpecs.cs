@@ -1,4 +1,5 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -8,12 +9,12 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 {
     public CheckRetrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    private static WorkflowDefinitionInput StageWithRetryCheck(int retryLimit = 2) =>
-        new([
-            new StageDefinitionInput("build",
+    private static WorkflowDefinition StageWithRetryCheck(int retryLimit = 2) =>
+        new("spec/workflow", [
+            new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task")],
-                [new("check-1", "Check 1", "spec/check", RetryLimit: retryLimit,
-                    RetryTask: new("fix-check", "Fix check", "spec/fix"))])
+                [new("check-1", "Check 1", "spec/check",
+                    OnFailure: new CheckFailureAction(new CheckFailureRetry(retryLimit, new TaskDefinition("fix-check", "Fix check", "spec/fix"))))])
         ]);
 
     [Fact]

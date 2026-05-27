@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
@@ -19,7 +20,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
     public string DisplayName => "Mohist Default";
     public string Description => "Plan, build, check, and integrate an issue using OpenSpec artifacts.";
     public bool IsDefault => true;
-    public WorkflowDefinitionInput Definition => MohistWorkflow.Definition;
+    public WorkflowDefinition Definition => MohistWorkflow.Definition;
 
     public string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Dictionary<string, object?>? globalAgentConfig = null)
     {

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Prompts;
 using Xunit;
 
@@ -65,15 +66,15 @@ public class MohistDefaultWorkflowProfileSpecs
         var proposal = definition.Stages[0].Tasks[0];
         Assert.Equal("proposal", proposal.Id);
         Assert.Equal("mohist/acp-agent", proposal.Uses);
-        Assert.Contains("proposal.md", proposal.With);
+        Assert.Contains("proposal.md", JsonSerializer.Serialize(proposal.With));
 
         var build = definition.Stages[1];
-        Assert.Equal("mohist/openspec-tasks", build.TasksFromUses);
-        Assert.Contains("tasks.json", build.TasksFromWith);
+        Assert.Equal("mohist/openspec-tasks", build.TasksFrom?.Uses);
+        Assert.Contains("tasks.json", JsonSerializer.Serialize(build.TasksFrom?.With));
 
         var merge = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:merge");
         Assert.Equal("mohist/merge", merge.Uses);
-        Assert.Contains("mo/issue-${{ issue.number }}", merge.With);
+        Assert.Contains("mo/issue-${{ issue.number }}", JsonSerializer.Serialize(merge.With));
     }
 
     [Fact]
@@ -156,9 +157,22 @@ public class MohistDefaultWorkflowProfileSpecs
 
         var check = definition.Stages.Single().Checks.Single();
         Assert.Equal("core/script", check.Uses);
-        Assert.Equal(1, check.RetryLimit);
-        Assert.Equal("fix-health", check.RetryTask?.Id);
-        Assert.Contains("\"timeout\":300000", check.With);
-        Assert.Contains("\"prompt\":\"Fix it\"", check.RetryTask?.With);
+        Assert.Equal(1, check.OnFailure?.Retry?.Limit);
+        Assert.Equal("fix-health", check.OnFailure?.Retry?.Task.Id);
+        Assert.Contains("\"timeout\":300000", JsonSerializer.Serialize(check.With));
+        Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Retry?.Task.With));
+    }
+
+    [Fact]
+    public void WorkflowYamlSerializer_RoundTripsDomainDefinition()
+    {
+        var yaml = WorkflowYamlSerializer.ToYaml(MohistWorkflow.Definition);
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
+
+        Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
+        Assert.Contains("agent: ${{ vars.agent }}", yaml);
+        Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
+        Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].TasksFrom?.Uses);
+        Assert.Equal(2, reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry?.Limit);
     }
 }

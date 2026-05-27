@@ -3,6 +3,7 @@ using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Orleans.TestingHost;
 using Xunit;
@@ -66,13 +67,13 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         await backlog.ClearAsync();
     }
 
-    private static WorkflowDefinitionInput SingleStage(
-        List<TaskDefinitionInput>? tasks = null,
-        List<CheckDefinitionInput>? checks = null)
+    private static WorkflowDefinition SingleStage(
+        List<TaskDefinition>? tasks = null,
+        List<CheckDefinition>? checks = null)
     {
-        return new WorkflowDefinitionInput(
+        return new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinitionInput("build",
+            new StageDefinition("build",
                 tasks ?? [new("task-1", "Task 1", "spec/task")],
                 checks ?? [new("check-1", "Check 1", "spec/check")])
         ]);

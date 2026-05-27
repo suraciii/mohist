@@ -53,11 +53,16 @@ export class RunnerHost {
 }
 
 async function delay(ms: number, signal: AbortSignal) {
+  if (signal.aborted) throw signal.reason
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(resolve, ms)
-    signal.addEventListener("abort", () => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
       clearTimeout(timeout)
       reject(signal.reason)
-    }, { once: true })
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
   })
 }
