@@ -3,6 +3,7 @@ import { ServerConnection } from "../server/connection.js"
 import { createDefaultRegistry } from "../actions/registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkExecutor } from "./executor.js"
+import { discoverOpencodeModels } from "./opencode-models.js"
 
 export class RunnerHost {
   private readonly connection: ServerConnection
@@ -42,7 +43,8 @@ export class RunnerHost {
   private async connectWhenServerIsReady(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
-        await this.connection.connect(signal)
+        const coderModels = await discoverOpencodeModels(signal)
+        await this.connection.connect({ capabilities: [], coderModels }, signal)
         return
       } catch (error) {
         console.error(`runner registration failed; retrying in ${this.options.pollIntervalMs}ms`, error)

@@ -1,12 +1,12 @@
 import { hostname } from "node:os"
-import type { RunnerOptions, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
+import type { RunnerOptions, RunnerRegistration, WorkDispatchResponse, WorkItem, WorkItemResult } from "../core/types.js"
 import { parseObject } from "../core/json.js"
 
 export class ServerConnection {
   constructor(private readonly options: RunnerOptions) {}
 
-  async connect(signal: AbortSignal) {
-    await this.post("register", { capabilities: [], hostname: hostname() }, signal)
+  async connect(registration: RunnerRegistration, signal: AbortSignal) {
+    await this.post("register", { hostname: hostname(), ...registration }, signal)
   }
 
   async heartbeat(signal: AbortSignal) {

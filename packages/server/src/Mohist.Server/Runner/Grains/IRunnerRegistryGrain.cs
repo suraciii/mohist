@@ -2,9 +2,10 @@ namespace Mohist.Server.Runner.Grains;
 
 public interface IRunnerRegistryGrain : IGrainWithStringKey
 {
-    Task RegisterAsync(string runnerId, string[] capabilities);
+    Task RegisterAsync(RunnerInfo info);
     Task UnregisterAsync(string runnerId);
     Task<IReadOnlyList<string>> ListRunnerIdsAsync();
+    Task<IReadOnlyList<string>> ListCoderModelsAsync();
 }
 
 public static class RunnerRegistryKeys

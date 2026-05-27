@@ -82,3 +82,9 @@ export interface RunnerOptions {
   pollIntervalMs: number
   heartbeatIntervalMs: number
 }
+
+export interface RunnerRegistration {
+  capabilities: string[]
+  hostname?: string
+  coderModels?: string[]
+}

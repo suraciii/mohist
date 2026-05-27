@@ -42,7 +42,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
-        await registry.RegisterAsync(RunnerId, info.Capabilities);
+        await registry.RegisterAsync(info);
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
             HeartbeatCheckInterval,

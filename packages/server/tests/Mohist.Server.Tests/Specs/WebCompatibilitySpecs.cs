@@ -90,22 +90,20 @@ public class WebCompatibilitySpecs
     }
 
     [Fact]
-    public async Task SettingsAndProviderCompatibilityEndpoints_DoNotReturnMissingRoutes()
+    public async Task SettingsCompatibilityEndpoints_DoNotReturnMissingRoutes()
     {
         await _client.PutAsJsonOkAsync("/api/log-level", new { level = "DEBUG" });
         await _client.PutAsJsonOkAsync("/api/agent-runtime", new { timeout = 900, maxConcurrent = 5 });
-        await _client.PostOkAsync("/api/providers/test", new { });
-        await _client.PostOkAsync("/api/providers/custom-openai", new { name = "Custom OpenAI", baseURL = "https://example.test", models = new[] { "model-a" } });
 
         var logLevel = await _client.GetDataAsync<LogLevelDto>("/api/log-level");
         var runtime = await _client.GetDataAsync<AgentRuntimeDto>("/api/agent-runtime");
-        var providers = await _client.GetDataAsync<ProviderDto[]>("/api/providers");
+        var opencodeRuntime = await _client.GetDataAsync<OpencodeRuntimeDto>("/api/opencode/runtime");
         var system = await _client.GetDataAsync<SystemInfoDto>("/api/system/info");
 
         Assert.Equal("DEBUG", logLevel.Level);
         Assert.Equal(900, runtime.Timeout);
         Assert.Equal(5, runtime.MaxConcurrent);
-        Assert.Contains(providers, p => p.Id == "custom-openai" && p.Configured);
+        Assert.Equal("local-opencode", opencodeRuntime.Mode);
         Assert.Equal("running", system.Server.Status);
     }
 
@@ -152,7 +150,7 @@ public class WebCompatibilitySpecs
     private sealed record LogLevelDto(string Level);
     private sealed record AgentRuntimeDto(int Timeout, int MaxConcurrent);
     private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStage);
-    private sealed record ProviderDto(string Id, bool Configured);
+    private sealed record OpencodeRuntimeDto(string Mode, string Command, string? Model);
     private sealed record SystemInfoDto(ServerInfoDto Server);
     private sealed record ServerInfoDto(string Status);
     private sealed record EpicDto(string Id);

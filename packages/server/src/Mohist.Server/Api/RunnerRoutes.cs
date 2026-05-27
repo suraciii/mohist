@@ -14,7 +14,7 @@ public static class RunnerRoutes
         group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName, req.CoderModels));
             return Results.Ok();
         });
 
@@ -93,7 +93,7 @@ public static class RunnerRoutes
     }
 }
 
-public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null);
+public record RunnerRegisterRequest(string[] Capabilities, string? Hostname = null, string[]? CoderModels = null);
 public record RunnerReportRequest(string WorkId, string Status, string? Message = null, string? Output = null, int? ExitCode = null);
 public record SessionTranscriptEntriesRequest([property: JsonPropertyName("events")] IReadOnlyList<SessionTranscriptEntryRequest> TranscriptEntries);
 public record WorkDispatchResponse(
