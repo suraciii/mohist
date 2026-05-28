@@ -10,7 +10,7 @@ public static class MohistApiRegistration
     {
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.Database.EnsureCreated();
+        MohistDatabaseInitializer.Initialize(db);
         return app;
     }
 
