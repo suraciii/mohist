@@ -110,8 +110,4 @@ Do NOT include more than one marker. Do NOT include markers in examples or quote
 Write to: `${{ openspecChangeDir }}/review.md`
 </output>
 
-<path_contract>
-Use `${{ openspecChangeDir }}` exactly as the change directory. Do not create or use a title slug, issue-title directory, numeric-title directory, or any other `openspec/changes/*` path for this artifact.
-</path_contract>
-
 </artifact>

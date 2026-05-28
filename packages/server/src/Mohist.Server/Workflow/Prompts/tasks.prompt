@@ -28,10 +28,6 @@ Read these files for context before creating this artifact:
 Write to: `${{ openspecChangeDir }}/tasks.json`
 </output>
 
-<path_contract>
-Use `${{ openspecChangeDir }}` exactly as the change directory. Do not create or use a title slug, issue-title directory, numeric-title directory, or any other `openspec/changes/*` path for this artifact.
-</path_contract>
-
 <instruction>
 Create `tasks.json`, a machine-readable implementation plan for Mohist agents.
 
