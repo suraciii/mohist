@@ -4,7 +4,7 @@ import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from "@agentclie
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { numberInput, objectInput, stringInput } from "../core/json.js"
-import { killProcess, sanitizedEnvironment } from "../system/process.js"
+import { killProcess, runCommand, sanitizedEnvironment } from "../system/process.js"
 import { verifyExpectations } from "./expectations.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../runtime/acp-connection.js"
 import { setActiveHandlers, clearActiveHandlers } from "../runtime/acp-connection.js"
@@ -58,6 +58,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
 
   const result = await runAcpSession(context, prompt)
+  await restoreAgentToolNoise(context)
   const verification = await verifyExpectations(context)
   const ok = result.success && verification.satisfied
   const agentConfig = resolveAgentConfig(context.with)
@@ -67,6 +68,16 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
     output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: agentConfig?.model, text: result.text, error: result.error, expectation: verification }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
+  }
+}
+
+async function restoreAgentToolNoise(context: ActionContext) {
+  for (const path of [".opencode/package-lock.json", ".opencode/bun.lock", ".opencode/node_modules/.package-lock.json"]) {
+    try {
+      await runCommand("git", ["checkout", "--", path], context.workDir, context.signal)
+    } catch {
+      // Tool-noise cleanup must never turn a successful agent run into a failure.
+    }
   }
 }
 
