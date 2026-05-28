@@ -2,11 +2,11 @@ namespace Mohist.Server.Sessions.Grains;
 
 public interface IWorkflowAgentSessionGrain : IGrainWithStringKey
 {
-    Task<WorkflowAgentSessionSnapshot> EnsureAsync(EnsureWorkflowAgentSessionCommand command);
-    Task<WorkflowAgentSessionSnapshot> AttachAgentAsync(AttachAgentCommand command);
-    Task<IReadOnlyList<WorkflowAgentSessionEventSnapshot>> AppendEventsAsync(AppendWorkflowAgentSessionEventsCommand command);
-    Task<WorkflowAgentSessionSnapshot?> FailIfRunningAsync(string reason);
-    Task<WorkflowAgentSessionSnapshot?> GetAsync();
+    Task<WorkflowAgentSessionInfo> EnsureAsync(EnsureWorkflowAgentSessionCommand command);
+    Task<WorkflowAgentSessionInfo> AttachAgentAsync(AttachAgentCommand command);
+    Task<IReadOnlyList<WorkflowAgentSessionEventInfo>> AppendEventsAsync(AppendWorkflowAgentSessionEventsCommand command);
+    Task<WorkflowAgentSessionInfo?> FailIfRunningAsync(string reason);
+    Task<WorkflowAgentSessionInfo?> GetAsync();
 }
 
 [GenerateSerializer]
@@ -42,7 +42,7 @@ public sealed record WorkflowAgentSessionEventInput(
     [property: Id(1)] string PayloadJson);
 
 [GenerateSerializer]
-public sealed record WorkflowAgentSessionSnapshot(
+public sealed record WorkflowAgentSessionInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string ProjectId,
     [property: Id(2)] int? IssueNumber,
@@ -67,7 +67,7 @@ public sealed record WorkflowAgentSessionSnapshot(
     [property: Id(21)] int? ExitCode);
 
 [GenerateSerializer]
-public sealed record WorkflowAgentSessionEventSnapshot(
+public sealed record WorkflowAgentSessionEventInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
     [property: Id(2)] string ProjectId,

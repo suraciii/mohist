@@ -33,10 +33,10 @@ public class DatabaseInitializationSpecs
         await using var db = new MohistDbContext(options);
         MohistDatabaseInitializer.Initialize(db);
 
-        Assert.True(await TableExistsAsync(connection, "WorkflowSessions"));
-        Assert.True(await TableExistsAsync(connection, "WorkflowSessionEvents"));
-        Assert.True(await IndexExistsAsync(connection, "IX_WorkflowSessions_WorkflowRunId_SessionName"));
-        Assert.True(await IndexExistsAsync(connection, "IX_WorkflowSessionEvents_WorkflowSessionId_Sequence"));
+        Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
+        Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessionEvents"));
+        Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_SessionName"));
+        Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessionEvents_SessionId_Sequence"));
     }
 
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, string name)
