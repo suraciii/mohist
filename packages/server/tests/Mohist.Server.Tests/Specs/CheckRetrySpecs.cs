@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -86,14 +87,14 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksFailAsync(r2, checks1, "check-1", "first fail");
 
         var (fix1, r3) = await PollWorkAnyAsync();
-        Assert.Equal("fix-check:check-1:1.1", fix1.WorkId);
+        Assert.Equal("fix-check:1.1", fix1.WorkId);
         await ReportAsync(r3, fix1.WorkId, "completed");
 
         var (checks2, r4) = await PollWorkAnyAsync();
         await ReportChecksFailAsync(r4, checks2, "check-1", "second fail");
 
         var (fix2, r5) = await PollWorkAnyAsync();
-        Assert.Equal("fix-check:check-1:2.1", fix2.WorkId);
+        Assert.Equal("fix-check:2.1", fix2.WorkId);
         await ReportAsync(r5, fix2.WorkId, "completed");
 
         var (checks3, r6) = await PollWorkAnyAsync();
@@ -107,7 +108,25 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Equal("Failed", status.Status);
         Assert.Null(status.PendingWork);
         var build = Assert.Single(status.Stages);
-        Assert.DoesNotContain(build.Tasks, t => t.Id.StartsWith("fix-check:check-1:3."));
+        Assert.DoesNotContain(build.Tasks, t => t.Id.StartsWith("fix-check:3."));
+    }
+
+    [Fact]
+    public void CheckRetryCount_IsStageCheckStateAndSurvivesSnapshotRestore()
+    {
+        var definition = StageWithRetryCheck(retryLimit: 2);
+        var run = new WorkflowRun("wf-domain", definition.Stages);
+
+        run.Start();
+        run.InitTasks([new("task-1", "Task 1", "spec/task")]);
+        run.CompleteTask();
+        run.InjectRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
+
+        var snapshot = run.Snapshot();
+        Assert.Equal(1, snapshot.Stages[0].Checks.Single(c => c.Name == "check-1").RetryCount);
+
+        var restored = WorkflowRun.Restore(definition.Stages, snapshot);
+        Assert.Equal(1, restored.RetryCountForCheck("check-1"));
     }
 
     [Fact]

@@ -710,7 +710,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
             : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
         _run.InjectRetryTask(checkName, new LoadedTaskInput(
-            $"{retry.Task.Id}:{checkName}:{retryCount + 1}",
+            $"{retry.Task.Id}:{retryCount + 1}",
             retry.Task.Title,
             retry.Task.Uses,
             retryWith));

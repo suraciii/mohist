@@ -9,6 +9,7 @@ public class StageCheck
     public string? Uses { get; }
     public Dictionary<string, JsonElement?>? WithInput { get; }
     public CheckRunStatus Status { get; private set; } = CheckRunStatus.Pending;
+    public int RetryCount { get; private set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }
 
@@ -20,10 +21,11 @@ public class StageCheck
         WithInput = withInput;
     }
 
-    private StageCheck(string name, string title, string? uses, Dictionary<string, JsonElement?>? withInput, CheckRunStatus status, string? message, JsonElement? output)
+    private StageCheck(string name, string title, string? uses, Dictionary<string, JsonElement?>? withInput, CheckRunStatus status, int retryCount, string? message, JsonElement? output)
         : this(name, title, uses, withInput)
     {
         Status = status;
+        RetryCount = retryCount;
         Message = message;
         Output = output;
     }
@@ -37,8 +39,9 @@ public class StageCheck
 
     public void Pass() => Status = CheckRunStatus.Passed;
     public void Fail() => Status = CheckRunStatus.Failed;
+    public int RecordRetry() => ++RetryCount;
 
-    public StageCheckSnapshot Snapshot() => new(Name, Title, Uses, WithInput, Status, Message, Output);
+    public StageCheckSnapshot Snapshot() => new(Name, Title, Uses, WithInput, Status, RetryCount, Message, Output);
 
     public static StageCheck Restore(StageCheckSnapshot snapshot) => new(
         snapshot.Name,
@@ -46,6 +49,7 @@ public class StageCheck
         snapshot.Uses,
         snapshot.WithInput,
         snapshot.Status,
+        snapshot.RetryCount,
         snapshot.Message,
         snapshot.Output);
 }
