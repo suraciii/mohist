@@ -237,6 +237,8 @@ public class StageRun
 
     public void InjectRetryTask(string checkName, LoadedTaskInput task)
     {
+        var check = FindCheck(checkName);
+        check.RecordRetry();
         AddTask(task);
     }
 
@@ -266,7 +268,7 @@ public class StageRun
 
     public int RetryCountForCheck(string checkName)
     {
-        return _tasks.Count(t => t.DefinitionId == checkName || t.DefinitionId.Contains($":{checkName}"));
+        return FindCheck(checkName).RetryCount;
     }
 
     public void Retry()

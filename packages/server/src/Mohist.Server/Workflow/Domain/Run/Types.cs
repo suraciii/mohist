@@ -142,5 +142,6 @@ public sealed record StageCheckSnapshot(
     string? Uses,
     Dictionary<string, JsonElement?>? WithInput,
     CheckRunStatus Status,
+    int RetryCount,
     string? Message,
     JsonElement? Output);
