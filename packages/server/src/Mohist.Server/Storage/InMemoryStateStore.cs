@@ -23,4 +23,10 @@ public class InMemoryStateStore<T> : IStateStore<T> where T : class
         _data.TryRemove(key, out _);
         return Task.CompletedTask;
     }
+
+    public Task<IReadOnlyList<T>> ListAsync()
+    {
+        IReadOnlyList<T> result = _data.Values.ToList();
+        return Task.FromResult(result);
+    }
 }

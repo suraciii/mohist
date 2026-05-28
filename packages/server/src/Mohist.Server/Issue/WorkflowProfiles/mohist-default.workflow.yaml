@@ -1,3 +1,7 @@
+variables:
+  agent:
+    type: opencode
+
 stages:
   - stage: plan
     requiresApproval: true
@@ -6,6 +10,7 @@ stages:
         title: Generate proposal
         uses: mohist/acp-agent
         with:
+          session: plan
           prompt: ${{ prompts.proposal }}
           agent: ${{ vars.agent }}
           expect:
@@ -15,6 +20,7 @@ stages:
         title: Write specs
         uses: mohist/acp-agent
         with:
+          session: plan
           prompt: ${{ prompts.specs }}
           agent: ${{ vars.agent }}
           expect:
@@ -24,6 +30,7 @@ stages:
         title: Create design
         uses: mohist/acp-agent
         with:
+          session: plan
           prompt: ${{ prompts.design }}
           agent: ${{ vars.agent }}
           expect:
@@ -33,6 +40,7 @@ stages:
         title: Generate tasks
         uses: mohist/acp-agent
         with:
+          session: plan
           prompt: ${{ prompts.tasks }}
           agent: ${{ vars.agent }}
           expect:
@@ -42,6 +50,7 @@ stages:
         title: Self review
         uses: mohist/acp-agent
         with:
+          session: plan
           prompt: ${{ prompts.self-review }}
           agent: ${{ vars.agent }}
           expect:
@@ -83,6 +92,7 @@ stages:
           title: Fix plan review findings
           uses: mohist/acp-agent
           with:
+            session: plan
             prompt: |
               Fix the plan review findings in ${{ openspecChangeDir }}.
               Update proposal.md, specs, design.md, tasks.json, or self-review.md as needed.
@@ -113,6 +123,7 @@ stages:
           title: Fix build health
           uses: mohist/acp-agent
           with:
+            session: build
             prompt: |
               Fix the build-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
@@ -125,6 +136,7 @@ stages:
         title: AI review
         uses: mohist/acp-agent
         with:
+          session: check
           prompt: ${{ prompts.review }}
           agent: ${{ vars.agent }}
           expect:
@@ -143,6 +155,7 @@ stages:
           title: Fix check health
           uses: mohist/acp-agent
           with:
+            session: check
             prompt: |
               Fix the check-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.
@@ -159,6 +172,7 @@ stages:
           title: Fix review findings
           uses: mohist/acp-agent
           with:
+            session: check
             prompt: |
               Read ${{ openspecChangeDir }}/review.md and fix the blocking findings.
               Keep changes focused on review failures and preserve existing passing behavior.
@@ -200,6 +214,7 @@ stages:
           title: Fix integrate health
           uses: mohist/acp-agent
           with:
+            session: integrate
             prompt: |
               Fix the integrate-stage health failure reported by `git diff --check`.
               Keep changes focused on whitespace and patch formatting issues.

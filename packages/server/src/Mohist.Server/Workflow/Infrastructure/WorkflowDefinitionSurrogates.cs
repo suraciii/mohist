@@ -10,21 +10,23 @@ public struct WorkflowDefinitionSurrogate
     [Id(0)] public string Id;
     [Id(1)] public List<StageDefinition> Stages;
     [Id(2)] public string? Name;
-    [Id(3)] public Dictionary<string, JsonElement?>? Defaults;
-    [Id(4)] public Dictionary<string, string>? Artifacts;
+    [Id(3)] public Dictionary<string, JsonElement?>? Variables;
+    [Id(4)] public Dictionary<string, JsonElement?>? Defaults;
+    [Id(5)] public Dictionary<string, string>? Artifacts;
 }
 
 [RegisterConverter]
 public sealed class WorkflowDefinitionSurrogateConverter : IConverter<WorkflowDefinition, WorkflowDefinitionSurrogate>
 {
     public WorkflowDefinition ConvertFromSurrogate(in WorkflowDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Stages, surrogate.Name, surrogate.Defaults, surrogate.Artifacts);
+        new(surrogate.Id, surrogate.Stages, surrogate.Name, surrogate.Variables, surrogate.Defaults, surrogate.Artifacts);
 
     public WorkflowDefinitionSurrogate ConvertToSurrogate(in WorkflowDefinition value) => new()
     {
         Id = value.Id,
         Stages = value.Stages,
         Name = value.Name,
+        Variables = value.Variables,
         Defaults = value.Defaults,
         Artifacts = value.Artifacts,
     };
@@ -38,14 +40,15 @@ public struct StageDefinitionSurrogate
     [Id(2)] public List<CheckDefinition> Checks;
     [Id(3)] public WorkflowTasksFromDefinition? TasksFrom;
     [Id(4)] public bool RequiresApproval;
-    [Id(5)] public Dictionary<string, StageEventPolicy>? On;
+    [Id(5)] public Dictionary<string, JsonElement?>? Variables;
+    [Id(6)] public Dictionary<string, StageEventPolicy>? On;
 }
 
 [RegisterConverter]
 public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefinition, StageDefinitionSurrogate>
 {
     public StageDefinition ConvertFromSurrogate(in StageDefinitionSurrogate surrogate) =>
-        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.TasksFrom, surrogate.RequiresApproval, surrogate.On);
+        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.TasksFrom, surrogate.RequiresApproval, surrogate.Variables, surrogate.On);
 
     public StageDefinitionSurrogate ConvertToSurrogate(in StageDefinition value) => new()
     {
@@ -54,6 +57,7 @@ public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefiniti
         Checks = value.Checks,
         TasksFrom = value.TasksFrom,
         RequiresApproval = value.RequiresApproval,
+        Variables = value.Variables,
         On = value.On,
     };
 }

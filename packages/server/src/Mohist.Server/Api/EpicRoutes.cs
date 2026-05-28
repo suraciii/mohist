@@ -2,22 +2,22 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
-using Mohist.Server.Project.Grains;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage.Db;
 
 namespace Mohist.Server.Api;
 
 public static class EpicRoutes
 {
-    private const string ProjectKey = "projects";
+    
 
     public static WebApplication MapEpicRoutes(this WebApplication app)
     {
         var epics = app.MapGroup("/api/epics");
 
-        epics.MapGet("/", async (string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
+        epics.MapGet("/", async (string projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             await using var db = await dbFactory.CreateDbContextAsync();
@@ -34,7 +34,7 @@ public static class EpicRoutes
         epics.MapPost("/", async (EpicCreateRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title)) return ApiResults.BadRequest("title is required");
-            var pid = await ResolveProjectIdAsync(req.ProjectId, grains);
+            var pid = req.ProjectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             await using var db = await dbFactory.CreateDbContextAsync();
@@ -55,18 +55,18 @@ public static class EpicRoutes
             return Results.Json(new ApiResponse<EpicDto>(true, ToDto(epic)), statusCode: 201);
         });
 
-        epics.MapGet("/{id}", async (string id, string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
+        epics.MapGet("/{id}", async (string id, string projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             await using var db = await dbFactory.CreateDbContextAsync();
             var epic = await db.Epics.AsNoTracking().FirstOrDefaultAsync(e => e.ProjectId == pid && e.Id == id);
             return epic is null ? ApiResults.NotFound($"Epic {id} not found") : ApiResults.Ok(await ToDetailAsync(db, issuesQuery, epic));
         });
 
-        epics.MapPost("/{id}/issues", async (string id, string? projectId, EpicIssueRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
+        epics.MapPost("/{id}/issues", async (string id, string projectId, EpicIssueRequest req, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             await using var db = await dbFactory.CreateDbContextAsync();
 
@@ -97,9 +97,9 @@ public static class EpicRoutes
             return ApiResults.Ok(new { epicId = id, issueId = issue.Id });
         });
 
-        epics.MapDelete("/{id}/issues/{issueId}", async (string id, string issueId, string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) =>
+        epics.MapDelete("/{id}/issues/{issueId}", async (string id, string issueId, string projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             await using var db = await dbFactory.CreateDbContextAsync();
             var row = await db.EpicIssues.FirstOrDefaultAsync(link => link.ProjectId == pid && link.EpicId == id && link.IssueId == issueId);
@@ -113,15 +113,15 @@ public static class EpicRoutes
             return ApiResults.Ok(new { epicId = id, issueId });
         });
 
-        epics.MapPost("/{id}/done", async (string id, string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) => await SetStatusAsync(id, projectId, "done", grains, dbFactory));
-        epics.MapPost("/{id}/close", async (string id, string? projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) => await SetStatusAsync(id, projectId, "closed", grains, dbFactory));
+        epics.MapPost("/{id}/done", async (string id, string projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) => await SetStatusAsync(id, projectId, "done", grains, dbFactory));
+        epics.MapPost("/{id}/close", async (string id, string projectId, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory) => await SetStatusAsync(id, projectId, "closed", grains, dbFactory));
 
         return app;
     }
 
-    private static async Task<IResult> SetStatusAsync(string id, string? projectId, string status, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory)
+    private static async Task<IResult> SetStatusAsync(string id, string projectId, string status, IGrainFactory grains, IDbContextFactory<MohistDbContext> dbFactory)
     {
-        var pid = await ResolveProjectIdAsync(projectId, grains);
+        var pid = projectId;
         if (pid is null) return ApiResults.BadRequest("No active project");
         await using var db = await dbFactory.CreateDbContextAsync();
         var epic = await db.Epics.FirstOrDefaultAsync(e => e.ProjectId == pid && e.Id == id);
@@ -181,14 +181,6 @@ public static class EpicRoutes
     }
 
     private static bool IsCompleted(LinkedIssueDto issue) => issue.Stage == "done" || issue.Status is "done" or "completed";
-
-    private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
-    {
-        if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
-        var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-        var projects = await projectsGrain.GetAllAsync();
-        return projects.Count == 1 ? projects[0].Id : null;
-    }
 }
 
 public record EpicCreateRequest(string Title, string? Description, string? Priority, string? ProjectId = null);

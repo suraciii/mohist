@@ -15,7 +15,6 @@ public class IssueQueryService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
-    private readonly string _issueType = typeof(Domain.Issue).FullName!;
     private readonly string _workflowType = typeof(WorkflowGrainState).FullName!;
 
     public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IssueWorkflowProfileRegistry profiles)
@@ -27,23 +26,25 @@ public class IssueQueryService
     public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var key = $"{projectId}:{number}";
-        var row = await db.GrainStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
-        var issue = row is null ? null : IssueStateStore.Deserialize(row.JsonState);
-        return issue is null ? null : await EnrichAsync(db, await ToReadModelAsync(db, issue, project));
+        var aggregate = await LoadAggregateAsync(db, projectId, number);
+        return aggregate is null ? null : await EnrichAsync(db, await ToReadModelAsync(db, aggregate, project));
     }
 
     public async Task<IssueInfo?> GetInfoAsync(string projectId, int number, ProjectInfo? project = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+        var aggregate = await LoadAggregateAsync(db, projectId, number);
+        return aggregate is null ? null : ToInfo(aggregate, project);
+    }
+
+    private static async Task<IssueAggregate?> LoadAggregateAsync(MohistDbContext db, string projectId, int number)
+    {
         var key = $"{projectId}:{number}";
+        var issueType = typeof(IssueAggregate).FullName!;
         var row = await db.GrainStates
             .AsNoTracking()
-            .FirstOrDefaultAsync(row => row.Key == key && row.Type == _issueType);
-        var issue = row is null ? null : IssueStateStore.Deserialize(row.JsonState);
-        return issue is null ? null : ToInfo(issue, project);
+            .FirstOrDefaultAsync(r => r.Key == key && r.Type == issueType);
+        return row is null ? null : IssueStateStore.Deserialize(row.JsonState);
     }
 
     public async Task<List<IssueReadModel>> ListAsync(
@@ -56,16 +57,17 @@ public class IssueQueryService
         bool? all = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+        var issueType = typeof(IssueAggregate).FullName!;
         var rows = await db.GrainStates
             .AsNoTracking()
-            .Where(row => row.Type == _issueType && EF.Functions.Like(row.Key, projectId + ":%"))
+            .Where(row => row.Type == issueType && EF.Functions.Like(row.Key, projectId + ":%"))
             .ToListAsync();
         var list = rows
             .Select(row => IssueStateStore.Deserialize(row.JsonState))
-            .Where(issue => issue is not null)
-            .Cast<Domain.Issue>()
-            .Where(issue => issue.ProjectId == projectId)
-            .Select(issue => ToReadModel(ToInfo(issue, project)))
+            .Where(aggregate => aggregate is not null)
+            .Cast<IssueAggregate>()
+            .Where(aggregate => aggregate.Issue.ProjectId == projectId)
+            .Select(aggregate => ToReadModel(ToInfo(aggregate, project)))
             .OrderBy(i => i.Number)
             .ToList();
 
@@ -90,41 +92,100 @@ public class IssueQueryService
         return await EnrichAsync(db, query.OrderBy(i => i.Number).ToList());
     }
 
-    private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, Domain.Issue issue, ProjectInfo? project = null)
+    private async Task<IssueReadModel> ToReadModelAsync(MohistDbContext db, IssueAggregate aggregate, ProjectInfo? project = null)
     {
-        var model = ToReadModel(ToInfo(issue, project));
+        var model = ToReadModel(ToInfo(aggregate, project));
         ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
         return model;
     }
 
-    public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null) => new()
+    public static IssueInfo ToInfo(IssueAggregate aggregate, ProjectInfo? project = null)
     {
-        Id = issue.Id,
-        Number = issue.Number,
-        Title = issue.Title,
-        Body = issue.Body,
-        Stage = IssueDomainNames.Stage(issue.Stage),
-        RuntimeStatus = IssueRuntimeSummary(issue.Stage, issue.Attention),
-        ProjectId = issue.ProjectId,
-        ProjectName = project?.Name,
-        Labels = issue.Labels,
-        Priority = issue.Priority,
-        Model = issue.Model,
-        AgentConfig = issue.AgentConfig,
-        StageModels = issue.StageModels,
-        StageVariables = issue.StageVariables,
-        CreatedAt = issue.CreatedAt.ToString("o"),
-        UpdatedAt = issue.UpdatedAt.ToString("o"),
-        ArchivedAt = issue.ArchivedAt?.ToString("o"),
-        StageApproval = issue.StageApproval,
-        RetryCount = issue.RetryCount,
-        ConflictRetryCount = issue.ConflictRetryCount,
-        BlockedReason = issue.BlockedReason,
-        Attention = issue.Attention,
-        WorkflowRunId = issue.WorkflowRunId,
-        WorkflowProfileId = issue.WorkflowProfileId ?? IssueWorkflowProfiles.DefaultId,
-        PrerequisiteNumbers = issue.PrerequisiteNumbers,
-    };
+        var issue = aggregate.Issue;
+        var profile = aggregate.Profile;
+        return new()
+        {
+            Id = issue.Id,
+            Number = issue.Number,
+            Title = issue.Title,
+            Body = issue.Body,
+            Stage = IssueDomainNames.Stage(issue.Stage),
+            RuntimeStatus = IssueRuntimeSummary(issue.Stage, issue.Attention),
+            ProjectId = issue.ProjectId,
+            ProjectName = project?.Name,
+            Labels = issue.Labels,
+            Priority = issue.Priority,
+            Model = ExtractModel(profile),
+            AgentConfig = ExtractAgentConfig(profile),
+            StageModels = ExtractStageModels(profile),
+            StageVariables = ExtractStageVariables(profile),
+            CreatedAt = issue.CreatedAt.ToString("o"),
+            UpdatedAt = issue.UpdatedAt.ToString("o"),
+            ArchivedAt = issue.ArchivedAt?.ToString("o"),
+            StageApproval = issue.StageApproval,
+            RetryCount = issue.RetryCount,
+            ConflictRetryCount = issue.ConflictRetryCount,
+            BlockedReason = issue.BlockedReason,
+            Attention = issue.Attention,
+            WorkflowRunId = issue.WorkflowRunId,
+            WorkflowProfileId = profile?.SourceProfileId ?? IssueWorkflowProfiles.DefaultId,
+            PrerequisiteNumbers = issue.PrerequisiteNumbers,
+            Repository = issue.Repository,
+        };
+    }
+
+    private static string? ExtractModel(IssueWorkflowProfile? profile)
+    {
+        if (profile?.Definition.Variables is null) return null;
+        if (!profile.Definition.Variables.TryGetValue("agent", out var agentElement) || !agentElement.HasValue) return null;
+        if (agentElement.Value.ValueKind != JsonValueKind.Object) return null;
+        if (!agentElement.Value.TryGetProperty("model", out var modelElement)) return null;
+        return modelElement.ValueKind == JsonValueKind.String ? modelElement.GetString() : null;
+    }
+
+    private static Dictionary<string, object?>? ExtractAgentConfig(IssueWorkflowProfile? profile)
+    {
+        if (profile?.Definition.Variables is null) return null;
+        if (!profile.Definition.Variables.TryGetValue("agent", out var agentElement) || !agentElement.HasValue) return null;
+        if (agentElement.Value.ValueKind != JsonValueKind.Object) return null;
+        return JsonSerializer.Deserialize<Dictionary<string, object?>>(agentElement.Value.GetRawText(), WorkflowVariableJson.Options);
+    }
+
+    private static Dictionary<string, string>? ExtractStageModels(IssueWorkflowProfile? profile)
+    {
+        if (profile?.Definition.Stages is null) return null;
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stage in profile.Definition.Stages)
+        {
+            if (stage.Variables is null) continue;
+            if (!stage.Variables.TryGetValue("agent", out var agentEl) || !agentEl.HasValue) continue;
+            if (agentEl.Value.ValueKind != JsonValueKind.Object) continue;
+            if (!agentEl.Value.TryGetProperty("model", out var modelEl)) continue;
+            if (modelEl.ValueKind == JsonValueKind.String && modelEl.GetString() is { } m)
+                result[stage.Stage] = m;
+        }
+        return result.Count > 0 ? result : null;
+    }
+
+    private static Dictionary<string, Dictionary<string, string>>? ExtractStageVariables(IssueWorkflowProfile? profile)
+    {
+        if (profile?.Definition.Stages is null) return null;
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stage in profile.Definition.Stages)
+        {
+            if (stage.Variables is null || stage.Variables.Count == 0) continue;
+            var vars = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in stage.Variables)
+            {
+                if (key == "agent") continue;
+                if (value.HasValue && value.Value.ValueKind == JsonValueKind.String)
+                    vars[key] = value.Value.GetString() ?? "";
+            }
+            if (vars.Count > 0)
+                result[stage.Stage] = vars;
+        }
+        return result.Count > 0 ? result : null;
+    }
 
     public static IssueReadModel ToReadModel(IssueInfo issue) => new()
     {
@@ -154,6 +215,7 @@ public class IssueQueryService
         WorkflowStatus = issue.WorkflowStatus,
         WorkflowProfileId = issue.WorkflowProfileId,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
+        Repository = issue.Repository,
     };
 
     private async Task<Dictionary<string, WorkflowStatusSnapshot>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
@@ -344,14 +406,15 @@ public class IssueQueryService
         if (missingPrereqNumbers.Length > 0)
         {
             var keys = missingPrereqNumbers.Select(number => $"{projectId}:{number}").ToArray();
+            var aggregateType = typeof(IssueAggregate).FullName!;
             var rows = await db.GrainStates.AsNoTracking()
-                .Where(row => row.Type == typeof(Domain.Issue).FullName! && keys.Contains(row.Key))
+                .Where(row => row.Type == aggregateType && keys.Contains(row.Key))
                 .ToListAsync();
             foreach (var row in rows)
             {
-                var domain = IssueStateStore.Deserialize(row.JsonState);
-                if (domain is not null)
-                    prereqIssues[domain.Number] = ToReadModel(ToInfo(domain));
+                var aggregate = IssueStateStore.Deserialize(row.JsonState);
+                if (aggregate is not null)
+                    prereqIssues[aggregate.Issue.Number] = ToReadModel(ToInfo(aggregate));
             }
         }
         foreach (var group in prereqRows.GroupBy(p => p.IssueNumber))

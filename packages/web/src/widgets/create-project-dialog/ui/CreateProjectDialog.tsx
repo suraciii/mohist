@@ -9,7 +9,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
 import { DialogSelectDirectory } from './DialogSelectDirectory'
-import { useCreateProject, useUseProject, useProject } from '../../../entities/project'
+import { useCreateProject, useProject } from '../../../entities/project'
 
 interface Props {
   open: boolean
@@ -23,8 +23,6 @@ export function CreateProjectDialog({ open, onClose }: Props) {
   const { setProjectId, projects } = useProject()
 
   const createProject = useCreateProject()
-  const switchProject = useUseProject()
-  const [switchError, setSwitchError] = useState('')
 
   const isConflict =
     createProject.isError &&
@@ -33,26 +31,17 @@ export function CreateProjectDialog({ open, onClose }: Props) {
   function resetAndClose() {
     setName('')
     setPath('')
-    setSwitchError('')
     createProject.reset()
     onClose()
   }
 
   async function handleCreate() {
-    setSwitchError('')
     createProject.mutate(
       { name: name.trim(), path },
       {
         onSuccess: (project) => {
-          switchProject.mutate(project.name, {
-            onSuccess: () => {
-              setProjectId(project.id)
-              resetAndClose()
-            },
-            onError: (err) => {
-              setSwitchError(err instanceof Error ? err.message : 'Failed to switch project')
-            },
-          })
+          setProjectId(project.id)
+          resetAndClose()
         },
       },
     )
@@ -107,12 +96,6 @@ export function CreateProjectDialog({ open, onClose }: Props) {
             {!isConflict && createProject.isError && (
               <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
                 {createProject.error.message}
-              </div>
-            )}
-
-            {switchError && (
-              <div className="rounded-md bg-yellow-50 px-3 py-2 text-xs text-yellow-700">
-                Project created, but failed to switch: {switchError}
               </div>
             )}
 

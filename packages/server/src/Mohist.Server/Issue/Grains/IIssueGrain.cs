@@ -1,15 +1,16 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, object?>? agentConfig = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null);
-    Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null);
-    Task CompleteWorkflowAsync(string workflowRunId);
-    Task CloseAsync();
+    Task CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, RepositoryInfo? repository = null);
+    Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
+    Task CompleteWorkAsync(string workflowRunId);
+    Task CancelAsync();
     Task UpdateAsync(string title, string? body);
     Task UpdateFullAsync(UpdateIssueData data);
     Task ArchiveAsync();
@@ -38,7 +39,11 @@ public sealed record WorkflowProjectContext(
     [property: Id(0)] string Id,
     [property: Id(1)] string Name,
     [property: Id(2)] string Path,
-    [property: Id(3)] string BaseBranch);
+    [property: Id(3)] string BaseBranch,
+    [property: Id(4)] string? RepositoryName = null,
+    [property: Id(5)] string? RepositoryRemote = null,
+    [property: Id(6)] string? RepositoryPath = null,
+    [property: Id(7)] string? RepositoryBaseBranch = null);
 
 [GenerateSerializer]
 public sealed record IssuePrerequisiteResult(

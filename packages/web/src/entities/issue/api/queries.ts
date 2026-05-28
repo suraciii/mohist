@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorktreeStatus, unarchiveIssue } from './client'
+import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue } from './client'
 
 export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   return useQuery({
@@ -61,6 +61,15 @@ export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true
     queryFn: () => getWorkflowTimeline(issueNumber, projectId),
     enabled: enabled && issueNumber > 0 && !!projectId,
     refetchInterval: enabled ? 5000 : false,
+  })
+}
+
+export function useWorkflowYaml(issueNumber: number, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: ['issues', issueNumber, projectId, 'workflow-yaml'],
+    queryFn: () => getWorkflowYaml(issueNumber, projectId),
+    enabled: enabled && issueNumber > 0 && !!projectId,
   })
 }
 

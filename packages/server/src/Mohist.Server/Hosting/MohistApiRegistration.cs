@@ -33,7 +33,6 @@ public static class MohistApiRegistration
         app.MapWorkspaceRoutes();
         app.MapEpicRoutes();
         app.MapAgentRoutes();
-        app.MapCompatibilityRoutes();
         app.MapRunnerRoutes();
         return app;
     }

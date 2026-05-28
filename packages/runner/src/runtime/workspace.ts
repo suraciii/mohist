@@ -20,18 +20,45 @@ export class WorkspaceManager {
       return { path: existing, branch: stringAt(variables, ["workspace", "branch"]), changeDir: stringAt(variables, ["workspace", "changeDir"]) }
     }
 
+    const repoPath = stringAt(variables, ["repository", "path"])
+    const repoRemote = stringAt(variables, ["repository", "remote"])
     const projectPath = stringAt(variables, ["project", "path"])
     const issueNumber = numberAt(variables, ["issue", "number"])
-    if (projectPath && issueNumber !== undefined) return await this.ensureIssueWorktree(variables, projectPath, issueNumber, signal)
+
+    const resolvedPath = repoPath ?? projectPath
+    const resolvedRemote = repoRemote
+
+    if (resolvedPath && issueNumber !== undefined) {
+      return await this.ensureIssueWorktree(variables, resolvedPath, issueNumber, signal)
+    }
+
+    if (resolvedRemote && issueNumber !== undefined) {
+      const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
+      const repoName = stringAt(variables, ["repository", "name"]) ?? "repo"
+      const clonePath = resolve(join(this.runnerRoot, "repos", slug(projectName), slug(repoName)))
+      await this.ensureCloned(clonePath, resolvedRemote, signal)
+      return await this.ensureIssueWorktree(variables, clonePath, issueNumber, signal)
+    }
 
     const fallback = resolve(join(this.runnerRoot, "fallback", work.workId))
     await ensureDir(fallback)
     return { path: fallback, changeDir: stringAt(variables, ["openspecChangeDir"]) }
   }
 
+  private async ensureCloned(clonePath: string, remote: string, signal: AbortSignal) {
+    if (exists(clonePath)) {
+      const result = await runCommand("git", ["-C", clonePath, "remote", "get-url", "origin"], ".", signal)
+      if (result.exitCode === 0 && result.stdout.trim() === remote) return
+      await deleteDirectory(clonePath)
+    }
+    await ensureDir(join(clonePath, ".."))
+    const result = await runCommand("git", ["clone", "--bare", remote, clonePath], ".", signal)
+    if (result.exitCode !== 0) throw new Error(`git clone failed: ${result.stderr || result.stdout}`)
+  }
+
   private async ensureIssueWorktree(variables: JsonObject, projectPath: string, issueNumber: number, signal: AbortSignal): Promise<WorkspaceInfo> {
     const projectName = stringAt(variables, ["project", "name"]) ?? stringAt(variables, ["project", "id"]) ?? "project"
-    const baseBranch = stringAt(variables, ["project", "baseBranch"]) ?? stringAt(variables, ["project", "defaultBranch"]) ?? "main"
+    const baseBranch = stringAt(variables, ["repository", "baseBranch"]) ?? stringAt(variables, ["project", "baseBranch"]) ?? stringAt(variables, ["project", "defaultBranch"]) ?? "main"
     const branch = `mo/issue-${issueNumber}`
     const worktree = issueWorktreePath(this.runnerRoot, projectName, issueNumber)
     const marker = issueWorkspaceMarker(variables)

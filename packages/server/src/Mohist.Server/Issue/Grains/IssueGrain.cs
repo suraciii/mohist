@@ -2,22 +2,23 @@ using System.Text.Json;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Storage;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Grains;
 
 public class IssueGrain : Grain, IIssueGrain
 {
-    private Issue.Domain.Issue? _issue;
-    private readonly IStateStore<Issue.Domain.Issue> _issueStore;
+    private IssueAggregate? _aggregate;
+    private readonly IssueStateStore _issueStore;
     private readonly IEventStore _events;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly Config.ConfigService _config;
     private readonly ILogger<IssueGrain> _log;
 
-    public IssueGrain(IStateStore<Issue.Domain.Issue> issueStore, IEventStore events, IssueWorkflowProfileRegistry profiles, Config.ConfigService config, ILogger<IssueGrain> log)
+    public IssueGrain(IssueStateStore issueStore, IEventStore events, IssueWorkflowProfileRegistry profiles, Config.ConfigService config, ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
         _events = events;
@@ -26,108 +27,121 @@ public class IssueGrain : Grain, IIssueGrain
         _log = log;
     }
 
+    private Issue.Domain.Issue? Issue => _aggregate?.Issue;
+    private IssueWorkflowProfile? Profile => _aggregate?.Profile;
     private string GrainKey => this.GetPrimaryKeyString();
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        _issue = await _issueStore.LoadAsync(GrainKey);
+        _aggregate = await _issueStore.LoadAsync(GrainKey);
     }
 
-    public async Task<string> StartWorkflowAsync(WorkflowProjectContext? project = null)
+    public async Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
     {
         EnsureIssue();
         var eligibility = await GetStartEligibilityAsync();
         if (!eligibility.Startable)
             throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
 
+        var issue = Issue!;
         var wrId = $"wr_{Guid.NewGuid():N}";
-        _issue!.StartWorkflow(wrId);
-        await _issueStore.SaveAsync(GrainKey, _issue);
-        await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
+        issue.StartWorkflow(wrId);
 
-        var projectId = project?.Id ?? _issue.ProjectId;
-        var projectName = project?.Name ?? _issue.ProjectId;
-        var projectPath = project?.Path ?? ".";
-        var baseBranch = project?.BaseBranch ?? "main";
-        var correlation = new WorkflowCorrelationContext(projectId, "issue", _issue.Id, _issue.Number);
-        var projectContext = new WorkflowProjectContext(projectId, projectName, projectPath, baseBranch);
-        var profile = _profiles.Get(_issue.WorkflowProfileId);
-        var globalAgentConfig = await _config.GetAgentConfigAsync();
-        var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
+        var repo = issue.Repository;
+        var projectId = project?.Id ?? issue.ProjectId;
+        var projectName = project?.Name ?? issue.ProjectId;
+        var projectPath = repo?.Path ?? project?.Path ?? ".";
+        var baseBranch = repo?.BaseBranch ?? project?.BaseBranch ?? "main";
+        var correlation = new WorkflowCorrelationContext(projectId, "issue", issue.Id, issue.Number);
+        var projectContext = new WorkflowProjectContext(
+            projectId,
+            projectName,
+            projectPath,
+            baseBranch,
+            repo?.Name,
+            repo?.Remote,
+            repo?.Path,
+            repo?.BaseBranch);
+
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+        var definition = Profile?.Definition ?? defaultProfile.Definition;
+        var stageVariables = BuildStageVariablesFromDefinition(definition);
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(
-            profile.Definition,
+            definition,
             correlation,
             new WorkflowStartInput(
-                profile.BuildVariables(wrId, _issue, projectContext, globalAgentConfig),
-                profile.BuildStageVariables(_issue, globalStageAgentConfigs)));
+                BuildVariables(wrId, issue, projectContext, definition),
+                stageVariables));
 
+        await SaveAsync();
+        await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
 
-    public async Task CloseAsync()
+    public async Task CancelAsync()
     {
         EnsureIssue();
-        if (_issue!.WorkflowRunId is { } wrId)
+        if (Issue!.WorkflowRunId is { } wrId)
         {
             var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
             await wfGrain.PauseAsync("issue-closed");
         }
-        _issue.Close();
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue.Close();
+        await SaveAsync();
         await AppendIssueEventAsync("issue_closed", "closed", "Issue closed");
     }
 
-    public async Task CompleteWorkflowAsync(string workflowRunId)
+    public async Task CompleteWorkAsync(string workflowRunId)
     {
-        if (_issue is null) return;
-        if (_issue!.WorkflowRunId != workflowRunId) return;
-        if (_issue.Stage == IssueStage.Done) return;
+        if (Issue is null) return;
+        if (Issue.WorkflowRunId != workflowRunId) return;
+        if (Issue.Stage == IssueStage.Done) return;
 
-        _issue.Complete();
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue.Complete();
+        await SaveAsync();
         await AppendIssueEventAsync("issue_completed", "completed", "Issue completed", new { workflowRunId });
     }
 
     public async Task UpdateAsync(string title, string? body)
     {
         EnsureIssue();
-        _issue!.Update(title, body, null, null, null, null, null, null);
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue!.Update(title, body, null, null);
+        await SaveAsync();
         await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
 
     public async Task ArchiveAsync()
     {
         EnsureIssue();
-        _issue!.Archive();
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue!.Archive();
+        await SaveAsync();
         await AppendIssueEventAsync("issue_archived", "archived", "Issue archived");
     }
 
     public async Task UnarchiveAsync()
     {
         EnsureIssue();
-        _issue!.Unarchive();
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue!.Unarchive();
+        await SaveAsync();
         await AppendIssueEventAsync("issue_unarchived", "active", "Issue unarchived");
     }
 
     public async Task ReopenAsync()
     {
         EnsureIssue();
-        _issue!.Reopen();
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue!.Reopen();
+        await SaveAsync();
         await AppendIssueEventAsync("issue_reopened", "active", "Issue reopened");
     }
 
     public async Task UpdateFullAsync(UpdateIssueData data)
     {
         EnsureIssue();
-        _issue!.Update(data.Title, data.Body, data.Labels, data.Priority, data.Model, data.AgentConfig, data.StageModels, data.StageVariables);
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue!.Update(data.Title, data.Body, data.Labels, data.Priority);
+        await SaveAsync();
         await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
 
@@ -135,17 +149,18 @@ public class IssueGrain : Grain, IIssueGrain
     {
         EnsureIssue();
 
-        var wrId = _issue!.WorkflowRunId;
+        var wrId = Issue!.WorkflowRunId;
         if (wrId is null) return null;
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         var wfStatus = await wfGrain.GetStatusAsync();
-        var projection = _profiles.Get(_issue.WorkflowProfileId).ProjectWorkflowState(_issue, wfStatus);
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+        var projection = defaultProfile.ProjectWorkflowState(Issue, wfStatus);
 
         return new IssueWorkflowStatus(
-            _issue.Id,
-            _issue.Number,
-            _issue.Title,
+            Issue.Id,
+            Issue.Number,
+            Issue.Title,
             projection.IssueStage,
             projection.RuntimeStatus,
             wrId,
@@ -154,12 +169,12 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task HydrateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? model = null, Dictionary<string, object?>? agentConfig = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null)
+    public async Task CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, RepositoryInfo? repository = null)
     {
-        if (_issue is not null)
+        if (_aggregate is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-        _issue = new Issue.Domain.Issue(
+        var issue = new Issue.Domain.Issue(
             $"issue_{Guid.NewGuid():N}",
             projectId,
             number,
@@ -167,26 +182,33 @@ public class IssueGrain : Grain, IIssueGrain
             body,
             labels,
             priority ?? "p2",
-            model,
-            agentConfig,
-            stageModels,
-            null,
-            workflowProfileId);
-        await _issueStore.SaveAsync(GrainKey, _issue);
+            repository);
+
+        var globalAgentConfig = await _config.GetAgentConfigAsync();
+        var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+        var profile = IssueWorkflowProfile.CopyFrom(
+            IssueWorkflowProfiles.DefaultId,
+            defaultProfile.Definition,
+            globalAgentConfig,
+            globalStageAgentConfigs);
+
+        _aggregate = new IssueAggregate(issue, profile);
+        await SaveAsync();
         await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
     }
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
     {
-        if (_issue is null)
+        if (Issue is null)
             return IssuePrerequisiteResult.IssueNotFound();
-        if (prerequisiteNumber == _issue.Number)
+        if (prerequisiteNumber == Issue.Number)
             return IssuePrerequisiteResult.Circular();
         if (await LoadIssueSummaryAsync(prerequisiteNumber) is null)
             return IssuePrerequisiteResult.PrerequisiteNotFound(prerequisiteNumber);
 
-        _issue.AddPrerequisite(prerequisiteNumber);
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue.AddPrerequisite(prerequisiteNumber);
+        await SaveAsync();
         await AppendIssueEventAsync("issue_prerequisite_added", "updated", $"Prerequisite #{prerequisiteNumber} added", new { prerequisiteNumber });
         return IssuePrerequisiteResult.Added();
     }
@@ -194,8 +216,8 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task RemovePrerequisiteAsync(int prerequisiteNumber)
     {
         EnsureIssue();
-        _issue!.RemovePrerequisite(prerequisiteNumber);
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        Issue!.RemovePrerequisite(prerequisiteNumber);
+        await SaveAsync();
         await AppendIssueEventAsync("issue_prerequisite_removed", "updated", $"Prerequisite #{prerequisiteNumber} removed", new { prerequisiteNumber });
     }
 
@@ -203,7 +225,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         EnsureIssue();
         var prerequisites = new List<IssuePrerequisiteSummary>();
-        foreach (var prerequisiteNumber in _issue!.PrerequisiteNumbers)
+        foreach (var prerequisiteNumber in Issue!.PrerequisiteNumbers)
         {
             var summary = await LoadIssueSummaryAsync(prerequisiteNumber);
             if (summary is not null)
@@ -213,17 +235,66 @@ public class IssueGrain : Grain, IIssueGrain
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
+    private string BuildVariables(string workflowRunId, Issue.Domain.Issue issue, WorkflowProjectContext project, Workflow.Domain.Definition.WorkflowDefinition definition)
+    {
+        var profile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+        var prompts = profile is MohistDefaultIssueWorkflowProfile defaultProfile
+            ? defaultProfile.LoadPrompts()
+            : new Dictionary<string, string>();
+
+        var repo = issue.Repository;
+        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
+        {
+            ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
+            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
+            ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
+            ["repository"] = JsonSerializer.SerializeToElement(new { name = repo?.Name, path = repo?.Path, remote = repo?.Remote, baseBranch = repo?.BaseBranch }, WorkflowVariableJson.Options),
+            ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
+            ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
+            ["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options),
+        };
+
+        if (definition.Variables is not null)
+            variables["vars"] = JsonSerializer.SerializeToElement(
+                definition.Variables.ToDictionary(kv => kv.Key, kv => kv.Value.HasValue ? JsonSerializer.Deserialize<object?>(kv.Value.Value.GetRawText(), WorkflowVariableJson.Options) : null),
+                WorkflowVariableJson.Options);
+
+        return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+    }
+
+    private static Dictionary<string, Dictionary<string, string>>? BuildStageVariablesFromDefinition(Workflow.Domain.Definition.WorkflowDefinition definition)
+    {
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stage in definition.Stages)
+        {
+            if (stage.Variables is null || stage.Variables.Count == 0) continue;
+            result[stage.Stage] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["vars"] = JsonSerializer.Serialize(
+                    stage.Variables.ToDictionary(kv => kv.Key, kv => kv.Value.HasValue ? JsonSerializer.Deserialize<object?>(kv.Value.Value.GetRawText(), WorkflowVariableJson.Options) : null),
+                    WorkflowVariableJson.Options)
+            };
+        }
+        return result.Count == 0 ? null : result;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_aggregate is null) return;
+        await _issueStore.SaveAsync(GrainKey, _aggregate);
+    }
+
     private Task AppendIssueEventAsync(string type, string? status, string? message, object? payload = null)
     {
-        if (_issue is null) return Task.CompletedTask;
+        if (Issue is null) return Task.CompletedTask;
         return _events.AppendAsync(new EventInput(
-            _issue.ProjectId,
-            _issue.Number,
+            Issue.ProjectId,
+            Issue.Number,
             "issue",
             type,
-            IssueId: _issue.Id,
-            WorkflowRunId: _issue.WorkflowRunId,
-            Stage: IssueDomainNames.Stage(_issue.Stage),
+            IssueId: Issue.Id,
+            WorkflowRunId: Issue.WorkflowRunId,
+            Stage: IssueDomainNames.Stage(Issue.Stage),
             Status: status,
             Message: message,
             Payload: payload));
@@ -231,27 +302,17 @@ public class IssueGrain : Grain, IIssueGrain
 
     private void EnsureIssue()
     {
-        if (_issue is null)
+        if (Issue is null)
             throw new InvalidOperationException($"Issue '{GrainKey}' not found");
     }
 
-    private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
-        status switch
-        {
-            IssueStage.Done => "done",
-            IssueStage.Cancelled => "cancelled",
-            _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
-            _ when attention is not null => "attention",
-            _ => "active",
-        };
-
     private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)
     {
-        if (_issue is null) return null;
+        if (Issue is null) return null;
         try
         {
-            var prerequisite = await _issueStore.LoadAsync($"{_issue.ProjectId}:{issueNumber}");
-            return prerequisite is null ? null : ToPrerequisiteSummary(prerequisite);
+            var aggregate = await _issueStore.LoadAsync($"{Issue.ProjectId}:{issueNumber}");
+            return aggregate is null ? null : ToPrerequisiteSummary(aggregate.Issue);
         }
         catch (InvalidOperationException)
         {
@@ -269,6 +330,15 @@ public class IssueGrain : Grain, IIssueGrain
         Status = IssueRuntimeSummary(issue.Stage, issue.Attention),
     };
 
+    private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
+        status switch
+        {
+            IssueStage.Done => "done",
+            IssueStage.Cancelled => "cancelled",
+            _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
+            _ when attention is not null => "attention",
+            _ => "active",
+        };
 }
 
 [GenerateSerializer]
@@ -276,9 +346,5 @@ public record UpdateIssueData(
     [property: Id(0)] string? Title = null,
     [property: Id(1)] string? Body = null,
     [property: Id(2)] string[]? Labels = null,
-    [property: Id(3)] string? Priority = null,
-    [property: Id(4)] string? Model = null,
-    [property: Id(5)] Dictionary<string, object?>? AgentConfig = null,
-    [property: Id(6)] Dictionary<string, string>? StageModels = null,
-    [property: Id(7)] Dictionary<string, Dictionary<string, string>>? StageVariables = null
+    [property: Id(3)] string? Priority = null
 );

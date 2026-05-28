@@ -1,5 +1,6 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Project.Queries;
 using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Issue.Queries;
@@ -37,5 +38,6 @@ public class IssueReadModel
     public IssueCommentDto[] Comments { get; set; } = [];
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
     public IssueStartEligibility StartEligibility { get; set; } = IssueStartEligibility.Ready();
+    public RepositoryInfo? Repository { get; set; }
     public IssuePrimaryEpic? PrimaryEpic { get; set; }
 }

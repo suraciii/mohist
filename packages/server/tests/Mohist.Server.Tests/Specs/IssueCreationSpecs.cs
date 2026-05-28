@@ -23,15 +23,16 @@ public class IssueCreationSpecs
 
     private async Task<ProjectInfo> SetupProjectAsync()
     {
-        var projects = _grains.GetGrain<IProjectGrain>(Guid.NewGuid().ToString());
-        return await projects.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
+        var id = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(id);
+        return await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/tmp/test", null);
     }
 
-    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null, string? model = null, Dictionary<string, string>? stageModels = null, string? workflowProfileId = null)
+    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
         var grain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await grain.HydrateAsync(projectId, number, title, body, labels, priority, model, null, stageModels, workflowProfileId);
+        await grain.CreateAsync(projectId, number, title, body, labels, priority, null);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
 
@@ -60,25 +61,36 @@ public class IssueCreationSpecs
     }
 
     [Fact]
-    public async Task CreateIssue_WithWorkflowProfileId_PersistsProfileId()
+    public async Task CreateIssue_DefaultWorkflowProfile_ComesFromDefaultProfile()
     {
         var project = await SetupProjectAsync();
 
-        var issue = await CreateIssueAsync(project.Id, "Custom profile", workflowProfileId: "custom/profile");
+        var issue = await CreateIssueAsync(project.Id, "Default profile");
 
-        Assert.Equal("custom/profile", issue.WorkflowProfileId);
+        Assert.Equal("mohist/default", issue.WorkflowProfileId);
     }
 
     [Fact]
-    public async Task StartWorkflow_WithUnknownProfile_FailsClearly()
+    public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
         var project = await SetupProjectAsync();
-        var issue = await CreateIssueAsync(project.Id, "Unknown profile", workflowProfileId: "missing/profile");
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var created = await CreateIssueAsync(project.Id, "Context");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkflowAsync());
+        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "trunk"));
 
-        Assert.Contains("Workflow profile 'missing/profile' not found", ex.Message);
+        Assert.StartsWith("wr_", wrId);
+        Assert.DoesNotContain(project.Id, wrId);
+        Assert.False(wrId.EndsWith($"_{created.Number}", StringComparison.Ordinal));
+
+        var wf = _grains.GetGrain<IWorkflowGrain>(wrId);
+        var work = await wf.GetWorkAsync("runner-variable-test");
+
+        Assert.NotNull(work);
+        Assert.NotNull(work.Variables);
+        Assert.Contains("/tmp/my-project", work.Variables);
+        Assert.Contains("My Project", work.Variables);
+        Assert.Contains("trunk", work.Variables);
     }
 
     [Fact]
@@ -140,8 +152,8 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Closable");
 
         var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
-        await grain.StartWorkflowAsync();
-        await grain.CloseAsync();
+        await grain.StartWorkAsync();
+        await grain.CancelAsync();
 
         var info = await GetIssueInfoAsync(project.Id, created.Number);
         Assert.NotNull(info);
@@ -157,32 +169,7 @@ public class IssueCreationSpecs
 
         var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            grain.HydrateAsync(project.Id, 999, "dup", null, null, null));
-    }
-
-    [Fact]
-    public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
-    {
-        var project = await SetupProjectAsync();
-        var created = await CreateIssueAsync(project.Id, "Context", model: "openai/gpt-4o", stageModels: new Dictionary<string, string> { ["plan"] = "anthropic/claude" });
-
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
-        var wrId = await grain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "trunk"));
-
-        Assert.StartsWith("wr_", wrId);
-        Assert.DoesNotContain(project.Id, wrId);
-        Assert.False(wrId.EndsWith($"_{created.Number}", StringComparison.Ordinal));
-
-        var wf = _grains.GetGrain<IWorkflowGrain>(wrId);
-        var work = await wf.GetWorkAsync("runner-variable-test");
-
-        Assert.NotNull(work);
-        Assert.NotNull(work.Variables);
-        Assert.Contains("/tmp/my-project", work.Variables);
-        Assert.Contains("My Project", work.Variables);
-        Assert.Contains("trunk", work.Variables);
-        Assert.Contains("openai/gpt-4o", work.Variables);
-        Assert.Contains("anthropic/claude", work.Variables);
+            grain.CreateAsync(project.Id, 999, "dup", null, null, null, null));
     }
 
     [Fact]
@@ -192,7 +179,7 @@ public class IssueCreationSpecs
         var created = await CreateIssueAsync(project.Id, "Add Search");
 
         var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
-        await grain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+        await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
 
         var status = await grain.GetWorkflowStatusAsync();
 
@@ -230,7 +217,7 @@ public class IssueCreationSpecs
         Assert.Contains(prereq.Number, info.PrerequisiteNumbers);
         Assert.False(eligibility.Startable);
         Assert.Contains(eligibility.WaitingForCompletion, p => p.Number == prereq.Number);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkflowAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkAsync());
     }
 
     [Fact]
@@ -243,8 +230,8 @@ public class IssueCreationSpecs
         var dependentGrain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
 
         await dependentGrain.AddPrerequisiteAsync(prereq.Number);
-        var prereqRunId = await prereqGrain.StartWorkflowAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
-        await prereqGrain.CompleteWorkflowAsync(prereqRunId);
+        var prereqRunId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
+        await prereqGrain.CompleteWorkAsync(prereqRunId);
 
         var eligibility = await dependentGrain.GetStartEligibilityAsync();
 

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
@@ -16,7 +16,7 @@ import {
 } from '@/shared/ui/components/popover'
 import { createIssue, useLabels } from '../../../entities/issue'
 import { useAvailableModelIds } from '../../../entities/settings'
-import { useProject } from '../../../entities/project'
+import { useProject, useRepositories } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
@@ -185,9 +185,18 @@ export function CreateIssueDialog({ open, onClose }: Props) {
   const [labels, setLabels] = useState<string[]>([])
   const [model, setModel] = useState<string | null>(null)
   const [priority, setPriority] = useState<string>('p2')
-  const { projectId } = useProject()
+  const [repositoryName, setRepositoryName] = useState<string | null>(null)
+  const { projectId, projects } = useProject()
+  const currentProject = projects?.find((p) => p.id === projectId)
+  const { data: repositories } = useRepositories(currentProject?.id)
   const queryClient = useQueryClient()
   const { data: allLabels } = useLabels()
+
+  useEffect(() => {
+    if (repositories && repositories.length === 1) {
+      setRepositoryName(repositories[0].name)
+    }
+  }, [repositories])
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -198,6 +207,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
         ...(model ? { model } : {}),
         ...(projectId ? { projectId } : {}),
         priority,
+        ...(repositoryName ? { repositoryName } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
@@ -211,6 +221,7 @@ export function CreateIssueDialog({ open, onClose }: Props) {
     setLabels([])
     setModel(null)
     setPriority('p2')
+    setRepositoryName(null)
     onClose()
   }
 
@@ -270,6 +281,23 @@ export function CreateIssueDialog({ open, onClose }: Props) {
                   </Button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {repositories && repositories.length > 1 && (
+            <div>
+              <label className="block text-xs font-medium text-foreground mb-1">Repository</label>
+              <select
+                value={repositoryName ?? ''}
+                onChange={(e) => setRepositoryName(e.target.value || null)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+              >
+                {repositories.map((repo) => (
+                  <option key={repo.name} value={repo.name}>
+                    {repo.name} {repo.isDefault ? '(default)' : ''}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
 

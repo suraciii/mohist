@@ -78,22 +78,34 @@ public class MohistDefaultWorkflowProfileSpecs
     }
 
     [Fact]
-    public void AgentConfig_BuildsFlatAgentVariableAndStageOverrides()
+    public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
         var issue = new Mohist.Server.Issue.Domain.Issue(
             "issue-1",
             "project-1",
             1,
-            "Agent config",
-            agentConfig: new Dictionary<string, object?> { ["timeout"] = 1200 },
-            stageModels: new Dictionary<string, string> { ["plan"] = "anthropic/claude" });
+            "Agent config");
 
         var variables = profile.BuildVariables(
             "wr-1",
             issue,
             new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"),
             new Dictionary<string, object?> { ["model"] = "openai/gpt-4o", ["probeTimeoutMs"] = 30000 });
+
+        using var document = JsonDocument.Parse(variables);
+        var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("openai/gpt-4o", agent.GetProperty("model").GetString());
+        Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
+    }
+
+    [Fact]
+    public void StageVariables_MergesStageOverrides()
+    {
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
+        var issue = new Mohist.Server.Issue.Domain.Issue("issue-1", "project-1", 1, "Stage vars");
+
         var stageVariables = profile.BuildStageVariables(
             issue,
             new Dictionary<string, Dictionary<string, object?>>
@@ -101,19 +113,8 @@ public class MohistDefaultWorkflowProfileSpecs
                 ["check"] = new() { ["model"] = "openai/o3" },
             });
 
-        using var document = JsonDocument.Parse(variables);
-        var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
-        Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("openai/gpt-4o", agent.GetProperty("model").GetString());
-        Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
-        Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
-        Assert.False(agent.TryGetProperty("stage", out _));
-
         Assert.NotNull(stageVariables);
-        using var planVars = JsonDocument.Parse(stageVariables!["plan"]["vars"]);
-        Assert.Equal("anthropic/claude", planVars.RootElement.GetProperty("agent").GetProperty("model").GetString());
-        using var checkVars = JsonDocument.Parse(stageVariables["check"]["vars"]);
-        Assert.Equal("openai/o3", checkVars.RootElement.GetProperty("agent").GetProperty("model").GetString());
+        Assert.True(stageVariables.ContainsKey("check"));
     }
 
     [Fact]

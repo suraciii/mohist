@@ -1,5 +1,5 @@
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Project.Grains;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workspace;
 
@@ -7,15 +7,15 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public sealed class IssueWorkflowCompletionHook : IWorkflowCompletionHook
 {
-    private const string ProjectKey = "projects";
-
     private readonly IGrainFactory _grains;
+    private readonly ProjectQueryService _projectsQuery;
     private readonly IGitService _git;
     private readonly ILogger<IssueWorkflowCompletionHook> _log;
 
-    public IssueWorkflowCompletionHook(IGrainFactory grains, IGitService git, ILogger<IssueWorkflowCompletionHook> log)
+    public IssueWorkflowCompletionHook(IGrainFactory grains, ProjectQueryService projectsQuery, IGitService git, ILogger<IssueWorkflowCompletionHook> log)
     {
         _grains = grains;
+        _projectsQuery = projectsQuery;
         _git = git;
         _log = log;
     }
@@ -31,10 +31,9 @@ public sealed class IssueWorkflowCompletionHook : IWorkflowCompletionHook
         }
 
         var issue = _grains.GetGrain<IIssueGrain>($"{correlation.ProjectId}:{correlation.OwnerNumber.Value}");
-        await issue.CompleteWorkflowAsync(context.WorkflowRunId);
+        await issue.CompleteWorkAsync(context.WorkflowRunId);
 
-        var projectGrain = _grains.GetGrain<IProjectGrain>(ProjectKey);
-        var project = await projectGrain.GetByIdAsync(correlation.ProjectId);
+        var project = await _projectsQuery.GetByIdAsync(correlation.ProjectId);
         if (project is null)
         {
             _log.LogWarning(

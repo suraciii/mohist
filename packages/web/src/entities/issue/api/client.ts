@@ -14,7 +14,7 @@ export function getIssue(number: number, projectId?: string | null) {
   return request<Issue>(withProject(`/issues/${number}`, projectId))
 }
 
-export function createIssue(data: { title: string; body?: string; labels?: string[]; model?: string; agentConfig?: Record<string, unknown>; priority?: string; projectId?: string }) {
+export function createIssue(data: { title: string; body?: string; labels?: string[]; model?: string; agentConfig?: Record<string, unknown>; priority?: string; projectId?: string; repositoryName?: string }) {
   return request<Issue>('/issues', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -90,6 +90,10 @@ export function deleteComment(issueNumber: number, commentId: string, projectId?
 
 export function getLabels() {
   return request<string[]>('/labels')
+}
+
+export function getWorkflowYaml(number: number, projectId?: string | null) {
+  return request<{ issueNumber: number; workflowRunId: string; yaml: string }>(withProject(`/issues/${number}/workflow/yaml`, projectId))
 }
 
 export function getWorkflowTimeline(number: number, projectId?: string | null) {

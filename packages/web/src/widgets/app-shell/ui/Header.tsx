@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@/shared/ui/components/dialog'
 import { Button } from '@/shared/ui/components/button'
-import { useDeleteProject, useUseProject } from '../../../entities/project'
+import { useDeleteProject } from '../../../entities/project'
 
 interface HeaderProps {
   onCreateIssue: () => void
@@ -26,7 +26,6 @@ export function Header({ onCreateIssue }: HeaderProps) {
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const deleteProject = useDeleteProject()
-  const switchProject = useUseProject()
   const isEpicsRoute = location.pathname === '/epics' || location.pathname.startsWith('/epic/')
 
   useEffect(() => {
@@ -48,14 +47,13 @@ export function Header({ onCreateIssue }: HeaderProps) {
 
   function handleDelete() {
     if (!currentProject) return
-    deleteProject.mutate(currentProject.name, {
+    deleteProject.mutate(currentProject.id, {
       onSuccess: () => {
         setDeleteConfirmOpen(false)
         setDropdownOpen(false)
         const remaining = projects.filter((p) => p.id !== currentProject.id)
         if (remaining.length > 0) {
           setProjectId(remaining[0].id)
-          switchProject.mutate(remaining[0].name)
         } else {
           setProjectId(null)
         }

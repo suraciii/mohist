@@ -41,12 +41,14 @@ public sealed record StageDefinition(
     List<CheckDefinition> Checks,
     WorkflowTasksFromDefinition? TasksFrom = null,
     bool RequiresApproval = false,
+    Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, StageEventPolicy>? On = null);
 
 public sealed record WorkflowDefinition(
     string Id,
     List<StageDefinition> Stages,
     string? Name = null,
+    Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, JsonElement?>? Defaults = null,
     Dictionary<string, string>? Artifacts = null);
 

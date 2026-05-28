@@ -1,4 +1,4 @@
-using System.Text.Json;
+using Mohist.Server.Project.Queries;
 
 namespace Mohist.Server.Issue.Domain;
 
@@ -11,10 +11,6 @@ public class Issue
     public string? Body { get; private set; }
     public string[] Labels { get; private set; }
     public string Priority { get; private set; }
-    public string? Model { get; private set; }
-    public Dictionary<string, object?>? AgentConfig { get; private set; }
-    public Dictionary<string, string>? StageModels { get; private set; }
-    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
     public DateTime? ArchivedAt { get; private set; }
@@ -26,7 +22,7 @@ public class Issue
     public int ConflictRetryCount { get; private set; }
     public string? BlockedReason { get; private set; }
     public int[] PrerequisiteNumbers { get; private set; } = [];
-    public string? WorkflowProfileId { get; private set; }
+    public RepositoryInfo? Repository { get; private set; }
 
     public Issue(
         string id,
@@ -36,11 +32,7 @@ public class Issue
         string? body = null,
         string[]? labels = null,
         string priority = "p2",
-        string? model = null,
-        Dictionary<string, object?>? agentConfig = null,
-        Dictionary<string, string>? stageModels = null,
-        Dictionary<string, Dictionary<string, string>>? stageVariables = null,
-        string? workflowProfileId = null)
+        RepositoryInfo? repository = null)
     {
         Id = id;
         ProjectId = projectId;
@@ -49,11 +41,7 @@ public class Issue
         Body = body;
         Labels = labels ?? [];
         Priority = priority;
-        Model = model;
-        AgentConfig = agentConfig;
-        StageModels = stageModels;
-        StageVariables = stageVariables;
-        WorkflowProfileId = string.IsNullOrWhiteSpace(workflowProfileId) ? null : workflowProfileId;
+        Repository = repository;
         CreatedAt = DateTime.UtcNow;
         UpdatedAt = DateTime.UtcNow;
     }
@@ -66,10 +54,6 @@ public class Issue
         string? body,
         string[] labels,
         string priority,
-        string? model,
-        Dictionary<string, object?>? agentConfig,
-        Dictionary<string, string>? stageModels,
-        Dictionary<string, Dictionary<string, string>>? stageVariables,
         DateTime createdAt,
         DateTime updatedAt,
         DateTime? archivedAt,
@@ -81,9 +65,9 @@ public class Issue
         int conflictRetryCount,
         string? blockedReason,
         int[] prerequisiteNumbers,
-        string? workflowProfileId)
+        RepositoryInfo? repository = null)
     {
-        var issue = new Issue(id, projectId, number, title, body, labels, priority, model, agentConfig, stageModels, stageVariables, workflowProfileId)
+        var issue = new Issue(id, projectId, number, title, body, labels, priority, repository)
         {
             CreatedAt = createdAt,
             UpdatedAt = updatedAt,
@@ -104,20 +88,12 @@ public class Issue
         string? title,
         string? body,
         string[]? labels,
-        string? priority,
-        string? model,
-        Dictionary<string, object?>? agentConfig,
-        Dictionary<string, string>? stageModels,
-        Dictionary<string, Dictionary<string, string>>? stageVariables)
+        string? priority)
     {
         if (title != null) Title = title;
         if (body != null) Body = body;
         if (labels != null) Labels = labels;
         if (priority != null) Priority = priority;
-        if (model != null) Model = model;
-        if (agentConfig != null) AgentConfig = agentConfig;
-        if (stageModels != null) StageModels = stageModels;
-        if (stageVariables != null) StageVariables = stageVariables;
         UpdatedAt = DateTime.UtcNow;
     }
 
