@@ -65,5 +65,8 @@ export function sanitizedEnvironment(env?: NodeJS.ProcessEnv) {
   const next = { ...process.env, ...env }
   delete next.OPENCODE_SERVER_PASSWORD
   delete next.OPENCODE_SERVER_USERNAME
+  next.OPENCODE_DISABLE_UPDATE_CHECK = next.OPENCODE_DISABLE_UPDATE_CHECK ?? "1"
+  next.OPENCODE_DISABLE_AUTO_UPDATE = next.OPENCODE_DISABLE_AUTO_UPDATE ?? "1"
+  next.NO_UPDATE_NOTIFIER = next.NO_UPDATE_NOTIFIER ?? "1"
   return next
 }
