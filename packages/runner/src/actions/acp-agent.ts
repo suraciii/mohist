@@ -8,6 +8,7 @@ import { killProcess, sanitizedEnvironment } from "../system/process.js"
 import { verifyExpectations } from "./expectations.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../runtime/acp-connection.js"
 import { setActiveHandlers, clearActiveHandlers } from "../runtime/acp-connection.js"
+import { acpArgs, acpCommand } from "../runtime/acp-command.js"
 
 export interface AcpProcessHandle {
   readonly stream: Stream
@@ -682,8 +683,8 @@ function objectField(value: JsonObject, key: string): JsonObject | undefined {
 }
 
 function createSpawnedAcpProcess(context: ActionContext): AcpProcessHandle {
-  const command = process.env.MOHIST_AGENT_COMMAND ?? "opencode"
-  const args = process.env.MOHIST_AGENT_ARGS ? JSON.parse(process.env.MOHIST_AGENT_ARGS) as string[] : ["acp"]
+  const command = acpCommand()
+  const args = acpArgs()
   const proc = spawn(command, args, {
     cwd: context.workDir,
     stdio: ["pipe", "pipe", "inherit"],
