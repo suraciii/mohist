@@ -3,11 +3,14 @@ import { useNavigate, useParams, Navigate } from 'react-router-dom'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
+import { WorkflowProfilesSection } from './WorkflowProfilesSection'
+import { RepositoriesSection } from './RepositoriesSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
-const VALID_SECTIONS = ['ai', 'agent', 'system'] as const
+const VALID_SECTIONS = ['ai', 'agent', 'repositories', 'workflows', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]
 
 const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
@@ -30,6 +33,24 @@ const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
     ),
   },
   {
+    key: 'repositories',
+    label: 'Repositories',
+    icon: (
+      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+      </svg>
+    ),
+  },
+  {
+    key: 'workflows',
+    label: 'Workflows',
+    icon: (
+      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+        <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-2.033l.312.311a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm-8.624-2.848a5.5 5.5 0 019.201-2.466l.312.311h-2.433a.75.75 0 000 1.5h3.634a.75.75 0 00.75-.75V3.537a.75.75 0 00-1.5 0v2.033l-.312-.311a7 7 0 00-11.712 3.138.75.75 0 001.449.39z" clipRule="evenodd" />
+      </svg>
+    ),
+  },
+  {
     key: 'system',
     label: 'System',
     icon: (
@@ -45,11 +66,18 @@ function isValidSection(s: string): s is Section {
 }
 
 function SectionContent({ section }: { section: Section }) {
+  const { projects } = useProject()
+  const currentProject = projects?.[0]
+
   switch (section) {
     case 'ai':
       return <AiSettingsSection />
     case 'agent':
       return <AgentSettingsSection />
+    case 'repositories':
+      return currentProject ? <RepositoriesSection projectId={currentProject.id} /> : <div className="text-sm text-gray-500">No project selected</div>
+    case 'workflows':
+      return <WorkflowProfilesSection />
     case 'system':
       return <SystemSettingsSection />
   }

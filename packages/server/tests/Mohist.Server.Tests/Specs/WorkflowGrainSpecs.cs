@@ -1,12 +1,16 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Storage;
+using Mohist.Server.Storage.Db;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
+using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;
 
@@ -20,30 +24,60 @@ public class WorkflowGrainFixture : IAsyncLifetime
 
     private readonly InMemoryEventBus _sharedEventBus = new(
         Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
+    private SqliteConnection _keeper = null!;
 
     public Task InitializeAsync()
     {
+        var dbName = $"mohist-test-{Guid.NewGuid():N}";
+        var connectionString = $"Data Source={dbName};Mode=Memory;Cache=Shared";
+        _keeper = new SqliteConnection(connectionString);
+        _keeper.Open();
+
         var builder = new InProcessTestClusterBuilder();
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
+            siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
+            siloBuilder.Services.AddHostedService<DbSchemaInitializer>();
         });
         Cluster = builder.Build();
         return Cluster.DeployAsync();
     }
 
+    private async Task EnsureSchemaAsync(IServiceProvider services)
+    {
+        var dbFactory = services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        await db.Database.EnsureCreatedAsync();
+    }
+
     public Task DisposeAsync()
     {
         Cluster?.Dispose();
+        _keeper?.DisposeAsync();
         return Task.CompletedTask;
     }
 }
 
 [CollectionDefinition("WorkflowGrain", DisableParallelization = true)]
 public class WorkflowGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
+
+internal class DbSchemaInitializer(IDbContextFactory<MohistDbContext> dbFactory) : IHostedService
+{
+    public async Task StartAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            await db.Database.EnsureCreatedAsync(ct);
+        }
+        catch { }
+    }
+    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+}
 
 [Collection("WorkflowGrain")]
 public abstract class WorkflowGrainSpecs

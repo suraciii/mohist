@@ -24,6 +24,7 @@ public static class WorkflowYamlSerializer
             string.IsNullOrWhiteSpace(workflowId) ? id : workflowId,
             stages,
             Name: NullIfEmpty(String(document, "name")),
+            Variables: JsonElementMap(OptionalMap(document, "variables")),
             Defaults: JsonElementMap(OptionalMap(document, "defaults")),
             Artifacts: OptionalMap(document, "artifacts")?.ToDictionary(kv => kv.Key, kv => kv.Value?.ToString() ?? ""));
     }
@@ -34,6 +35,7 @@ public static class WorkflowYamlSerializer
         {
             ["id"] = definition.Id,
             ["name"] = definition.Name,
+            ["variables"] = ObjectMap(definition.Variables),
             ["defaults"] = ObjectMap(definition.Defaults),
             ["artifacts"] = definition.Artifacts,
             ["stages"] = definition.Stages.Select(ToStageMap).ToList(),
@@ -65,7 +67,8 @@ public static class WorkflowYamlSerializer
             List(map, "tasks").Select(ToTask).ToList(),
             List(map, "checks").Select(ToCheck).ToList(),
             tasksFrom is null ? null : new WorkflowTasksFromDefinition(String(tasksFrom, "uses"), JsonElementMap(OptionalMap(tasksFrom, "with"))),
-            Bool(map, "requiresApproval"));
+            Bool(map, "requiresApproval"),
+            Variables: JsonElementMap(OptionalMap(map, "variables")));
     }
 
     private static TaskDefinition ToTask(object? value)
@@ -115,6 +118,7 @@ public static class WorkflowYamlSerializer
             ["checks"] = stage.Checks.Select(ToCheckMap).ToList(),
         };
         if (stage.RequiresApproval) map["requiresApproval"] = true;
+        if (stage.Variables is not null) map["variables"] = ObjectMap(stage.Variables);
         if (stage.TasksFrom is not null)
         {
             var tasksFrom = new Dictionary<string, object?> { ["uses"] = stage.TasksFrom.Uses };

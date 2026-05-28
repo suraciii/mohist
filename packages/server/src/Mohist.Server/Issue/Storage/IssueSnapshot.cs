@@ -1,8 +1,26 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Project.Queries;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Issue.Storage;
+
+public sealed class IssueWorkflowProfileSnapshot
+{
+    public string SourceProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
+    public WorkflowDefinition Definition { get; set; } = null!;
+
+    public IssueWorkflowProfile ToDomain() => new(SourceProfileId, Definition);
+
+    public static IssueWorkflowProfileSnapshot FromDomain(IssueWorkflowProfile profile) => new()
+    {
+        SourceProfileId = profile.SourceProfileId,
+        Definition = profile.Definition,
+    };
+}
 
 public sealed class IssueSnapshot
 {
@@ -13,10 +31,6 @@ public sealed class IssueSnapshot
     public string? Body { get; set; }
     public string[] Labels { get; set; } = [];
     public string Priority { get; set; } = "p2";
-    public string? Model { get; set; }
-    public Dictionary<string, object?>? AgentConfig { get; set; }
-    public Dictionary<string, string>? StageModels { get; set; }
-    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? ArchivedAt { get; set; }
@@ -30,7 +44,8 @@ public sealed class IssueSnapshot
     public int ConflictRetryCount { get; set; }
     public string? BlockedReason { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
-    public string? WorkflowProfileId { get; set; }
+    public RepositoryInfo? Repository { get; set; }
+    public IssueWorkflowProfileSnapshot? WorkflowProfile { get; set; }
 
     [JsonPropertyName("Stage")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -40,7 +55,20 @@ public sealed class IssueSnapshot
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? LegacyRuntimeStatus { get; set; }
 
-    public static IssueSnapshot FromDomain(Domain.Issue issue) => new()
+    #region Legacy fields (read for migration, no longer written)
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Model { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, object?>? AgentConfig { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string>? StageModels { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WorkflowProfileId { get; set; }
+    #endregion
+
+    public static IssueSnapshot FromDomain(Domain.Issue issue, IssueWorkflowProfile? profile) => new()
     {
         Id = issue.Id,
         ProjectId = issue.ProjectId,
@@ -49,10 +77,6 @@ public sealed class IssueSnapshot
         Body = issue.Body,
         Labels = issue.Labels,
         Priority = issue.Priority,
-        Model = issue.Model,
-        AgentConfig = issue.AgentConfig,
-        StageModels = issue.StageModels,
-        StageVariables = issue.StageVariables,
         CreatedAt = issue.CreatedAt,
         UpdatedAt = issue.UpdatedAt,
         ArchivedAt = issue.ArchivedAt,
@@ -64,10 +88,11 @@ public sealed class IssueSnapshot
         ConflictRetryCount = issue.ConflictRetryCount,
         BlockedReason = issue.BlockedReason,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
-        WorkflowProfileId = issue.WorkflowProfileId,
+        Repository = issue.Repository,
+        WorkflowProfile = profile is not null ? IssueWorkflowProfileSnapshot.FromDomain(profile) : null,
     };
 
-    public Domain.Issue ToDomain()
+    public (Domain.Issue Issue, IssueWorkflowProfile? Profile) ToDomain()
     {
         var stage = LegacyStage is { } legacyStage ? LegacyStageName(legacyStage) : Stage;
         var attention = Attention;
@@ -96,7 +121,7 @@ public sealed class IssueSnapshot
             }
         }
 
-        return Domain.Issue.Restore(
+        var issue = Domain.Issue.Restore(
             Id,
             ProjectId,
             Number,
@@ -104,10 +129,6 @@ public sealed class IssueSnapshot
             Body,
             Labels,
             Priority,
-            Model,
-            AgentConfig,
-            StageModels,
-            StageVariables,
             CreatedAt == default ? DateTime.UtcNow : CreatedAt,
             UpdatedAt == default ? DateTime.UtcNow : UpdatedAt,
             ArchivedAt,
@@ -119,7 +140,64 @@ public sealed class IssueSnapshot
             ConflictRetryCount,
             blockedReason,
             PrerequisiteNumbers,
-            WorkflowProfileId);
+            Repository);
+
+        var profile = MigrateProfile();
+        return (issue, profile);
+    }
+
+    private IssueWorkflowProfile? MigrateProfile()
+    {
+        if (WorkflowProfile?.Definition is not null)
+            return WorkflowProfile.ToDomain();
+
+        var hasLegacyData = Model is not null
+            || AgentConfig is not null
+            || StageModels is not null
+            || StageVariables is not null
+            || WorkflowProfileId is not null;
+
+        if (!hasLegacyData)
+            return null;
+
+        var profileId = !string.IsNullOrWhiteSpace(WorkflowProfileId) ? WorkflowProfileId : IssueWorkflowProfiles.DefaultId;
+        var definition = MohistWorkflow.Definition;
+
+        var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        if (definition.Variables is not null)
+            foreach (var (k, v) in definition.Variables)
+                variables[k] = v;
+
+        var agentConfig = new Dictionary<string, object?>(StringComparer.Ordinal) { ["type"] = "opencode" };
+        if (AgentConfig is not null)
+            foreach (var (k, v) in AgentConfig)
+                if (v is not null) agentConfig[k] = v;
+        if (!string.IsNullOrWhiteSpace(Model))
+            agentConfig["model"] = Model;
+        if (agentConfig.Count > 0)
+            variables["agent"] = JsonSerializer.SerializeToElement(agentConfig, WorkflowVariableJson.Options);
+
+        var stages = definition.Stages.Select(stage =>
+        {
+            var stageVars = stage.Variables != null
+                ? new Dictionary<string, JsonElement?>(stage.Variables, StringComparer.Ordinal)
+                : new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+
+            if (StageModels is not null && StageModels.TryGetValue(stage.Stage, out var stageModel) && !string.IsNullOrWhiteSpace(stageModel))
+                stageVars["agent"] = JsonSerializer.SerializeToElement(
+                    new Dictionary<string, object?> { ["model"] = stageModel }, WorkflowVariableJson.Options);
+
+            if (StageVariables is not null && StageVariables.TryGetValue(stage.Stage, out var sv))
+            {
+                foreach (var (section, value) in sv)
+                    stageVars[section] = JsonSerializer.SerializeToElement(value, WorkflowVariableJson.Options);
+            }
+
+            return stageVars.Count > 0 ? stage with { Variables = stageVars } : stage;
+        }).ToList();
+
+        var migrated = definition with { Variables = variables, Stages = stages };
+        return new IssueWorkflowProfile(profileId, migrated);
     }
 
     private static IssueStage LegacyStageName(JsonElement value)

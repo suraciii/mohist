@@ -125,6 +125,7 @@ export interface Issue {
   workflowStage?: WorkflowStage | null
   workflowStatus?: string | null
   workflowRunId?: string | null
+  workflowProfileId?: string | null
   status: IssueStatus
   projectId: string
   labels: string[]
@@ -132,6 +133,7 @@ export interface Issue {
   updatedAt: string
   projectName?: string
   projectPath?: string
+  repository?: { name: string; path?: string; remote?: string; baseBranch: string } | null
   comments?: Comment[]
   approvalState?: ApprovalState
   priority?: string | null

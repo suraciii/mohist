@@ -1,11 +1,67 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { createProject, deleteProject, getProjects, useProjectByName } from './client'
+import { createProject, deleteProject, getProjects, getRepositories, addRepository, removeRepository, setDefaultRepository } from './client'
 
 export function useProjects() {
   return useQuery({
     queryKey: ['projects'],
     queryFn: () => getProjects(),
+  })
+}
+
+export function useRepositories(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ['repositories', projectId],
+    queryFn: () => getRepositories(projectId!),
+    enabled: !!projectId,
+  })
+}
+
+export function useAddRepository() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, data }: { projectId: string; data: { name: string; path?: string; remote?: string; baseBranch?: string } }) =>
+      addRepository(projectId, data),
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ['repositories', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Repository added')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useRemoveRepository() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, repoName }: { projectId: string; repoName: string }) =>
+      removeRepository(projectId, repoName),
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ['repositories', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Repository removed')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useSetDefaultRepository() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, repoName }: { projectId: string; repoName: string }) =>
+      setDefaultRepository(projectId, repoName),
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ['repositories', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      toast.success('Default repository updated')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Request failed')
+    },
   })
 }
 
@@ -26,24 +82,10 @@ export function useCreateProject() {
 export function useDeleteProject() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (name: string) => deleteProject(name),
+    mutationFn: (id: string) => deleteProject(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success('Project deleted')
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Request failed')
-    },
-  })
-}
-
-export function useUseProject() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (name: string) => useProjectByName(name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
-      toast.success('Switched to project')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')

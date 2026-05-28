@@ -30,6 +30,29 @@ export interface SystemInfo {
   }
 }
 
+export interface WorkflowProfileInfo {
+  id: string
+  displayName: string
+  description: string
+  isDefault: boolean
+}
+
+export interface WorkflowProfileStageSummary {
+  stage: string
+  requiresApproval: boolean
+  tasks: string[]
+  checks: string[]
+}
+
+export interface WorkflowProfileDetail {
+  id: string
+  displayName: string
+  description: string
+  isDefault: boolean
+  yaml: string
+  stages: WorkflowProfileStageSummary[]
+}
+
 export type ModelBadge = 'free' | 'latest'
 
 export interface Model {

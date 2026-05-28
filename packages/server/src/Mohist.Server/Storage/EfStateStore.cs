@@ -56,4 +56,13 @@ public class EfStateStore<T> : IStateStore<T> where T : class
             await db.SaveChangesAsync();
         }
     }
+
+    public async Task<IReadOnlyList<T>> ListAsync()
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync();
+        return await db.GrainStates
+            .Where(e => e.Type == _typeName)
+            .Select(e => JsonSerializer.Deserialize<T>(e.JsonState)!)
+            .ToListAsync();
+    }
 }

@@ -1,38 +1,39 @@
 using Mohist.Server.Project.Grains;
+using Mohist.Server.Project.Queries;
 
 namespace Mohist.Server.Api;
 
 public static class ProjectRoutes
 {
-    private const string ProjectKey = "projects";
-
     public static WebApplication MapProjectRoutes(this WebApplication app)
     {
         var group = app.MapGroup("/api/projects");
 
-        group.MapGet("/", async (IGrainFactory grains) =>
+        group.MapGet("/", async (ProjectQueryService projectsQuery) =>
         {
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var projects = await projectsGrain.GetAllAsync();
+            var projects = await projectsQuery.ListAllAsync();
             return ApiResults.Ok(projects);
         });
 
-        group.MapGet("/{name}", async (string name, IGrainFactory grains) =>
+        group.MapGet("/{id}", async (string id, ProjectQueryService projectsQuery) =>
         {
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByNameAsync(name);
+            var project = await projectsQuery.GetByIdAsync(id);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapPost("/", async (CreateProjectRequest req, IGrainFactory grains) =>
+        group.MapPost("/", async (CreateProjectRequest req, IGrainFactory grains, ProjectQueryService projectsQuery) =>
         {
             if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Path))
                 return ApiResults.BadRequest("name and path are required");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            if (await projectsQuery.ExistsAsync(req.Name))
+                return ApiResults.Conflict($"Project '{req.Name}' already exists");
+
+            var id = $"proj_{Guid.NewGuid():N}";
+            var projectGrain = grains.GetGrain<IProjectGrain>(id);
             try
             {
-                var project = await projectsGrain.CreateAsync(req.Name, req.Path, req.BaseBranch);
+                var project = await projectGrain.CreateAsync(req.Name, req.Path, req.BaseBranch);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
@@ -41,25 +42,63 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapPatch("/{name}", async (string name, UpdateProjectRequest req, IGrainFactory grains) =>
+        group.MapPatch("/{id}", async (string id, UpdateProjectRequest req, IGrainFactory grains) =>
         {
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.UpdateAsync(name, req.BaseBranch);
-            return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
+            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var updated = await projectGrain.UpdateAsync(req.BaseBranch);
+            return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapPost("/{name}/use", async (string name, IGrainFactory grains) =>
+        group.MapDelete("/{id}", async (string id, IGrainFactory grains) =>
         {
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByNameAsync(name);
-            return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
+            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            await projectGrain.DeleteAsync();
+            return ApiResults.Ok();
         });
 
-        group.MapDelete("/{name}", async (string name, IGrainFactory grains) =>
+        group.MapGet("/{id}/repositories", async (string id, ProjectQueryService projectsQuery) =>
         {
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var deleted = await projectsGrain.DeleteAsync(name);
-            return deleted ? ApiResults.Ok() : ApiResults.NotFound("Project not found");
+            var project = await projectsQuery.GetByIdAsync(id);
+            return project is not null ? ApiResults.Ok(project.Repositories) : ApiResults.NotFound("Project not found");
+        });
+
+        group.MapPost("/{id}/repositories", async (string id, AddRepositoryRequest req, IGrainFactory grains) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Name))
+                return ApiResults.BadRequest("name is required");
+            if (string.IsNullOrWhiteSpace(req.Path) && string.IsNullOrWhiteSpace(req.Remote))
+                return ApiResults.BadRequest("path or remote is required");
+
+            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            try
+            {
+                var updated = await projectGrain.AddRepositoryAsync(req.Name, req.Path, req.Remote, req.BaseBranch);
+                return updated is not null
+                    ? Results.Json(new { success = true, data = updated }, statusCode: 201)
+                    : ApiResults.NotFound("Project not found");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
+        });
+
+        group.MapPatch("/{id}/repositories/{repoName}", async (string id, string repoName, UpdateRepositoryRequest req, IGrainFactory grains) =>
+        {
+            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            if (req.SetDefault == true)
+            {
+                var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
+                return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
+            }
+            return ApiResults.BadRequest("No action specified");
+        });
+
+        group.MapDelete("/{id}/repositories/{repoName}", async (string id, string repoName, IGrainFactory grains) =>
+        {
+            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var updated = await projectGrain.RemoveRepositoryAsync(repoName);
+            return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
         });
 
         return app;
@@ -68,3 +107,5 @@ public static class ProjectRoutes
 
 public record CreateProjectRequest(string Name, string Path, string? BaseBranch = null);
 public record UpdateProjectRequest(string? BaseBranch = null);
+public record AddRepositoryRequest(string Name, string? Path = null, string? Remote = null, string? BaseBranch = null);
+public record UpdateRepositoryRequest(bool? SetDefault = null);

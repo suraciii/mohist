@@ -1,17 +1,20 @@
-using ProjectInfo = Mohist.Server.Project.Queries.ProjectInfo;
-using Mohist.Server.Storage;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Storage;
+using Mohist.Server.Storage.Db;
+using System.Text.Json;
 
 namespace Mohist.Server.Project.Grains;
 
 public class ProjectGrain : Grain, IProjectGrain
 {
-    private readonly Dictionary<string, ProjectInfo> _projects = new(StringComparer.OrdinalIgnoreCase);
-    private readonly IStateStore<ProjectState> _store;
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<ProjectGrain> _log;
+    private ProjectInfo? _project;
 
-    public ProjectGrain(IStateStore<ProjectState> store, ILogger<ProjectGrain> log)
+    public ProjectGrain(IDbContextFactory<MohistDbContext> dbFactory, ILogger<ProjectGrain> log)
     {
-        _store = store;
+        _dbFactory = dbFactory;
         _log = log;
     }
 
@@ -19,68 +22,168 @@ public class ProjectGrain : Grain, IProjectGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        var state = await _store.LoadAsync(GrainKey);
-        if (state is null) return;
-        foreach (var (name, project) in state.Projects)
-            _projects[name] = project;
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is not null)
+            _project = ProjectQueryService.ToInfo(entry);
     }
 
-    public Task<ProjectInfo?> GetByNameAsync(string name)
-    {
-        _projects.TryGetValue(name, out var project);
-        return Task.FromResult(project);
-    }
-
-    public Task<ProjectInfo?> GetByIdAsync(string id)
-    {
-        var project = _projects.Values.FirstOrDefault(p => p.Id == id);
-        return Task.FromResult(project);
-    }
-
-    public Task<List<ProjectInfo>> GetAllAsync()
-    {
-        return Task.FromResult(_projects.Values.ToList());
-    }
+    public Task<ProjectInfo?> GetAsync() => Task.FromResult(_project);
 
     public async Task<ProjectInfo> CreateAsync(string name, string path, string? baseBranch)
     {
-        if (_projects.ContainsKey(name))
-            throw new InvalidOperationException($"Project '{name}' already exists");
+        if (_project is not null)
+            throw new InvalidOperationException($"Project '{GrainKey}' already exists");
 
-        var project = new ProjectInfo
+        var branch = baseBranch ?? "main";
+        var repos = new List<RepositoryInfo>
         {
-            Id = $"proj_{Guid.NewGuid():N}",
-            Name = name,
-            Path = path,
-            BaseBranch = baseBranch ?? "main",
+            new()
+            {
+                Name = "main",
+                Path = path,
+                BaseBranch = branch,
+                IsDefault = true,
+            },
         };
 
-        _projects[name] = project;
-        await SaveAsync();
+        var entry = new ProjectEntry
+        {
+            Id = GrainKey,
+            Name = name,
+            Path = path,
+            BaseBranch = branch,
+            RepositoriesJson = JsonSerializer.Serialize(repos),
+        };
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        db.Projects.Add(entry);
+        await db.SaveChangesAsync();
+
+        _project = new ProjectInfo
+        {
+            Id = GrainKey,
+            Name = name,
+            Path = path,
+            BaseBranch = branch,
+            Repositories = repos,
+        };
+
         _log.LogInformation("Project {Name} created at {Path}", name, path);
-        return project;
+        return _project;
     }
 
-    public async Task<ProjectInfo?> UpdateAsync(string name, string? baseBranch)
+    public async Task<ProjectInfo?> UpdateAsync(string? baseBranch)
     {
-        if (!_projects.TryGetValue(name, out var project))
-            return null;
+        if (_project is null) return null;
 
         if (baseBranch is not null)
-            project.BaseBranch = baseBranch;
+            _project.BaseBranch = baseBranch;
 
-        project.UpdatedAt = DateTime.UtcNow.ToString("o");
-        await SaveAsync();
-        return project;
+        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is null) return null;
+
+        entry.BaseBranch = _project.BaseBranch;
+        entry.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        return _project;
     }
 
-    public async Task<bool> DeleteAsync(string name)
+    public async Task DeleteAsync()
     {
-        var removed = _projects.Remove(name);
-        if (removed)
-            await SaveAsync();
-        return removed;
+        if (_project is null) return;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is not null)
+        {
+            db.Projects.Remove(entry);
+            await db.SaveChangesAsync();
+        }
+
+        _project = null;
     }
 
-    private Task SaveAsync() => _store.SaveAsync(GrainKey, new ProjectState(new Dictionary<string, ProjectInfo>(_projects, StringComparer.OrdinalIgnoreCase)));
+    public Task<List<RepositoryInfo>> ListRepositoriesAsync()
+    {
+        return Task.FromResult(_project?.Repositories ?? []);
+    }
+
+    public async Task<ProjectInfo?> AddRepositoryAsync(string repoName, string? path, string? remote, string? baseBranch)
+    {
+        if (_project is null) return null;
+        if (string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(remote))
+            throw new InvalidOperationException("path or remote is required");
+        if (_project.Repositories.Any(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"Repository '{repoName}' already exists");
+
+        _project.Repositories.Add(new RepositoryInfo
+        {
+            Name = repoName,
+            Path = path,
+            Remote = remote,
+            BaseBranch = baseBranch ?? "main",
+            IsDefault = _project.Repositories.Count == 0,
+        });
+
+        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        await PersistRepositoriesAsync();
+        return _project;
+    }
+
+    public async Task<ProjectInfo?> RemoveRepositoryAsync(string repoName)
+    {
+        if (_project is null) return null;
+
+        var repo = _project.Repositories.FirstOrDefault(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase));
+        if (repo is null) return null;
+
+        _project.Repositories.Remove(repo);
+        if (repo.IsDefault && _project.Repositories.Count > 0)
+            _project.Repositories[0].IsDefault = true;
+
+        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        await PersistRepositoriesAsync();
+        return _project;
+    }
+
+    public async Task<ProjectInfo?> SetDefaultRepositoryAsync(string repoName)
+    {
+        if (_project is null) return null;
+
+        var found = false;
+        foreach (var repo in _project.Repositories)
+        {
+            if (string.Equals(repo.Name, repoName, StringComparison.OrdinalIgnoreCase))
+            {
+                repo.IsDefault = true;
+                found = true;
+            }
+            else
+            {
+                repo.IsDefault = false;
+            }
+        }
+
+        if (!found) return null;
+
+        _project.UpdatedAt = DateTime.UtcNow.ToString("o");
+        await PersistRepositoriesAsync();
+        return _project;
+    }
+
+    private async Task PersistRepositoriesAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is null) return;
+
+        entry.RepositoriesJson = JsonSerializer.Serialize(_project!.Repositories);
+        entry.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+    }
 }

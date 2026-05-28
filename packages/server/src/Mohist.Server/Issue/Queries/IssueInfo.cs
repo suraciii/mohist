@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Project.Queries;
 
 namespace Mohist.Server.Issue.Queries;
 
@@ -35,6 +36,7 @@ public class IssueInfo
     [Id(23)] public IssueAttention? Attention { get; set; }
     [Id(24)] public string? WorkflowStage { get; set; }
     [Id(25)] public string? WorkflowStatus { get; set; }
+    [Id(28)] public RepositoryInfo? Repository { get; set; }
 }
 
 [GenerateSerializer]

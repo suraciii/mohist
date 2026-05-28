@@ -22,15 +22,17 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
     public bool IsDefault => true;
     public WorkflowDefinition Definition => MohistWorkflow.Definition;
 
+    public Dictionary<string, string> LoadPrompts() => _promptLoader.LoadAll();
+
     public string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Dictionary<string, object?>? globalAgentConfig = null)
     {
-        var agentConfig = BuildAgentConfig(issue, globalAgentConfig);
+        var agentConfig = BuildAgentConfig(globalAgentConfig);
         var prompts = _promptLoader.LoadAll();
 
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
             ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
-            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "", model = issue.Model, stageModels = issue.StageModels }, WorkflowVariableJson.Options),
+            ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
             ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
@@ -42,7 +44,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
 
     public Dictionary<string, Dictionary<string, string>>? BuildStageVariables(Domain.Issue issue, Dictionary<string, Dictionary<string, object?>>? globalStageAgentConfigs = null)
     {
-        var result = CopyStageVariables(issue.StageVariables);
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
         if (globalStageAgentConfigs is not null)
         {
@@ -50,46 +52,17 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
                 MergeStageAgent(result, stage, config);
         }
 
-        if (issue.StageModels is not null)
-        {
-            foreach (var (stage, model) in issue.StageModels)
-            {
-                if (!string.IsNullOrWhiteSpace(model))
-                    MergeStageAgent(result, stage, new Dictionary<string, object?>(StringComparer.Ordinal) { ["model"] = model });
-            }
-        }
-
         return result.Count == 0 ? null : result;
     }
 
-    private static Dictionary<string, object?> BuildAgentConfig(Domain.Issue issue, Dictionary<string, object?>? globalAgentConfig)
+    private static Dictionary<string, object?> BuildAgentConfig(Dictionary<string, object?>? globalAgentConfig)
     {
         var agentConfig = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["type"] = "opencode",
         };
         MergeAgentConfig(agentConfig, globalAgentConfig);
-        MergeAgentConfig(agentConfig, issue.AgentConfig);
-
-        // Legacy compatibility: issue.model is equivalent to agent.model.
-        if (!string.IsNullOrWhiteSpace(issue.Model))
-            agentConfig["model"] = issue.Model;
-
-        if (!agentConfig.ContainsKey("type"))
-            agentConfig["type"] = "opencode";
-
         return agentConfig;
-    }
-
-    private static Dictionary<string, Dictionary<string, string>> CopyStageVariables(Dictionary<string, Dictionary<string, string>>? source)
-    {
-        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        if (source is null) return result;
-
-        foreach (var (stage, sections) in source)
-            result[stage] = new Dictionary<string, string>(sections, StringComparer.Ordinal);
-
-        return result;
     }
 
     private static void MergeStageAgent(Dictionary<string, Dictionary<string, string>> stageVariables, string stage, Dictionary<string, object?> agentConfig)

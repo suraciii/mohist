@@ -12,7 +12,6 @@ vi.mock('../../../entities/project', async (importOriginal) => {
   return {
     ...actual,
     useDeleteProject: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
-    useUseProject: () => ({ mutate: vi.fn() }),
   }
 })
 

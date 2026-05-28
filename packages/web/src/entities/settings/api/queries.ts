@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../model/types'
-import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, setLogLevel, setModel, setOpencodeModel, setStageModels, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
+import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModels, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
   return useQuery<GeneralConfig, Error>({
@@ -217,5 +217,20 @@ export function useSystemInfo() {
   return useQuery<SystemInfo>({
     queryKey: ['system-info'],
     queryFn: () => getSystemInfo(),
+  })
+}
+
+export function useWorkflowProfiles() {
+  return useQuery<WorkflowProfileInfo[]>({
+    queryKey: ['workflow-profiles'],
+    queryFn: () => getWorkflowProfiles(),
+  })
+}
+
+export function useWorkflowProfile(id: string | null) {
+  return useQuery<WorkflowProfileDetail>({
+    queryKey: ['workflow-profile', id],
+    queryFn: () => getWorkflowProfile(id!),
+    enabled: !!id,
   })
 }

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Config;
 using Mohist.Server.Events;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
@@ -25,7 +26,8 @@ public static class MohistServiceRegistration
             options.UseSqlite(connectionString));
 
         services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
-        services.AddScoped<IStateStore<Issue.Domain.Issue>, IssueStateStore>();
+        services.AddScoped<IssueStateStore>();
+        services.AddSingleton<ProjectQueryService>();
         services.AddScoped<IssueQueryService>();
         services.AddSingleton<Workflow.Prompts.IPromptLoader, Workflow.Prompts.FilePromptLoader>();
         services.AddSingleton<IssueWorkflowProfileRegistry>();

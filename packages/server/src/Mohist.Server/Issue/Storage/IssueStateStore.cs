@@ -6,9 +6,21 @@ using Mohist.Server.Storage.Db.Entities;
 
 namespace Mohist.Server.Issue.Storage;
 
-public sealed class IssueStateStore : IStateStore<Domain.Issue>
+public sealed class IssueAggregate
 {
-    private static readonly string IssueType = typeof(Domain.Issue).FullName!;
+    public Domain.Issue Issue { get; }
+    public WorkflowProfiles.IssueWorkflowProfile? Profile { get; }
+
+    public IssueAggregate(Domain.Issue issue, WorkflowProfiles.IssueWorkflowProfile? profile)
+    {
+        Issue = issue;
+        Profile = profile;
+    }
+}
+
+public sealed class IssueStateStore : IStateStore<IssueAggregate>
+{
+    private static readonly string IssueType = typeof(IssueAggregate).FullName!;
     private readonly IDbContextFactory<MohistDbContext> _contextFactory;
 
     public IssueStateStore(IDbContextFactory<MohistDbContext> contextFactory)
@@ -16,14 +28,14 @@ public sealed class IssueStateStore : IStateStore<Domain.Issue>
         _contextFactory = contextFactory;
     }
 
-    public async Task<Domain.Issue?> LoadAsync(string key)
+    public async Task<IssueAggregate?> LoadAsync(string key)
     {
         await using var db = await _contextFactory.CreateDbContextAsync();
         var row = await db.GrainStates.FindAsync(key, IssueType);
         return row is null ? null : Deserialize(row.JsonState);
     }
 
-    public async Task SaveAsync(string key, Domain.Issue state)
+    public async Task SaveAsync(string key, IssueAggregate state)
     {
         await using var db = await _contextFactory.CreateDbContextAsync();
         var row = await db.GrainStates.FindAsync(key, IssueType);
@@ -58,9 +70,19 @@ public sealed class IssueStateStore : IStateStore<Domain.Issue>
         }
     }
 
-    public static Domain.Issue? Deserialize(string json) =>
-        JsonSerializer.Deserialize<IssueSnapshot>(json)?.ToDomain();
+    public Task<IReadOnlyList<IssueAggregate>> ListAsync()
+    {
+        throw new NotSupportedException();
+    }
 
-    public static string Serialize(Domain.Issue issue) =>
-        JsonSerializer.Serialize(IssueSnapshot.FromDomain(issue));
+    public static IssueAggregate? Deserialize(string json)
+    {
+        var snapshot = JsonSerializer.Deserialize<IssueSnapshot>(json);
+        if (snapshot is null) return null;
+        var (issue, profile) = snapshot.ToDomain();
+        return new IssueAggregate(issue, profile);
+    }
+
+    public static string Serialize(IssueAggregate aggregate) =>
+        JsonSerializer.Serialize(IssueSnapshot.FromDomain(aggregate.Issue, aggregate.Profile));
 }

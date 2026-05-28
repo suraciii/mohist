@@ -31,8 +31,8 @@ public class IssueQueryServiceSpecs
         db.GrainStates.Add(new GrainState
         {
             Key = $"{project.Id}:1",
-            Type = typeof(Issue.Domain.Issue).FullName!,
-            JsonState = IssueStateStore.Serialize(issue),
+            Type = typeof(IssueAggregate).FullName!,
+            JsonState = IssueStateStore.Serialize(new IssueAggregate(issue, null)),
         });
         await db.SaveChangesAsync();
 

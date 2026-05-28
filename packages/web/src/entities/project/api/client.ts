@@ -1,5 +1,5 @@
 import { request } from '../../../shared/api/client'
-import type { DirEntry, Project } from '../model/types'
+import type { DirEntry, Project, Repository } from '../model/types'
 
 export function getProjects() {
   return request<Project[]>('/projects')
@@ -12,15 +12,33 @@ export function createProject(data: { name: string; path: string }) {
   })
 }
 
-export function deleteProject(name: string) {
-  return request<{ message: string }>(`/projects/${encodeURIComponent(name)}`, {
+export function deleteProject(id: string) {
+  return request<{ message: string }>(`/projects/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
 }
 
-export function useProjectByName(name: string) {
-  return request<Project>(`/projects/${encodeURIComponent(name)}/use`, {
+export function getRepositories(projectId: string) {
+  return request<Repository[]>(`/projects/${encodeURIComponent(projectId)}/repositories`)
+}
+
+export function addRepository(projectId: string, data: { name: string; path?: string; remote?: string; baseBranch?: string }) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/repositories`, {
     method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function removeRepository(projectId: string, repoName: string) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/repositories/${encodeURIComponent(repoName)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function setDefaultRepository(projectId: string, repoName: string) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/repositories/${encodeURIComponent(repoName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ setDefault: true }),
   })
 }
 

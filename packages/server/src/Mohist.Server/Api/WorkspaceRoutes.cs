@@ -1,6 +1,6 @@
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
-using Mohist.Server.Project.Grains;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Projection;
 
@@ -8,48 +8,43 @@ namespace Mohist.Server.Api;
 
 public static class WorkspaceRoutes
 {
-    private const string ProjectKey = "projects";
-
     public static WebApplication MapWorkspaceRoutes(this WebApplication app)
     {
         var issues = app.MapGroup("/api/issues/{number:int}");
 
-        issues.MapGet("/worktree-status", async (int number, string? projectId, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/worktree-status", async (int number, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
-            var status = await git.GetWorktreeStatusAsync(project.Path, project.Name, number, project.BaseBranch);
+            var (repoPath, baseBranch) = ResolveRepo(issue);
+            var status = await git.GetWorktreeStatusAsync(repoPath, issue.ProjectName ?? "project", number, baseBranch);
             return ApiResults.Ok(status);
         });
 
-        issues.MapGet("/diff", async (int number, string? projectId, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/diff", async (int number, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
+            var (repoPath, baseBranch) = ResolveRepo(issue);
+            var head = $"mo/issue-{number}";
 
-            var branchExists = await git.BranchExistsAsync(project.Path, $"mo/issue-{number}");
+            var branchExists = await git.BranchExistsAsync(repoPath, head);
             if (!branchExists)
                 return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
 
-            var head = $"mo/issue-{number}";
-            var diff = await git.GetDiffAsync(project.Path, project.BaseBranch, head);
-            var mergeBase = await git.GetMergeBaseAsync(project.Path, project.BaseBranch, head) ?? project.BaseBranch;
-            var (ahead, behind) = await git.GetAheadBehindAsync(project.Path, project.BaseBranch, head);
-            var commits = await git.GetCommitsAsync(project.Path, project.BaseBranch, head);
+            var diff = await git.GetDiffAsync(repoPath, baseBranch, head);
+            var mergeBase = await git.GetMergeBaseAsync(repoPath, baseBranch, head) ?? baseBranch;
+            var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, baseBranch, head);
+            var commits = await git.GetCommitsAsync(repoPath, baseBranch, head);
             return ApiResults.Ok(new
             {
                 available = true,
                 reason = (string?)null,
-                @base = project.BaseBranch,
+                @base = baseBranch,
                 head,
                 mergeBase,
                 ahead,
@@ -61,28 +56,27 @@ public static class WorkspaceRoutes
             });
         });
 
-        issues.MapGet("/commits", async (int number, string? projectId, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/commits", async (int number, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
+            var (repoPath, baseBranch) = ResolveRepo(issue);
             var head = $"mo/issue-{number}";
-            if (!await git.BranchExistsAsync(project.Path, head))
+
+            if (!await git.BranchExistsAsync(repoPath, head))
                 return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
 
-            var commits = await git.GetCommitsAsync(project.Path, project.BaseBranch, head);
-            var diff = await git.GetDiffAsync(project.Path, project.BaseBranch, head);
-            var mergeBase = await git.GetMergeBaseAsync(project.Path, project.BaseBranch, head) ?? project.BaseBranch;
-            var (ahead, behind) = await git.GetAheadBehindAsync(project.Path, project.BaseBranch, head);
+            var commits = await git.GetCommitsAsync(repoPath, baseBranch, head);
+            var diff = await git.GetDiffAsync(repoPath, baseBranch, head);
+            var mergeBase = await git.GetMergeBaseAsync(repoPath, baseBranch, head) ?? baseBranch;
+            var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, baseBranch, head);
             return ApiResults.Ok(new
             {
                 available = true,
                 reason = (string?)null,
-                @base = project.BaseBranch,
+                @base = baseBranch,
                 head,
                 mergeBase,
                 ahead,
@@ -105,53 +99,45 @@ public static class WorkspaceRoutes
             });
         });
 
-        issues.MapGet("/commits/{hash}/diff", async (int number, string hash, string? projectId, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/commits/{hash}/diff", async (int number, string hash, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
+            var (repoPath, baseBranch) = ResolveRepo(issue);
             var head = $"mo/issue-{number}";
-            if (!await git.BranchExistsAsync(project.Path, head))
+
+            if (!await git.BranchExistsAsync(repoPath, head))
                 return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found", hash, diff = "" });
 
-            var diff = await git.GetCommitDiffAsync(project.Path, hash);
+            var diff = await git.GetCommitDiffAsync(repoPath, hash);
             return diff is null
                 ? ApiResults.NotFound($"Commit {hash} not found")
                 : ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff });
         });
 
-        issues.MapGet("/file-content", async (int number, string path, string? projectId, IGitService git, IGrainFactory grains) =>
+        issues.MapGet("/file-content", async (int number, string path, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
-            var baseContent = await git.GetFileContentAsync(project.Path, project.BaseBranch, path);
-            var headContent = await git.GetFileContentAsync(project.Path, $"mo/issue-{number}", path);
+            var (repoPath, baseBranch) = ResolveRepo(issue);
+            var baseContent = await git.GetFileContentAsync(repoPath, baseBranch, path);
+            var headContent = await git.GetFileContentAsync(repoPath, $"mo/issue-{number}", path);
 
             return ApiResults.Ok(new { @base = baseContent, head = headContent });
         });
 
-        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQueryService issuesQuery) =>
+        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
-            var pid = await ResolveProjectIdAsync(projectId, grains);
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
-
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-            var project = await projectsGrain.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
 
             try
             {
-                var issue = await issuesQuery.GetInfoAsync(pid, number);
-                if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
                 var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
                 var workflow = await grain.GetWorkflowStatusAsync();
                 if (IsWorkflowActive(workflow))
@@ -165,7 +151,10 @@ public static class WorkspaceRoutes
                     return ApiResults.Conflict("Cannot remove a worktree while an agent is running", "worktree_agent_running");
                 }
 
-                var removal = await git.RemoveWorktreeAsync(project.Path, project.Name, number);
+                var (repoPath, _) = ResolveRepo(issue);
+                var project = await projectsQuery.GetByIdAsync(pid);
+                var projectName = project?.Name ?? issue.ProjectName ?? "project";
+                var removal = await git.RemoveWorktreeAsync(repoPath, projectName, number);
                 if (removal.Status == "failed")
                 {
                     return ApiResults.Conflict(removal.Message, "worktree_cleanup_failed", removal);
@@ -180,6 +169,24 @@ public static class WorkspaceRoutes
         });
 
         return app;
+    }
+
+    private static (string RepoPath, string BaseBranch) ResolveRepo(IssueReadModel issue)
+    {
+        var repo = issue.Repository;
+        var repoPath = repo?.Path ?? ".";
+        var baseBranch = repo?.BaseBranch ?? "main";
+        return (repoPath, baseBranch);
+    }
+
+    private static async Task<(string? ProjectId, IssueReadModel? Issue)> ResolveIssueAsync(
+        int number, string? projectId, ProjectQueryService projectsQuery, IssueQueryService issuesQuery)
+    {
+        var pid = await ResolveProjectIdAsync(projectId, projectsQuery);
+        if (pid is null) return (null, null);
+
+        var issue = await issuesQuery.GetAsync(pid, number);
+        return (pid, issue);
     }
 
     private static bool IsWorkflowActive(IssueWorkflowStatus? workflow)
@@ -205,11 +212,10 @@ public static class WorkspaceRoutes
         },
     };
 
-    private static async Task<string?> ResolveProjectIdAsync(string? projectId, IGrainFactory grains)
+    private static async Task<string?> ResolveProjectIdAsync(string? projectId, ProjectQueryService projectsQuery)
     {
         if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
-        var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
-        var projects = await projectsGrain.GetAllAsync();
-        return projects.Count == 1 ? projects[0].Id : null;
+        var resolved = await projectsQuery.ResolveSingleAsync();
+        return resolved?.Id;
     }
 }

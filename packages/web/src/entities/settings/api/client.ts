@@ -1,5 +1,5 @@
 import { request } from '../../../shared/api/client'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo } from '../model/types'
+import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 
 export function getConfig() {
   return request<GeneralConfig>('/config')
@@ -84,6 +84,14 @@ export function setStageModels(stageModels: Record<string, string> | null) {
     method: 'PUT',
     body: JSON.stringify({ stageModels }),
   })
+}
+
+export function getWorkflowProfiles() {
+  return request<WorkflowProfileInfo[]>('/workflow-profiles')
+}
+
+export function getWorkflowProfile(id: string) {
+  return request<WorkflowProfileDetail>(`/workflow-profiles/${id}`)
 }
 
 export function getSystemInfo() {

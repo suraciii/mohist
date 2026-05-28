@@ -5,7 +5,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { IssueStage, IssueStatus, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue } from '../../../entities/issue'
-import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline } from '../../../entities/issue'
+import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
 import { WorkflowConvergencePanel } from '../../../widgets/issue-workflow'
@@ -19,6 +19,7 @@ import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Textarea } from '@/shared/ui/components/textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
@@ -67,6 +68,45 @@ function formatStageName(stage: string | null | undefined): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
+}
+
+function WorkflowYamlDialog({ issueNumber }: { issueNumber: number }) {
+  const [open, setOpen] = useState(false)
+  const { data, isLoading } = useWorkflowYaml(issueNumber, open)
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors flex items-center justify-between"
+      >
+        <span className="text-sm text-gray-600">Workflow Definition (YAML)</span>
+        <span className="text-xs text-blue-600">View</span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader>
+            <DialogTitle>Workflow Definition</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto px-4 pb-4">
+            {isLoading ? (
+              <div className="space-y-2">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : data?.yaml ? (
+              <pre className="text-xs font-mono leading-relaxed text-gray-800 whitespace-pre-wrap break-all bg-gray-50 rounded-md p-4 border">
+                {data.yaml}
+              </pre>
+            ) : (
+              <p className="text-sm text-gray-400">No workflow YAML available.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
 }
 
 export function IssueDetailPage() {
@@ -393,6 +433,10 @@ export function IssueDetailPage() {
                   </div>
               )}
 
+              {issue.workflowRunId && (
+                <WorkflowYamlDialog issueNumber={issueNumber} />
+              )}
+
               {diffData?.available === true && (
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <div className="flex items-center justify-between">
@@ -543,6 +587,12 @@ export function IssueDetailPage() {
                     <dt className="text-gray-500">Issue Stage</dt>
                     <dd className="text-gray-900 font-medium">{formatStageName(issue.stage)}</dd>
                   </div>
+                  {issue.workflowProfileId && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Workflow Profile</dt>
+                      <dd className="text-gray-900 font-mono text-xs">{issue.workflowProfileId}</dd>
+                    </div>
+                  )}
                   {workflowStage && (
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Workflow Stage</dt>
@@ -561,6 +611,20 @@ export function IssueDetailPage() {
                     <div className="flex justify-between">
                       <dt className="text-gray-500">Project</dt>
                       <dd className="text-gray-900">{issue.projectName}</dd>
+                    </div>
+                  )}
+                  {issue.repository && (
+                    <div className="flex justify-between">
+                      <dt className="text-gray-500">Repository</dt>
+                      <dd className="text-gray-900">
+                        {issue.repository.name}
+                        {issue.repository.path && (
+                          <span className="text-gray-400 text-xs ml-1">({issue.repository.path})</span>
+                        )}
+                        {issue.repository.remote && (
+                          <span className="text-gray-400 text-xs ml-1">(remote)</span>
+                        )}
+                      </dd>
                     </div>
                   )}
                   <div className="flex justify-between">

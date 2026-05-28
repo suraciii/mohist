@@ -4,6 +4,7 @@ using Mohist.Server.Epics;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Storage;
+using Mohist.Server.Project.Storage;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db.Entities;
 using Mohist.Server.Workflow.Sessions.Storage;
@@ -13,6 +14,7 @@ namespace Mohist.Server.Storage.Db;
 public class MohistDbContext : DbContext
 {
     public DbSet<GrainState> GrainStates { get; set; } = null!;
+    public DbSet<ProjectEntry> Projects { get; set; } = null!;
     public DbSet<ConfigEntry> Configs { get; set; } = null!;
     public DbSet<WorkflowEventEntry> WorkflowEvents { get; set; } = null!;
     public DbSet<AgentSessionRecord> AgentSessions { get; set; } = null!;
@@ -36,6 +38,15 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Key).HasMaxLength(256);
             entity.Property(e => e.Type).HasMaxLength(256);
             entity.Property(e => e.JsonState).IsRequired();
+        });
+
+        modelBuilder.Entity<ProjectEntry>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256);
+            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.RepositoriesJson).IsRequired();
+            entity.HasIndex(e => e.Name).IsUnique();
         });
 
         modelBuilder.Entity<ConfigEntry>(entity =>
