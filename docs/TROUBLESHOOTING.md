@@ -2,6 +2,21 @@
 
 Mohist 常见问题和解决方案。
 
+## 更新后快速检查
+
+**场景**: 执行 `mo update` 后，确认本地 server 和 runner 已就绪
+
+**检查步骤**:
+1. 确认 server systemd 服务运行中: `mo server status`
+2. 确认 server HTTP 健康状态正常: `mo server health`
+3. 确认 runner systemd 服务运行中: `mo runner status`
+4. 再查看 runner 日志，确认 runner 已启动、正在连接或已连接 server，且没有持续报错: `mo runner logs`
+5. 打开 Web UI `http://localhost:3456`，确认页面正常加载
+6. 如果当前项目里已经有 issue，任选一条查看日志，确认该 issue 的 workflow 已开始产生日志: `mo issue logs <number>`
+7. 运行 `git diff --check`，确认当前工作区没有 whitespace 或 conflict marker 问题；它也是 workflow 健康门控的一部分，但不表示编译、测试或 typecheck 已通过
+
+如果以上检查均通过，即可开始或恢复 workflow 工作。如有异常，参考下方对应阶段的排查步骤。
+
 ## Plan 阶段
 
 ### Plan 产物缺失
@@ -60,7 +75,7 @@ Mohist 常见问题和解决方案。
 
 **现象**: Build 阶段完成后 `git diff --check` 失败
 
-**原因**: 生成的代码有编译错误
+**原因**: 生成的变更存在 whitespace 或 conflict marker 问题，因此未通过该健康门控
 
 **解决**:
 1. 外部 coder agent 自动修复（默认 2 次重试）
@@ -147,7 +162,7 @@ Mohist 常见问题和解决方案。
 
 **现象**: `git diff --check` 失败
 
-**原因**: 合并后的代码有问题
+**原因**: 合并后的变更存在 whitespace 或 conflict marker 问题
 
 **解决**:
 1. Integrate 阶段不自动修复此失败——这是最后防线
@@ -164,7 +179,7 @@ Mohist 常见问题和解决方案。
 1. 确认 server 运行: `mo server status`
 2. 检查浏览器 console（F12）
 3. 确认端口 3456 未被占用
-4. 重建 Web UI: `git diff --check:web`
+4. 重建 Web UI: `npm run build:web`
 
 ### 数据不刷新
 
@@ -252,6 +267,6 @@ mo attach -f
 
 1. 查看日志: `mo server logs` 或 Web UI `/logs`
 2. 查看 OpenSpec 产物: `openspec/changes/{slug}/`
-3. 运行类型检查: `git diff --check`
+3. 检查工作区 whitespace 或 conflict marker 问题: `git diff --check`
 4. 运行测试: `dotnet test Mohist.sln`
 5. 提交 Issue: https://github.com/owner/mohist/issues
