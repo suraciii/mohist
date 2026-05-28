@@ -5,33 +5,33 @@ using Mohist.Server.Storage.Db;
 
 namespace Mohist.Server.Sessions.Queries;
 
-public class SessionQueryService
+public class WorkflowAgentSessionQueryService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
-    public SessionQueryService(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowAgentSessionQueryService(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
     }
 
-    public async Task<IReadOnlyList<SessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<WorkflowAgentSessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.Sessions.AsNoTracking()
+        var rows = await db.WorkflowAgentSessions.AsNoTracking()
             .Where(s => s.WorkflowRunId == workflowRunId)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
-        return rows.Select(ToSessionDto).ToList();
+        return rows.Select(ToWorkflowAgentSessionDto).ToList();
     }
 
     public async Task<WorkflowSessionDetailDto?> GetByWorkflowAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await db.Sessions.AsNoTracking()
+        var session = await db.WorkflowAgentSessions.AsNoTracking()
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName, ct);
         if (session is null) return null;
 
-        var events = await db.SessionEvents.AsNoTracking()
+        var events = await db.WorkflowAgentSessionEvents.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync(ct);
@@ -41,21 +41,21 @@ public class SessionQueryService
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.Sessions.AsNoTracking()
+        var rows = await db.WorkflowAgentSessions.AsNoTracking()
             .Where(s => s.ProjectId == projectId && s.IssueNumber == issueNumber)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
         return rows.Select(ToWorkflowDto).ToList();
     }
 
-    public async Task<IReadOnlyList<SessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
+    public async Task<IReadOnlyList<WorkflowAgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var query = db.Sessions.AsNoTracking().Where(s => s.ProjectId == projectId);
+        var query = db.WorkflowAgentSessions.AsNoTracking().Where(s => s.ProjectId == projectId);
         if (!string.IsNullOrWhiteSpace(status)) query = query.Where(s => s.Status == status);
 
         var rows = await query.OrderByDescending(s => s.CreatedAt).Take(limit).ToListAsync(ct);
-        return rows.Select(s => new SessionInfoDto(
+        return rows.Select(s => new WorkflowAgentSessionInfoDto(
             s.IssueNumber,
             $"Issue #{s.IssueNumber}",
             s.Stage ?? string.Empty,
@@ -68,24 +68,24 @@ public class SessionQueryService
             (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o"))).ToList();
     }
 
-    public async Task<IReadOnlyList<SessionSummaryDto>> ListSummariesByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
+    public async Task<IReadOnlyList<WorkflowAgentSessionSummaryDto>> ListSummariesByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.Sessions.AsNoTracking()
+        var rows = await db.WorkflowAgentSessions.AsNoTracking()
             .Where(s => s.ProjectId == projectId && s.IssueNumber == issueNumber)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
         return rows.Select(ToSummaryDto).ToList();
     }
 
-    public async Task<SessionTranscript?> GetTranscriptAsync(string projectId, int issueNumber, string sessionId, CancellationToken ct = default)
+    public async Task<WorkflowAgentSessionTranscript?> GetTranscriptAsync(string projectId, int issueNumber, string sessionId, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var session = await db.Sessions.AsNoTracking()
+        var session = await db.WorkflowAgentSessions.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == sessionId && s.ProjectId == projectId && s.IssueNumber == issueNumber, ct);
         if (session is null) return null;
 
-        var events = await db.SessionEvents.AsNoTracking()
+        var events = await db.WorkflowAgentSessionEvents.AsNoTracking()
             .Where(e => e.SessionId == sessionId)
             .OrderBy(e => e.Sequence)
             .ToListAsync(ct);
@@ -134,7 +134,7 @@ public class SessionQueryService
             turnCount = turns.Length,
         };
 
-        return new SessionTranscript(
+        return new WorkflowAgentSessionTranscript(
             session.Id,
             session.AgentSessionId ?? session.Id,
             session.WorkId,
@@ -149,14 +149,14 @@ public class SessionQueryService
             metadata,
             turns,
             session.CompletedAt is null,
-            events.Select(e => new SessionTranscriptItem(e.Id.ToString(), e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"))).ToList());
+            events.Select(e => new WorkflowAgentSessionTranscriptItem(e.Id.ToString(), e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"))).ToList());
     }
 
     public async Task<ActivityDto> GetActivityAsync(string projectId, int? limit = null, IReadOnlyList<ActivityWaitingCardDto>? waiting = null, IReadOnlyList<string>? runnerIds = null, CancellationToken ct = default)
     {
         var take = Math.Clamp(limit ?? 50, 1, 200);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var sessions = await db.Sessions.AsNoTracking()
+        var sessions = await db.WorkflowAgentSessions.AsNoTracking()
             .Where(s => s.ProjectId == projectId)
             .OrderByDescending(s => s.CreatedAt)
             .Take(take)
@@ -180,12 +180,12 @@ public class SessionQueryService
         return new ActivityDto(summary, cards, waiting.ToList());
     }
 
-    private static async Task<Dictionary<string, SessionEventRecord>> LoadLatestEventsAsync(
+    private static async Task<Dictionary<string, WorkflowAgentSessionEventRecord>> LoadLatestEventsAsync(
         MohistDbContext db, string[] sessionIds, CancellationToken ct)
     {
         if (sessionIds.Length == 0) return [];
 
-        var latestSeqs = await db.SessionEvents.AsNoTracking()
+        var latestSeqs = await db.WorkflowAgentSessionEvents.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .GroupBy(e => e.SessionId)
             .Select(g => new { SessionId = g.Key, Sequence = g.Max(e => e.Sequence) })
@@ -193,7 +193,7 @@ public class SessionQueryService
         if (latestSeqs.Count == 0) return [];
 
         var latestBySession = latestSeqs.ToDictionary(e => e.SessionId, e => e.Sequence);
-        var events = await db.SessionEvents.AsNoTracking()
+        var events = await db.WorkflowAgentSessionEvents.AsNoTracking()
             .Where(e => sessionIds.Contains(e.SessionId))
             .ToListAsync(ct);
 
@@ -202,7 +202,7 @@ public class SessionQueryService
             .ToDictionary(e => e.SessionId);
     }
 
-    private static ActivityCardDto ToActivityCard(SessionRecord s, SessionEventRecord? latestEvent)
+    private static ActivityCardDto ToActivityCard(WorkflowAgentSessionRecord s, WorkflowAgentSessionEventRecord? latestEvent)
     {
         var lastActivityAt = (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o");
         return new ActivityCardDto(
@@ -224,7 +224,7 @@ public class SessionQueryService
             s.FailureReason);
     }
 
-    private static ActivityPreviewDto ToPreview(SessionEventRecord e)
+    private static ActivityPreviewDto ToPreview(WorkflowAgentSessionEventRecord e)
     {
         var text = ExtractPreviewText(e.PayloadJson);
         var kind = e.Type.Contains("tool", StringComparison.OrdinalIgnoreCase) ? "tool" : "text";
@@ -276,27 +276,27 @@ public class SessionQueryService
         }
     }
 
-    private static SessionDto ToSessionDto(SessionRecord s) => new(
+    private static WorkflowAgentSessionDto ToWorkflowAgentSessionDto(WorkflowAgentSessionRecord s) => new(
         s.Id, s.ProjectId, s.IssueNumber, s.WorkflowRunId, s.SessionName,
         s.WorkId, s.WorkType, s.Stage, s.Title, s.RunnerId, s.AgentSessionId,
         s.Status, s.Model, s.WorkDir, s.ChangeDir, s.ProcessPid,
         s.CreatedAt.ToString("o"), s.StartedAt?.ToString("o"), s.CompletedAt?.ToString("o"),
         s.LastDataAt?.ToString("o"), s.FailureReason, s.ExitCode);
 
-    private static WorkflowSessionDto ToWorkflowDto(SessionRecord s) => new(
+    private static WorkflowSessionDto ToWorkflowDto(WorkflowAgentSessionRecord s) => new(
         s.Id, s.WorkflowRunId, s.SessionName, s.AgentSessionId,
         s.ProjectId, s.IssueNumber == 0 ? null : s.IssueNumber, s.RunnerId,
         s.Status, s.Model, s.WorkDir, s.ProcessPid,
         s.CreatedAt.ToString("o"), s.StartedAt?.ToString("o"), s.LastDataAt?.ToString("o"),
         s.CompletedAt?.ToString("o"), s.FailureReason, s.ExitCode);
 
-    private static SessionSummaryDto ToSummaryDto(SessionRecord s) => new(
+    private static WorkflowAgentSessionSummaryDto ToSummaryDto(WorkflowAgentSessionRecord s) => new(
         s.Id, s.AgentSessionId ?? s.Id, s.WorkId, s.Title,
         s.Status, s.CreatedAt.ToString("o"), s.CompletedAt?.ToString("o"),
         s.Model, null, s.Stage, s.Title,
         s.LastDataAt?.ToString("o"), null, null, s.FailureReason);
 
-    private static SessionEventDto ToEventDto(SessionEventRecord e) => new(
+    private static WorkflowAgentSessionEventDto ToEventDto(WorkflowAgentSessionEventRecord e) => new(
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId,
         e.SessionName, e.AgentSessionId, e.WorkId, e.WorkType, e.Stage,
         e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"));

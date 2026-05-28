@@ -7,15 +7,15 @@ using Mohist.Server.Storage.Db;
 
 namespace Mohist.Server.Sessions.Grains;
 
-public sealed class SessionGrain : Grain, ISessionGrain
+public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventBus _eventBus;
-    private readonly ILogger<SessionGrain> _log;
-    private SessionRecord? _session;
+    private readonly ILogger<WorkflowAgentSessionGrain> _log;
+    private WorkflowAgentSessionRecord? _session;
     private long _nextSequence;
 
-    public SessionGrain(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<SessionGrain> log)
+    public WorkflowAgentSessionGrain(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<WorkflowAgentSessionGrain> log)
     {
         _dbFactory = dbFactory;
         _eventBus = eventBus;
@@ -27,23 +27,23 @@ public sealed class SessionGrain : Grain, ISessionGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        _session = await db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == SessionId, ct);
+        _session = await db.WorkflowAgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == SessionId, ct);
         if (_session is null) return;
-        _nextSequence = await db.SessionEvents
+        _nextSequence = await db.WorkflowAgentSessionEvents
             .Where(e => e.SessionId == SessionId)
             .Select(e => (long?)e.Sequence)
             .MaxAsync(ct) ?? 0;
     }
 
-    public async Task<SessionSnapshot> EnsureAsync(EnsureSessionCommand command)
+    public async Task<WorkflowAgentSessionSnapshot> EnsureAsync(EnsureWorkflowAgentSessionCommand command)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == SessionId)
-            ?? await db.Sessions.FirstOrDefaultAsync(s => s.WorkflowRunId == command.WorkflowRunId && s.SessionName == command.SessionName);
+        var session = await db.WorkflowAgentSessions.FirstOrDefaultAsync(s => s.Id == SessionId)
+            ?? await db.WorkflowAgentSessions.FirstOrDefaultAsync(s => s.WorkflowRunId == command.WorkflowRunId && s.SessionName == command.SessionName);
 
         if (session is null)
         {
-            session = new SessionRecord
+            session = new WorkflowAgentSessionRecord
             {
                 Id = SessionId,
                 ProjectId = command.ProjectId,
@@ -58,7 +58,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
                 Status = "created",
                 CreatedAt = DateTime.UtcNow,
             };
-            db.Sessions.Add(session);
+            db.WorkflowAgentSessions.Add(session);
             await db.SaveChangesAsync();
         }
         else
@@ -74,14 +74,14 @@ public sealed class SessionGrain : Grain, ISessionGrain
         }
 
         _session = Clone(session);
-        _nextSequence = await db.SessionEvents
+        _nextSequence = await db.WorkflowAgentSessionEvents
             .Where(e => e.SessionId == _session.Id)
             .Select(e => (long?)e.Sequence)
             .MaxAsync() ?? 0;
         return ToSnapshot(_session);
     }
 
-    public async Task<SessionSnapshot> AttachAgentAsync(AttachAgentCommand command)
+    public async Task<WorkflowAgentSessionSnapshot> AttachAgentAsync(AttachAgentCommand command)
     {
         var session = await LoadTrackedOrCreateAsync();
         if (IsTerminal(session.Status)) return ToSnapshot(session);
@@ -105,7 +105,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         return ToSnapshot(session);
     }
 
-    public async Task<IReadOnlyList<SessionEventSnapshot>> AppendEventsAsync(AppendSessionEventsCommand command)
+    public async Task<IReadOnlyList<WorkflowAgentSessionEventSnapshot>> AppendEventsAsync(AppendWorkflowAgentSessionEventsCommand command)
     {
         if (command.Events.Count == 0) return [];
 
@@ -116,7 +116,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         var domain = session.ToDomain();
         domain.RecordActivity(now);
 
-        var records = new List<SessionEventRecord>();
+        var records = new List<WorkflowAgentSessionEventRecord>();
         foreach (var e in command.Events)
         {
             if (e.Type == "agent_liveness_status")
@@ -139,7 +139,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
                     domain.Complete(now, exitCode);
             }
 
-            records.Add(new SessionEventRecord
+            records.Add(new WorkflowAgentSessionEventRecord
             {
                 SessionId = session.Id,
                 ProjectId = session.ProjectId,
@@ -164,8 +164,8 @@ public sealed class SessionGrain : Grain, ISessionGrain
         var statusChanged = records.Any(r => r.Type == "agent_liveness_status");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        db.SessionEvents.AddRange(records);
-        db.Sessions.Update(session);
+        db.WorkflowAgentSessionEvents.AddRange(records);
+        db.WorkflowAgentSessions.Update(session);
         await db.SaveChangesAsync();
         _session = Clone(session);
 
@@ -180,7 +180,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         return records.Select(ToSnapshot).ToList();
     }
 
-    public async Task<SessionSnapshot?> FailIfRunningAsync(string reason)
+    public async Task<WorkflowAgentSessionSnapshot?> FailIfRunningAsync(string reason)
     {
         var session = await LoadTrackedOrCreateAsync();
         if (IsTerminal(session.Status)) return ToSnapshot(session);
@@ -193,18 +193,18 @@ public sealed class SessionGrain : Grain, ISessionGrain
         return ToSnapshot(session);
     }
 
-    public async Task<SessionSnapshot?> GetAsync()
+    public async Task<WorkflowAgentSessionSnapshot?> GetAsync()
     {
         if (_session is not null) return ToSnapshot(_session);
         await using var db = await _dbFactory.CreateDbContextAsync();
-        _session = await db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == SessionId);
+        _session = await db.WorkflowAgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == SessionId);
         return _session is null ? null : ToSnapshot(_session);
     }
 
-    private async Task<SessionRecord> LoadTrackedOrCreateAsync()
+    private async Task<WorkflowAgentSessionRecord> LoadTrackedOrCreateAsync()
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == SessionId);
+        var session = await db.WorkflowAgentSessions.FirstOrDefaultAsync(s => s.Id == SessionId);
         if (session is not null) return session;
 
         var parts = SessionId.Split('/');
@@ -212,7 +212,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         var workflowRunId = parts.Length > 1 ? parts[1] : string.Empty;
         var sessionName = parts.Length > 2 ? parts[2] : string.Empty;
 
-        session = new SessionRecord
+        session = new WorkflowAgentSessionRecord
         {
             Id = SessionId,
             ProjectId = projectId,
@@ -221,21 +221,21 @@ public sealed class SessionGrain : Grain, ISessionGrain
             Status = "created",
             CreatedAt = DateTime.UtcNow,
         };
-        db.Sessions.Add(session);
+        db.WorkflowAgentSessions.Add(session);
         await db.SaveChangesAsync();
         _session = Clone(session);
         return session;
     }
 
-    private async Task SaveAsync(SessionRecord session)
+    private async Task SaveAsync(WorkflowAgentSessionRecord session)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        db.Sessions.Update(session);
+        db.WorkflowAgentSessions.Update(session);
         await db.SaveChangesAsync();
         _session = Clone(session);
     }
 
-    private void EmitStarted(SessionRecord session) => _eventBus.Emit("coder_session_started", new
+    private void EmitStarted(WorkflowAgentSessionRecord session) => _eventBus.Emit("coder_session_started", new
     {
         issueId = session.IssueNumber.ToString(),
         session.ProjectId,
@@ -248,7 +248,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         title = session.Title,
     });
 
-    private void EmitTranscriptEntry(SessionRecord session, SessionEventRecord entry)
+    private void EmitTranscriptEntry(WorkflowAgentSessionRecord session, WorkflowAgentSessionEventRecord entry)
     {
         var text = ExtractText(entry.PayloadJson);
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
@@ -277,7 +277,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         }
     }
 
-    private void EmitStatusChanged(SessionRecord session) => _eventBus.Emit("coder_session_status_changed", new
+    private void EmitStatusChanged(WorkflowAgentSessionRecord session) => _eventBus.Emit("coder_session_status_changed", new
     {
         issueId = session.IssueNumber.ToString(),
         session.ProjectId,
@@ -288,7 +288,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         failureReason = session.FailureReason,
     });
 
-    private void EmitTerminal(SessionRecord session, string terminal) => _eventBus.Emit(terminal switch
+    private void EmitTerminal(WorkflowAgentSessionRecord session, string terminal) => _eventBus.Emit(terminal switch
     {
         "failed" => "coder_session_failed",
         "cancelled" => "coder_session_cancelled",
@@ -305,7 +305,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
 
     private static bool IsTerminal(string status) => status is "completed" or "failed" or "cancelled";
 
-    private static SessionRecord Clone(SessionRecord s) => new()
+    private static WorkflowAgentSessionRecord Clone(WorkflowAgentSessionRecord s) => new()
     {
         Id = s.Id,
         ProjectId = s.ProjectId,
@@ -332,7 +332,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         ExitCode = s.ExitCode,
     };
 
-    private static SessionSnapshot ToSnapshot(SessionRecord s) => new(
+    private static WorkflowAgentSessionSnapshot ToSnapshot(WorkflowAgentSessionRecord s) => new(
         s.Id,
         s.ProjectId,
         s.IssueNumber == 0 ? null : s.IssueNumber,
@@ -356,7 +356,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         s.FailureReason,
         s.ExitCode);
 
-    private static SessionEventSnapshot ToSnapshot(SessionEventRecord e) => new(
+    private static WorkflowAgentSessionEventSnapshot ToSnapshot(WorkflowAgentSessionEventRecord e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.ProjectId,
@@ -391,7 +391,7 @@ public sealed class SessionGrain : Grain, ISessionGrain
         return string.Empty;
     }
 
-    private static long DurationMs(SessionRecord session)
+    private static long DurationMs(WorkflowAgentSessionRecord session)
     {
         var start = session.StartedAt ?? session.CreatedAt;
         var end = session.CompletedAt ?? DateTime.UtcNow;

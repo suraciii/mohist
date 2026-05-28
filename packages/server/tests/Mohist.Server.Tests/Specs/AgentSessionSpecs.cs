@@ -44,14 +44,14 @@ public class AgentSessionSpecs
             }
         });
 
-        var sessions = await _client.GetDataAsync<SessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
+        var sessions = await _client.GetDataAsync<WorkflowAgentSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
         Assert.Contains(sessions, s => s.Id == session.Id && s.Status == "completed");
 
-        var detail = await _client.GetDataAsync<SessionTranscriptDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
         Assert.Equal(session.Id, detail.Id);
         Assert.Contains("hello from agent", JsonSerializer.Serialize(detail.Turns));
 
-        var current = await _client.GetDataAsync<SessionInfoDto[]>($"/api/agent/sessions?projectId={project.Id}");
+        var current = await _client.GetDataAsync<WorkflowAgentSessionInfoDto[]>($"/api/agent/sessions?projectId={project.Id}");
         Assert.Contains(current, s => s.SessionId == session.Id);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
@@ -66,13 +66,13 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task SessionGrain_ForAgentWork_CreatesDeterministicSessionAndKeepsPollIdempotent()
+    public async Task WorkflowAgentSessionGrain_ForAgentWork_CreatesDeterministicSessionAndKeepsPollIdempotent()
     {
         var (_, _, work, session) = await CreateStartedAgentSessionAsync("idempotent", start: false);
         Assert.Equal(GrainKey.Session(work.Issue!.ProjectId, work.WorkflowRunId, work.WorkId), session.Id);
 
         var repeated = await _fixture.Grains
-            .GetGrain<ISessionGrain>(session.Id)
+            .GetGrain<IWorkflowAgentWorkflowAgentSessionGrain>(session.Id)
             .GetAsync();
         Assert.NotNull(repeated);
         Assert.Equal(session.Id, repeated.Id);
@@ -87,9 +87,9 @@ public class AgentSessionSpecs
             PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "first"),
             PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "second"));
 
-        var detail = await _client.GetDataAsync<SessionTranscriptDto>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var sequences = await db.SessionEvents.AsNoTracking()
+        var sequences = await db.WorkflowAgentSessionEvents.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
@@ -126,7 +126,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<ISessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentWorkflowAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("completed", grainSession.Status);
         Assert.Equal(0, grainSession.ExitCode);
@@ -138,9 +138,9 @@ public class AgentSessionSpecs
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister");
 
-        await _fixture.Grains.GetGrain<ISessionGrain>(session.Id).FailIfRunningAsync("Runner unregistered");
+        await _fixture.Grains.GetGrain<IWorkflowAgentWorkflowAgentSessionGrain>(session.Id).FailIfRunningAsync("Runner unregistered");
 
-        var grainSession = await _fixture.Grains.GetGrain<ISessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentWorkflowAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
         Assert.Contains("unregistered", grainSession.FailureReason);
@@ -166,7 +166,7 @@ public class AgentSessionSpecs
             exitCode = 1
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<ISessionGrain>(work.Session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentWorkflowAgentSessionGrain>(work.Session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
         Assert.Equal("ACP agent requires 'prompt'", grainSession.FailureReason);
@@ -219,7 +219,7 @@ public class AgentSessionSpecs
         return default!;
     }
 
-    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, SessionSnapshot Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null)
+    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, WorkflowAgentSessionSnapshot Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null)
     {
         var projectName = $"session-grain-{name}-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -234,8 +234,8 @@ public class AgentSessionSpecs
             Stage: "Build",
             Title: issueTitle,
             Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
-        var grain = _fixture.Grains.GetGrain<ISessionGrain>(GrainKey.Session(project.Id, work.WorkflowRunId, work.WorkId));
-        var session = await grain.EnsureAsync(new EnsureSessionCommand(project.Id, issue.Number, work.WorkflowRunId, work.WorkId, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
+        var grain = _fixture.Grains.GetGrain<IWorkflowAgentWorkflowAgentSessionGrain>(GrainKey.Session(project.Id, work.WorkflowRunId, work.WorkId));
+        var session = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, work.WorkId, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
         if (start)
             await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
@@ -251,11 +251,11 @@ public class AgentSessionSpecs
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(int Number, string Title);
-    private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber, SessionSnapshotDto? Session);
-    private sealed record SessionSnapshotDto(string Id, string WorkflowRunId, string SessionName);
-    private sealed record SessionSummaryDto(string Id, string Status);
-    private sealed record SessionTranscriptDto(string Id, JsonElement Turns);
-    private sealed record SessionInfoDto(string SessionId);
+    private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber, WorkflowAgentWorkflowAgentSessionSnapshot? Session);
+    private sealed record WorkflowAgentWorkflowAgentSessionSnapshot(string Id, string WorkflowRunId, string SessionName);
+    private sealed record WorkflowAgentSessionSummaryDto(string Id, string Status);
+    private sealed record WorkflowAgentSessionTranscript(string Id, JsonElement Turns);
+    private sealed record WorkflowAgentSessionInfoDto(string SessionId);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     private sealed record ActivitySlotUsageDto(int Active, int Max);

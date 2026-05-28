@@ -77,7 +77,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         foreach (var (workId, workflowRunId) in agentWorkMappings)
         {
-var session = GrainFactory.GetGrain<ISessionGrain>(GrainKey.Session(_projectId, workflowRunId, workId));
+var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(_projectId, workflowRunId, workId));
                 await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
         }
     }
@@ -237,7 +237,7 @@ var session = GrainFactory.GetGrain<ISessionGrain>(GrainKey.Session(_projectId, 
 
         foreach (var (workId, workflowRunId) in timedOutAgentWork)
         {
-            var session = GrainFactory.GetGrain<ISessionGrain>(GrainKey.Session(_projectId, workflowRunId, workId));
+            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(_projectId, workflowRunId, workId));
             await session.FailIfRunningAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
     }

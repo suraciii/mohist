@@ -6,5 +6,5 @@ public static class GrainKey
     public static string IssueCounter(string projectId) => projectId;
     public static string WorkflowBacklog(string projectId) => projectId;
     public static string RunnerRegistry(string projectId) => projectId;
-    public static string Session(string projectId, string workflowRunId, string sessionName) => $"{projectId}/{workflowRunId}/{sessionName}";
+    public static string WorkflowAgentSession(string projectId, string workflowRunId, string sessionName) => $"{projectId}/{workflowRunId}/{sessionName}";
 }

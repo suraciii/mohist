@@ -34,17 +34,17 @@ export class ServerConnection {
     }
   }
 
-  async ensureSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
+  async ensureWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
     const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/ensure`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session ensure failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
   }
 
-  async attachSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+  async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
   }
 
-  async sessionEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+  async workflowAgentSessionEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/events`, body, signal)
   }
 

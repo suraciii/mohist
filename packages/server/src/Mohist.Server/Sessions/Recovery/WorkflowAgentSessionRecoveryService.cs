@@ -7,15 +7,15 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Sessions.Recovery;
 
-public sealed class SessionRecoveryService : IHostedService
+public sealed class WorkflowAgentSessionRecoveryService : IHostedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly ILogger<SessionRecoveryService> _log;
+    private readonly ILogger<WorkflowAgentSessionRecoveryService> _log;
     private readonly string _workflowType = typeof(WorkflowGrainState).FullName!;
 
-    public SessionRecoveryService(
+    public WorkflowAgentSessionRecoveryService(
         IDbContextFactory<MohistDbContext> dbFactory,
-        ILogger<SessionRecoveryService> log)
+        ILogger<WorkflowAgentSessionRecoveryService> log)
     {
         _dbFactory = dbFactory;
         _log = log;
@@ -24,7 +24,7 @@ public sealed class SessionRecoveryService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var openSessions = await db.Sessions
+        var openSessions = await db.WorkflowAgentSessions
             .Where(s => s.Status != "completed" && s.Status != "failed" && s.Status != "cancelled")
             .ToListAsync(cancellationToken);
 
