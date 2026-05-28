@@ -65,7 +65,7 @@ export class RunnerHost {
     while (!signal.aborted) {
       try {
         const coderModels = await discoverOpencodeModels(signal)
-        await this.connection.connect({ capabilities: [], coderModels }, signal)
+        await this.connection.connect({ capabilities: [], projectId: this.options.projectId, coderModels }, signal)
         return
       } catch (error) {
         console.error(`runner registration failed; retrying in ${this.options.pollIntervalMs}ms`, error)

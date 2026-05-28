@@ -1,5 +1,6 @@
+using Mohist.Server.Grains;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Queries;
 using Mohist.Server.Config;
 using Mohist.Server.Workflow.Projection;
 
@@ -13,7 +14,7 @@ public static class AgentRoutes
 
         group.MapGet("/status", async (string projectId, IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
         {
-            var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+            var registry = grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId));
             var runnerIds = await registry.ListRunnerIdsAsync();
             var activeAgents = await projection.ListActiveAgentsAsync(projectId);
             var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
@@ -21,14 +22,15 @@ public static class AgentRoutes
             return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runnerIds, maxConcurrentAgents));
         });
 
-        group.MapGet("/sessions", async (string projectId, string? status, int? limit, IGrainFactory grains, AgentSessionService sessions) =>
+        group.MapGet("/sessions", async (string projectId, string? status, int? limit, SessionQueryService sessions) =>
         {
             return ApiResults.Ok(await sessions.ListCurrentAsync(projectId, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (string projectId, int? limit, IGrainFactory grains, AgentActivityService activity, CancellationToken ct) =>
+        group.MapGet("/activity", async (string projectId, int? limit, SessionQueryService sessions, IGrainFactory grains, WorkflowProjectionService projection, CancellationToken ct) =>
         {
-            return ApiResults.Ok(await activity.GetAsync(projectId, limit, ct));
+            var runnerIds = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnerIdsAsync();
+            return ApiResults.Ok(await sessions.GetActivityAsync(projectId, limit, runnerIds: runnerIds, ct: ct));
         });
 
         return app;

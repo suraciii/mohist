@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { AgentSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, Stream } from "@agentclientprotocol/sdk"
 import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
-import type { ActionContext, RunnerTelemetry } from "../src/core/types.js"
+import type { ActionContext } from "../src/core/types.js"
 
 afterEach(() => setAcpProcessFactoryForTest(null))
 
@@ -60,13 +60,13 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.find((entry) => entry.event === "permissionResponse" && entry.outcome?.optionId === "allow")).toBeTruthy()
   })
 
-  it("AgentMessageChunkArrives_SessionUpdateHandled_PersistsRawEventAndAccumulatesAgentText", async () => {
+  it("AgentMessageChunkArrives_SessionUpdateHandled_ReturnsAgentTextInOutput", async () => {
     const fixture = createFixture("basic")
 
     const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
 
+    expect(result.status).toBe("success")
     expect(JSON.parse(result.output ?? "{}").text).toBe("hello")
-    expect(fixture.telemetry.collectedEvents.some((event) => event.type === "agent_message_chunk" && event.payload.content.text === "hello")).toBe(true)
   })
 
   it("ToolEventMissingToolNameButHasProviderId_ToolCallUpdateHandled_InfersToolNameAndReusesToolCallId", async () => {
@@ -75,11 +75,6 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(fixture.context({ prompt: "use tools" }))
 
     expect(result.status).toBe("success")
-    const toolEvents = fixture.telemetry.collectedEvents.filter((event) => event.type === "tool_call" || event.type === "tool_call_update")
-    expect(toolEvents).toHaveLength(2)
-    expect(toolEvents[0].payload.toolCall.toolName).toBe("bash")
-    expect(toolEvents[0].payload.toolCall.toolCallId).toBe("provider-tool-1")
-    expect(toolEvents[1].payload.toolCall.toolCallId).toBe("provider-tool-1")
   })
 
   it("RunningSessionExceedsQuietThreshold_LivenessMonitored_EntersProbingAndSendsProbePrompt", async () => {
@@ -88,8 +83,6 @@ describe("mohist/acp-agent", () => {
     const result = await acpAgentAction(fixture.context({ prompt: "long task", livenessQuietThresholdMs: 30, probeTimeoutMs: 500, timeout: 2_000 }))
 
     expect(result.status).toBe("success")
-    expect(fixture.telemetry.statuses.some((status) => status.status === "probing")).toBe(true)
-    expect(fixture.telemetry.statuses.some((status) => status.status === "running")).toBe(true)
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
@@ -107,12 +100,10 @@ describe("mohist/acp-agent", () => {
 })
 
 function createFixture(scenario: Scenario) {
-  const telemetry = createTelemetry()
   const agent = new FakeAcpAgent(scenario)
   setAcpProcessFactoryForTest(() => createFakeProcess(agent))
   return {
     agent,
-    telemetry,
     context(withInput: Record<string, unknown>, signal = new AbortController().signal): ActionContext {
       return {
         workflowRunId: "workflow-1",
@@ -125,8 +116,8 @@ function createFixture(scenario: Scenario) {
         variables: { project: { path: "D:/fake/work" } } as never,
         workDir: "D:/fake/work",
         signal,
-        session: { id: "session-row-1", projectId: "project-1", issueNumber: 7, workflowRunId: "workflow-1", workId: "work-1", stage: "build", title: "Build task" },
-        telemetry,
+        projectId: "project-1",
+        issueNumber: 7,
       }
     },
   }
@@ -239,18 +230,4 @@ function linkedStreams(): [Stream, Stream] {
     { writable: clientToAgent.writable, readable: agentToClient.readable },
     { writable: agentToClient.writable, readable: clientToAgent.readable },
   ]
-}
-
-function createTelemetry(): RunnerTelemetry & { startedBodies: unknown[]; collectedEvents: Array<{ type: string; payload: any }>; completedBodies: unknown[]; statuses: any[] } {
-  const telemetry = {
-    startedBodies: [] as unknown[],
-    collectedEvents: [] as Array<{ type: string; payload: any }>,
-    completedBodies: [] as unknown[],
-    statuses: [] as any[],
-    async started(_sessionId: string, body: unknown) { telemetry.startedBodies.push(body) },
-    async events(_sessionId: string, events: unknown[]) { telemetry.collectedEvents.push(...events as Array<{ type: string; payload: any }>) },
-    async completed(_sessionId: string, body: unknown) { telemetry.completedBodies.push(body) },
-    async status(_sessionId: string, body: unknown) { telemetry.statuses.push(body) },
-  }
-  return telemetry
 }

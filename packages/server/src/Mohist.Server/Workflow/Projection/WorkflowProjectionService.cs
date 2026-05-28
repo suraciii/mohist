@@ -41,7 +41,7 @@ public class WorkflowProjectionService
     public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(string? projectId = null, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var query = db.AgentSessions.AsNoTracking()
+        var query = db.Sessions.AsNoTracking()
             .Where(s => s.CompletedAt == null && (s.Status == "created" || s.Status == "running" || s.Status == "probing"));
         if (!string.IsNullOrWhiteSpace(projectId)) query = query.Where(s => s.ProjectId == projectId);
 
@@ -64,13 +64,13 @@ public class WorkflowProjectionService
             var lastActivity = (session.LastDataAt ?? session.StartedAt ?? session.CreatedAt).ToString("o");
 
             result.Add(new ActiveAgentDto(
-                session.RunnerId,
+                session.RunnerId ?? string.Empty,
                 $"issue_{session.ProjectId}_{session.IssueNumber}",
                 session.IssueNumber,
                 session.ProjectId,
                 session.WorkflowRunId,
-                session.WorkId,
-                session.WorkType,
+                session.WorkId ?? string.Empty,
+                session.WorkType ?? string.Empty,
                 session.Stage,
                 session.Title,
                 session.Id,
@@ -78,7 +78,7 @@ public class WorkflowProjectionService
                 lastActivity,
                 new ActiveAgentProgressDto(
                     session.Stage,
-                    new ActiveWorkItemDto(session.WorkType, session.WorkId, session.Title ?? session.WorkId),
+                    new ActiveWorkItemDto(session.WorkType ?? "task", session.WorkId ?? session.WorkflowRunId, session.Title ?? session.WorkId ?? session.WorkflowRunId),
                     new TaskProgressDto(completed, total),
                     lastActivity)));
         }
@@ -86,7 +86,7 @@ public class WorkflowProjectionService
         return result;
     }
 
-    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<AgentSessionRecord> sessions)
+    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<SessionRecord> sessions)
     {
         var eventList = events.ToList();
         var stages = status.Stages
@@ -103,7 +103,7 @@ public class WorkflowProjectionService
             status.AvailableActions.Select(a => new AvailableActionDto(a.Name, a.Label, a.Target)).ToList());
     }
 
-    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<AgentSessionRecord> sessions)
+    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<SessionRecord> sessions)
     {
         var stageEvents = events.Where(e => e.Stage == stage.Stage).ToList();
         var startedAt = stageEvents.FirstOrDefault()?.CreatedAt;
@@ -141,10 +141,10 @@ public class WorkflowProjectionService
             stage.Approval is null ? null : new ApprovalDto(stage.Approval.Status, stage.Approval.Output, stage.Approval.RequestedAt, stage.Approval.RespondedAt));
     }
 
-    private async Task<IReadOnlyList<AgentSessionRecord>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
+    private async Task<IReadOnlyList<SessionRecord>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.AgentSessions.AsNoTracking()
+        return await db.Sessions.AsNoTracking()
             .Where(s => s.WorkflowRunId == workflowRunId)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);

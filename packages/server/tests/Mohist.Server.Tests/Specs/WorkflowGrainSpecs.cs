@@ -97,7 +97,7 @@ public abstract class WorkflowGrainSpecs
     {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host"));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project"));
         return runnerId;
     }
 
@@ -131,7 +131,7 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ClearBacklogAsync()
     {
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
         await backlog.ClearAsync();
     }
 

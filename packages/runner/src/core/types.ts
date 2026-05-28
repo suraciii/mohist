@@ -13,18 +13,6 @@ export interface WorkDispatchResponse {
   projectId?: string | null
   issueId?: string | null
   issueNumber?: number | null
-  session?: AgentSessionContext | null
-}
-
-export interface AgentSessionContext {
-  id: string
-  projectId: string
-  issueNumber: number
-  workflowRunId: string
-  workId: string
-  stage?: string | null
-  title?: string | null
-  externalSessionId?: string | null
 }
 
 export interface WorkItem {
@@ -36,7 +24,8 @@ export interface WorkItem {
   uses?: string | null
   with?: JsonObject | null
   variables?: JsonObject | null
-  session?: AgentSessionContext | null
+  projectId?: string | null
+  issueNumber?: number | null
 }
 
 export interface WorkItemResult {
@@ -57,18 +46,11 @@ export interface ActionContext {
   variables: JsonObject
   workDir: string
   signal: AbortSignal
-  session?: AgentSessionContext | null
-  telemetry?: RunnerTelemetry
+  projectId?: string | null
+  issueNumber?: number | null
   acpSessionManager?: import("../runtime/acp-connection.js").AcpSessionManager | null
   acpConnection?: import("../runtime/acp-connection.js").SharedAcpConnection | null
   serverConnection?: import("../server/connection.js").ServerConnection | null
-}
-
-export interface RunnerTelemetry {
-  started(sessionId: string, body: unknown, signal: AbortSignal): Promise<void>
-  events(sessionId: string, events: unknown[], signal: AbortSignal): Promise<void>
-  completed(sessionId: string, body: unknown, signal: AbortSignal): Promise<void>
-  status?(sessionId: string, body: unknown, signal: AbortSignal): Promise<void>
 }
 
 export interface ActionResult {
@@ -81,6 +63,7 @@ export interface ActionResult {
 export interface RunnerOptions {
   serverUrl: string
   runnerId: string
+  projectId: string
   runnerRoot: string
   pollIntervalMs: number
   heartbeatIntervalMs: number
@@ -88,6 +71,7 @@ export interface RunnerOptions {
 
 export interface RunnerRegistration {
   capabilities: string[]
+  projectId: string
   hostname?: string
   coderModels?: string[]
 }

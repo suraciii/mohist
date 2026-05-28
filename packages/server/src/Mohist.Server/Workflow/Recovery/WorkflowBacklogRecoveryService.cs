@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Grains;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -33,13 +34,13 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
             .ToListAsync(cancellationToken);
 
         var recovered = 0;
-        var backlog = _grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
 
         foreach (var row in rows)
         {
-            if (!TryRestoreRunnableWorkflow(row.JsonState, out var hasWork)) continue;
+            if (!TryRestoreRunnableWorkflow(row.JsonState, out var projectId, out var hasWork)) continue;
             if (!hasWork) continue;
 
+            var backlog = _grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId ?? "default"));
             await backlog.RegisterAsync(row.Key);
             recovered++;
         }
@@ -50,8 +51,9 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private static bool TryRestoreRunnableWorkflow(string jsonState, out bool hasWork)
+    private static bool TryRestoreRunnableWorkflow(string jsonState, out string? projectId, out bool hasWork)
     {
+        projectId = null;
         hasWork = false;
 
         try
@@ -59,6 +61,8 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
             var state = JsonSerializer.Deserialize<WorkflowGrainState>(jsonState);
             if (state?.StageDefinitions is null || state.Run is null || state.Lease is not null)
                 return false;
+
+            projectId = state.Correlation?.ProjectId;
 
             var run = WorkflowRun.Restore(state.StageDefinitions, state.Run);
             if (run.Status != WorkflowRunStatus.Running)

@@ -7,15 +7,15 @@ using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Sessions.Recovery;
 
-public sealed class AgentSessionRecoveryService : IHostedService
+public sealed class SessionRecoveryService : IHostedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly ILogger<AgentSessionRecoveryService> _log;
+    private readonly ILogger<SessionRecoveryService> _log;
     private readonly string _workflowType = typeof(WorkflowGrainState).FullName!;
 
-    public AgentSessionRecoveryService(
+    public SessionRecoveryService(
         IDbContextFactory<MohistDbContext> dbFactory,
-        ILogger<AgentSessionRecoveryService> log)
+        ILogger<SessionRecoveryService> log)
     {
         _dbFactory = dbFactory;
         _log = log;
@@ -24,7 +24,7 @@ public sealed class AgentSessionRecoveryService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var openSessions = await db.AgentSessions
+        var openSessions = await db.Sessions
             .Where(s => s.Status != "completed" && s.Status != "failed" && s.Status != "cancelled")
             .ToListAsync(cancellationToken);
 
@@ -61,7 +61,7 @@ public sealed class AgentSessionRecoveryService : IHostedService
         if (recovered == 0) return;
 
         await db.SaveChangesAsync(cancellationToken);
-        _log.LogInformation("Recovered {Count} stale agent sessions from terminal workflow state", recovered);
+        _log.LogInformation("Recovered {Count} stale sessions from terminal workflow state", recovered);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

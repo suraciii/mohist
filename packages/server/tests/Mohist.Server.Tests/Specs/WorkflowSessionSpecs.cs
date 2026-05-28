@@ -15,29 +15,29 @@ public class WorkflowSessionSpecs
     }
 
     [Fact]
-    public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInWorkflowSessionOrder()
+    public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder()
     {
+        var projectId = $"proj_{Guid.NewGuid():N}";
         var workflowRunId = $"wr_{Guid.NewGuid():N}";
         var sessionName = "builder";
 
-        var ensured = await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/workflow-sessions/{workflowRunId}/{sessionName}/ensure", new
+        var ensured = await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/ensure", new
         {
             workId = "proposal",
             workType = "task",
             stage = "plan",
             title = "Generate proposal",
-            projectId = "project-1",
             issueNumber = 7,
         });
-        await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/workflow-sessions/{workflowRunId}/{sessionName}/attach", new
+        await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/attach", new
         {
-            acpSessionId = "acp-1",
+            agentSessionId = "acp-1",
             workDir = "/workspace",
             model = "openai/gpt-4o",
             processPid = 123,
         });
 
-        await PostRawAsync<WorkflowSessionEventDto[]>($"/api/runner/runner-1/workflow-sessions/{workflowRunId}/{sessionName}/events", new
+        await PostRawAsync<SessionEventDto[]>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/events", new
         {
             workId = "proposal",
             workType = "task",
@@ -48,17 +48,19 @@ public class WorkflowSessionSpecs
                 new { type = "agent_message_chunk", payload = new { content = new { text = "done" } } },
             },
         });
-        await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/workflow-sessions/{workflowRunId}/{sessionName}/complete", new
+        await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/events", new
         {
-            status = "completed",
-            exitCode = 0,
+            events = new object[]
+            {
+                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+            },
         });
 
         var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflows/{workflowRunId}/sessions/{sessionName}");
 
         Assert.Equal(workflowRunId, ensured.WorkflowRunId);
         Assert.Equal(sessionName, detail.Session.SessionName);
-        Assert.Equal("acp-1", detail.Session.AcpSessionId);
+        Assert.Equal("acp-1", detail.Session.AgentSessionId);
         Assert.Equal("completed", detail.Session.Status);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
         Assert.Equal([1, 2], detail.Events.Select(e => e.Sequence).ToArray());
@@ -73,7 +75,7 @@ public class WorkflowSessionSpecs
         return (await response.Content.ReadFromJsonAsync<T>(new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)))!;
     }
 
-    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AcpSessionId, string Status, string? Model);
-    private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, WorkflowSessionEventDto[] Events);
-    private sealed record WorkflowSessionEventDto(long Sequence, string Type, string? WorkId);
+    private sealed record WorkflowSessionDto(string Id, string WorkflowRunId, string SessionName, string? AgentSessionId, string Status, string? Model);
+    private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, SessionEventDto[] Events);
+    private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
 }

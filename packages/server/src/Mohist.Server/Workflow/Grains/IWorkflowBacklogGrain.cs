@@ -12,7 +12,7 @@ public interface IWorkflowBacklogGrain : IGrainWithStringKey
 
 public static class WorkflowBacklogKeys
 {
-    public const string Key = "default";
+    public static string ForProject(string projectId) => projectId;
 }
 
 [GenerateSerializer]
