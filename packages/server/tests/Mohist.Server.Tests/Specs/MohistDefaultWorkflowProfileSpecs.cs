@@ -78,6 +78,19 @@ public class MohistDefaultWorkflowProfileSpecs
     }
 
     [Fact]
+    public void ArtifactPrompts_RequireCanonicalOpenSpecChangeDirectory()
+    {
+        var prompts = new FilePromptLoader().LoadAll();
+
+        foreach (var name in new[] { "proposal", "specs", "design", "tasks", "self-review", "review" })
+        {
+            Assert.Contains("<path_contract>", prompts[name]);
+            Assert.Contains("Use `${{ openspecChangeDir }}` exactly as the change directory.", prompts[name]);
+            Assert.Contains("Do not create or use a title slug", prompts[name]);
+        }
+    }
+
+    [Fact]
     public void AgentConfig_BuildsFlatAgentVariableAndStageOverrides()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
