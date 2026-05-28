@@ -57,13 +57,13 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     {
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host"));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project"));
         return runnerId;
     }
 
     private async Task ClearBacklogAsync()
     {
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
         await backlog.ClearAsync();
     }
 
@@ -144,7 +144,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.NotNull(work);
         await runner.ReportAsync(work.WorkId, new WorkDispatchResult("failed", "boom"));
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
         var running = await backlog.ListRunningAsync();
         Assert.All(running, r => Assert.NotEqual(workflowId, r.WorkflowId));
     }
@@ -190,7 +190,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         await workflow.StartAsync(SingleStage());
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
         var waiting = await backlog.ListWaitingAsync();
         Assert.Contains(workflowId, waiting);
 
@@ -226,7 +226,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.Equal("checks", check.WorkType);
         await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
         var running = await backlog.ListRunningAsync();
         Assert.All(running, r => Assert.NotEqual(workflowId, r.WorkflowId));
     }

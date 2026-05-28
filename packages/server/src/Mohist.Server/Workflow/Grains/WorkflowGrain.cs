@@ -1,3 +1,4 @@
+using Mohist.Server.Grains;
 using System.Text.Json;
 using Mohist.Server.Events;
 using Mohist.Server.Runner.Grains;
@@ -435,7 +436,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return;
         if (_run.Status is WorkflowRunStatus.Completed or WorkflowRunStatus.Failed)
         {
-            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(_correlation?.ProjectId ?? string.Empty));
             await backlog.ReleaseAsync(GrainKey);
             _log.LogInformation("Workflow {Id} released from backlog (status={Status})", GrainKey, _run.Status);
         }
@@ -443,7 +444,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task RegisterToBacklogAsync()
     {
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(_correlation?.ProjectId ?? string.Empty));
         await backlog.RegisterAsync(GrainKey);
         _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
     }

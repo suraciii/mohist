@@ -1,3 +1,4 @@
+using Mohist.Server.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Grains;
 
@@ -7,6 +8,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
+    private string _projectId = string.Empty;
     private readonly HashSet<string> _assignedWorkflows = [];
     private readonly Dictionary<string, string> _workToWorkflow = new();
     private readonly Dictionary<string, WorkDispatch> _workById = new();
@@ -39,9 +41,10 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task RegisterAsync(RunnerInfo info)
     {
         _info = info;
+        _projectId = info.ProjectId;
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(_projectId));
         await registry.RegisterAsync(info);
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
@@ -62,7 +65,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
         _workById.Clear();
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(_projectId));
         await registry.UnregisterAsync(RunnerId);
 
         foreach (var wfId in workflows)
@@ -74,8 +77,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         foreach (var (workId, workflowRunId) in agentWorkMappings)
         {
-            var session = GrainFactory.GetGrain<IAgentSessionGrain>(AgentSessionGrainKeys.ForWork(workflowRunId, workId));
-            await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
+var session = GrainFactory.GetGrain<ISessionGrain>(GrainKey.Session(_projectId, workflowRunId, workId));
+                await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
         }
     }
 
@@ -107,7 +110,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             }
         }
 
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.Key);
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(GrainKey.WorkflowBacklog(_projectId));
         var claimedId = await backlog.ClaimAsync(RunnerId);
         if (claimedId is not null)
         {
@@ -222,7 +225,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         _workToWorkflow.Clear();
         _workById.Clear();
         _status = RunnerStatus.Offline;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(_projectId));
         await registry.UnregisterAsync(RunnerId);
 
         foreach (var wfId in timedOutWorkflows)
@@ -234,7 +237,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         foreach (var (workId, workflowRunId) in timedOutAgentWork)
         {
-            var session = GrainFactory.GetGrain<IAgentSessionGrain>(AgentSessionGrainKeys.ForWork(workflowRunId, workId));
+            var session = GrainFactory.GetGrain<ISessionGrain>(GrainKey.Session(_projectId, workflowRunId, workId));
             await session.FailIfRunningAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
     }

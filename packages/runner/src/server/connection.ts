@@ -25,7 +25,7 @@ export class ServerConnection {
   }
 
   async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
-    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workId: work.workId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode }), signal })
+    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workId: work.workId, projectId: work.projectId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode }), signal })
     if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
     try {
       return await response.json() as Record<string, unknown>
@@ -34,42 +34,18 @@ export class ServerConnection {
     }
   }
 
-  async sessionStarted(sessionId: string, body: unknown, signal: AbortSignal) {
-    await this.post(`sessions/${sessionId}/started`, body, signal)
-  }
-
-  async sessionEvents(sessionId: string, events: unknown[], signal: AbortSignal) {
-    await this.post(`sessions/${sessionId}/events`, { events }, signal)
-  }
-
-  async sessionCompleted(sessionId: string, body: unknown, signal: AbortSignal) {
-    await this.post(`sessions/${sessionId}/completed`, body, signal)
-  }
-
-  async sessionStatus(sessionId: string, body: unknown, signal: AbortSignal) {
-    await this.post(`sessions/${sessionId}/status`, body, signal)
-  }
-
-  async ensureWorkflowSession(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
-    const response = await fetch(this.url(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/ensure`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
-    if (!response.ok) throw new Error(`workflow session ensure failed: ${response.status} ${await response.text()}`)
+  async ensureSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<{ acpSessionId?: string | null; workDir?: string | null }> {
+    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/ensure`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`session ensure failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
   }
 
-  async attachWorkflowSession(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
+  async attachSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+    await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
   }
 
-  async workflowSessionEvents(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/events`, body, signal)
-  }
-
-  async workflowSessionStatus(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/status`, body, signal)
-  }
-
-  async workflowSessionComplete(workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
-    await this.post(`workflow-sessions/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/complete`, body, signal)
+  async sessionEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
+    await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/events`, body, signal)
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal) {
@@ -92,6 +68,7 @@ function toWorkItem(dispatch: WorkDispatchResponse): WorkItem {
     uses: dispatch.uses,
     with: parseObject(dispatch.with),
     variables: parseObject(dispatch.variables),
-    session: dispatch.session,
+    projectId: dispatch.projectId,
+    issueNumber: dispatch.issueNumber ?? undefined,
   }
 }

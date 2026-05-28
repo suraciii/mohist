@@ -7,7 +7,6 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db.Entities;
-using Mohist.Server.Workflow.Sessions.Storage;
 
 namespace Mohist.Server.Storage.Db;
 
@@ -17,10 +16,8 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectEntry> Projects { get; set; } = null!;
     public DbSet<ConfigEntry> Configs { get; set; } = null!;
     public DbSet<WorkflowEventEntry> WorkflowEvents { get; set; } = null!;
-    public DbSet<AgentSessionRecord> AgentSessions { get; set; } = null!;
-    public DbSet<AgentSessionTranscriptEntry> AgentSessionTranscriptEntries { get; set; } = null!;
-    public DbSet<WorkflowSessionRecord> WorkflowSessions { get; set; } = null!;
-    public DbSet<WorkflowSessionEventRecord> WorkflowSessionEvents { get; set; } = null!;
+    public DbSet<SessionRecord> Sessions { get; set; } = null!;
+    public DbSet<SessionEventRecord> SessionEvents { get; set; } = null!;
     public DbSet<IssueCommentEntry> IssueComments { get; set; } = null!;
     public DbSet<IssuePrerequisiteEntry> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicEntry> Epics { get; set; } = null!;
@@ -75,70 +72,44 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Type, e.CreatedAt });
         });
 
-        modelBuilder.Entity<AgentSessionRecord>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasMaxLength(64);
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkType).HasMaxLength(64).IsRequired();
-            entity.Property(e => e.Stage).HasMaxLength(64);
-            entity.Property(e => e.Title).HasMaxLength(512);
-            entity.Property(e => e.RunnerId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ExternalSessionId).HasMaxLength(256);
-            entity.Property(e => e.Status).HasColumnName("Status").HasMaxLength(64).IsRequired();
-            entity.Property(e => e.Model).HasMaxLength(256);
-            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
-            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId }).IsUnique();
-            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
-        });
-
-        modelBuilder.Entity<AgentSessionTranscriptEntry>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.SessionId).HasMaxLength(64).IsRequired();
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.Type).HasMaxLength(128).IsRequired();
-            entity.Property(e => e.PayloadJson).IsRequired();
-            entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
-            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
-        });
-
-        modelBuilder.Entity<WorkflowSessionRecord>(entity =>
+        modelBuilder.Entity<SessionRecord>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(512);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SessionName).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.AcpSessionId).HasMaxLength(256);
-            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.WorkId).HasMaxLength(256);
+            entity.Property(e => e.WorkType).HasMaxLength(64);
+            entity.Property(e => e.Stage).HasMaxLength(64);
+            entity.Property(e => e.Title).HasMaxLength(512);
             entity.Property(e => e.RunnerId).HasMaxLength(256);
+            entity.Property(e => e.AgentSessionId).HasMaxLength(256);
             entity.Property(e => e.Status).HasMaxLength(64).IsRequired();
             entity.Property(e => e.Model).HasMaxLength(256);
-            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName }).IsUnique();
-            entity.HasIndex(e => e.AcpSessionId);
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
+            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId }).IsUnique();
+            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName }).IsUnique();
+            entity.HasIndex(e => e.AgentSessionId);
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
         });
 
-        modelBuilder.Entity<WorkflowSessionEventRecord>(entity =>
+        modelBuilder.Entity<SessionEventRecord>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.WorkflowSessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SessionName).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.AcpSessionId).HasMaxLength(256);
-            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.AgentSessionId).HasMaxLength(256);
             entity.Property(e => e.WorkId).HasMaxLength(256);
             entity.Property(e => e.WorkType).HasMaxLength(64);
             entity.Property(e => e.Stage).HasMaxLength(64);
             entity.Property(e => e.Type).HasMaxLength(128).IsRequired();
             entity.Property(e => e.PayloadJson).IsRequired();
-            entity.HasIndex(e => new { e.WorkflowSessionId, e.Sequence }).IsUnique();
-            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
+            entity.HasIndex(e => new { e.SessionId, e.Sequence }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
+            entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName, e.Sequence });
         });
 
         modelBuilder.Entity<IssueCommentEntry>(entity =>

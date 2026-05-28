@@ -1,7 +1,9 @@
+using Mohist.Server.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Queries;
 using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
@@ -59,9 +61,9 @@ public static class IssueRoutes
 
             var repository = project.GetRepository(req.RepositoryName);
 
-            var counter = grains.GetGrain<IIssueCounterGrain>(pid);
+            var counter = grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(pid));
             var number = await counter.NextAsync();
-            var issueGrain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             await issueGrain.CreateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, repository);
             var issue = await issuesQuery.GetAsync(pid, number);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
@@ -83,7 +85,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 await grain.UpdateFullAsync(new UpdateIssueData(
@@ -102,7 +104,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 var eligibility = await grain.GetStartEligibilityAsync();
@@ -123,7 +125,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 await grain.CancelAsync();
@@ -140,7 +142,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 await grain.ReopenAsync();
@@ -163,7 +165,7 @@ public static class IssueRoutes
             var repoPath = issue.Repository?.Path ?? ".";
             var projectName = issue.ProjectName ?? "project";
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 await grain.ArchiveAsync();
@@ -188,7 +190,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 await grain.UnarchiveAsync();
@@ -212,7 +214,7 @@ public static class IssueRoutes
 
             foreach (var issue in completed)
             {
-                var grain = grains.GetGrain<IIssueGrain>($"{pid}:{issue.Number}");
+                var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, issue.Number));
                 try
                 {
                     var repoPath = issue.Repository?.Path ?? ".";
@@ -242,7 +244,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 var status = await grain.GetWorkflowStatusAsync();
@@ -262,18 +264,18 @@ public static class IssueRoutes
             return timeline is not null ? ApiResults.Ok(timeline) : ApiResults.NotFound("Workflow not found");
         });
 
-        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, IGrainFactory grains, AgentSessionService sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, IGrainFactory grains, SessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
-            return ApiResults.Ok(await sessions.ListByIssueAsync(pid, number));
+            return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(pid, number));
         });
 
-        issues.MapGet("/{number:int}/coder-sessions/{sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, AgentSessionService sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions/{sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, SessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
-            var detail = await sessions.GetDetailAsync(pid, number, sessionId);
+            var detail = await sessions.GetTranscriptAsync(pid, number, sessionId);
             return detail is null ? ApiResults.NotFound($"Coder session {sessionId} not found") : ApiResults.Ok(detail);
         });
 
@@ -383,7 +385,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 var info = await issuesQuery.GetInfoAsync(pid, number);
@@ -403,7 +405,7 @@ public static class IssueRoutes
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
             try
             {
                 var info = await issuesQuery.GetInfoAsync(pid, number);

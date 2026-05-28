@@ -35,7 +35,7 @@ export class WorkExecutor {
       const variables = await this.variables(work, signal)
       const renderedWith = renderTemplate(work.with, variables)
       const workDir = await this.resolveWorkDir(renderedWith, variables)
-      return normalize(work, await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir, telemetry: telemetry(this.connection) }))
+      return normalize(work, await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir }))
     } catch (error) {
       return failure(work, error instanceof Error ? error.message : String(error))
     }
@@ -52,7 +52,7 @@ export class WorkExecutor {
       try {
         const renderedWith = renderTemplate(check.with ?? null, variables)
         const workDir = await this.resolveWorkDir(renderedWith, variables)
-        const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir, telemetry: telemetry(this.connection) })
+        const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
         return { name: check.name, status: toCheckStatus(result.status), message: result.message, output: result.output }
       } catch (error) {
         return { name: check.name, status: "fail", message: error instanceof Error ? error.message : String(error) }
@@ -75,7 +75,7 @@ export class WorkExecutor {
 }
 
 function baseContext(work: WorkItem, variables: JsonObject, signal: AbortSignal, sessionManager: AcpSessionManager, acpConnection: SharedAcpConnection | null, connection: ServerConnection): Omit<ActionContext, "with" | "workDir"> {
-  return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, session: work.session, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
+  return { workflowRunId: work.workflowRunId, workId: work.workId, workType: work.workType, stage: work.stage, title: work.title, uses: work.uses, variables, signal, projectId: work.projectId, issueNumber: work.issueNumber, acpSessionManager: sessionManager, acpConnection, serverConnection: connection }
 }
 
 function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {
@@ -114,13 +114,4 @@ function stringAt(value: JsonObject, path: string[]) {
     return (current as JsonObject)[part]
   }, value)
   return typeof found === "string" ? found : undefined
-}
-
-function telemetry(connection: ServerConnection) {
-  return {
-    started: (sessionId: string, body: unknown, signal: AbortSignal) => connection.sessionStarted(sessionId, body, signal),
-    events: (sessionId: string, events: unknown[], signal: AbortSignal) => connection.sessionEvents(sessionId, events, signal),
-    completed: (sessionId: string, body: unknown, signal: AbortSignal) => connection.sessionCompleted(sessionId, body, signal),
-    status: (sessionId: string, body: unknown, signal: AbortSignal) => connection.sessionStatus(sessionId, body, signal),
-  }
 }

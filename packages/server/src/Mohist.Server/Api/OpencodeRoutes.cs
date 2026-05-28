@@ -1,4 +1,5 @@
 using Mohist.Server.Config;
+using Mohist.Server.Grains;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Api;
@@ -7,9 +8,9 @@ public static class OpencodeRoutes
 {
     public static WebApplication MapOpencodeRoutes(this WebApplication app)
     {
-        app.MapGet("/api/opencode/models", async (IGrainFactory grains) =>
+        app.MapGet("/api/opencode/models", async (string projectId, IGrainFactory grains) =>
         {
-            var registry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Key);
+            var registry = grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId));
             return ApiResults.Ok(new { models = await registry.ListCoderModelsAsync() });
         });
 

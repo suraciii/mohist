@@ -10,5 +10,5 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
 
 public static class RunnerRegistryKeys
 {
-    public const string Key = "default";
+    public static string ForProject(string projectId) => projectId;
 }

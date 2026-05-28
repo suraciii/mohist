@@ -62,7 +62,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const verification = await verifyExpectations(context)
   const ok = result.success && verification.satisfied
   const agentConfig = resolveAgentConfig(context.with)
-  if (context.session) await emitSessionCompleted(context, ok ? "completed" : "failed", ok ? "Agent completed" : result.error ?? verification.message, result.exitCode ?? (ok ? 0 : 1))
+  await emitSessionEvent(context, "agent_session_terminal", { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, exitCode: result.exitCode ?? (ok ? 0 : 1) })
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
@@ -130,18 +130,18 @@ function formatValue(value: unknown): string {
 }
 
 async function runAcpSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
-  const sessionName = workflowSessionName(context)
+  const sessionName = sessionNameFromContext(context)
   const manager = context.acpSessionManager
+  const projectId = context.projectId
 
-  if (sessionName && manager && context.serverConnection) {
+  if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.key(context.workflowRunId, sessionName)
-    const session = await context.serverConnection.ensureWorkflowSession(context.workflowRunId, sessionName, {
+    const session = await context.serverConnection.ensureSession(projectId, context.workflowRunId, sessionName, {
       workId: context.workId,
       workType: context.workType,
       stage: context.stage,
       title: context.title,
-      projectId: context.session?.projectId,
-      issueNumber: context.session?.issueNumber,
+      issueNumber: context.issueNumber,
     }, context.signal)
 
     if (session.acpSessionId) {
@@ -194,7 +194,7 @@ async function runPromptOnExistingSession(context: ActionContext, prompt: string
           }
         }
       }
-      if (context.session) await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, entry.sessionId, toolIds))
+      await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, entry.sessionId, toolIds))
     },
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -202,10 +202,8 @@ async function runPromptOnExistingSession(context: ActionContext, prompt: string
     },
   )
 
-  if (context.session) {
-    await emitSessionStarted(context, entry.sessionId, acp.processPid, agentConfig)
-    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, entry.sessionId))
-  }
+  await emitSessionStarted(context, entry.sessionId, acp.processPid, agentConfig)
+  await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, entry.sessionId))
 
   try {
     const promptResult = await monitorPrompt(context, connection, entry.sessionId, prompt, {
@@ -262,7 +260,7 @@ async function runResumedSession(context: ActionContext, prompt: string, acpSess
           }
         }
       }
-      if (context.session) await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
+      await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
     },
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -289,10 +287,8 @@ async function runResumedSession(context: ActionContext, prompt: string, acpSess
       }
     }
 
-    if (context.session) {
-      await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig)
-      await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
-    }
+    await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig)
+    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
 
     const promptResult = await monitorPrompt(context, connection, acpSessionId, prompt, {
       timeoutMs,
@@ -350,7 +346,7 @@ async function runNewSession(context: ActionContext, prompt: string): Promise<Ac
           }
         }
       }
-      if (context.session) await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
+      await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
     },
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -378,10 +374,8 @@ async function runNewSession(context: ActionContext, prompt: string): Promise<Ac
       }
     }
 
-    if (context.session) {
-      await emitSessionStarted(context, sessionId, acp.processPid, agentConfig)
-      await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
-    }
+    await emitSessionStarted(context, sessionId, acp.processPid, agentConfig)
+    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
       timeoutMs,
@@ -438,7 +432,7 @@ async function runEphemeralSession(context: ActionContext, prompt: string): Prom
             }
           }
         }
-        if (context.session) await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
+        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
       },
       requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
         const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -479,10 +473,8 @@ async function runEphemeralSession(context: ActionContext, prompt: string): Prom
       }
     }
 
-    if (context.session) {
-      await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig)
-      await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
-    }
+    await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig)
+    await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
       timeoutMs,
@@ -527,7 +519,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
 
     const probeSentAt = new Date()
     const probeDeadlineAt = new Date(probeSentAt.getTime() + options.probeTimeoutMs)
-    await emitSessionStatus(context, "probing", { probeSentAt, probeDeadlineAt })
+    await emitSessionEvent(context, "agent_liveness_status", { status: "probing", probeSentAt: probeSentAt.toISOString(), probeDeadlineAt: probeDeadlineAt.toISOString() })
     const beforeProbeVersion = options.dataVersion()
     connection.prompt({ sessionId, prompt: [{ type: "text", text: PROBE_PROMPT }] }).catch(() => {})
     const probeResult = await Promise.race([
@@ -539,7 +531,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     ])
     if (probeResult === "completed") return "completed"
     if (probeResult === "data") {
-      await emitSessionStatus(context, "running", { lastDataAt: new Date(options.lastDataAt()) })
+      await emitSessionEvent(context, "agent_liveness_status", { status: "running", lastDataAt: new Date(options.lastDataAt()).toISOString() })
       continue
     }
     if (probeResult === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
@@ -557,49 +549,28 @@ function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"da
   return new Promise((resolve) => waiters.add(() => resolve("data")))
 }
 
-async function emitSessionStarted(context: ActionContext, externalSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined) {
-  const sessionName = workflowSessionName(context)
-  if (sessionName && context.serverConnection) {
-    await context.serverConnection.attachWorkflowSession(context.workflowRunId, sessionName, { acpSessionId: externalSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
-    return
+async function emitSessionStarted(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined) {
+  const sessionName = sessionNameFromContext(context)
+  const projectId = context.projectId
+  if (sessionName && context.serverConnection && projectId) {
+    await context.serverConnection.attachSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
   }
-  if (context.telemetry && context.session) await context.telemetry.started(context.session.id, { externalSessionId, workDir: context.workDir, changeDir: null, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
 }
 
 async function emitSessionEvent(context: ActionContext, type: string, payload: JsonObject) {
-  const sessionName = workflowSessionName(context)
-  if (sessionName && context.serverConnection) {
-    await context.serverConnection.workflowSessionEvents(context.workflowRunId, sessionName, { workId: context.workId, workType: context.workType, stage: context.stage, events: [{ type, payload }] }, context.signal)
-    return
+  const sessionName = sessionNameFromContext(context)
+  const projectId = context.projectId
+  if (sessionName && context.serverConnection && projectId) {
+    await context.serverConnection.sessionEvents(projectId, context.workflowRunId, sessionName, { workId: context.workId, workType: context.workType, stage: context.stage, events: [{ type, payload }] }, context.signal)
   }
-  if (context.telemetry && context.session) await context.telemetry.events(context.session.id, [{ type, payload }], context.signal)
 }
 
-async function emitSessionCompleted(context: ActionContext, status: string, message: string, exitCode: number) {
-  const sessionName = workflowSessionName(context)
-  if (sessionName && context.serverConnection) {
-    await context.serverConnection.workflowSessionComplete(context.workflowRunId, sessionName, { status, failureReason: message, exitCode }, context.signal)
-    return
-  }
-  if (context.telemetry && context.session) await context.telemetry.completed(context.session.id, { status, failureReason: message, exitCode }, context.signal)
-}
-
-async function emitSessionStatus(context: ActionContext, status: string, input: { lastDataAt?: Date; probeSentAt?: Date; probeDeadlineAt?: Date; failureReason?: string }) {
-  const sessionName = workflowSessionName(context)
-  if (sessionName && context.serverConnection) {
-    await context.serverConnection.workflowSessionStatus(context.workflowRunId, sessionName, { status, lastDataAt: input.lastDataAt?.toISOString(), failureReason: input.failureReason }, context.signal)
-    return
-  }
-  if (!context.telemetry?.status || !context.session) return
-  await context.telemetry.status(context.session.id, { status, lastDataAt: input.lastDataAt?.toISOString(), probeSentAt: input.probeSentAt?.toISOString(), probeDeadlineAt: input.probeDeadlineAt?.toISOString(), failureReason: input.failureReason }, context.signal)
-}
-
-function workflowSessionName(context: ActionContext) {
-  return stringInput(context.with, "session") ?? (context.session ? `work:${context.workId}` : null)
+function sessionNameFromContext(context: ActionContext) {
+  return stringInput(context.with, "session") ?? context.workId
 }
 
 function buildPromptEvent(context: ActionContext, prompt: string, sessionId: string): JsonObject {
-  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueId: context.session ? String(context.session.issueNumber) : null, acpSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
+  return { role: "mohist", text: prompt, kind: "task", sentAt: new Date().toISOString(), executionId: context.workId, stage: context.stage ?? null, title: context.title ?? null, issueId: context.issueNumber != null ? String(context.issueNumber) : null, acpSessionId: sessionId, outputPath: extractOutputPath(prompt) ?? null, contextFiles: extractContextFiles(prompt) ?? null }
 }
 
 function extractOutputPath(prompt: string) {
