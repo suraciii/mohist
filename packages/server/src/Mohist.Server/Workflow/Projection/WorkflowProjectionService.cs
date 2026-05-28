@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Sessions.Storage;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Grains;
 
@@ -42,7 +42,7 @@ public class WorkflowProjectionService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.WorkflowAgentSessions.AsNoTracking()
-            .Where(s => s.CompletedAt == null && (s.Status == "created" || s.Status == "running" || s.Status == "probing"));
+            .Where(s => s.CompletedAt == null && (s.Status == AgentSessionStatus.Created || s.Status == AgentSessionStatus.Running || s.Status == AgentSessionStatus.Probing));
         if (!string.IsNullOrWhiteSpace(projectId)) query = query.Where(s => s.ProjectId == projectId);
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
@@ -59,7 +59,7 @@ public class WorkflowProjectionService
                 ? null
                 : BuildTimeline(status, await _events.ListWorkflowEventsAsync(session.WorkflowRunId, 1000, ct), [session]);
             var currentStage = timeline?.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
-            var completed = currentStage?.Tasks.Count(t => t.Status == "completed" || t.Status == "Completed") ?? 0;
+            var completed = currentStage?.Tasks.Count(t => t.Status == "completed") ?? 0;
             var total = currentStage?.Tasks.Count ?? 0;
             var lastActivity = (session.LastDataAt ?? session.StartedAt ?? session.CreatedAt).ToString("o");
 
@@ -86,7 +86,7 @@ public class WorkflowProjectionService
         return result;
     }
 
-    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<WorkflowAgentSessionRecord> sessions)
+    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
     {
         var eventList = events.ToList();
         var stages = status.Stages
@@ -103,7 +103,7 @@ public class WorkflowProjectionService
             status.AvailableActions.Select(a => new AvailableActionDto(a.Name, a.Label, a.Target)).ToList());
     }
 
-    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<WorkflowAgentSessionRecord> sessions)
+    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
     {
         var stageEvents = events.Where(e => e.Stage == stage.Stage).ToList();
         var startedAt = stageEvents.FirstOrDefault()?.CreatedAt;
@@ -141,7 +141,7 @@ public class WorkflowProjectionService
             stage.Approval is null ? null : new ApprovalDto(stage.Approval.Status, stage.Approval.Output, stage.Approval.RequestedAt, stage.Approval.RespondedAt));
     }
 
-    private async Task<IReadOnlyList<WorkflowAgentSessionRecord>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
+    private async Task<IReadOnlyList<WorkflowAgentSession>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return await db.WorkflowAgentSessions.AsNoTracking()

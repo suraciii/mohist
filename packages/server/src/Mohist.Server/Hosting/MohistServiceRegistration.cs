@@ -5,8 +5,9 @@ using Mohist.Server.Project.Queries;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Queries;
-using Mohist.Server.Sessions.Recovery;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Hooks;
@@ -26,6 +27,7 @@ public static class MohistServiceRegistration
             options.UseSqlite(connectionString));
 
         services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
+        services.AddScoped<IStateStore<WorkflowAgentSession>, WorkflowAgentSessionStore>();
         services.AddScoped<IssueStateStore>();
         services.AddSingleton<ProjectQueryService>();
         services.AddScoped<IssueQueryService>();
@@ -36,7 +38,6 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowAgentSessionQueryService>();
         services.AddScoped<WorkflowProjectionService>();
         services.AddHostedService<WorkflowBacklogRecoveryService>();
-        services.AddHostedService<WorkflowAgentSessionRecoveryService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);

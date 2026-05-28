@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db;
 
@@ -51,16 +52,16 @@ public class WorkflowAgentSessionQueryService
     public async Task<IReadOnlyList<WorkflowAgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var query = db.WorkflowAgentSessions.AsNoTracking().Where(s => s.ProjectId == projectId);
-        if (!string.IsNullOrWhiteSpace(status)) query = query.Where(s => s.Status == status);
-
+        IQueryable<WorkflowAgentSession> query = db.WorkflowAgentSessions.AsNoTracking().Where(s => s.ProjectId == projectId);
+        if (!string.IsNullOrWhiteSpace(status) && AgentSessionStatusNames.TryParse(status, out var s))
+            query = query.Where(x => x.Status == s);
         var rows = await query.OrderByDescending(s => s.CreatedAt).Take(limit).ToListAsync(ct);
         return rows.Select(s => new WorkflowAgentSessionInfoDto(
             s.IssueNumber,
             $"Issue #{s.IssueNumber}",
             s.Stage ?? string.Empty,
             s.Id,
-            s.Status,
+            AgentSessionStatusNames.ToName(s.Status),
             s.Model,
             s.Title,
             s.CreatedAt.ToString("o"),
@@ -118,7 +119,7 @@ public class WorkflowAgentSessionQueryService
             acpSessionId = session.AgentSessionId ?? session.Id,
             executionId = session.WorkId,
             title = session.Title,
-            status = session.Status,
+            status = AgentSessionStatusNames.ToName(session.Status),
             model = session.Model,
             stage = session.Stage,
             createdAt = session.CreatedAt.ToString("o"),
@@ -139,7 +140,7 @@ public class WorkflowAgentSessionQueryService
             session.AgentSessionId ?? session.Id,
             session.WorkId,
             session.Title,
-            session.Status,
+            AgentSessionStatusNames.ToName(session.Status),
             session.CreatedAt.ToString("o"),
             session.CompletedAt?.ToString("o"),
             session.Model,
@@ -180,7 +181,7 @@ public class WorkflowAgentSessionQueryService
         return new ActivityDto(summary, cards, waiting.ToList());
     }
 
-    private static async Task<Dictionary<string, WorkflowAgentSessionEventRecord>> LoadLatestEventsAsync(
+    private static async Task<Dictionary<string, WorkflowAgentSessionEvent>> LoadLatestEventsAsync(
         MohistDbContext db, string[] sessionIds, CancellationToken ct)
     {
         if (sessionIds.Length == 0) return [];
@@ -202,7 +203,7 @@ public class WorkflowAgentSessionQueryService
             .ToDictionary(e => e.SessionId);
     }
 
-    private static ActivityCardDto ToActivityCard(WorkflowAgentSessionRecord s, WorkflowAgentSessionEventRecord? latestEvent)
+    private static ActivityCardDto ToActivityCard(WorkflowAgentSession s, WorkflowAgentSessionEvent? latestEvent)
     {
         var lastActivityAt = (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o");
         return new ActivityCardDto(
@@ -212,7 +213,7 @@ public class WorkflowAgentSessionQueryService
             s.Stage ?? string.Empty,
             null,
             s.Id,
-            s.Status,
+            AgentSessionStatusNames.ToName(s.Status),
             s.Model,
             s.Title,
             s.CreatedAt.ToString("o"),
@@ -224,7 +225,7 @@ public class WorkflowAgentSessionQueryService
             s.FailureReason);
     }
 
-    private static ActivityPreviewDto ToPreview(WorkflowAgentSessionEventRecord e)
+    private static ActivityPreviewDto ToPreview(WorkflowAgentSessionEvent e)
     {
         var text = ExtractPreviewText(e.PayloadJson);
         var kind = e.Type.Contains("tool", StringComparison.OrdinalIgnoreCase) ? "tool" : "text";
@@ -276,27 +277,27 @@ public class WorkflowAgentSessionQueryService
         }
     }
 
-    private static WorkflowAgentSessionDto ToWorkflowAgentSessionDto(WorkflowAgentSessionRecord s) => new(
+    private static WorkflowAgentSessionDto ToWorkflowAgentSessionDto(WorkflowAgentSession s) => new(
         s.Id, s.ProjectId, s.IssueNumber, s.WorkflowRunId, s.SessionName,
         s.WorkId, s.WorkType, s.Stage, s.Title, s.RunnerId, s.AgentSessionId,
-        s.Status, s.Model, s.WorkDir, s.ChangeDir, s.ProcessPid,
+        AgentSessionStatusNames.ToName(s.Status), s.Model, s.WorkDir, s.ChangeDir, s.ProcessPid,
         s.CreatedAt.ToString("o"), s.StartedAt?.ToString("o"), s.CompletedAt?.ToString("o"),
         s.LastDataAt?.ToString("o"), s.FailureReason, s.ExitCode);
 
-    private static WorkflowSessionDto ToWorkflowDto(WorkflowAgentSessionRecord s) => new(
+    private static WorkflowSessionDto ToWorkflowDto(WorkflowAgentSession s) => new(
         s.Id, s.WorkflowRunId, s.SessionName, s.AgentSessionId,
         s.ProjectId, s.IssueNumber == 0 ? null : s.IssueNumber, s.RunnerId,
-        s.Status, s.Model, s.WorkDir, s.ProcessPid,
+        AgentSessionStatusNames.ToName(s.Status), s.Model, s.WorkDir, s.ProcessPid,
         s.CreatedAt.ToString("o"), s.StartedAt?.ToString("o"), s.LastDataAt?.ToString("o"),
         s.CompletedAt?.ToString("o"), s.FailureReason, s.ExitCode);
 
-    private static WorkflowAgentSessionSummaryDto ToSummaryDto(WorkflowAgentSessionRecord s) => new(
+    private static WorkflowAgentSessionSummaryDto ToSummaryDto(WorkflowAgentSession s) => new(
         s.Id, s.AgentSessionId ?? s.Id, s.WorkId, s.Title,
-        s.Status, s.CreatedAt.ToString("o"), s.CompletedAt?.ToString("o"),
+        AgentSessionStatusNames.ToName(s.Status), s.CreatedAt.ToString("o"), s.CompletedAt?.ToString("o"),
         s.Model, null, s.Stage, s.Title,
         s.LastDataAt?.ToString("o"), null, null, s.FailureReason);
 
-    private static WorkflowAgentSessionEventDto ToEventDto(WorkflowAgentSessionEventRecord e) => new(
+    private static WorkflowAgentSessionEventDto ToEventDto(WorkflowAgentSessionEvent e) => new(
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId,
         e.SessionName, e.AgentSessionId, e.WorkId, e.WorkType, e.Stage,
         e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"));
