@@ -86,21 +86,34 @@ internal static class UpdateCommands
 
 internal sealed class SourceCodeUpdater
 {
+    private static readonly TimeSpan ServerReadyTimeout = TimeSpan.FromSeconds(180);
+    private static readonly TimeSpan ServerReadyPollInterval = TimeSpan.FromMilliseconds(500);
+
     private readonly TextWriter _out;
     private readonly TextWriter _err;
     private readonly SystemdServiceInstaller _systemd;
     private readonly ICommandExecutor _commandExecutor;
+    private readonly HttpClient _http;
+    private readonly TimeSpan _serverReadyTimeout;
 
     public SourceCodeUpdater(
         TextWriter output,
         TextWriter error,
         SystemdServiceInstaller systemd,
-        ICommandExecutor commandExecutor)
+        ICommandExecutor commandExecutor,
+        HttpClient? http = null,
+        TimeSpan? serverReadyTimeout = null)
     {
         _out = output;
         _err = error;
         _systemd = systemd;
         _commandExecutor = commandExecutor;
+        _http = http ?? new HttpClient
+        {
+            BaseAddress = new Uri(Environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
+            Timeout = TimeSpan.FromSeconds(5),
+        };
+        _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
     }
 
     public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null)
@@ -111,10 +124,41 @@ internal sealed class SourceCodeUpdater
         var cli = await UpdateCliAsync(root, dryRun, cliPath);
         if (cli != 0) return cli;
 
-        var server = await UpdateServerAsync(root, dryRun);
-        if (server != 0) return server;
+        var stoppedRunner = await StopRunnerForServerUpdateAsync(dryRun);
+        if (stoppedRunner != 0) return stoppedRunner;
 
-        return await UpdateRunnerAsync(root, dryRun);
+        var server = await UpdateServerAsync(root, dryRun);
+        if (server != 0)
+            return await RestoreRunnerAfterFailedUpdateAsync(dryRun, server);
+
+        var runner = await UpdateRunnerAsync(root, dryRun);
+        if (runner != 0)
+            return await RestoreRunnerAfterFailedUpdateAsync(dryRun, runner);
+
+        return 0;
+    }
+
+    private async Task<int> StopRunnerForServerUpdateAsync(bool dryRun)
+    {
+        _out.WriteLine("Stopping runner service before server restart.");
+        var stop = await _systemd.StopRunnerAsync(new ServiceCommandOptions(dryRun, null, 100, false));
+        if (stop != 0)
+        {
+            _err.WriteLine("Warning: Failed to stop runner service before server restart.");
+            return stop;
+        }
+
+        return 0;
+    }
+
+    private async Task<int> RestoreRunnerAfterFailedUpdateAsync(bool dryRun, int originalExitCode)
+    {
+        _err.WriteLine("Update failed after runner service was stopped. Restoring runner service.");
+        var start = await _systemd.StartRunnerAsync(new ServiceCommandOptions(dryRun, null, 100, false));
+        if (start != 0)
+            _err.WriteLine("Warning: Failed to restore runner service. You may need to start it manually.");
+
+        return originalExitCode;
     }
 
     public async Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null)
@@ -225,6 +269,14 @@ internal sealed class SourceCodeUpdater
         }
 
         _out.WriteLine("Server service restarted.");
+        var ready = await WaitForServerReadyAsync(_serverReadyTimeout);
+        if (!ready)
+        {
+            _err.WriteLine($"Server service restarted, but /api/health did not become ready within {(int)_serverReadyTimeout.TotalSeconds} seconds.");
+            return 1;
+        }
+
+        _out.WriteLine("Server is ready.");
         return 0;
     }
 
@@ -298,5 +350,38 @@ internal sealed class SourceCodeUpdater
         if (OperatingSystem.IsMacOS()) return "osx-x64";
         if (OperatingSystem.IsWindows()) return "win-x64";
         return "linux-x64";
+    }
+
+    private async Task<bool> WaitForServerReadyAsync(TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        while (!cts.IsCancellationRequested)
+        {
+            try
+            {
+                using var response = await _http.GetAsync("/api/health", cts.Token);
+                if (response.IsSuccessStatusCode)
+                    return true;
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                break;
+            }
+            catch
+            {
+                // The service can be active before Kestrel starts accepting requests.
+            }
+
+            try
+            {
+                await Task.Delay(ServerReadyPollInterval, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        return false;
     }
 }

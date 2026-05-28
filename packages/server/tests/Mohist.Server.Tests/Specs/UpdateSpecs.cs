@@ -1,5 +1,6 @@
 using Xunit;
 using Mohist.Cli;
+using System.Net;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -19,7 +20,11 @@ public class UpdateSpecs
             new StringWriter(),
             new StringWriter(),
             installer,
-            commands);
+            commands,
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            });
 
         var exitCode = await updater.UpdateAllAsync("/repo", dryRun: false, cliPath: "/home/user/.local/bin/mo");
 
@@ -29,11 +34,15 @@ public class UpdateSpecs
         Assert.Equal("cp", commands.ExecutedCommands[1].FileName);
         Assert.Equal("chmod", commands.ExecutedCommands[2].FileName);
         Assert.Equal("mv", commands.ExecutedCommands[3].FileName);
-        Assert.Equal("dotnet", commands.ExecutedCommands[4].FileName);
-        Assert.Equal(new[] { "build", "Mohist.sln" }, commands.ExecutedCommands[4].Args);
-        Assert.Equal("systemctl", commands.ExecutedCommands[5].FileName);
-        Assert.Equal("npm", commands.ExecutedCommands[6].FileName);
-        Assert.Equal("systemctl", commands.ExecutedCommands[7].FileName);
+        Assert.Equal("systemctl", commands.ExecutedCommands[4].FileName);
+        Assert.Equal(new[] { "--user", "stop", "mohist-runner.service" }, commands.ExecutedCommands[4].Args);
+        Assert.Equal("dotnet", commands.ExecutedCommands[5].FileName);
+        Assert.Equal(new[] { "build", "Mohist.sln" }, commands.ExecutedCommands[5].Args);
+        Assert.Equal("systemctl", commands.ExecutedCommands[6].FileName);
+        Assert.Equal(new[] { "--user", "restart", "mohist.service" }, commands.ExecutedCommands[6].Args);
+        Assert.Equal("npm", commands.ExecutedCommands[7].FileName);
+        Assert.Equal("systemctl", commands.ExecutedCommands[8].FileName);
+        Assert.Equal(new[] { "--user", "restart", "mohist-runner.service" }, commands.ExecutedCommands[8].Args);
         Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git");
     }
 
@@ -52,7 +61,11 @@ public class UpdateSpecs
             new StringWriter(),
             new StringWriter(),
             installer,
-            commands);
+            commands,
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            });
 
         var exitCode = await updater.UpdateCliAsync("/repo", dryRun: false);
 
@@ -95,6 +108,64 @@ public class UpdateSpecs
     }
 
     [Fact]
+    public async Task UpdateServer_WaitsForHealthAfterRestart()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var health = new SequenceHttpHandler(null, HttpStatusCode.OK);
+        var stdout = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            stdout,
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            stdout,
+            new StringWriter(),
+            installer,
+            commands,
+            new HttpClient(health)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromSeconds(1));
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(2, health.Requests);
+        Assert.Contains("Server is ready.", stdout.ToString());
+    }
+
+    [Fact]
+    public async Task UpdateServer_WhenHealthDoesNotBecomeReady_ReturnsFailure()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.ServiceUnavailable))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromMilliseconds(20));
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("/api/health did not become ready", stderr.ToString());
+    }
+
+    [Fact]
     public async Task UpdateRunner_BuildsCurrentSourceAndRestarts()
     {
         var files = new FakeFileSystem();
@@ -118,6 +189,70 @@ public class UpdateSpecs
         Assert.Equal(new[] { "run", "build", "-w", "packages/runner" }, commands.ExecutedCommands[0].Args);
         Assert.Equal("systemctl", commands.ExecutedCommands[1].FileName);
         Assert.Equal(new[] { "--user", "restart", "mohist-runner.service" }, commands.ExecutedCommands[1].Args);
+    }
+
+    [Fact]
+    public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunner_RestoresRunner()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            });
+
+        var exitCode = await updater.UpdateAllAsync("/repo", dryRun: false, cliPath: "/home/user/.local/bin/mo");
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+        Assert.Contains("Restoring runner service", stderr.ToString());
+    }
+
+    [Fact]
+    public async Task UpdateAll_WhenRunnerBuildFailsAfterServerReady_RestoresRunner()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        commands.SetExitCodeFor("npm", args => args.SequenceEqual(["run", "build", "-w", "packages/runner"]), 1);
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands,
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            });
+
+        var exitCode = await updater.UpdateAllAsync("/repo", dryRun: false, cliPath: "/home/user/.local/bin/mo");
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "restart", "mohist.service"]));
+        Assert.Contains(commands.ExecutedCommands, c =>
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+        Assert.Contains("Restoring runner service", stderr.ToString());
     }
 
     [Fact]
@@ -194,17 +329,45 @@ public class UpdateSpecs
         public readonly List<(string FileName, string[] Args, string? WorkingDirectory)> ExecutedCommands = new();
         private readonly Queue<int> _exitCodes = new();
         private readonly Queue<string> _stdout = new();
+        private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode)> _exitCodeRules = new();
 
         public void SetNextExitCode(int code) => _exitCodes.Enqueue(code);
         public void SetNextStdout(string stdout) => _stdout.Enqueue(stdout);
+        public void SetExitCodeFor(string fileName, Func<string[], bool> match, int code) => _exitCodeRules.Add((fileName, match, code));
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
             string fileName, string[] args, string? workingDirectory = null)
         {
             ExecutedCommands.Add((fileName, args, workingDirectory));
-            var code = _exitCodes.Count > 0 ? _exitCodes.Dequeue() : 0;
+            var rule = _exitCodeRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
+            var code = rule.Match is not null ? rule.ExitCode : _exitCodes.Count > 0 ? _exitCodes.Dequeue() : 0;
             var stdout = _stdout.Count > 0 ? _stdout.Dequeue() : "";
             return Task.FromResult((code, stdout, ""));
+        }
+    }
+
+    private sealed class SequenceHttpHandler : HttpMessageHandler
+    {
+        private readonly HttpStatusCode?[] _statuses;
+
+        public int Requests { get; private set; }
+
+        public SequenceHttpHandler(params HttpStatusCode?[] statuses)
+        {
+            _statuses = statuses.Length == 0 ? [HttpStatusCode.OK] : statuses;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var index = Math.Min(Requests, _statuses.Length - 1);
+            Requests++;
+            var status = _statuses[index];
+            if (status is null)
+                throw new HttpRequestException("server not ready");
+
+            return Task.FromResult(new HttpResponseMessage(status.Value));
         }
     }
 }

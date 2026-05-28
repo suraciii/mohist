@@ -40,6 +40,20 @@ public class IssueApiSpecs
     }
 
     [Fact]
+    public async Task ListIssues_WithAllAcrossMultipleProjects_ReturnsIssues()
+    {
+        var firstProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-a-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var secondProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-b-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var firstIssue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "First listed issue", projectId = firstProject.Id });
+        var secondIssue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Second listed issue", projectId = secondProject.Id });
+
+        var issues = await _client.GetDataAsync<IssueDto[]>("/api/issues?all=true");
+
+        Assert.Contains(issues, issue => issue.Id == firstIssue.Id);
+        Assert.Contains(issues, issue => issue.Id == secondIssue.Id);
+    }
+
+    [Fact]
     public async Task CreateIssue_WithWorkflowProfileId_RoundTripsProfileId()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-profile-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });

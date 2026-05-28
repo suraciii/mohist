@@ -27,10 +27,20 @@ public static class IssueRoutes
             IGrainFactory grains,
             IssueQueryService issuesQuery) =>
         {
+            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
+            if (all == true && string.IsNullOrWhiteSpace(projectId))
+            {
+                var projects = await projectsGrain.GetAllAsync();
+                var allIssues = new List<IssueReadModel>();
+                foreach (var listedProject in projects)
+                    allIssues.AddRange(await issuesQuery.ListAsync(listedProject.Id, listedProject, stage, label, priority, archived, all));
+
+                return ApiResults.Ok(allIssues.OrderBy(i => i.Number).ToList());
+            }
+
             var pid = await ResolveProjectIdAsync(projectId, grains);
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var projectsGrain = grains.GetGrain<IProjectGrain>(ProjectKey);
             var project = await projectsGrain.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
             var list = await issuesQuery.ListAsync(pid, project, stage, label, priority, archived, all);
