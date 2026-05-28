@@ -22,12 +22,12 @@ public static class AgentRoutes
             return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runnerIds, maxConcurrentAgents));
         });
 
-        group.MapGet("/sessions", async (string projectId, string? status, int? limit, SessionQueryService sessions) =>
+        group.MapGet("/sessions", async (string projectId, string? status, int? limit, WorkflowAgentSessionQueryService sessions) =>
         {
             return ApiResults.Ok(await sessions.ListCurrentAsync(projectId, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (string projectId, int? limit, SessionQueryService sessions, IGrainFactory grains, WorkflowProjectionService projection, CancellationToken ct) =>
+        group.MapGet("/activity", async (string projectId, int? limit, WorkflowAgentSessionQueryService sessions, IGrainFactory grains, WorkflowProjectionService projection, CancellationToken ct) =>
         {
             var runnerIds = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnerIdsAsync();
             return ApiResults.Ok(await sessions.GetActivityAsync(projectId, limit, runnerIds: runnerIds, ct: ct));

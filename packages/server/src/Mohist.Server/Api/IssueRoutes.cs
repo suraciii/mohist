@@ -264,14 +264,14 @@ public static class IssueRoutes
             return timeline is not null ? ApiResults.Ok(timeline) : ApiResults.NotFound("Workflow not found");
         });
 
-        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, IGrainFactory grains, SessionQueryService sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, IGrainFactory grains, WorkflowAgentSessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(pid, number));
         });
 
-        issues.MapGet("/{number:int}/coder-sessions/{sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, SessionQueryService sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions/{sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, WorkflowAgentSessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");

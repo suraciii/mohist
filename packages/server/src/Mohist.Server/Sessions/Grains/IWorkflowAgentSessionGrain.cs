@@ -1,16 +1,16 @@
 namespace Mohist.Server.Sessions.Grains;
 
-public interface ISessionGrain : IGrainWithStringKey
+public interface IWorkflowAgentSessionGrain : IGrainWithStringKey
 {
-    Task<SessionSnapshot> EnsureAsync(EnsureSessionCommand command);
-    Task<SessionSnapshot> AttachAgentAsync(AttachAgentCommand command);
-    Task<IReadOnlyList<SessionEventSnapshot>> AppendEventsAsync(AppendSessionEventsCommand command);
-    Task<SessionSnapshot?> FailIfRunningAsync(string reason);
-    Task<SessionSnapshot?> GetAsync();
+    Task<WorkflowAgentSessionSnapshot> EnsureAsync(EnsureWorkflowAgentSessionCommand command);
+    Task<WorkflowAgentSessionSnapshot> AttachAgentAsync(AttachAgentCommand command);
+    Task<IReadOnlyList<WorkflowAgentSessionEventSnapshot>> AppendEventsAsync(AppendWorkflowAgentSessionEventsCommand command);
+    Task<WorkflowAgentSessionSnapshot?> FailIfRunningAsync(string reason);
+    Task<WorkflowAgentSessionSnapshot?> GetAsync();
 }
 
 [GenerateSerializer]
-public sealed record EnsureSessionCommand(
+public sealed record EnsureWorkflowAgentSessionCommand(
     [property: Id(0)] string ProjectId,
     [property: Id(1)] int? IssueNumber,
     [property: Id(2)] string WorkflowRunId,
@@ -30,19 +30,19 @@ public sealed record AttachAgentCommand(
     [property: Id(4)] int? ProcessPid = null);
 
 [GenerateSerializer]
-public sealed record AppendSessionEventsCommand(
+public sealed record AppendWorkflowAgentSessionEventsCommand(
     [property: Id(0)] string? WorkId = null,
     [property: Id(1)] string? WorkType = null,
     [property: Id(2)] string? Stage = null,
-    [property: Id(3)] IReadOnlyList<SessionEventInput> Events = null!);
+    [property: Id(3)] IReadOnlyList<WorkflowAgentSessionEventInput> Events = null!);
 
 [GenerateSerializer]
-public sealed record SessionEventInput(
+public sealed record WorkflowAgentSessionEventInput(
     [property: Id(0)] string Type,
     [property: Id(1)] string PayloadJson);
 
 [GenerateSerializer]
-public sealed record SessionSnapshot(
+public sealed record WorkflowAgentSessionSnapshot(
     [property: Id(0)] string Id,
     [property: Id(1)] string ProjectId,
     [property: Id(2)] int? IssueNumber,
@@ -67,7 +67,7 @@ public sealed record SessionSnapshot(
     [property: Id(21)] int? ExitCode);
 
 [GenerateSerializer]
-public sealed record SessionEventSnapshot(
+public sealed record WorkflowAgentSessionEventSnapshot(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
     [property: Id(2)] string ProjectId,

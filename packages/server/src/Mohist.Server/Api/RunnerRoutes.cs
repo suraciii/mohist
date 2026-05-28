@@ -72,10 +72,10 @@ public static class RunnerRoutes
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/ensure", async (
             string runnerId, string projectId, string workflowRunId, string sessionName,
-            SessionEnsureRequest req, IGrainFactory grains) =>
+            WorkflowAgentSessionEnsureRequest req, IGrainFactory grains) =>
         {
-            var grain = grains.GetGrain<ISessionGrain>(GrainKey.Session(projectId, workflowRunId, sessionName));
-            var session = await grain.EnsureAsync(new EnsureSessionCommand(
+            var grain = grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
+            var session = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(
                 projectId, req.IssueNumber, workflowRunId, sessionName,
                 runnerId, req.WorkId, req.WorkType, req.Stage, req.Title));
             return Results.Ok(session);
@@ -83,22 +83,22 @@ public static class RunnerRoutes
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/attach", async (
             string projectId, string workflowRunId, string sessionName,
-            SessionAttachRequest req, IGrainFactory grains) =>
+            WorkflowAgentSessionAttachRequest req, IGrainFactory grains) =>
         {
-            var grain = grains.GetGrain<ISessionGrain>(GrainKey.Session(projectId, workflowRunId, sessionName));
+            var grain = grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
             return Results.Ok(await grain.AttachAgentAsync(new AttachAgentCommand(
                 req.AgentSessionId, req.Model, req.WorkDir, req.ChangeDir, req.ProcessPid)));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/events", async (
             string projectId, string workflowRunId, string sessionName,
-            SessionEventsRequest req, IGrainFactory grains) =>
+            WorkflowAgentSessionEventsRequest req, IGrainFactory grains) =>
         {
-            var grain = grains.GetGrain<ISessionGrain>(GrainKey.Session(projectId, workflowRunId, sessionName));
-            var inputs = req.Events.Select(e => new SessionEventInput(
+            var grain = grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
+            var inputs = req.Events.Select(e => new WorkflowAgentSessionEventInput(
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
-            return Results.Ok(await grain.AppendEventsAsync(new AppendSessionEventsCommand(req.WorkId, req.WorkType, req.Stage, inputs)));
+            return Results.Ok(await grain.AppendEventsAsync(new AppendWorkflowAgentSessionEventsCommand(req.WorkId, req.WorkType, req.Stage, inputs)));
         });
 
         return app;
@@ -108,10 +108,10 @@ public static class RunnerRoutes
 public record RunnerRegisterRequest(string[] Capabilities, string ProjectId, string? Hostname = null, string[]? CoderModels = null);
 public record RunnerReportRequest(string WorkId, string Status, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
 public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
-public record SessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
-public record SessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
-public record SessionEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<SessionEventRequest> Events);
-public record SessionEventRequest(string Type, System.Text.Json.JsonElement Payload);
+public record WorkflowAgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
+public record WorkflowAgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
+public record WorkflowAgentSessionEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<WorkflowAgentSessionEventRequest> Events);
+public record WorkflowAgentSessionEventRequest(string Type, System.Text.Json.JsonElement Payload);
 public record WorkDispatchResponse(
     string WorkflowRunId,
     string WorkId,

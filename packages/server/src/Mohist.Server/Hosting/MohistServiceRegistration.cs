@@ -33,10 +33,10 @@ public static class MohistServiceRegistration
         services.AddSingleton<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();
         services.AddScoped<IEventStore, EventStore>();
-        services.AddScoped<SessionQueryService>();
+        services.AddScoped<WorkflowAgentSessionQueryService>();
         services.AddScoped<WorkflowProjectionService>();
         services.AddHostedService<WorkflowBacklogRecoveryService>();
-        services.AddHostedService<SessionRecoveryService>();
+        services.AddHostedService<WorkflowAgentSessionRecoveryService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);

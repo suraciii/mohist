@@ -2,7 +2,7 @@ using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions.Storage;
 
-public class SessionRecord
+public class WorkflowAgentSessionRecord
 {
     public string Id { get; set; } = string.Empty;
     public string ProjectId { get; set; } = string.Empty;

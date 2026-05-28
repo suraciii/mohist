@@ -6,16 +6,16 @@ public static class WorkflowSessionRoutes
 {
     public static WebApplication MapWorkflowSessionRoutes(this WebApplication app)
     {
-        app.MapGet("/api/workflows/{workflowRunId}/sessions", async (string workflowRunId, SessionQueryService sessions) =>
+        app.MapGet("/api/workflows/{workflowRunId}/sessions", async (string workflowRunId, WorkflowAgentSessionQueryService sessions) =>
             ApiResults.Ok(await sessions.ListByWorkflowAsync(workflowRunId)));
 
-        app.MapGet("/api/workflows/{workflowRunId}/sessions/{sessionName}", async (string workflowRunId, string sessionName, SessionQueryService sessions) =>
+        app.MapGet("/api/workflows/{workflowRunId}/sessions/{sessionName}", async (string workflowRunId, string sessionName, WorkflowAgentSessionQueryService sessions) =>
         {
             var detail = await sessions.GetByWorkflowAsync(workflowRunId, sessionName);
             return detail is null ? ApiResults.NotFound($"Session {sessionName} not found") : ApiResults.Ok(detail);
         });
 
-        app.MapGet("/api/issues/{number:int}/workflow-sessions", async (int number, string projectId, SessionQueryService sessions) =>
+        app.MapGet("/api/issues/{number:int}/workflow-sessions", async (int number, string projectId, WorkflowAgentSessionQueryService sessions) =>
             ApiResults.Ok(await sessions.ListByIssueAsync(projectId, number)));
 
         return app;

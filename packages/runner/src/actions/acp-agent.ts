@@ -57,7 +57,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const prompt = stringInput(context.with, "prompt") ?? buildFallbackPrompt(context)
   if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
 
-  const result = await runAcpSession(context, prompt)
+  const result = await runAcpWorkflowAgentSession(context, prompt)
   await restoreAgentToolNoise(context)
   const verification = await verifyExpectations(context)
   const ok = result.success && verification.satisfied
@@ -129,14 +129,14 @@ function formatValue(value: unknown): string {
   return String(value)
 }
 
-async function runAcpSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const sessionName = sessionNameFromContext(context)
   const manager = context.acpSessionManager
   const projectId = context.projectId
 
   if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.key(context.workflowRunId, sessionName)
-    const session = await context.serverConnection.ensureSession(projectId, context.workflowRunId, sessionName, {
+    const session = await context.serverConnection.ensureWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
       workId: context.workId,
       workType: context.workType,
       stage: context.stage,
@@ -146,21 +146,21 @@ async function runAcpSession(context: ActionContext, prompt: string): Promise<Ac
 
     if (session.acpSessionId) {
       const cached = manager.get(key)
-      if (cached?.sessionId === session.acpSessionId) return runPromptOnExistingSession(context, prompt, cached)
-      const result = await runResumedSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
+      if (cached?.sessionId === session.acpSessionId) return runPromptOnExistingWorkflowAgentSession(context, prompt, cached)
+      const result = await runResumedWorkflowAgentSession(context, prompt, session.acpSessionId, session.workDir ?? context.workDir)
       if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: session.workDir ?? context.workDir })
       return result
     }
 
-    const result = await runNewSession(context, prompt)
+    const result = await runNewWorkflowAgentSession(context, prompt)
     if (result.success && result.acpSessionId) manager.set(key, { sessionId: result.acpSessionId, workDir: context.workDir })
     return result
   }
 
-  return runEphemeralSession(context, prompt)
+  return runEphemeralWorkflowAgentSession(context, prompt)
 }
 
-async function runPromptOnExistingSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
+async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, prompt: string, entry: { sessionId: string; workDir: string }): Promise<AcpSessionResult> {
   const acp = context.acpConnection
   if (!acp) return { text: "", success: false, error: "No shared ACP connection available", exitCode: 1 }
 
@@ -226,7 +226,7 @@ async function runPromptOnExistingSession(context: ActionContext, prompt: string
   }
 }
 
-async function runResumedSession(context: ActionContext, prompt: string, acpSessionId: string, workDir: string): Promise<AcpSessionResult> {
+async function runResumedWorkflowAgentSession(context: ActionContext, prompt: string, acpSessionId: string, workDir: string): Promise<AcpSessionResult> {
   const acp = context.acpConnection
   if (!acp) return { text: "", success: false, error: "No shared ACP connection available", exitCode: 1 }
 
@@ -311,9 +311,9 @@ async function runResumedSession(context: ActionContext, prompt: string, acpSess
   }
 }
 
-async function runNewSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+async function runNewWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const acp = context.acpConnection
-  if (!acp) return runEphemeralSession(context, prompt)
+  if (!acp) return runEphemeralWorkflowAgentSession(context, prompt)
 
   const connection = acp.connection
   const agentConfig = resolveAgentConfig(context.with)
@@ -399,7 +399,7 @@ async function runNewSession(context: ActionContext, prompt: string): Promise<Ac
   }
 }
 
-async function runEphemeralSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
+async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: string): Promise<AcpSessionResult> {
   const acpProcess = getAcpProcessFactory()(context)
   const agentConfig = resolveAgentConfig(context.with)
   let sessionId = ""
@@ -553,7 +553,7 @@ async function emitSessionStarted(context: ActionContext, agentSessionId: string
   const sessionName = sessionNameFromContext(context)
   const projectId = context.projectId
   if (sessionName && context.serverConnection && projectId) {
-    await context.serverConnection.attachSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
+    await context.serverConnection.attachWorkflowAgentSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
   }
 }
 
@@ -561,7 +561,7 @@ async function emitSessionEvent(context: ActionContext, type: string, payload: J
   const sessionName = sessionNameFromContext(context)
   const projectId = context.projectId
   if (sessionName && context.serverConnection && projectId) {
-    await context.serverConnection.sessionEvents(projectId, context.workflowRunId, sessionName, { workId: context.workId, workType: context.workType, stage: context.stage, events: [{ type, payload }] }, context.signal)
+    await context.serverConnection.workflowAgentSessionEvents(projectId, context.workflowRunId, sessionName, { workId: context.workId, workType: context.workType, stage: context.stage, events: [{ type, payload }] }, context.signal)
   }
 }
 
