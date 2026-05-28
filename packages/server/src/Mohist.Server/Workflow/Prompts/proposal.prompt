@@ -9,10 +9,6 @@ Initial proposal document outlining the change.
 Write to: `${{ openspecChangeDir }}/proposal.md`
 </output>
 
-<path_contract>
-Use `${{ openspecChangeDir }}` exactly as the change directory. Do not create or use a title slug, issue-title directory, numeric-title directory, or any other `openspec/changes/*` path for this artifact.
-</path_contract>
-
 <instruction>
 Create the proposal document that establishes WHY this change is needed.
 
