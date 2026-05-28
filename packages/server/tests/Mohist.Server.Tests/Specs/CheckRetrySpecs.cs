@@ -75,6 +75,42 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task CheckFailsBeyondRetryLimit_WorkflowFailsWithoutInjectingAnotherRepairTask()
+    {
+        await StartWorkflowAsync(StageWithRetryCheck(retryLimit: 2));
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r2, checks1, "check-1", "first fail");
+
+        var (fix1, r3) = await PollWorkAnyAsync();
+        Assert.Equal("fix-check:check-1:1.1", fix1.WorkId);
+        await ReportAsync(r3, fix1.WorkId, "completed");
+
+        var (checks2, r4) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r4, checks2, "check-1", "second fail");
+
+        var (fix2, r5) = await PollWorkAnyAsync();
+        Assert.Equal("fix-check:check-1:2.1", fix2.WorkId);
+        await ReportAsync(r5, fix2.WorkId, "completed");
+
+        var (checks3, r6) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r6, checks3, "check-1", "third fail");
+
+        var runner = Grains.GetGrain<IRunnerGrain>(r6);
+        Assert.Null(await runner.PollAsync());
+
+        var status = await Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Failed", status.Status);
+        Assert.Null(status.PendingWork);
+        var build = Assert.Single(status.Stages);
+        Assert.DoesNotContain(build.Tasks, t => t.Id.StartsWith("fix-check:check-1:3."));
+    }
+
+    [Fact]
     public async Task CheckFails_NoRetryConfigured_WorkflowFails()
     {
         await StartWorkflowAsync(SingleStage());
