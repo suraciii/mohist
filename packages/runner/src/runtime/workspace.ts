@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { JsonObject, WorkItem } from "../core/types.js"
-import { ensureDir, exists, runCommand } from "../system/process.js"
+import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 
 export interface WorkspaceInfo {
   path: string
@@ -34,17 +34,26 @@ export class WorkspaceManager {
     const baseBranch = stringAt(variables, ["project", "baseBranch"]) ?? stringAt(variables, ["project", "defaultBranch"]) ?? "main"
     const branch = `mo/issue-${issueNumber}`
     const worktree = issueWorktreePath(this.runnerRoot, projectName, issueNumber)
-    if (!exists(worktree)) {
-      await ensureDir(worktree)
-      const branchExists = await runCommand("git", ["rev-parse", "--verify", branch], projectPath, signal).then((result) => result.exitCode === 0)
-      const args = branchExists ? ["worktree", "add", worktree, branch] : ["worktree", "add", "-b", branch, worktree, baseBranch]
-      const result = await runCommand("git", args, projectPath, signal)
-      if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr || result.stdout}`)
-    }
+    const marker = issueWorkspaceMarker(variables)
+    await this.ensureFreshWorktree(projectPath, worktree, branch, baseBranch, marker, signal)
 
     const changeDir = stringAt(variables, ["openspecChangeDir"])
     if (changeDir) await ensureDir(join(worktree, changeDir, "specs"))
+    await writeText(markerPath(worktree), JSON.stringify(marker, null, 2))
     return { path: worktree, branch, changeDir: changeDir ? join(worktree, changeDir) : null }
+  }
+
+  private async ensureFreshWorktree(projectPath: string, worktree: string, branch: string, baseBranch: string, marker: IssueWorkspaceMarker, signal: AbortSignal) {
+    if (exists(worktree) && !await hasSameMarker(worktree, marker)) {
+      const removed = await runCommand("git", ["worktree", "remove", "--force", worktree], projectPath, signal)
+      if (removed.exitCode !== 0) await deleteDirectory(worktree)
+    }
+
+    if (!exists(worktree)) {
+      await ensureBranchAvailableForFreshWorktree(projectPath, branch, signal)
+      const result = await runCommand("git", ["worktree", "add", "-b", branch, worktree, baseBranch], projectPath, signal)
+      if (result.exitCode !== 0) throw new Error(`git worktree add -b ${branch} ${worktree} ${baseBranch} failed: ${result.stderr || result.stdout}`)
+    }
   }
 }
 
@@ -58,6 +67,45 @@ export function runnerVariables() {
 
 function issueWorktreePath(runnerRoot: string, projectName: string, issueNumber: number) {
   return resolve(join(runnerRoot, slug(projectName), "worktrees", `issue-${issueNumber}`))
+}
+
+interface IssueWorkspaceMarker {
+  issueId: string | null
+  issueNumber: number
+  workflowRunId: string | null
+}
+
+function issueWorkspaceMarker(variables: JsonObject): IssueWorkspaceMarker {
+  return {
+    issueId: stringAt(variables, ["issue", "id"]) ?? null,
+    issueNumber: numberAt(variables, ["issue", "number"]) ?? 0,
+    workflowRunId: stringAt(variables, ["mohist", "runId"]) ?? null,
+  }
+}
+
+async function hasSameMarker(worktree: string, expected: IssueWorkspaceMarker) {
+  const path = markerPath(worktree)
+  if (!exists(path)) return false
+  try {
+    const actual = JSON.parse(await readText(path)) as Partial<IssueWorkspaceMarker>
+    return actual.issueId === expected.issueId
+      && actual.issueNumber === expected.issueNumber
+      && actual.workflowRunId === expected.workflowRunId
+  } catch {
+    return false
+  }
+}
+
+function markerPath(worktree: string) {
+  return join(worktree, ".mohist", "workspace.json")
+}
+
+async function ensureBranchAvailableForFreshWorktree(projectPath: string, branch: string, signal: AbortSignal) {
+  const branchExists = await runCommand("git", ["rev-parse", "--verify", branch], projectPath, signal).then((result) => result.exitCode === 0)
+  if (!branchExists) return
+
+  const deleted = await runCommand("git", ["branch", "-D", branch], projectPath, signal)
+  if (deleted.exitCode !== 0) throw new Error(`git branch -D ${branch} failed: ${deleted.stderr || deleted.stdout}`)
 }
 
 function slug(value: string) {

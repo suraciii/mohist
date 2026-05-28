@@ -31,6 +31,10 @@ export async function deleteFile(path: string) {
   await rm(path, { force: true })
 }
 
+export async function deleteDirectory(path: string) {
+  await rm(path, { recursive: true, force: true })
+}
+
 export async function runCommand(command: string, args: string[], cwd: string, signal: AbortSignal, env?: NodeJS.ProcessEnv) {
   return await new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, signal, shell: false })
