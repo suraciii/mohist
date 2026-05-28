@@ -3,6 +3,7 @@ import { Readable, Writable } from "node:stream"
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { killProcess, sanitizedEnvironment } from "../system/process.js"
+import { acpArgs, acpCommand } from "./acp-command.js"
 
 export interface SharedAcpConnection {
   readonly connection: ClientSideConnection
@@ -57,8 +58,8 @@ export function clearActiveHandlers() {
 }
 
 export async function createSharedAcpConnection(workDir: string): Promise<SharedAcpConnection> {
-  const command = process.env.MOHIST_AGENT_COMMAND ?? "opencode"
-  const args = process.env.MOHIST_AGENT_ARGS ? JSON.parse(process.env.MOHIST_AGENT_ARGS) as string[] : ["acp"]
+  const command = acpCommand()
+  const args = acpArgs()
   const proc = spawn(command, args, {
     cwd: workDir,
     stdio: ["pipe", "pipe", "inherit"],
