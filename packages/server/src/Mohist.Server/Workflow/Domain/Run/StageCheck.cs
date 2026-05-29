@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -15,6 +16,11 @@ public sealed record CheckResult(
     string Status,
     string? Message = null,
     JsonElement? Output = null);
+
+public sealed record CheckResultAction(
+    CheckResult Result,
+    string Action,
+    TaskDefinition? RetryTask = null);
 
 public sealed class StageCheck
 {
