@@ -40,7 +40,7 @@ public static partial class WorkflowRunExtensions
                 return WorkflowWork.Task(current.StageId, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput);
 
             var pendingChecks = current.Checks
-                .Where(c => c.Phase == CheckRunPhase.Pending)
+                .Where(c => c.Status == StageCheckStatus.Pending)
                 .Select(c => new CheckItem(c.Name, c.Title, c.Uses, c.WithInput))
                 .ToList();
 
@@ -53,13 +53,13 @@ public static partial class WorkflowRunExtensions
         public bool HasIncompleteTaskUsing(string uses)
         {
             var current = run.CurrentStage();
-            return current.Tasks.Any(t => t.Uses == uses && t.Phase != TaskRunPhase.Completed);
+            return current.Tasks.Any(t => t.Uses == uses && t.Status != TaskRunStatus.Completed);
         }
 
         public bool HasIncompleteTaskId(string id)
         {
             var current = run.CurrentStage();
-            return current.Tasks.Any(t => t.Id == id && t.Phase != TaskRunPhase.Completed);
+            return current.Tasks.Any(t => t.Id == id && t.Status != TaskRunStatus.Completed);
         }
 
         public int RetryCountForCheck(string checkName)
