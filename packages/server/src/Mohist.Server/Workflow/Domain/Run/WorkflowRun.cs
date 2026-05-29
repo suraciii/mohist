@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum WorkflowRunPhase { Pending, Running, AwaitingApproval, Paused, Completed, Failed }
+public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Completed, Failed }
 
 public sealed record WorkflowRunMetadata(
     string? Name,
@@ -15,7 +15,7 @@ public sealed class WorkflowRun
 {
     public required string Id { get; init; }
     public required WorkflowRunMetadata Metadata { get; set; }
-    public WorkflowRunPhase Phase { get; set; }
+    public WorkflowRunStatus Status { get; set; }
     public string? CurrentStageId { get; set; }
     public required List<StageRun> Stages { get; init; }
     public DateTimeOffset? StartedAt { get; set; }
@@ -42,7 +42,7 @@ public static partial class WorkflowRunExtensions
                     Order = i,
                     Attempt = 1,
                     RequiresApproval = def.RequiresApproval,
-                    Phase = StageRunPhase.Pending
+                    Status = StageRunStatus.Pending
                 })
                 .ToList();
 
@@ -50,7 +50,7 @@ public static partial class WorkflowRunExtensions
             {
                 Id = id,
                 Metadata = metadata ?? new WorkflowRunMetadata(null, DateTimeOffset.UtcNow),
-                Phase = WorkflowRunPhase.Pending,
+                Status = WorkflowRunStatus.Pending,
                 CurrentStageId = stages[0].StageId,
                 Stages = stages
             };
@@ -61,34 +61,34 @@ public static partial class WorkflowRunExtensions
     {
         public void Start()
         {
-            if (run.Phase != WorkflowRunPhase.Pending && run.Phase != WorkflowRunPhase.Paused)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Phase}");
+            if (run.Status != WorkflowRunStatus.Pending && run.Status != WorkflowRunStatus.Paused)
+                throw new WorkflowDomainException($"WorkflowRun is {run.Status}");
 
             var current = run.CurrentStage();
-            if (current.Phase == StageRunPhase.Pending)
-                current.Phase = StageRunPhase.Running;
+            if (current.Status == StageRunStatus.Pending)
+                current.Status = StageRunStatus.Running;
 
-            run.Phase = WorkflowRunPhase.Running;
+            run.Status = WorkflowRunStatus.Running;
             run.StartedAt ??= DateTimeOffset.UtcNow;
         }
 
         public void Pause()
         {
-            if (run.Phase != WorkflowRunPhase.Running)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Phase}, pause requires Running");
-            run.Phase = WorkflowRunPhase.Paused;
+            if (run.Status != WorkflowRunStatus.Running)
+                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, pause requires Running");
+            run.Status = WorkflowRunStatus.Paused;
         }
 
         public void Resume()
         {
-            if (run.Phase != WorkflowRunPhase.Paused)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Phase}, resume requires Paused");
+            if (run.Status != WorkflowRunStatus.Paused)
+                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, resume requires Paused");
 
             var current = run.CurrentStage();
-            if (current.Phase == StageRunPhase.Pending)
-                current.Phase = StageRunPhase.Running;
+            if (current.Status == StageRunStatus.Pending)
+                current.Status = StageRunStatus.Running;
 
-            run.Phase = WorkflowRunPhase.Running;
+            run.Status = WorkflowRunStatus.Running;
         }
     }
 }

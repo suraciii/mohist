@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum CheckRunPhase { Pending, Passed, Failed }
+public enum StageCheckStatus { Pending, Passed, Failed }
 
 public sealed record CheckItem(
     string Name,
@@ -22,7 +22,7 @@ public sealed class StageCheck
     public required string Title { get; init; }
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
-    public CheckRunPhase Phase { get; set; }
+    public StageCheckStatus Status { get; set; }
     public int RetryCount { get; set; }
     public string? Message { get; set; }
     public JsonElement? Output { get; set; }

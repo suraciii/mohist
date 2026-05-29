@@ -11,8 +11,8 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason);
             run.Failure = current.Failure;
-            current.Phase = StageRunPhase.Failed;
-            run.Phase = WorkflowRunPhase.Failed;
+            current.Status = StageRunStatus.Failed;
+            run.Status = WorkflowRunStatus.Failed;
         }
 
         public void FailInFlightWork(string workType, string? reason)
@@ -25,31 +25,31 @@ public static partial class WorkflowRunExtensions
                 {
                     var task = current.FirstPendingTask();
                     if (task is null) return;
-                    task.Phase = TaskRunPhase.Failed;
+                    task.Status = TaskRunStatus.Failed;
                     current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, task.Id, Message: reason);
                     run.Failure = current.Failure;
-                    current.Phase = StageRunPhase.Failed;
-                    run.Phase = WorkflowRunPhase.Failed;
+                    current.Status = StageRunStatus.Failed;
+                    run.Status = WorkflowRunStatus.Failed;
                     break;
                 }
                 case "check" or "checks":
                 {
                     var pending = current.FirstPendingCheck();
                     if (pending is null) return;
-                    pending.Phase = CheckRunPhase.Failed;
+                    pending.Status = StageCheckStatus.Failed;
                     pending.Message = reason;
                     current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.StageId, CheckName: pending.Name, Message: reason);
                     run.Failure = current.Failure;
-                    current.Phase = StageRunPhase.Failed;
-                    run.Phase = WorkflowRunPhase.Failed;
+                    current.Status = StageRunStatus.Failed;
+                    run.Status = WorkflowRunStatus.Failed;
                     break;
                 }
                 default:
                 {
                     current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason ?? $"In-flight work lost (type={workType})");
                     run.Failure = current.Failure;
-                    current.Phase = StageRunPhase.Failed;
-                    run.Phase = WorkflowRunPhase.Failed;
+                    current.Status = StageRunStatus.Failed;
+                    run.Status = WorkflowRunStatus.Failed;
                     break;
                 }
             }
@@ -57,8 +57,8 @@ public static partial class WorkflowRunExtensions
 
         public void Retry()
         {
-            if (run.Phase != WorkflowRunPhase.Failed)
-                throw new WorkflowDomainException($"WorkflowRun is {run.Phase}, retry requires failed");
+            if (run.Status != WorkflowRunStatus.Failed)
+                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, retry requires failed");
 
             var current = run.CurrentStage();
             if (current.Failure is null)
@@ -91,36 +91,36 @@ public static partial class WorkflowRunExtensions
                 Order = current.Order,
                 Attempt = current.Attempt + 1,
                 RequiresApproval = current.RequiresApproval,
-                Phase = StageRunPhase.Running
+                Status = StageRunStatus.Running
             };
             run.Stages[stageIdx] = newStage;
-            run.Phase = WorkflowRunPhase.Running;
+            run.Status = WorkflowRunStatus.Running;
         }
     }
 
     private static void RetryFailedTask(WorkflowRun run, StageRun stage, string taskRunId)
     {
-        var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Phase == TaskRunPhase.Failed)
+        var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
             ?? throw new WorkflowDomainException($"Failed task {taskRunId} not found or not in failed state");
 
         var input = new LoadedTaskInput(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
         var newTask = TaskRun.MakeTask(stage.Tasks, input);
         stage.Tasks.Add(newTask);
         stage.Failure = null;
-        stage.Phase = StageRunPhase.Running;
-        run.Phase = WorkflowRunPhase.Running;
+        stage.Status = StageRunStatus.Running;
+        run.Status = WorkflowRunStatus.Running;
     }
 
     private static void RetryFailedCheck(WorkflowRun run, StageRun stage, string? checkName)
     {
-        var failedCheck = stage.Checks.FirstOrDefault(c => c.Name == checkName && c.Phase == CheckRunPhase.Failed)
+        var failedCheck = stage.Checks.FirstOrDefault(c => c.Name == checkName && c.Status == StageCheckStatus.Failed)
             ?? throw new WorkflowDomainException($"Failed check {checkName} not found or not in failed state");
 
-        failedCheck.Phase = CheckRunPhase.Pending;
+        failedCheck.Status = StageCheckStatus.Pending;
         failedCheck.Message = null;
         failedCheck.Output = null;
         stage.Failure = null;
-        stage.Phase = StageRunPhase.Running;
-        run.Phase = WorkflowRunPhase.Running;
+        stage.Status = StageRunStatus.Running;
+        run.Status = WorkflowRunStatus.Running;
     }
 }

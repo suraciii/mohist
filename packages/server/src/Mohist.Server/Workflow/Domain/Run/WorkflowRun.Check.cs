@@ -8,7 +8,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            check.Phase = CheckRunPhase.Passed;
+            check.Status = StageCheckStatus.Passed;
             check.Message = result.Message;
             check.Output = result.Output;
             current.TryRequestApproval();
@@ -19,7 +19,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            check.Phase = CheckRunPhase.Failed;
+            check.Status = StageCheckStatus.Failed;
             check.Message = result.Message;
             check.Output = result.Output;
             if (current.Failure is null)
@@ -29,15 +29,15 @@ public static partial class WorkflowRunExtensions
                     CheckName: check.Name, Message: result.Message);
                 run.Failure = current.Failure;
             }
-            current.Phase = StageRunPhase.Failed;
-            run.Phase = WorkflowRunPhase.Failed;
+            current.Status = StageRunStatus.Failed;
+            run.Status = WorkflowRunStatus.Failed;
         }
 
         public void ResetCheck(CheckResult result)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
-            check.Phase = CheckRunPhase.Pending;
+            check.Status = StageCheckStatus.Pending;
             check.Message = result.Message;
             check.Output = result.Output;
         }

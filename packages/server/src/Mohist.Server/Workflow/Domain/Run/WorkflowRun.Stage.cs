@@ -14,7 +14,7 @@ public static partial class WorkflowRunExtensions
             if (current.Initialized) return;
 
             var pendingRuntimeTasks = current.Tasks
-                .Where(t => t.Phase == TaskRunPhase.Pending)
+                .Where(t => t.Status == TaskRunStatus.Pending)
                 .Select(t => new LoadedTaskInput(t.DefinitionId, t.Title, t.Uses, t.WithInput))
                 .ToList();
 
@@ -32,11 +32,11 @@ public static partial class WorkflowRunExtensions
                     Title = c.Title,
                     Uses = c.Uses,
                     WithInput = c.With,
-                    Phase = CheckRunPhase.Pending
+                    Status = StageCheckStatus.Pending
                 })
                 .ToList();
             current.Initialized = true;
-            current.Phase = StageRunPhase.Running;
+            current.Status = StageRunStatus.Running;
             current.TryRequestApproval();
             run.Advance();
         }
@@ -46,7 +46,7 @@ public static partial class WorkflowRunExtensions
             while (true)
             {
                 var current = run.CurrentStage();
-                if (current.Phase != StageRunPhase.Completed) break;
+                if (current.Status != StageRunStatus.Completed) break;
 
                 var nextStage = run.Stages
                     .Where(s => s.Order > current.Order)
@@ -54,15 +54,30 @@ public static partial class WorkflowRunExtensions
 
                 if (nextStage is null)
                 {
-                    run.Phase = WorkflowRunPhase.Completed;
+                    run.Status = WorkflowRunStatus.Completed;
                     run.CompletedAt = DateTimeOffset.UtcNow;
                     return;
                 }
 
-                nextStage.Phase = StageRunPhase.Running;
+                nextStage.Status = StageRunStatus.Running;
                 run.CurrentStageId = nextStage.StageId;
             }
-            run.RecomputePhase();
+
+            if (run.Status is not WorkflowRunStatus.Pending and not WorkflowRunStatus.Paused)
+            {
+                var current = run.CurrentStage();
+                if (current.Status == StageRunStatus.Failed)
+                    run.Status = WorkflowRunStatus.Failed;
+                else if (current.Status == StageRunStatus.AwaitingApproval)
+                    run.Status = WorkflowRunStatus.AwaitingApproval;
+                else if (current.Status == StageRunStatus.Completed && run.Stages.Count > 0 && run.Stages[^1].StageId == current.StageId)
+                {
+                    run.Status = WorkflowRunStatus.Completed;
+                    run.CompletedAt = DateTimeOffset.UtcNow;
+                }
+                else
+                    run.Status = WorkflowRunStatus.Running;
+            }
         }
     }
 }

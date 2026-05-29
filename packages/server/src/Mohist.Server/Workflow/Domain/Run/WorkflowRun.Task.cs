@@ -23,7 +23,7 @@ public static partial class WorkflowRunExtensions
             var task = current.FirstPendingTask();
             if (task is null) return;
 
-            task.Phase = TaskRunPhase.Completed;
+            task.Status = TaskRunStatus.Completed;
             current.TryRequestApproval();
             run.Advance();
         }
@@ -34,11 +34,11 @@ public static partial class WorkflowRunExtensions
             var task = current.FirstPendingTask();
             if (task is null) return;
 
-            task.Phase = TaskRunPhase.Failed;
+            task.Status = TaskRunStatus.Failed;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, task.Id, Message: result.Reason);
             run.Failure = current.Failure;
-            current.Phase = StageRunPhase.Failed;
-            run.Phase = WorkflowRunPhase.Failed;
+            current.Status = StageRunStatus.Failed;
+            run.Status = WorkflowRunStatus.Failed;
         }
 
         public void AddRuntimeTask(
@@ -57,7 +57,7 @@ public static partial class WorkflowRunExtensions
             {
                 foreach (var c in current.Checks)
                 {
-                    c.Phase = CheckRunPhase.Pending;
+                    c.Status = StageCheckStatus.Pending;
                     c.Message = null;
                     c.Output = null;
                 }
@@ -67,9 +67,9 @@ public static partial class WorkflowRunExtensions
             if (current.Approval?.Status == "awaiting")
                 current.Approval = null;
             if (current.Initialized)
-                current.Phase = StageRunPhase.Running;
+                current.Status = StageRunStatus.Running;
 
-            run.Phase = WorkflowRunPhase.Running;
+            run.Status = WorkflowRunStatus.Running;
         }
 
         public void InsertRuntimeTasksAfter(
@@ -92,7 +92,7 @@ public static partial class WorkflowRunExtensions
             {
                 foreach (var c in current.Checks)
                 {
-                    c.Phase = CheckRunPhase.Pending;
+                    c.Status = StageCheckStatus.Pending;
                     c.Message = null;
                     c.Output = null;
                 }

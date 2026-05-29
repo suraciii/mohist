@@ -20,7 +20,7 @@ public static partial class WorkflowRunExtensions
                 input?.Output ?? null,
                 current.Approval.RequestedAt,
                 DateTimeOffset.UtcNow.ToString("O"));
-            current.Phase = StageRunPhase.Completed;
+            current.Status = StageRunStatus.Completed;
             run.Advance();
         }
 
@@ -37,8 +37,8 @@ public static partial class WorkflowRunExtensions
                 current.Approval.RequestedAt,
                 DateTimeOffset.UtcNow.ToString("O"));
             current.Failure = new FailureDetails(FailureReason.ApprovalRejected, current.StageId, Message: message);
-            current.Phase = StageRunPhase.Failed;
-            run.Phase = WorkflowRunPhase.Failed;
+            current.Status = StageRunStatus.Failed;
+            run.Status = WorkflowRunStatus.Failed;
         }
     }
 }

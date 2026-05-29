@@ -88,11 +88,11 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
         var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
         if (currentStage is null) return true;
 
-        if (currentStage.Failure is not null && run.Phase != WorkflowRunPhase.Paused) return true;
+        if (currentStage.Failure is not null && run.Status != WorkflowRunStatus.Paused) return true;
 
         if (currentStage.Initialized
-            && currentStage.Tasks.All(t => t.Phase == TaskRunPhase.Completed)
-            && currentStage.Checks.All(c => c.Phase == CheckRunPhase.Passed)
+            && currentStage.Tasks.All(t => t.Status == TaskRunStatus.Completed)
+            && currentStage.Checks.All(c => c.Status == StageCheckStatus.Passed)
             && (!currentStage.RequiresApproval || currentStage.Approval?.Status == "approved")
             && currentStage.Order == run.Stages.Max(s => s.Order))
             return true;
@@ -104,8 +104,8 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
     {
         if (!stage.Initialized) return true;
 
-        return stage.Tasks.Any(t => t.Phase is TaskRunPhase.Pending or TaskRunPhase.Running)
-            || stage.Checks.Any(c => c.Phase is CheckRunPhase.Pending);
+        return stage.Tasks.Any(t => t.Status is TaskRunStatus.Pending or TaskRunStatus.Running)
+            || stage.Checks.Any(c => c.Status is StageCheckStatus.Pending);
     }
 
     private static WorkflowRun? Deserialize(string json)

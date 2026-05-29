@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum TaskRunPhase { Pending, Running, Completed, Failed }
+public enum TaskRunStatus { Pending, Running, Completed, Failed }
 
 public sealed class TaskRun
 {
@@ -12,7 +12,7 @@ public sealed class TaskRun
     public required string Title { get; init; }
     public string? Uses { get; init; }
     public Dictionary<string, JsonElement?>? WithInput { get; init; }
-    public TaskRunPhase Phase { get; set; }
+    public TaskRunStatus Status { get; set; }
 }
 
 internal static class TaskRunExtensions
@@ -34,7 +34,7 @@ internal static class TaskRunExtensions
                 Title = input.Title,
                 Uses = input.Uses,
                 WithInput = input.With,
-                Phase = TaskRunPhase.Pending
+                Status = TaskRunStatus.Pending
             };
         }
     }
