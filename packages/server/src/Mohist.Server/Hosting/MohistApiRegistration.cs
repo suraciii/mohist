@@ -1,19 +1,9 @@
-using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Api;
-using Mohist.Server.Storage.Db;
 
 namespace Mohist.Server.Hosting;
 
 public static class MohistApiRegistration
 {
-    public static WebApplication EnsureMohistDatabase(this WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        MohistDatabaseInitializer.Initialize(db);
-        return app;
-    }
-
     public static WebApplication MapMohistApi(this WebApplication app)
     {
         app.UseApiExceptionHandler();
