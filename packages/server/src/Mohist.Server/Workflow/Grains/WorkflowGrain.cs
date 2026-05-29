@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Mohist.Server.Grains;
 using System.Text.Json;
 using Mohist.Server.Events;
@@ -11,7 +12,6 @@ using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Workflow.Grains;
 
-#pragma warning disable CS8602
 public class WorkflowGrain : Grain, IWorkflowGrain
 {
     private WorkflowRunProfile? _profile;
@@ -174,7 +174,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var phaseBefore = _run.Status;
         var with = ParseWith(task.With);
-        _run!.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
+        _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
         var stage = _run.CurrentStageId ?? "unknown";
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
@@ -189,13 +189,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public Task<bool> HasIncompleteTaskWithUsesAsync(string uses)
     {
         EnsureRun();
-        return Task.FromResult(_run!.HasIncompleteTaskWithUses(uses));
+        return Task.FromResult(_run.HasIncompleteTaskWithUses(uses));
     }
 
     public Task<bool> HasIncompleteTaskByIdAsync(string id)
     {
         EnsureRun();
-        return Task.FromResult(_run!.HasIncompleteTaskById(id));
+        return Task.FromResult(_run.HasIncompleteTaskById(id));
     }
 
     public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
@@ -222,7 +222,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (request.Tasks is null || request.Tasks.Count == 0)
             throw new InvalidOperationException("AddTasksBatchRequest requires at least one task");
 
-        if (_run?.CurrentStageId is null)
+        if (_run.CurrentStageId is null)
             throw new InvalidOperationException("Workflow has no current stage");
 
         var current = _run.CurrentStage();
@@ -241,7 +241,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, with));
         }
 
-        _run!.InsertRuntimeTasksAfter(tasksToInsert);
+        _run.InsertRuntimeTasksAfter(tasksToInsert);
 
         _log.LogInformation("Workflow {Id} added {Count} tasks in stage {Stage}",
             GrainKey, tasksToInsert.Count, current.Id);
@@ -678,6 +678,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return new CheckResult(name!, status, message, output);
     }
 
+    [MemberNotNull(nameof(_run))]
     private void EnsureRun()
     {
         if (_run is null)
