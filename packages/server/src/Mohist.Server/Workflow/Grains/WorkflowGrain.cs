@@ -216,7 +216,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return dispatch;
     }
 
-    public Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
+    public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
     {
         EnsureRun();
         if (request.Tasks is null || request.Tasks.Count == 0)
@@ -246,15 +246,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} added {Count} tasks in stage {Stage}",
             GrainKey, tasksToInsert.Count, current.Id);
 
-        _ = SaveRunAsync();
-        _ = AppendWorkflowEventAsync(
+        await SaveRunAsync();
+        await AppendWorkflowEventAsync(
             "workflow_tasks_batch_added", "batch_added",
             $"Added {tasksToInsert.Count} tasks to workflow stage {current.Id}",
             Payload: new { Count = tasksToInsert.Count });
 
-        _ = RegisterToBacklogAsync();
+        await RegisterToBacklogAsync();
 
-        return Task.FromResult(new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count));
+        return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
     public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
@@ -587,41 +587,67 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task ProcessCheckResultAsync(WorkDispatchResult result)
     {
-        var stage = _run!.CurrentStageId!;
-
         var checkResults = ParseCheckResults(result.Output);
         if (checkResults.Count == 0)
             return;
+
+        var stage = _run!.CurrentStageId!;
+        var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == stage);
+        var actions = new List<CheckResultAction>(checkResults.Count);
 
         foreach (var cr in checkResults)
         {
             if (cr.Status == "pass")
             {
-                _run!.PassCheck(cr);
-                await AppendWorkflowEventAsync("workflow_check_passed", "pass", cr.Message ?? $"Check passed: {cr.Name}", CheckName: cr.Name, Payload: cr);
+                actions.Add(new(cr, "pass"));
             }
             else if (cr.Status == "pending")
             {
-                _run!.ResetCheck(cr);
-                await AppendWorkflowEventAsync("workflow_check_pending", "pending", cr.Message ?? $"Check pending: {cr.Name}", CheckName: cr.Name, Payload: cr);
+                actions.Add(new(cr, "pending"));
             }
             else
             {
-                var injected = TryAddRetryTask(stage, cr.Name, cr);
-                if (injected)
-                {
-                    _run!.ResetCheck(cr);
-                    _run!.ResetStageFailure();
-                    await AppendWorkflowEventAsync("workflow_retry_task_injected", "retrying", cr.Message ?? $"Retry task injected for check: {cr.Name}", CheckName: cr.Name, Payload: cr);
-                }
-                else
-                {
-                    _run!.FailCheck(cr);
-                    await AppendWorkflowEventAsync("workflow_check_failed", "fail", cr.Message ?? $"Check failed: {cr.Name}", CheckName: cr.Name, Payload: cr);
-                    return;
-                }
+                var retryTask = ResolveRetryTask(stageDef, cr);
+                actions.Add(retryTask is not null
+                    ? new(cr, "retry", retryTask)
+                    : new(cr, "fail"));
             }
         }
+
+        _run!.ProcessCheckResults(actions);
+
+        foreach (var a in actions)
+        {
+            var (eventType, eventStatus) = a.Action switch
+            {
+                "pass" => ("workflow_check_passed", "pass"),
+                "pending" => ("workflow_check_pending", "pending"),
+                "retry" => ("workflow_retry_task_injected", "retrying"),
+                "fail" => ("workflow_check_failed", "fail"),
+                _ => (a.Action, a.Action)
+            };
+            await AppendWorkflowEventAsync(eventType, eventStatus, a.Result.Message ?? $"Check {a.Action}: {a.Result.Name}", CheckName: a.Result.Name, Payload: a.Result);
+            if (a.Action == "fail") break;
+        }
+    }
+
+    private TaskDefinition? ResolveRetryTask(StageDefinition? stageDef, CheckResult cr)
+    {
+        var checkDef = stageDef?.Checks.Find(c => c.Name == cr.Name);
+        if (checkDef?.OnFailure?.Retry is not { } retry) return null;
+
+        var retryCount = _run!.GetRetryCount(cr.Name);
+        if (retryCount >= retry.Limit) return null;
+
+        var resultJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(cr));
+        var retryWith = retry.Task.With is not null
+            ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
+            : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
+        return new TaskDefinition(
+            $"{retry.Task.Id}:{retryCount + 1}",
+            retry.Task.Title,
+            retry.Task.Uses,
+            retryWith);
     }
 
     private static List<CheckResult> ParseCheckResults(string? output)
@@ -655,30 +681,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         JsonElement? output = element.TryGetProperty("output", out var outProp) ? outProp.Clone() : null;
 
         return new CheckResult(name!, status, message, output);
-    }
-
-    private bool TryAddRetryTask(string stage, string checkName, CheckResult result)
-    {
-        var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == stage);
-        if (stageDef is null) return false;
-
-        var checkDef = stageDef.Checks.Find(c => c.Name == checkName);
-        if (checkDef?.OnFailure?.Retry is not { } retry) return false;
-
-        var retryCount = _run!.GetRetryCount(checkName);
-        if (retryCount >= retry.Limit) return false;
-
-        var resultJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
-        var retryWith = retry.Task.With is not null
-            ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
-            : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
-        _run!.AddRetryTask(checkName, new TaskDefinition(
-            $"{retry.Task.Id}:{retryCount + 1}",
-            retry.Task.Title,
-            retry.Task.Uses,
-            retryWith));
-
-        return true;
     }
 
     private void EnsureRun()
