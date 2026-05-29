@@ -72,7 +72,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         {
             _log.LogWarning("Runner {Id} unregistered with in-flight work, failing workflow {WorkflowId}", RunnerId, wfId);
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            await workflowGrain.FailCurrentWorkAsync(RunnerId, $"Runner {RunnerId} unregistered");
+            await workflowGrain.AbandonCurrentWorkAsync(RunnerId, $"Runner {RunnerId} unregistered");
         }
 
         foreach (var (workId, workflowRunId) in agentWorkMappings)
@@ -232,7 +232,7 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
         {
             _log.LogWarning("Runner {Id} timed out, failing in-flight work for workflow {WorkflowId}", RunnerId, wfId);
             var workflowGrain = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-            await workflowGrain.FailCurrentWorkAsync(RunnerId, $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
+            await workflowGrain.AbandonCurrentWorkAsync(RunnerId, $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
 
         foreach (var (workId, workflowRunId) in timedOutAgentWork)

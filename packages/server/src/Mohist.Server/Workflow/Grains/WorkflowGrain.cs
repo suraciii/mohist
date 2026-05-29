@@ -292,30 +292,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
-    public async Task FailCurrentWorkAsync(string runnerId, string reason)
+    public async Task AbandonCurrentWorkAsync(string runnerId, string reason)
     {
         var lease = _lease;
         if (lease is null) return;
 
         if (lease.RunnerId != runnerId)
         {
-            _log.LogWarning("Workflow {Id} ignoring FailInFlight from runner {Caller} — lease owned by {Owner}",
+            _log.LogWarning("Workflow {Id} ignoring abandon from runner {Caller} — lease owned by {Owner}",
                 GrainKey, runnerId, lease.RunnerId);
             return;
         }
 
-        _log.LogWarning("Workflow {Id} failing in-flight work {WorkId} ({WorkType}): {Reason}",
+        _log.LogWarning("Workflow {Id} abandoning in-flight work {WorkId} ({WorkType}): {Reason}",
             GrainKey, lease.WorkId, lease.WorkType, reason);
 
-        var phaseBefore = _run?.Status;
         ClearLease();
-        _run!.FailCurrentWork(lease.WorkType, reason);
-
         await SaveRunAsync();
-        await AppendWorkflowEventAsync("workflow_work_failed", "failed", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
-        await AppendTerminalEventIfNeededAsync();
-        await ReleaseFromBacklogIfTerminalAsync();
-        await DispatchCompletedHookIfNeededAsync(phaseBefore);
+        await AppendWorkflowEventAsync("workflow_work_abandoned", "abandoned", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
+        await RegisterToBacklogIfRunnableAsync();
     }
 
     public Task<WorkflowVariablesSnapshot?> GetVariablesAsync()

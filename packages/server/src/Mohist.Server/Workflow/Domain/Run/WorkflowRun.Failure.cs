@@ -17,32 +17,6 @@ public static partial class WorkflowRunExtensions
             run.Status = WorkflowRunStatus.Failed;
         }
 
-        public void FailCurrentWork(string workType, string? reason)
-        {
-            switch (workType)
-            {
-                case "task":
-                    run.FailTask(new TaskResult("failed", reason));
-                    break;
-                case "check" or "checks":
-                {
-                    var current = run.CurrentStage();
-                    var check = current.CurrentCheck();
-                    if (check is null) return;
-                    check.Status = StageCheckStatus.Failed;
-                    check.Message = reason;
-                    current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.Id, CheckName: check.Name, Message: reason);
-                    run.Failure = current.Failure;
-                    current.Status = StageRunStatus.Failed;
-                    run.Status = WorkflowRunStatus.Failed;
-                    break;
-                }
-                default:
-                    run.FailStage(reason ?? $"In-flight work lost (type={workType})");
-                    break;
-            }
-        }
-
         public void Retry()
         {
             if (run.Status != WorkflowRunStatus.Failed)
