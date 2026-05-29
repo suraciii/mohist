@@ -78,8 +78,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                 new StageDefinition("release",
                     [new("publish", "Publish", "spec/task")],
                     [])
-            ]),
-            new WorkflowCorrelationContext("project-1", "deployment", "deploy-1", null));
+            ]));
 
         var (work, _) = await PollWorkAnyAsync();
 

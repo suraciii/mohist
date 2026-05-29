@@ -6,37 +6,36 @@ using Mohist.Server.Project.Queries;
 
 namespace Mohist.Server.Issue.Queries;
 
-[GenerateSerializer]
 public class IssueInfo
 {
-    [Id(0)]  public string Id { get; set; } = null!;
-    [Id(1)]  public int Number { get; set; }
-    [Id(2)]  public string Title { get; set; } = null!;
-    [Id(3)]  public string? Body { get; set; }
-    [Id(4)]  public string Stage { get; set; } = "backlog";
-    [Id(5), JsonPropertyName("status")] public string RuntimeStatus { get; set; } = "active";
-    [Id(6)]  public string ProjectId { get; set; } = null!;
-    [Id(7)]  public string? ProjectName { get; set; }
-    [Id(8)]  public string[] Labels { get; set; } = [];
-    [Id(9)]  public string Priority { get; set; } = "p2";
-    [Id(10)] public string? Model { get; set; }
-    [Id(11)] public Dictionary<string, string>? StageModels { get; set; }
-    [Id(26)] public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
-    [Id(27)] public Dictionary<string, object?>? AgentConfig { get; set; }
-    [Id(12)] public string CreatedAt { get; set; } = "";
-    [Id(13)] public string UpdatedAt { get; set; } = "";
-    [Id(14)] public string? ArchivedAt { get; set; }
-    [Id(15), JsonPropertyName("approvalState")] public StageApproval? StageApproval { get; set; }
-    [Id(17)] public int? RetryCount { get; set; }
-    [Id(18)] public int? ConflictRetryCount { get; set; }
-    [Id(19)] public string? BlockedReason { get; set; }
-    [Id(20)] public string? WorkflowRunId { get; set; }
-    [Id(21)] public int[] PrerequisiteNumbers { get; set; } = [];
-    [Id(22)] public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
-    [Id(23)] public IssueAttention? Attention { get; set; }
-    [Id(24)] public string? WorkflowStage { get; set; }
-    [Id(25)] public string? WorkflowStatus { get; set; }
-    [Id(28)] public RepositoryInfo? Repository { get; set; }
+    public string Id { get; set; } = null!;
+    public int Number { get; set; }
+    public string Title { get; set; } = null!;
+    public string? Body { get; set; }
+    public string Stage { get; set; } = "backlog";
+    [JsonPropertyName("status")] public string RuntimeStatus { get; set; } = "active";
+    public string ProjectId { get; set; } = null!;
+    public string? ProjectName { get; set; }
+    public string[] Labels { get; set; } = [];
+    public string Priority { get; set; } = "p2";
+    public string? Model { get; set; }
+    public Dictionary<string, string>? StageModels { get; set; }
+    public Dictionary<string, Dictionary<string, string>>? StageVariables { get; set; }
+    public Dictionary<string, object?>? AgentConfig { get; set; }
+    public string CreatedAt { get; set; } = "";
+    public string UpdatedAt { get; set; } = "";
+    public string? ArchivedAt { get; set; }
+    [JsonPropertyName("approvalState")] public StageApproval? StageApproval { get; set; }
+    public int? RetryCount { get; set; }
+    public int? ConflictRetryCount { get; set; }
+    public string? BlockedReason { get; set; }
+    public string? WorkflowRunId { get; set; }
+    public int[] PrerequisiteNumbers { get; set; } = [];
+    public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
+    public IssueAttention? Attention { get; set; }
+    public string? WorkflowStage { get; set; }
+    public string? WorkflowStatus { get; set; }
+    public RepositoryInfo? Repository { get; set; }
 }
 
 [GenerateSerializer]

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Config;
 using Mohist.Server.Events;
 using Mohist.Server.Project.Queries;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
@@ -10,9 +11,12 @@ using Mohist.Server.Sessions.Queries;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Recovery;
+using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workspace;
 
 namespace Mohist.Server.Hosting;
@@ -26,9 +30,15 @@ public static class MohistServiceRegistration
         services.AddDbContextFactory<MohistDbContext>(options =>
             options.UseSqlite(connectionString));
 
-        services.AddScoped(typeof(IStateStore<>), typeof(EfStateStore<>));
+        services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
+        services.AddScoped<IStateStore<IssueWorkflowProfile>, IssueProfileStore>();
+        services.AddScoped<IStateStore<IssueCounterState>, IssueCounterStore>();
+        services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
+        services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
+        services.AddScoped<IStateStore<WorkflowRunState>, WorkflowRunStore>();
+        services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
+        services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
         services.AddScoped<IStateStore<WorkflowAgentSession>, WorkflowAgentSessionStore>();
-        services.AddScoped<IssueStateStore>();
         services.AddSingleton<ProjectQueryService>();
         services.AddScoped<IssueQueryService>();
         services.AddSingleton<Workflow.Prompts.IPromptLoader, Workflow.Prompts.FilePromptLoader>();

@@ -115,17 +115,18 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     public void CheckRetryCount_IsStageCheckStateAndSurvivesSnapshotRestore()
     {
         var definition = StageWithRetryCheck(retryLimit: 2);
-        var run = new WorkflowRun("wf-domain", definition.Stages);
+        var profile = new WorkflowRunProfile("wf-domain", definition);
+        var run = new WorkflowRun("wf-domain", profile);
 
         run.Start();
-        run.InitTasks([new("task-1", "Task 1", "spec/task")]);
+        run.InitStage([new("task-1", "Task 1", "spec/task")], definition.Stages[0].Checks);
         run.CompleteTask();
         run.InjectRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
 
         var snapshot = run.Snapshot();
         Assert.Equal(1, snapshot.Stages[0].Checks.Single(c => c.Name == "check-1").RetryCount);
 
-        var restored = WorkflowRun.Restore(definition.Stages, snapshot);
+        var restored = WorkflowRun.Restore(profile, snapshot);
         Assert.Equal(1, restored.RetryCountForCheck("check-1"));
     }
 

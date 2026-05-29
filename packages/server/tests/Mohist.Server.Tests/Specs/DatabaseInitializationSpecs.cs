@@ -8,7 +8,7 @@ namespace Mohist.Server.Tests.Specs;
 public class DatabaseInitializationSpecs
 {
     [Fact]
-    public async Task Initialize_WhenExistingDatabaseLacksWorkflowSessionTables_CreatesThem()
+    public async Task Initialize_WhenExistingDatabaseLacksTables_CreatesThem()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -16,11 +16,11 @@ public class DatabaseInitializationSpecs
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                CREATE TABLE "GrainStates" (
-                    "Key" TEXT NOT NULL,
-                    "Type" TEXT NOT NULL,
-                    "JsonState" TEXT NOT NULL,
-                    CONSTRAINT "PK_GrainStates" PRIMARY KEY ("Key", "Type")
+                CREATE TABLE "Projects" (
+                    "Id" TEXT NOT NULL,
+                    "Name" TEXT NOT NULL,
+                    "RepositoriesJson" TEXT NOT NULL,
+                    CONSTRAINT "PK_Projects" PRIMARY KEY ("Id")
                 );
                 """;
             await command.ExecuteNonQueryAsync();

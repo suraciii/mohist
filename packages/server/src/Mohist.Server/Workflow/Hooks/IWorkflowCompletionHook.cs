@@ -9,5 +9,6 @@ public interface IWorkflowCompletionHook
 
 public sealed record WorkflowCompletionHookContext(
     string WorkflowRunId,
-    WorkflowCorrelationContext? Correlation,
+    string ProjectId,
+    int? IssueNumber,
     WorkflowStatusSnapshot CompletedStatus);

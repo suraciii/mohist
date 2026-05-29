@@ -22,29 +22,23 @@ public sealed class IssueWorkflowCompletionHook : IWorkflowCompletionHook
 
     public async Task OnCompletedAsync(WorkflowCompletionHookContext context)
     {
-        var correlation = context.Correlation;
-        if (correlation?.OwnerType != "issue" ||
-            string.IsNullOrWhiteSpace(correlation.ProjectId) ||
-            correlation.OwnerNumber is null)
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(context.ProjectId) || context.IssueNumber is null) return;
 
-        var issue = _grains.GetGrain<IIssueGrain>($"{correlation.ProjectId}:{correlation.OwnerNumber.Value}");
+        var issue = _grains.GetGrain<IIssueGrain>($"{context.ProjectId}:{context.IssueNumber.Value}");
         await issue.CompleteWorkAsync(context.WorkflowRunId);
 
-        var project = await _projectsQuery.GetByIdAsync(correlation.ProjectId);
+        var project = await _projectsQuery.GetByIdAsync(context.ProjectId);
         if (project is null)
         {
             _log.LogWarning(
                 "Workflow {WorkflowRunId} completed for issue {IssueNumber}, but project {ProjectId} was not found for cleanup",
                 context.WorkflowRunId,
-                correlation.OwnerNumber.Value,
-                correlation.ProjectId);
+                context.IssueNumber.Value,
+                context.ProjectId);
             return;
         }
 
-        var cleanup = await _git.RemoveWorktreeAsync(project.Path, project.Name, correlation.OwnerNumber.Value);
+        var cleanup = await _git.RemoveWorktreeAsync(project.Path, project.Name, context.IssueNumber.Value);
         if (cleanup.Status == "failed")
         {
             _log.LogWarning(

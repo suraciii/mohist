@@ -8,12 +8,12 @@ using Mohist.Server.Project.Storage;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db.Entities;
+using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Storage.Db;
 
 public class MohistDbContext : DbContext
 {
-    public DbSet<GrainState> GrainStates { get; set; } = null!;
     public DbSet<ProjectEntry> Projects { get; set; } = null!;
     public DbSet<ConfigEntry> Configs { get; set; } = null!;
     public DbSet<WorkflowEventEntry> WorkflowEvents { get; set; } = null!;
@@ -23,6 +23,14 @@ public class MohistDbContext : DbContext
     public DbSet<IssuePrerequisiteEntry> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicEntry> Epics { get; set; } = null!;
     public DbSet<EpicIssueEntry> EpicIssues { get; set; } = null!;
+    public DbSet<IssueStateRow> IssueStates { get; set; } = null!;
+    public DbSet<IssueProfileRow> IssueProfiles { get; set; } = null!;
+    public DbSet<WorkflowRunStateRow> WorkflowRunStates { get; set; } = null!;
+    public DbSet<WorkflowRunProfileRow> WorkflowRunProfiles { get; set; } = null!;
+    public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
+    public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
+    public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
+    public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -30,14 +38,6 @@ public class MohistDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<GrainState>(entity =>
-        {
-            entity.HasKey(e => new { e.Key, e.Type });
-            entity.Property(e => e.Key).HasMaxLength(256);
-            entity.Property(e => e.Type).HasMaxLength(256);
-            entity.Property(e => e.JsonState).IsRequired();
-        });
-
         modelBuilder.Entity<ProjectEntry>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -150,6 +150,61 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueId).HasMaxLength(256).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.IssueId }).IsUnique();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
+        });
+
+        modelBuilder.Entity<IssueStateRow>(entity =>
+        {
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasMaxLength(512);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<IssueProfileRow>(entity =>
+        {
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasMaxLength(512);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowRunStateRow>(entity =>
+        {
+            entity.HasKey(e => e.WorkflowRunId);
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowRunProfileRow>(entity =>
+        {
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasMaxLength(256);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowLeaseRow>(entity =>
+        {
+            entity.HasKey(e => e.WorkflowRunId);
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowVariablesRow>(entity =>
+        {
+            entity.HasKey(e => e.WorkflowRunId);
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<BacklogStateRow>(entity =>
+        {
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<IssueCounterRow>(entity =>
+        {
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
         });
     }
 }

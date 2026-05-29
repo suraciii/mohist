@@ -28,11 +28,10 @@ public class IssueQueryServiceSpecs
         var project = new ProjectInfo { Id = "proj-1", Name = "Project One", Path = "/tmp/project" };
         var issue = new Issue.Domain.Issue("issue_1", project.Id, 1, "Query me", labels: ["bug"], priority: "p1");
         issue.MarkReady();
-        db.GrainStates.Add(new GrainState
+        db.IssueStates.Add(new IssueStateRow
         {
             Key = $"{project.Id}:1",
-            Type = typeof(IssueAggregate).FullName!,
-            JsonState = IssueStateStore.Serialize(new IssueAggregate(issue, null)),
+            StateJson = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 

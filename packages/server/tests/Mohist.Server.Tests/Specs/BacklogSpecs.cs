@@ -21,7 +21,7 @@ public class BacklogFixture : IAsyncLifetime
         builder.Options.InitialSilosCount = 1;
         builder.ConfigureSilo((_, siloBuilder) =>
         {
-            siloBuilder.Services.AddSingleton(typeof(IStateStore<>), typeof(InMemoryStateStore<>));
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
             siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
         });

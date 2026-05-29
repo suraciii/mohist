@@ -6,7 +6,6 @@ namespace Mohist.Server.Workflow.Domain.Run;
 
 public class WorkflowRun
 {
-    private readonly List<StageDefinition> _definitionStages;
     private readonly List<StageRun> _stageRuns = [];
     private readonly Dictionary<string, int> _stageAttempts = new();
     private bool _started;
@@ -24,7 +23,7 @@ public class WorkflowRun
             if (CurrentStage.Status == StageRunStatus.Failed) return WorkflowRunStatus.Failed;
             if (_paused) return WorkflowRunStatus.Paused;
             if (CurrentStage.Status == StageRunStatus.AwaitingApproval) return WorkflowRunStatus.AwaitingApproval;
-            if (CurrentStage.Status == StageRunStatus.Completed && IsLastDefinitionStage(CurrentStage)) return WorkflowRunStatus.Completed;
+            if (CurrentStage.Order == _stageRuns.Count - 1 && CurrentStage.Status == StageRunStatus.Completed) return WorkflowRunStatus.Completed;
             return WorkflowRunStatus.Running;
         }
     }
@@ -32,7 +31,7 @@ public class WorkflowRun
     public FailureDetails? Failure => CurrentStage.Failure;
 
     public IReadOnlyList<string> StageOrder =>
-        _definitionStages.Select(d => d.Stage).ToList().AsReadOnly();
+        _stageRuns.Select(s => s.Stage).ToList().AsReadOnly();
 
     public IReadOnlyList<StageRunState> Stages =>
         _stageRuns.Select(sr => new StageRunState(
@@ -47,16 +46,23 @@ public class WorkflowRun
             sr.Failure
         )).ToList().AsReadOnly();
 
-    public WorkflowRun(string id, List<StageDefinition> definitionStages)
+    public WorkflowRun(string id, WorkflowRunProfile profile)
     {
-        if (definitionStages.Count == 0)
+        var stages = profile.Definition.Stages;
+        if (stages.Count == 0)
             throw new WorkflowDomainException("WorkflowRun requires at least one stage definition");
 
         Id = id;
-        _definitionStages = definitionStages;
 
-        var first = AppendStageRun(0);
-        CurrentStage = first;
+        for (var i = 0; i < stages.Count; i++)
+        {
+            var def = stages[i];
+            var attempt = _stageAttempts.GetValueOrDefault(def.Stage, 0) + 1;
+            _stageAttempts[def.Stage] = attempt;
+            _stageRuns.Add(new StageRun(def.Stage, i, attempt, def.RequiresApproval));
+        }
+
+        CurrentStage = _stageRuns[0];
     }
 
     public WorkflowRunSnapshot Snapshot() => new(
@@ -67,9 +73,9 @@ public class WorkflowRun
         new Dictionary<string, int>(_stageAttempts),
         _stageRuns.Select(s => s.Snapshot()).ToList());
 
-    public static WorkflowRun Restore(List<StageDefinition> definitionStages, WorkflowRunSnapshot snapshot)
+    public static WorkflowRun Restore(WorkflowRunProfile profile, WorkflowRunSnapshot snapshot)
     {
-        var run = new WorkflowRun(snapshot.Id, definitionStages);
+        var run = new WorkflowRun(snapshot.Id, profile);
         run._stageRuns.Clear();
         run._stageAttempts.Clear();
 
@@ -77,11 +83,7 @@ public class WorkflowRun
             run._stageAttempts[key] = value;
 
         foreach (var stageSnapshot in snapshot.Stages)
-        {
-            var stageDefinition = definitionStages.FirstOrDefault(d => d.Stage == stageSnapshot.Stage)
-                ?? throw new WorkflowDomainException($"Cannot restore stage {stageSnapshot.Stage}: definition not found");
-            run._stageRuns.Add(StageRun.Restore(stageSnapshot, stageDefinition.Checks));
-        }
+            run._stageRuns.Add(StageRun.Restore(stageSnapshot));
 
         if (run._stageRuns.Count == 0)
             throw new WorkflowDomainException("Cannot restore WorkflowRun without stage runs");
@@ -126,9 +128,9 @@ public class WorkflowRun
         _paused = true;
     }
 
-    public void InitTasks(List<LoadedTaskInput> tasks)
+    public void InitStage(IReadOnlyList<LoadedTaskInput> tasks, List<CheckDefinition> checks)
     {
-        CurrentStage.InitTasks(tasks);
+        CurrentStage.Init(tasks, checks);
         Advance();
     }
 
@@ -200,9 +202,16 @@ public class WorkflowRun
 
     public void Rerun()
     {
-        var defIndex = _definitionStages.FindIndex(d => d.Stage == CurrentStage.Stage);
-        var newRun = AppendStageRun(defIndex);
-        CurrentStage = newRun;
+        var attempt = _stageAttempts.GetValueOrDefault(CurrentStage.Stage, 0) + 1;
+        _stageAttempts[CurrentStage.Stage] = attempt;
+
+        _stageRuns[CurrentStage.Order] = new StageRun(
+            CurrentStage.Stage,
+            CurrentStage.Order,
+            attempt,
+            CurrentStage.RequiresApproval);
+
+        CurrentStage = _stageRuns[CurrentStage.Order];
         CurrentStage.Start();
         _paused = false;
     }
@@ -211,37 +220,13 @@ public class WorkflowRun
     {
         while (CurrentStage.Status == StageRunStatus.Completed)
         {
-            var defIndex = _definitionStages.FindIndex(d => d.Stage == CurrentStage.Stage);
-            var nextDefIndex = defIndex + 1;
-            if (nextDefIndex >= _definitionStages.Count) return;
+            var currentIndex = _stageRuns.IndexOf(CurrentStage);
+            var nextIndex = currentIndex + 1;
+            if (nextIndex >= _stageRuns.Count) return;
 
-            var next = AppendStageRun(nextDefIndex);
-            CurrentStage = next;
+            CurrentStage = _stageRuns[nextIndex];
             CurrentStage.Start();
         }
-    }
-
-    private StageRun AppendStageRun(int definitionIndex)
-    {
-        var def = _definitionStages[definitionIndex];
-        var attempt = _stageAttempts.GetValueOrDefault(def.Stage, 0) + 1;
-        _stageAttempts[def.Stage] = attempt;
-
-        var run = new StageRun(
-            def.Stage,
-            definitionIndex,
-            def.Checks,
-            attempt,
-            def.RequiresApproval);
-
-        _stageRuns.Add(run);
-        return run;
-    }
-
-    private bool IsLastDefinitionStage(StageRun stageRun)
-    {
-        var lastDef = _definitionStages[^1];
-        return stageRun.Stage == lastDef.Stage && stageRun.Order == _definitionStages.Count - 1;
     }
 
     private WorkflowWork MapWork(StageWork work) => work switch
