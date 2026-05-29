@@ -36,7 +36,7 @@ public static partial class WorkflowRunExtensions
             if (!current.Initialized)
                 return WorkflowWork.StageInit(current.Id);
 
-            var pendingTask = current.FirstPendingTask();
+            var pendingTask = current.CurrentTask();
             if (pendingTask is not null)
                 return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput);
 
@@ -85,13 +85,14 @@ public static partial class WorkflowRunExtensions
         }
 
         public void InsertRuntimeTasksAfter(
-            TaskRun afterTask,
             IReadOnlyList<TaskDefinition> tasks,
             bool invalidateChecks = false)
         {
             var current = run.CurrentStage();
-            var insertIndex = current.Tasks.IndexOf(afterTask) + 1;
-            if (insertIndex <= 0) insertIndex = current.Tasks.Count;
+            var afterTask = current.CurrentTask();
+            var insertIndex = afterTask is not null
+                ? current.Tasks.IndexOf(afterTask) + 1
+                : current.Tasks.Count;
 
             foreach (var task in tasks)
             {

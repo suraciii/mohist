@@ -19,41 +19,27 @@ public static partial class WorkflowRunExtensions
 
         public void FailCurrentWork(string workType, string? reason)
         {
-            var current = run.CurrentStage();
-
             switch (workType)
             {
                 case "task":
-                {
-                    var task = current.FirstPendingTask();
-                    if (task is null) return;
-                    task.Status = TaskRunStatus.Failed;
-                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: reason);
-                    run.Failure = current.Failure;
-                    current.Status = StageRunStatus.Failed;
-                    run.Status = WorkflowRunStatus.Failed;
+                    run.FailTask(new TaskResult("failed", reason));
                     break;
-                }
                 case "check" or "checks":
                 {
-                    var pending = current.FirstPendingCheck();
-                    if (pending is null) return;
-                    pending.Status = StageCheckStatus.Failed;
-                    pending.Message = reason;
-                    current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.Id, CheckName: pending.Name, Message: reason);
+                    var current = run.CurrentStage();
+                    var check = current.CurrentCheck();
+                    if (check is null) return;
+                    check.Status = StageCheckStatus.Failed;
+                    check.Message = reason;
+                    current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.Id, CheckName: check.Name, Message: reason);
                     run.Failure = current.Failure;
                     current.Status = StageRunStatus.Failed;
                     run.Status = WorkflowRunStatus.Failed;
                     break;
                 }
                 default:
-                {
-                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, Message: reason ?? $"In-flight work lost (type={workType})");
-                    run.Failure = current.Failure;
-                    current.Status = StageRunStatus.Failed;
-                    run.Status = WorkflowRunStatus.Failed;
+                    run.FailStage(reason ?? $"In-flight work lost (type={workType})");
                     break;
-                }
             }
         }
 

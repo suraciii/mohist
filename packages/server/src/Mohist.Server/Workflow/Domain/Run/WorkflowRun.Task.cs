@@ -9,7 +9,7 @@ public static partial class WorkflowRunExtensions
         public void CompleteTask()
         {
             var current = run.CurrentStage();
-            var task = current.FirstPendingTask();
+            var task = current.CurrentTask();
             if (task is null) return;
 
             task.Status = TaskRunStatus.Completed;
@@ -19,7 +19,7 @@ public static partial class WorkflowRunExtensions
         public void FailTask(TaskResult result)
         {
             var current = run.CurrentStage();
-            var task = current.FirstPendingTask();
+            var task = current.CurrentTask();
             if (task is null) return;
 
             task.Status = TaskRunStatus.Failed;
