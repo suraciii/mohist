@@ -13,7 +13,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     public async Task NoRunnerAtStart_RegisterLater_AssignAndRun()
     {
         var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        await workflow.StartAsync(SingleStage(), TestInput());
 
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
@@ -31,7 +31,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     public async Task PausedBeforeRunner_StillPaused()
     {
         var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        await workflow.StartAsync(SingleStage(), TestInput());
 
         await workflow.PauseAsync("paused before capacity");
         _runnerId = await RegisterRunnerAsync();

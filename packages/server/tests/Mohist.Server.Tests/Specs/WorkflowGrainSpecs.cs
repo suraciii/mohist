@@ -39,6 +39,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
@@ -122,7 +123,7 @@ public abstract class WorkflowGrainSpecs
         _workflowId = workflowId;
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.StartAsync(definition);
+        await workflow.StartAsync(definition, TestInput());
         return workflow;
     }
 
@@ -130,9 +131,12 @@ public abstract class WorkflowGrainSpecs
     {
         await ClearBacklogAsync();
         var workflow = await CreateWorkflowAsync(id);
-        await workflow.StartAsync(definition);
+        await workflow.StartAsync(definition, TestInput());
         return workflow;
     }
+
+    protected static WorkflowStartInput TestInput() =>
+        new(Variables: """{"project":{"id":"test-project"}}""");
 
     protected async Task ClearBacklogAsync()
     {

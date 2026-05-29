@@ -70,10 +70,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             if (_profile is null)
                 throw new InvalidOperationException("Cannot start: no workflow definition provided");
-            _run = WorkflowOperations.Create(GrainKey, _profile.Definition, input?.Metadata?.ToDomain());
+            _run = WorkflowRun.Create(GrainKey, _profile.Definition, input?.Metadata?.ToDomain());
         }
 
-        _run = WorkflowOperations.Start(_run);
+        _run.Start();
         if (!string.IsNullOrWhiteSpace(input?.Variables))
             _variables = new WorkflowExecutionContext(input.Variables!, input?.StageVariables);
 
@@ -89,7 +89,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Phase;
-        _run = WorkflowOperations.Start(_run);
+        _run.Start();
         _log.LogInformation("Workflow {Id} resumed, stage={Stage}", GrainKey, _run.CurrentStageId);
         EmitStageChanged("resumed");
         await SaveRunAsync();
@@ -102,7 +102,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Phase;
-        _run = WorkflowOperations.Pause(_run);
+        _run.Pause();
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
         await SaveRunAsync();
@@ -114,7 +114,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Phase;
-        _run = WorkflowOperations.Approve(_run);
+        _run.Approve();
         _log.LogInformation("Workflow {Id} approved at stage={Stage}", GrainKey, _run.CurrentStageId);
         EmitStageChanged("approved");
         await SaveRunAsync();
@@ -131,7 +131,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var output = reason is not null
             ? JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(reason))
             : (JsonElement?)null;
-        _run = WorkflowOperations.Reject(_run, new ApprovalInput(output));
+        _run.Reject(new ApprovalInput(output));
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStageId, reason);
         EmitStageChanged("rejected", reason);
         await SaveRunAsync();
@@ -146,7 +146,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         var phaseBefore = _run.Phase;
         ClearLease();
-        _run = WorkflowOperations.Retry(_run);
+        _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
@@ -159,7 +159,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         var phaseBefore = _run.Phase;
         ClearLease();
-        _run = WorkflowOperations.Rerun(_run);
+        _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
@@ -177,7 +177,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var phaseBefore = _run.Phase;
         var with = ParseWith(task.With);
-        _run = WorkflowOperations.AddRuntimeTask(_run!, new LoadedTaskInput(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
+        _run!.AddRuntimeTask(new LoadedTaskInput(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
         var stage = _run.CurrentStageId ?? "unknown";
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
@@ -192,21 +192,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public Task<bool> HasIncompleteTaskUsingAsync(string uses)
     {
         EnsureRun();
-        return Task.FromResult(WorkflowOperations.HasIncompleteTaskUsing(_run!, uses));
+        return Task.FromResult(_run!.HasIncompleteTaskUsing(uses));
     }
 
     public Task<bool> HasIncompleteTaskIdAsync(string id)
     {
         EnsureRun();
-        return Task.FromResult(WorkflowOperations.HasIncompleteTaskId(_run!, id));
+        return Task.FromResult(_run!.HasIncompleteTaskId(id));
     }
 
     public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
     {
         if (_run is null) return null;
+        if (_run.Phase == WorkflowRunPhase.Paused) return null;
         if (_lease is not null) return null;
 
-        var work = WorkflowOperations.GetNextWork(_run);
+        var work = _run.NextWork();
         if (work is null) return null;
 
         var dispatch = PrepareWork(work, runnerId);
@@ -279,7 +280,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var phaseBefore = _run?.Phase;
         ClearLease();
-        _run = WorkflowOperations.FailInFlightWork(_run!, lease.WorkType, reason);
+        _run!.FailInFlightWork(lease.WorkType, reason);
 
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_work_failed", "failed", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
@@ -328,7 +329,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EnsureRun();
         var domainPatch = patch.ToDomain();
         if (domainPatch is not null)
-            _run = WorkflowOperations.PatchMetadata(_run!, domainPatch);
+            _run!.PatchMetadata(domainPatch);
         await SaveRunAsync();
     }
 
@@ -451,7 +452,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return;
         if (_run.Phase is WorkflowRunPhase.Completed or WorkflowRunPhase.Failed)
         {
-            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(GetProjectId()));
+            var projectId = GetProjectId();
+            if (string.IsNullOrWhiteSpace(projectId)) return;
+            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(projectId));
             await backlog.ReleaseAsync(GrainKey);
             _log.LogInformation("Workflow {Id} released from backlog (status={Status})", GrainKey, _run.Phase);
         }
@@ -459,7 +462,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task RegisterToBacklogAsync()
     {
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(GetProjectId()));
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(projectId));
         await backlog.RegisterAsync(GrainKey);
         _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
     }
@@ -467,23 +472,32 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private async Task RegisterToBacklogIfRunnableAsync()
     {
         if (_run?.Phase != WorkflowRunPhase.Running) return;
-        if (WorkflowOperations.GetNextWork(_run) is null) return;
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+        if (_run.NextWork() is null) return;
         await RegisterToBacklogAsync();
     }
 
     private WorkDispatch? PrepareWork(WorkflowWork work, string runnerId)
     {
-        switch (work)
+        switch (work.WorkType)
         {
-            case WorkflowWork.StageInit si:
-                var stageDef = RequireStageDefinition(si.Stage);
-                _run = WorkflowOperations.InitStage(_run!, MaterializeTasks(stageDef), stageDef.Checks);
+            case "stage-init":
+                var stageDef = RequireStageDefinition(work.Stage);
+                if (stageDef.TasksFrom is not null)
+                {
+                    _run!.MarkLoadPending(stageDef.TasksFrom.Uses);
+                    return PrepareFromDomain(runnerId);
+                }
+                _run!.InitStage(MaterializeTasks(stageDef), stageDef.Checks);
                 return PrepareFromDomain(runnerId);
 
-            case WorkflowWork.Task t:
-                return MakeDispatch(t.Stage, t.Id, "task", t.Title, t.Uses, t.With, runnerId);
+            case "task":
+                var t = (WorkflowWork.TaskData)work.Data;
+                return MakeDispatch(work.Stage, t.Id, "task", t.Title, t.Uses, t.With, runnerId);
 
-            case WorkflowWork.Checks ch:
+            case "checks":
+                var ch = (WorkflowWork.ChecksData)work.Data;
                 var checksPayload = ch.Items.Select(i => (Dictionary<string, JsonElement?>)new Dictionary<string, JsonElement?>
                 {
                     ["name"] = JsonSerializer.SerializeToElement(i.Name),
@@ -491,7 +505,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
                     ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
                 }).ToList();
-                return MakeDispatch(ch.Stage, $"checks-{ch.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
+                return MakeDispatch(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
+
+            case "load":
+                var ld = (WorkflowWork.LoadData)work.Data;
+                return MakeDispatch(work.Stage, $"load-{work.Stage}", "load", $"Load tasks", uses: ld.Uses, with: null, runnerId);
 
             default:
                 return null;
@@ -500,7 +518,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private WorkDispatch? PrepareFromDomain(string runnerId)
     {
-        var work = WorkflowOperations.GetNextWork(_run!);
+        var work = _run!.NextWork();
         return work is not null ? PrepareWork(work, runnerId) : null;
     }
 
@@ -521,7 +539,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             Stage: stage,
             Title: title,
             Issue: issueRef);
-        _lease = new WorkLease(workId, workType, stage, logicalId, runnerId);
+        _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId);
         return dispatch;
     }
 
@@ -539,7 +557,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         lease.WorkId,
         lease.WorkType,
         lease.Stage,
-        null,
+        lease.Title,
         null);
 
     private void ClearLease()
@@ -552,14 +570,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (result.Status == "completed")
         {
             TryAddRequestedTaskFromCurrentTask();
-            _run = WorkflowOperations.CompleteTask(_run!);
+            _run!.CompleteTask();
         }
         else
         {
             if (TryAddRequestedTask(result))
-                _run = WorkflowOperations.CompleteTask(_run!);
+                _run!.CompleteTask();
             else
-                _run = WorkflowOperations.FailTask(_run!, new TaskResult("failed", result.Message));
+                _run!.FailTask(new TaskResult("failed", result.Message));
         }
     }
 
@@ -571,7 +589,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             using var document = JsonDocument.Parse(result.Output);
             if (!TryParseRequestedTask(document.RootElement, out var task)) return false;
-            _run = WorkflowOperations.AddRuntimeTask(_run!, task);
+            _run!.AddRuntimeTask(task);
             return true;
         }
         catch (JsonException)
@@ -594,7 +612,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!TryParseRequestedTask(new Dictionary<string, JsonElement?> { ["requestedTask"] = requested }, out var task))
             return false;
 
-        _run = WorkflowOperations.AddRuntimeTask(_run!, task);
+        _run!.AddRuntimeTask(task);
         return true;
     }
 
@@ -647,12 +665,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             if (cr.Status == "pass")
             {
-                _run = WorkflowOperations.PassCheck(_run!, cr);
+                _run!.PassCheck(cr);
                 await AppendWorkflowEventAsync("workflow_check_passed", "pass", cr.Message ?? $"Check passed: {cr.Name}", CheckName: cr.Name, Payload: cr);
             }
             else if (cr.Status == "pending")
             {
-                _run = WorkflowOperations.PendingCheck(_run!, cr);
+                _run!.PendingCheck(cr);
                 await AppendWorkflowEventAsync("workflow_check_pending", "pending", cr.Message ?? $"Check pending: {cr.Name}", CheckName: cr.Name, Payload: cr);
             }
             else
@@ -660,13 +678,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 var injected = TryInjectRetryTask(stage, cr.Name, cr);
                 if (injected)
                 {
-                    _run = WorkflowOperations.ResetCheck(_run!, cr);
-                    _run = WorkflowOperations.ClearStageFailure(_run!);
+                    _run!.ResetCheck(cr);
+                    _run!.ClearStageFailure();
                     await AppendWorkflowEventAsync("workflow_retry_task_injected", "retrying", cr.Message ?? $"Retry task injected for check: {cr.Name}", CheckName: cr.Name, Payload: cr);
                 }
                 else
                 {
-                    _run = WorkflowOperations.FailCheck(_run!, cr);
+                    _run!.FailCheck(cr);
                     await AppendWorkflowEventAsync("workflow_check_failed", "fail", cr.Message ?? $"Check failed: {cr.Name}", CheckName: cr.Name, Payload: cr);
                     return;
                 }
@@ -714,10 +732,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             case "completed":
             case "loaded":
                 var stageDef = RequireStageDefinition(_run!.CurrentStageId!);
-                _run = WorkflowOperations.InitStage(_run!, MaterializeTasks(stageDef, ParseLoadedTasks(result.Output)), stageDef.Checks);
+                _run!.InitStage(MaterializeTasks(stageDef, ParseLoadedTasks(result.Output)), stageDef.Checks);
                 break;
             default:
-                _run = WorkflowOperations.FailStage(_run!, result.Message ?? "Task loading failed");
+                _run!.FailStage(result.Message ?? "Task loading failed");
                 break;
         }
     }
@@ -730,14 +748,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var checkDef = stageDef.Checks.Find(c => c.Name == checkName);
         if (checkDef?.OnFailure?.Retry is not { } retry) return false;
 
-        var retryCount = WorkflowOperations.RetryCountForCheck(_run!, checkName);
+        var retryCount = _run!.RetryCountForCheck(checkName);
         if (retryCount >= retry.Limit) return false;
 
         var resultJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
         var retryWith = retry.Task.With is not null
             ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
             : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
-        _run = WorkflowOperations.InjectRetryTask(_run!, checkName, new LoadedTaskInput(
+        _run!.InjectRetryTask(checkName, new LoadedTaskInput(
             $"{retry.Task.Id}:{retryCount + 1}",
             retry.Task.Title,
             retry.Task.Uses,

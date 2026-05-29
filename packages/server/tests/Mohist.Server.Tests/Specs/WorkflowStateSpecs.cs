@@ -101,7 +101,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        await workflow.StartAsync(SingleStage(checks: []));
+        await workflow.StartAsync(SingleStage(checks: []), TestInput());
 
         var work = await runner.PollAsync();
         Assert.NotNull(work);
@@ -111,7 +111,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     public async Task StartWithoutRunner_RunnerClaimsFromBacklogLater()
     {
         var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage());
+        await workflow.StartAsync(SingleStage(), TestInput());
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
