@@ -123,7 +123,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         run.Start();
         run.InitializeStage([new("task-1", "Task 1", "spec/task")], definition.Stages[0].Checks);
         run.CompleteTask();
-        run.AddRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
+        run.RepairFailedCheck(new("check-1", "fail", "broken"), new("fix-check", "Fix check", "spec/fix"));
 
         var currentStage = run.Stages.First(s => s.Id == run.CurrentStageId);
         Assert.Equal(1, currentStage.Checks.Single(c => c.Name == "check-1").RetryCount);

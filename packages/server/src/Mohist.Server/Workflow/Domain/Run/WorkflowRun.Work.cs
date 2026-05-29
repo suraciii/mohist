@@ -112,7 +112,7 @@ public static partial class WorkflowRunExtensions
             }
         }
 
-        public void AddRetryTask(string checkName, TaskDefinition task)
+        private void AddRetryTask(string checkName, TaskDefinition task)
         {
             var current = run.CurrentStage();
             var newTask = TaskRun.MakeTask(current.Tasks, task);
