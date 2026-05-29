@@ -13,24 +13,6 @@ public class WorkflowRunEntity
     [Required]
     public string State { get; set; } = "{}";
 
-    [MaxLength(100)]
-    public string? MetadataName { get; set; }
-
-    [MaxLength(50)]
+    [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public string? MetadataProjectId { get; set; }
-
-    public long MetadataCreatedAt { get; set; }
-
-    public string? MetadataLabels { get; set; }
-
-    [MaxLength(50)]
-    public string? MetadataDefinitionId { get; set; }
-
-    [MaxLength(20)]
-    public string Phase { get; set; } = "Pending";
-
-    [MaxLength(50)]
-    public string? CurrentStageId { get; set; }
-
-    public long PhaseUpdatedAt { get; set; }
 }

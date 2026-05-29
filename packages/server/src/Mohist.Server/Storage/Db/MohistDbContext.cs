@@ -171,18 +171,9 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50);
             entity.Property(e => e.State).IsRequired();
-            entity.Property(e => e.MetadataName).HasMaxLength(100);
-            entity.Property(e => e.MetadataProjectId).HasMaxLength(50);
-            entity.Property(e => e.MetadataDefinitionId).HasMaxLength(50);
-            entity.Property(e => e.Phase).HasMaxLength(20);
-            entity.Property(e => e.CurrentStageId).HasMaxLength(50);
+            entity.Property(e => e.MetadataProjectId)
+                .HasComputedColumnSql("json_extract(State, '$.Metadata.Annotations.projectId')", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
-            entity.HasIndex(e => e.MetadataDefinitionId);
-            entity.HasIndex(e => e.Phase);
-            entity.HasIndex(e => new { e.MetadataProjectId, e.Phase });
-            entity.HasIndex(e => new { e.MetadataDefinitionId, e.Phase });
-            entity.HasIndex(e => e.MetadataCreatedAt);
-            entity.HasIndex(e => e.PhaseUpdatedAt);
         });
 
         modelBuilder.Entity<WorkflowRunProfileRow>(entity =>
