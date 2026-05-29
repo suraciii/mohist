@@ -26,7 +26,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
     Task<string?> GetDefinitionYamlAsync();
-    Task PatchMetadataAsync(MetadataSnapshot patch);
 }
 
 [GenerateSerializer]

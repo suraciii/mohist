@@ -55,9 +55,13 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        var running = await backlog.ListRunningAsync();
-        Assert.All(running, r => Assert.NotEqual(_workflowId, r.WorkflowId));
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Failed", status.Status);
+
+        var anotherRunnerId = await RegisterRunnerAsync();
+        var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);
+        Assert.Null(await anotherRunner.PollAsync());
     }
 
     [Fact]

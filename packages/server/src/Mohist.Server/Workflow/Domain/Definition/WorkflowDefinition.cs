@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Definition;
 
@@ -47,35 +46,4 @@ public sealed record WorkflowDefinition(
     Dictionary<string, JsonElement?>? Defaults = null,
     Dictionary<string, string>? Artifacts = null);
 
-public static class WorkflowDefinitionValidator
-{
-    public static void Validate(WorkflowDefinition definition)
-    {
-        if (string.IsNullOrWhiteSpace(definition.Id))
-            throw new WorkflowDomainException("WorkflowDefinition requires an id");
 
-        if (definition.Stages.Count == 0)
-            throw new WorkflowDomainException($"WorkflowDefinition {definition.Id} requires at least one stage");
-
-        var seenStages = new HashSet<string>();
-        foreach (var stage in definition.Stages)
-        {
-            if (!seenStages.Add(stage.Stage))
-                throw new WorkflowDomainException($"WorkflowDefinition {definition.Id} declares duplicate stage {stage.Stage}");
-
-            var taskIds = new HashSet<string>();
-            foreach (var task in stage.Tasks)
-            {
-                if (!taskIds.Add(task.Id))
-                    throw new WorkflowDomainException($"WorkflowDefinition {definition.Id} declares duplicate task {stage.Stage}:{task.Id}");
-            }
-
-            var checkNames = new HashSet<string>();
-            foreach (var check in stage.Checks)
-            {
-                if (!checkNames.Add(check.Name))
-                    throw new WorkflowDomainException($"WorkflowDefinition {definition.Id} declares duplicate check {stage.Stage}:{check.Name}");
-            }
-        }
-    }
-}

@@ -12,20 +12,6 @@ public sealed class FilePromptLoader : IPromptLoader
         _promptsDirectory = promptsDirectory ?? ResolveDefaultPromptsDirectory();
     }
 
-    public string Load(string name)
-    {
-        if (_cache.TryGetValue(name, out var cached))
-            return cached;
-
-        var filePath = Path.Combine(_promptsDirectory, $"{name}.prompt");
-        if (!File.Exists(filePath))
-            throw new FileNotFoundException($"Prompt file not found: {filePath}", filePath);
-
-        var content = File.ReadAllText(filePath);
-        _cache[name] = content;
-        return content;
-    }
-
     public Dictionary<string, string> LoadAll()
     {
         if (_cache.Count > 0)

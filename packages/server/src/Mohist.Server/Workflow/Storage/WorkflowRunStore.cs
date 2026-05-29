@@ -10,9 +10,6 @@ public interface IWorkflowRunStore
 {
     Task SaveAsync(WorkflowRun run);
     Task<WorkflowRun?> LoadAsync(string workflowRunId);
-    Task<IReadOnlyList<WorkflowRun>> ListByProjectAsync(string projectId, WorkflowRunPhase? phaseFilter = null);
-    Task<IReadOnlyList<WorkflowRun>> ListByDefinitionAsync(string definitionId, WorkflowRunPhase? phaseFilter = null);
-    Task DeleteAsync(string workflowRunId);
 }
 
 public class WorkflowRunStore : IWorkflowRunStore
@@ -60,43 +57,6 @@ public class WorkflowRunStore : IWorkflowRunStore
         var entity = await db.WorkflowRuns.FindAsync(workflowRunId);
         if (entity is null) return null;
         return Deserialize(entity.State);
-    }
-
-    public async Task<IReadOnlyList<WorkflowRun>> ListByProjectAsync(string projectId, WorkflowRunPhase? phaseFilter = null)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var query = db.WorkflowRuns.Where(e => e.MetadataProjectId == projectId);
-        if (phaseFilter.HasValue)
-        {
-            var phaseStr = phaseFilter.Value.ToString();
-            query = query.Where(e => e.Phase == phaseStr);
-        }
-        var entities = await query.ToListAsync();
-        return entities.Select(e => Deserialize(e.State)!).ToList();
-    }
-
-    public async Task<IReadOnlyList<WorkflowRun>> ListByDefinitionAsync(string definitionId, WorkflowRunPhase? phaseFilter = null)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var query = db.WorkflowRuns.Where(e => e.MetadataDefinitionId == definitionId);
-        if (phaseFilter.HasValue)
-        {
-            var phaseStr = phaseFilter.Value.ToString();
-            query = query.Where(e => e.Phase == phaseStr);
-        }
-        var entities = await query.ToListAsync();
-        return entities.Select(e => Deserialize(e.State)!).ToList();
-    }
-
-    public async Task DeleteAsync(string workflowRunId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var entity = await db.WorkflowRuns.FindAsync(workflowRunId);
-        if (entity != null)
-        {
-            db.WorkflowRuns.Remove(entity);
-            await db.SaveChangesAsync();
-        }
     }
 
     private static WorkflowRun? Deserialize(string json)

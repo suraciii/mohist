@@ -68,29 +68,5 @@ public static partial class WorkflowRunExtensions
             var check = current.FindCheck(checkName);
             return check.RetryCount;
         }
-
-        public void PatchMetadata(WorkflowRunMetadata patch)
-        {
-            var metadata = run.Metadata;
-            run.Metadata = new WorkflowRunMetadata(
-                patch.Name ?? metadata.Name,
-                patch.CreatedAt,
-                MergeDic(metadata.Labels, patch.Labels),
-                MergeDic(metadata.Annotations, patch.Annotations));
-        }
-
-        private static Dictionary<string, string>? MergeDic(
-            Dictionary<string, string>? a,
-            Dictionary<string, string>? b)
-        {
-            if (a is null && b is null) return null;
-            if (a is null) return b;
-            if (b is null) return a;
-
-            var result = new Dictionary<string, string>(a);
-            foreach (var kvp in b)
-                result[kvp.Key] = kvp.Value;
-            return result;
-        }
     }
 }

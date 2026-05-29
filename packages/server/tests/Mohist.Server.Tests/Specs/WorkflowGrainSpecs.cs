@@ -141,7 +141,7 @@ public abstract class WorkflowGrainSpecs
     protected async Task ClearBacklogAsync()
     {
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        await backlog.ClearAsync();
+        while (await backlog.ClaimAsync($"cleanup-{Guid.NewGuid():N}") is not null) { }
     }
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()

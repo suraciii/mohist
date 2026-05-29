@@ -74,23 +74,5 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
         _log.LogInformation("Workflow {WfId} released from backlog", workflowId);
     }
 
-    public Task<IReadOnlyList<string>> ListWaitingAsync()
-    {
-        return Task.FromResult<IReadOnlyList<string>>(_waiting.ToList().AsReadOnly());
-    }
-
-    public Task<IReadOnlyList<(string WorkflowId, string RunnerId)>> ListRunningAsync()
-    {
-        return Task.FromResult<IReadOnlyList<(string, string)>>(_running.Select(kv => (kv.Key, kv.Value)).ToList().AsReadOnly());
-    }
-
-    public async Task ClearAsync()
-    {
-        _waiting.Clear();
-        _running.Clear();
-        _all.Clear();
-        await SaveAsync();
-    }
-
     private Task SaveAsync() => _store.SaveAsync(GrainKey, new WorkflowBacklogState(_waiting.ToList(), new Dictionary<string, string>(_running), new HashSet<string>(_all)));
 }

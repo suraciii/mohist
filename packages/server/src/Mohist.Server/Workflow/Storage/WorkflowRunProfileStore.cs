@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
@@ -49,13 +48,4 @@ public class WorkflowRunProfileRow
 {
     public string Key { get; set; } = string.Empty;
     public string StateJson { get; set; } = "{}";
-}
-
-public static class WorkflowRunProfileJson
-{
-    public static readonly JsonSerializerOptions Options = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNameCaseInsensitive = true,
-    };
 }
