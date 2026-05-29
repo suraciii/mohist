@@ -39,7 +39,7 @@ public static partial class WorkflowRunExtensions
         {
             if (stage.RequiresApproval && stage.Approval is null && stage.IsComplete())
             {
-                stage.Approval = new ApprovalState("awaiting", null, DateTimeOffset.UtcNow.ToString("O"), null);
+                stage.Approval = new ApprovalStatus("awaiting", DateTimeOffset.UtcNow.ToString("O"), null);
                 stage.Status = StageRunStatus.AwaitingApproval;
                 return;
             }

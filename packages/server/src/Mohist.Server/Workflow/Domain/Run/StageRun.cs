@@ -1,12 +1,9 @@
-using System.Text.Json;
-
 namespace Mohist.Server.Workflow.Domain.Run;
 
 public enum StageRunStatus { Pending, Running, AwaitingApproval, Completed, Failed }
 
-public sealed record ApprovalState(
+public sealed record ApprovalStatus(
     string Status,
-    JsonElement? Output,
     string RequestedAt,
     string? RespondedAt);
 
@@ -19,6 +16,6 @@ public sealed class StageRun
     public bool Initialized { get; set; }
     public List<TaskRun> Tasks { get; set; } = new();
     public List<StageCheck> Checks { get; set; } = new();
-    public ApprovalState? Approval { get; set; }
+    public ApprovalStatus? Approval { get; set; }
     public FailureDetails? Failure { get; set; }
 }

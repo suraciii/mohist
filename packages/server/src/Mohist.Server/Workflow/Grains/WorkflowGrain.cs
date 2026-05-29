@@ -128,10 +128,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
-        var output = reason is not null
-            ? JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(reason))
-            : (JsonElement?)null;
-        _run.Reject(new ApprovalInput(output));
+        _run.Reject(reason);
         _log.LogInformation("Workflow {Id} rejected at stage={Stage}: {Reason}", GrainKey, _run.CurrentStageId, reason);
         EmitStageChanged("rejected", reason);
         await SaveRunAsync();
@@ -389,7 +386,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 SnapshotTasks(s),
                 SnapshotChecks(s),
                 s.Approval is not null
-                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
+                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.RequestedAt, s.Approval.RespondedAt)
                     : null,
                 stageFailure);
         }).ToList();
