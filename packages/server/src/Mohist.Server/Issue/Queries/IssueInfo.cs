@@ -26,8 +26,6 @@ public class IssueInfo
     public string UpdatedAt { get; set; } = "";
     public string? ArchivedAt { get; set; }
     [JsonPropertyName("approvalState")] public StageApproval? StageApproval { get; set; }
-    public int? RetryCount { get; set; }
-    public int? ConflictRetryCount { get; set; }
     public string? BlockedReason { get; set; }
     public string? WorkflowRunId { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];

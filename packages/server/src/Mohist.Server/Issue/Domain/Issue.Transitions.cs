@@ -58,8 +58,6 @@ public static partial class IssueExtensions
             issue.WorkflowRunId = wrId;
             issue.Stage = IssueStage.InProgress;
             issue.Attention = null;
-            issue.BlockedReason = null;
-            issue.StageApproval = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -67,8 +65,6 @@ public static partial class IssueExtensions
         {
             issue.Stage = IssueStage.Done;
             issue.Attention = null;
-            issue.BlockedReason = null;
-            issue.StageApproval = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -93,8 +89,6 @@ public static partial class IssueExtensions
             issue.Stage = IssueStage.Cancelled;
             issue.WorkflowRunId = null;
             issue.Attention = null;
-            issue.StageApproval = null;
-            issue.BlockedReason = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -103,18 +97,6 @@ public static partial class IssueExtensions
             if (issue.Stage != IssueStage.Cancelled)
                 throw new InvalidOperationException($"Issue #{issue.Number} is not cancelled");
             issue.Stage = IssueStage.Backlog;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
-
-        public void IncrementRetry()
-        {
-            issue.RetryCount++;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
-
-        public void IncrementConflictRetry()
-        {
-            issue.ConflictRetryCount++;
             issue.UpdatedAt = DateTime.UtcNow;
         }
     }

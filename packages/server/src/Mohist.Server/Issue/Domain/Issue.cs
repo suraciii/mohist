@@ -17,10 +17,6 @@ public class Issue
     public string? WorkflowRunId { get; set; }
     public IssueStage Stage { get; set; } = IssueStage.Backlog;
     public IssueAttention? Attention { get; set; }
-    public StageApproval? StageApproval { get; set; }
-    public int RetryCount { get; set; }
-    public int ConflictRetryCount { get; set; }
-    public string? BlockedReason { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public RepositoryInfo? Repository { get; set; }
 }

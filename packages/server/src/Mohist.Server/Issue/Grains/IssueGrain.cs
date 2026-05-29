@@ -350,7 +350,7 @@ public class IssueGrain : Grain, IIssueGrain
         {
             IssueStage.Done => "done",
             IssueStage.Cancelled => "cancelled",
-            _ when attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed => "blocked",
+            _ when attention?.Reason is IssueAttentionReason.Blocked or IssueAttentionReason.WorkflowFailed => "blocked",
             _ when attention is not null => "attention",
             _ => "active",
         };

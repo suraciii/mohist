@@ -43,11 +43,6 @@ public sealed class IssueSnapshot
     [JsonPropertyName("Status")]
     public IssueStage Stage { get; set; } = IssueStage.Backlog;
     public IssueAttention? Attention { get; set; }
-    [JsonPropertyName("ApprovalState")]
-    public StageApproval? StageApproval { get; set; }
-    public int RetryCount { get; set; }
-    public int ConflictRetryCount { get; set; }
-    public string? BlockedReason { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public RepositoryInfo? Repository { get; set; }
 
@@ -66,15 +61,11 @@ public sealed class IssueSnapshot
         WorkflowRunId = issue.WorkflowRunId,
         Stage = issue.Stage,
         Attention = issue.Attention,
-        StageApproval = issue.StageApproval,
-        RetryCount = issue.RetryCount,
-        ConflictRetryCount = issue.ConflictRetryCount,
-        BlockedReason = issue.BlockedReason,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         Repository = issue.Repository,
     };
 
-public Domain.Issue ToDomain() => new Domain.Issue
+    public Domain.Issue ToDomain() => new Domain.Issue
     {
         Id = Id,
         ProjectId = ProjectId,
@@ -89,10 +80,6 @@ public Domain.Issue ToDomain() => new Domain.Issue
         WorkflowRunId = WorkflowRunId,
         Stage = Stage,
         Attention = Attention,
-        StageApproval = StageApproval,
-        RetryCount = RetryCount,
-        ConflictRetryCount = ConflictRetryCount,
-        BlockedReason = BlockedReason,
         PrerequisiteNumbers = PrerequisiteNumbers,
         Repository = Repository,
     };

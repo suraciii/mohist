@@ -132,7 +132,6 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             issue.Title,
             IssueDomainNames.Stage(issue.Stage),
             issue.Attention,
-            issue.BlockedReason,
             workflow);
 
     public MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusSnapshot? workflow) =>
@@ -141,6 +140,5 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             issue.Title,
             issue.Stage,
             issue.Attention,
-            issue.BlockedReason,
             workflow);
 }
