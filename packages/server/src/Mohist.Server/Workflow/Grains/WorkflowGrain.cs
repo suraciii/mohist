@@ -248,17 +248,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _run!.InsertRuntimeTasksAfter(insertAfter, tasksToInsert);
 
         _log.LogInformation("Workflow {Id} added {Count} tasks after {AfterTaskId} in stage {Stage}",
-            GrainKey, tasksToInsert.Count, insertAfter.Id, current.StageId);
+            GrainKey, tasksToInsert.Count, insertAfter.Id, current.Id);
 
         _ = SaveRunAsync();
         _ = AppendWorkflowEventAsync(
             "workflow_tasks_batch_added", "batch_added",
-            $"Added {tasksToInsert.Count} tasks to workflow stage {current.StageId}",
+            $"Added {tasksToInsert.Count} tasks to workflow stage {current.Id}",
             Payload: new { Count = tasksToInsert.Count, InsertedAfter = insertAfter.Id });
 
         _ = RegisterToBacklogAsync();
 
-        return Task.FromResult(new AddTasksBatchResult(GrainKey, current.StageId, tasksToInsert.Count));
+        return Task.FromResult(new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count));
     }
 
     public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
@@ -380,7 +380,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 : null;
 
             return new StageStatusSnapshot(
-                s.StageId,
+                s.Id,
                 s.Status.ToString(),
                 i,
                 SnapshotTasks(s),
@@ -422,7 +422,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (stage.Tasks.Count > 0)
             return stage.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList();
 
-        var definition = _profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.StageId);
+        var definition = _profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (definition is null) return [];
         return definition.Tasks
             .Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, "Pending"))
@@ -434,7 +434,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (stage.Checks.Count > 0)
             return stage.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList();
 
-        var definition = _profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.StageId);
+        var definition = _profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.Id);
         if (definition is null) return [];
         return definition.Checks
             .Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, "Pending", null))
@@ -797,7 +797,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_run is null || workType != "task") return 1;
 
-        var current = _run.Stages.LastOrDefault(s => s.StageId == stage);
+        var current = _run.Stages.LastOrDefault(s => s.Id == stage);
         if (current is null) return 1;
 
         var marker = $"{logicalId}.";
@@ -810,7 +810,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private void EmitStageChanged(string action, string? reason = null)
     {
         if (_run is null) return;
-        var current = _run.Stages.FirstOrDefault(s => s.StageId == _run.CurrentStageId);
+        var current = _run.Stages.FirstOrDefault(s => s.Id == _run.CurrentStageId);
         _eventBus.Emit("stage_changed", new
         {
             workflowRunId = GrainKey,

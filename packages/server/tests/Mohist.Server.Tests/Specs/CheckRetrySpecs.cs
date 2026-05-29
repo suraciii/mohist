@@ -125,7 +125,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         run.CompleteTask();
         run.InjectRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
 
-        var currentStage = run.Stages.First(s => s.StageId == run.CurrentStageId);
+        var currentStage = run.Stages.First(s => s.Id == run.CurrentStageId);
         Assert.Equal(1, currentStage.Checks.Single(c => c.Name == "check-1").RetryCount);
 
         var jsonOptions = new JsonSerializerOptions

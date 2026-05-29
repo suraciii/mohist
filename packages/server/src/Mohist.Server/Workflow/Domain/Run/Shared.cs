@@ -16,3 +16,7 @@ public sealed record WorkLease(
     string LogicalId,
     string? Title = null,
     string? RunnerId = null);
+
+public sealed record TaskResult(
+    string Status,
+    string? Reason = null);

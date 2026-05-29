@@ -1,4 +1,5 @@
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -26,7 +27,7 @@ public static partial class WorkflowRunExtensions
             if (current.Failure is null)
             {
                 current.Failure = new FailureDetails(
-                    FailureReason.CheckUnrepaired, current.StageId,
+                    FailureReason.CheckUnrepaired, current.Id,
                     CheckName: check.Name, Message: result.Message);
                 run.Failure = current.Failure;
             }
@@ -44,20 +45,5 @@ public static partial class WorkflowRunExtensions
         }
 
         public void PendingCheck(CheckResult result) => run.ResetCheck(result);
-
-        public void InjectRetryTask(string checkName, TaskDefinition task)
-        {
-            var current = run.CurrentStage();
-            var newTask = TaskRun.MakeTask(current.Tasks, task);
-            current.Tasks.Add(newTask);
-            var check = current.FindCheck(checkName);
-            check.RetryCount++;
-        }
-
-        public void ClearStageFailure()
-        {
-            var current = run.CurrentStage();
-            current.Failure = null;
-        }
     }
 }

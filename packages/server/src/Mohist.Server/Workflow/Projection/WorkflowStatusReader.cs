@@ -11,7 +11,7 @@ public static class WorkflowStatusReader
     {
         var stages = run.Stages.Select((s, i) =>
             new StageStatusSnapshot(
-                s.StageId,
+                s.Id,
                 StageStatus(s),
                 i,
                 s.Tasks.Select(t => new TaskStatusSnapshot(
@@ -41,7 +41,7 @@ public static class WorkflowStatusReader
             ? new PendingWorkSnapshot(lease.WorkId, lease.WorkType, lease.Stage, null, null)
             : null;
 
-        var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
+        var currentStage = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
         var failure = currentStage?.Failure is not null
             ? new FailureStatusSnapshot(
                 currentStage.Failure.Reason.ToString(),
@@ -54,7 +54,7 @@ public static class WorkflowStatusReader
         return new WorkflowStatusSnapshot(
             run.Id,
             run.Status.ToString(),
-            currentStage?.StageId,
+            currentStage?.Id,
             stages,
             pending,
             failure,
