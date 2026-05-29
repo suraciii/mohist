@@ -17,7 +17,6 @@ public static class MohistDefaultWorkflowProjection
             {
                 Stage = s.Stage,
                 Status = s.Approval.Status,
-                OutputJson = s.Approval.Output,
                 RequestedAt = ParseDateTime(s.Approval.RequestedAt),
                 RespondedAt = ParseNullableDateTime(s.Approval.RespondedAt),
             })

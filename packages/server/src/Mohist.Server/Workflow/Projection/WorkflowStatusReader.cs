@@ -26,7 +26,7 @@ public static class WorkflowStatusReader
                     c.Status.ToString(),
                     c.Message)).ToList(),
                 s.Approval is not null
-                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
+                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.RequestedAt, s.Approval.RespondedAt)
                     : null,
                 s.Failure is not null
                     ? new FailureStatusSnapshot(

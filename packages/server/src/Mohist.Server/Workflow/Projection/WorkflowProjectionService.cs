@@ -137,7 +137,7 @@ public class WorkflowProjectionService
             DurationMs(startedAt, completedAt),
             tasks,
             checks,
-            stage.Approval is null ? null : new ApprovalDto(stage.Approval.Status, stage.Approval.Output, stage.Approval.RequestedAt, stage.Approval.RespondedAt));
+            stage.Approval is null ? null : new ApprovalDto(stage.Approval.Status, stage.Approval.RequestedAt, stage.Approval.RespondedAt));
     }
 
     private async Task<IReadOnlyList<WorkflowAgentSession>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
@@ -174,7 +174,7 @@ public sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, st
 public sealed record WorkflowStageDto(string Stage, string Status, int Order, string? StartedAt, string? CompletedAt, long? DurationMs, IReadOnlyList<WorkflowTaskDto> Tasks, IReadOnlyList<WorkflowCheckDto> Checks, ApprovalDto? Approval);
 public sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status, string? StartedAt, string? CompletedAt, long? DurationMs, int Attempts, string? Message);
 public sealed record WorkflowCheckDto(string Name, string Title, string? Uses, string Status, string? Message, string? StartedAt, string? CompletedAt, long? DurationMs);
-public sealed record ApprovalDto(string Status, string? Output, string RequestedAt, string? RespondedAt);
+public sealed record ApprovalDto(string Status, string RequestedAt, string? RespondedAt);
 public sealed record PendingWorkDto(string WorkId, string WorkType, string? Stage, string? Title, string? Uses);
 public sealed record AvailableActionDto(string Name, string Label, string? Target);
 

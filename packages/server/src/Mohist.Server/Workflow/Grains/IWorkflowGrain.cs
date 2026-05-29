@@ -146,6 +146,5 @@ public sealed record PendingWorkSnapshot(
 [GenerateSerializer]
 public sealed record ApprovalStatusSnapshot(
     string Status,
-    string? Output,
     string RequestedAt,
     string? RespondedAt);
