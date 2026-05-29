@@ -367,9 +367,9 @@ public static class IssueRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
             var workflow = grains.GetGrain<IWorkflowGrain>(wrId);
-            if (await workflow.HasIncompleteTaskUsingAsync("mohist/rebase")
-                || await workflow.HasIncompleteTaskIdAsync("resolve-rebase-conflicts")
-                || await workflow.HasIncompleteTaskIdAsync("verify-rebase"))
+            if (await workflow.HasIncompleteTaskWithUsesAsync("mohist/rebase")
+                || await workflow.HasIncompleteTaskByIdAsync("resolve-rebase-conflicts")
+                || await workflow.HasIncompleteTaskByIdAsync("verify-rebase"))
                 return ApiResults.Conflict("Rebase task is already pending", "rebase_already_pending");
 
             var baseBranch = string.IsNullOrWhiteSpace(req?.BaseBranch) ? issue.Repository?.BaseBranch ?? "main" : req!.BaseBranch!;
