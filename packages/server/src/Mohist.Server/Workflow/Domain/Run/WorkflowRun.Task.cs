@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -6,12 +7,6 @@ namespace Mohist.Server.Workflow.Domain.Run;
 public sealed record TaskResult(
     string Status,
     string? Reason = null);
-
-public sealed record LoadedTaskInput(
-    string Id,
-    string Title,
-    string? Uses = null,
-    Dictionary<string, JsonElement?>? With = null);
 
 public static partial class WorkflowRunExtensions
 {
@@ -41,7 +36,7 @@ public static partial class WorkflowRunExtensions
         }
 
         public void AddRuntimeTask(
-            LoadedTaskInput task,
+            TaskDefinition task,
             string? stage = null,
             bool invalidateChecks = false)
         {
@@ -75,7 +70,7 @@ public static partial class WorkflowRunExtensions
 
         public void InsertRuntimeTasksAfter(
             TaskRun afterTask,
-            IReadOnlyList<LoadedTaskInput> tasks,
+            IReadOnlyList<TaskDefinition> tasks,
             bool invalidateChecks = false)
         {
             var current = run.CurrentStage();

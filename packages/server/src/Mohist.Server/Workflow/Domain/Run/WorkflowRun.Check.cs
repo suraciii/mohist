@@ -1,3 +1,5 @@
+using Mohist.Server.Workflow.Domain.Definition;
+
 namespace Mohist.Server.Workflow.Domain.Run;
 
 public static partial class WorkflowRunExtensions
@@ -43,7 +45,7 @@ public static partial class WorkflowRunExtensions
 
         public void PendingCheck(CheckResult result) => run.ResetCheck(result);
 
-        public void InjectRetryTask(string checkName, LoadedTaskInput task)
+        public void InjectRetryTask(string checkName, TaskDefinition task)
         {
             var current = run.CurrentStage();
             var newTask = TaskRun.MakeTask(current.Tasks, task);
