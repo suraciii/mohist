@@ -360,15 +360,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables);
     }
 
-    public async Task PatchMetadataAsync(MetadataSnapshot patch)
-    {
-        EnsureRun();
-        var domainPatch = patch.ToDomain();
-        if (domainPatch is not null)
-            _run!.PatchMetadata(domainPatch);
-        await SaveRunAsync();
-    }
-
     public Task<string?> GetDefinitionYamlAsync()
     {
         if (_profile is null) return Task.FromResult<string?>(null);
@@ -963,10 +954,4 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _variables is not null
             ? _variablesStore.SaveAsync(GrainKey, _variables)
             : Task.CompletedTask;
-}
-
-internal static class StringExtensions
-{
-    public static string? NullIfEmpty(this string value) =>
-        string.IsNullOrEmpty(value) ? null : value;
 }

@@ -67,10 +67,25 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         return runnerId;
     }
 
-    private async Task ClearBacklogAsync()
+    private async Task ResetClusterAsync()
     {
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        await backlog.ClearAsync();
+        var oldCluster = _fixture.Cluster;
+        var builder = new InProcessTestClusterBuilder();
+        builder.Options.InitialSilosCount = 1;
+        builder.ConfigureSilo((_, siloBuilder) =>
+        {
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
+            siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
+            siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
+            siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
+        });
+        var newCluster = builder.Build();
+        await newCluster.DeployAsync();
+        oldCluster?.Dispose();
+        _fixture.GetType().GetProperty("Cluster")!.SetValue(_fixture, newCluster);
     }
 
     private static WorkflowDefinition SingleStage(
@@ -100,7 +115,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Fact]
     public async Task WorkflowInBacklog_RunnerClaimsOnFirstPoll()
     {
-        await ClearBacklogAsync();
+        await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -125,7 +140,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Fact]
     public async Task PausedWorkflowInBacklog_RunnerClaimsButNoWork()
     {
-        await ClearBacklogAsync();
+        await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
         await workflow.PauseAsync("hold");
 
@@ -139,7 +154,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Fact]
     public async Task FailedWorkflow_ReleasedFromBacklog()
     {
-        await ClearBacklogAsync();
+        await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -150,15 +165,19 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.NotNull(work);
         await runner.ReportAsync(work.WorkId, new WorkDispatchResult("failed", "boom"));
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        var running = await backlog.ListRunningAsync();
-        Assert.All(running, r => Assert.NotEqual(_workflowId, r.WorkflowId));
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Failed", status.Status);
+
+        var anotherRunnerId = await RegisterRunnerAsync();
+        var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);
+        Assert.Null(await anotherRunner.PollAsync());
     }
 
     [Fact]
     public async Task RetryAfterFailure_ReRegisteredToBacklog()
     {
-        await ClearBacklogAsync();
+        await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -185,12 +204,12 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Fact]
     public async Task NoRunner_WorkflowWaitsInBacklog()
     {
-        await ClearBacklogAsync();
+        await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        var waiting = await backlog.ListWaitingAsync();
-        Assert.Contains(_workflowId, waiting);
+        var status = await workflow.GetStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
@@ -204,7 +223,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     [Fact]
     public async Task CompletedWorkflow_ReleasedFromBacklog()
     {
-        await ClearBacklogAsync();
+        await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
         var runnerId = await RegisterRunnerAsync();
@@ -220,8 +239,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.Equal("checks", check.WorkType);
         await runner.ReportAsync(check.WorkId, new WorkDispatchResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        var running = await backlog.ListRunningAsync();
-        Assert.All(running, r => Assert.NotEqual(_workflowId, r.WorkflowId));
+        var anotherRunnerId = await RegisterRunnerAsync();
+        var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);
+        Assert.Null(await anotherRunner.PollAsync());
     }
 }
