@@ -383,7 +383,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }).ToList();
 
         var pending = _lease is not null
-            ? BuildPendingWork(_lease)
+            ? new PendingWorkSnapshot(_lease.WorkId, _lease.WorkType, _lease.Stage, _lease.Title, null)
             : null;
 
         var failure = _run.Failure is not null
@@ -498,13 +498,17 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         switch (work.WorkType)
         {
             case "stage-init":
-                var stageDef = RequireStageDefinition(work.Stage);
+                var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == work.Stage)
+                    ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{work.Stage}'");
                 _run!.InitializeStage(stageDef.Tasks, stageDef.Checks);
-                return PrepareFromDomain(runnerId);
+                var nextWork = _run!.NextWork();
+                return nextWork is not null ? PrepareWork(nextWork, runnerId) : null;
 
             case "task":
                 var t = (WorkflowWork.TaskData)work.Data;
-                var taskWith = MergeTaskWith(t.With, t.Title);
+                var taskWith = t.With is not null
+                    ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
+                    : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
                 return MakeDispatch(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId);
 
             case "checks":
@@ -523,19 +527,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
-    private WorkDispatch? PrepareFromDomain(string runnerId)
-    {
-        var work = _run!.NextWork();
-        return work is not null ? PrepareWork(work, runnerId) : null;
-    }
-
     private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        var attempt = ResolveWorkAttempt(stage, logicalId, workType);
+        var attempt = 1;
+        if (_run is not null && workType == "task")
+        {
+            var current = _run.Stages.LastOrDefault(s => s.Id == stage);
+            if (current is not null)
+            {
+                var marker = $"{logicalId}.";
+                var lastTask = current.Tasks.LastOrDefault(t => t.Id.StartsWith(marker, StringComparison.Ordinal));
+                if (lastTask is not null && int.TryParse(lastTask.Id[marker.Length..], out var a))
+                    attempt = a;
+            }
+        }
         var variables = _variables?.ToDispatchJson(new WorkflowDispatchContext(GrainKey, workId, workType, stage, title, attempt));
-        var issueRef = BuildIssueRef();
+        var projectId = _variables?.String("project", "id");
+        var issueId = _variables?.String("issue", "id");
+        var numberStr = _variables?.String("issue", "number");
+        WorkIssueRef? issueRef = projectId is not null && issueId is not null && numberStr is not null && int.TryParse(numberStr, out var num)
+            ? new WorkIssueRef(projectId, issueId, num) : null;
         var dispatch = new WorkDispatch(
             WorkflowRunId: GrainKey,
             WorkId: workId,
@@ -549,23 +562,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId);
         return dispatch;
     }
-
-    private WorkIssueRef? BuildIssueRef()
-    {
-        var projectId = _variables?.String("project", "id");
-        var issueId = _variables?.String("issue", "id");
-        var numberStr = _variables?.String("issue", "number");
-        if (projectId is null || issueId is null || numberStr is null) return null;
-        if (!int.TryParse(numberStr, out var number)) return null;
-        return new WorkIssueRef(projectId, issueId, number);
-    }
-
-    private static PendingWorkSnapshot? BuildPendingWork(WorkLease lease) => new(
-        lease.WorkId,
-        lease.WorkType,
-        lease.Stage,
-        lease.Title,
-        null);
 
     private void ClearLease()
     {
@@ -685,35 +681,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
     }
 
-    private StageDefinition RequireStageDefinition(string stage) =>
-        _profile?.Definition.Stages.Find(s => s.Stage == stage)
-        ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{stage}'");
-
-    private static Dictionary<string, JsonElement?>? MergeTaskWith(Dictionary<string, JsonElement?>? existingWith, string title)
-    {
-        var with = existingWith is not null
-            ? new Dictionary<string, JsonElement?>(existingWith)
-            : new Dictionary<string, JsonElement?>();
-        with["title"] = JsonSerializer.SerializeToElement(title);
-        return with.Count > 0 ? with : null;
-    }
-
     private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
         with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
-
-    private int ResolveWorkAttempt(string stage, string logicalId, string workType)
-    {
-        if (_run is null || workType != "task") return 1;
-
-        var current = _run.Stages.LastOrDefault(s => s.Id == stage);
-        if (current is null) return 1;
-
-        var marker = $"{logicalId}.";
-        var task = current.Tasks.LastOrDefault(t => t.Id.StartsWith(marker, StringComparison.Ordinal));
-        if (task is null) return 1;
-
-        return int.TryParse(task.Id[marker.Length..], out var attempt) ? attempt : 1;
-    }
 
     private void EmitStageChanged(string action, string? reason = null)
     {
