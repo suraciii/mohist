@@ -8,35 +8,46 @@ namespace Mohist.Server.Tests.Specs;
 public class DatabaseInitializationSpecs
 {
     [Fact]
-    public async Task Initialize_WhenExistingDatabaseLacksTables_CreatesThem()
+    public async Task Migrate_WhenEmptyDatabase_CreatesAllTables()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                CREATE TABLE "Projects" (
-                    "Id" TEXT NOT NULL,
-                    "Name" TEXT NOT NULL,
-                    "RepositoriesJson" TEXT NOT NULL,
-                    CONSTRAINT "PK_Projects" PRIMARY KEY ("Id")
-                );
-                """;
-            await command.ExecuteNonQueryAsync();
-        }
 
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
 
         await using var db = new MohistDbContext(options);
-        MohistDatabaseInitializer.Initialize(db);
+        db.Database.Migrate();
 
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessionEvents"));
         Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_SessionName"));
         Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessionEvents_SessionId_Sequence"));
+        Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
+    }
+
+    [Fact]
+    public async Task Migrate_WhenCalledTwice_IsIdempotent()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (var db1 = new MohistDbContext(options))
+        {
+            db1.Database.Migrate();
+        }
+
+        await using (var db2 = new MohistDbContext(options))
+        {
+            db2.Database.Migrate();
+        }
+
+        Assert.True(await TableExistsAsync(connection, "Projects"));
     }
 
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, string name)

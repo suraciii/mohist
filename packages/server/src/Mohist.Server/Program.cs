@@ -1,5 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Config;
 using Mohist.Server.Hosting;
+using Mohist.Server.Storage.Db;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,7 +21,13 @@ builder.Host.UseOrleans(silo => silo.ConfigureMohistSilo());
 builder.Services.AddMohistServerCore(builder.Configuration);
 
 var app = builder.Build();
-app.EnsureMohistDatabase();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+    db.Database.Migrate();
+}
+
 app.MapMohistApi();
 app.MapMohistWeb(builder.Configuration);
 
