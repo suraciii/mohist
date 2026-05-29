@@ -1,26 +1,27 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Storage.Db;
-using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Views;
+using Mohist.Server.Workflow.Queries;
 
 namespace Mohist.Server.Workflow.Projection;
 
 public class WorkflowProjectionService
 {
-    private readonly IGrainFactory _grains;
     private readonly IssueQueryService _issues;
     private readonly IEventStore _events;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly WorkflowQueryService _workflowReader;
 
-    public WorkflowProjectionService(IGrainFactory grains, IssueQueryService issues, IEventStore events, IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowProjectionService(IssueQueryService issues, IEventStore events, IDbContextFactory<MohistDbContext> dbFactory, WorkflowQueryService workflowReader)
     {
-        _grains = grains;
         _issues = issues;
         _events = events;
         _dbFactory = dbFactory;
+        _workflowReader = workflowReader;
     }
 
     public async Task<WorkflowTimelineDto?> GetTimelineAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -28,8 +29,7 @@ public class WorkflowProjectionService
         var issue = await _issues.GetAsync(projectId, issueNumber);
         if (issue?.WorkflowRunId is null) return null;
 
-        var workflow = _grains.GetGrain<IWorkflowGrain>(issue.WorkflowRunId);
-        var status = await workflow.GetStatusAsync();
+        var status = await _workflowReader.GetStatusAsync(issue.WorkflowRunId);
         if (status is null) return null;
 
         var events = await _events.ListWorkflowEventsAsync(issue.WorkflowRunId, 1000, ct);
@@ -50,8 +50,7 @@ public class WorkflowProjectionService
 
         foreach (var session in sessions)
         {
-            var workflow = _grains.GetGrain<IWorkflowGrain>(session.WorkflowRunId);
-            var status = await workflow.GetStatusAsync();
+            var status = await _workflowReader.GetStatusAsync(session.WorkflowRunId);
             var pending = status?.PendingWork;
             if (pending is null || pending.WorkId != session.WorkId) continue;
 
@@ -86,7 +85,7 @@ public class WorkflowProjectionService
         return result;
     }
 
-    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusSnapshot status, IReadOnlyList<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
+    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusView status, IReadOnlyList<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
     {
         var eventList = events.ToList();
         var stages = status.Stages
@@ -97,12 +96,12 @@ public class WorkflowProjectionService
             status.WorkflowRunId,
             status.Status,
             status.CurrentStage,
-            status.PendingWork is null ? null : new PendingWorkDto(status.PendingWork.WorkId, status.PendingWork.WorkType, status.PendingWork.Stage, status.PendingWork.Title, status.PendingWork.Uses),
+            status.PendingWork,
             stages,
-            status.AvailableActions.Select(a => new AvailableActionDto(a.Name, a.Label, a.Target)).ToList());
+            status.AvailableActions);
     }
 
-    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, int order, List<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
+    private static WorkflowStageDto BuildStage(StageStatusView stage, int order, List<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
     {
         var stageEvents = events.Where(e => e.Stage == stage.Stage).ToList();
         var startedAt = stageEvents.FirstOrDefault()?.CreatedAt;
@@ -170,13 +169,11 @@ public class WorkflowProjectionService
     }
 }
 
-public sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, PendingWorkDto? PendingWork, IReadOnlyList<WorkflowStageDto> Stages, IReadOnlyList<AvailableActionDto> AvailableActions);
+public sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, PendingWorkView? PendingWork, IReadOnlyList<WorkflowStageDto> Stages, IReadOnlyList<AvailableActionView> AvailableActions);
 public sealed record WorkflowStageDto(string Stage, string Status, int Order, string? StartedAt, string? CompletedAt, long? DurationMs, IReadOnlyList<WorkflowTaskDto> Tasks, IReadOnlyList<WorkflowCheckDto> Checks, ApprovalDto? ApprovalStatus);
 public sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status, string? StartedAt, string? CompletedAt, long? DurationMs, int Attempts, string? Message);
 public sealed record WorkflowCheckDto(string Name, string Title, string? Uses, string Status, string? Message, string? StartedAt, string? CompletedAt, long? DurationMs);
 public sealed record ApprovalDto(string? Result, string RequestedAt, string? RespondedAt);
-public sealed record PendingWorkDto(string WorkId, string WorkType, string? Stage, string? Title, string? Uses);
-public sealed record AvailableActionDto(string Name, string Label, string? Target);
 
 public sealed record ActiveAgentDto(string RunnerId, string IssueId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress);
 public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto TaskProgress, string LastActivityAt);

@@ -8,7 +8,7 @@ using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Storage;
 
@@ -157,7 +157,7 @@ Stage = issue.Stage,
         Repository = issue.Repository,
     };
 
-    private async Task<Dictionary<string, WorkflowStatusSnapshot>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
+    private async Task<Dictionary<string, WorkflowStatusView>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
     {
         var workflowRunIds = issues
             .Select(i => i.WorkflowRunId)
@@ -178,7 +178,7 @@ var runRows = await db.WorkflowRuns
 
         var leases = leaseRows.ToDictionary(r => r.WorkflowRunId, r => WorkflowLeaseStore.Deserialize(r.StateJson), StringComparer.Ordinal);
 
-        var workflows = new Dictionary<string, WorkflowStatusSnapshot>(StringComparer.Ordinal);
+        var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
             var run = DeserializeRun(row.State);
@@ -191,7 +191,7 @@ var runRows = await db.WorkflowRuns
         return workflows;
     }
 
-    private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusSnapshot> workflows)
+    private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusView> workflows)
     {
         foreach (var issue in issues)
         {

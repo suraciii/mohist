@@ -21,37 +21,18 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkDispatch?> GetWorkAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
     Task AbandonCurrentWorkAsync(string runnerId, string reason);
-    Task<WorkflowVariablesSnapshot?> GetVariablesAsync();
-    Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson);
-    Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
-    Task<WorkflowStatusSnapshot?> GetStatusAsync();
-    Task<string?> GetDefinitionYamlAsync();
-}
-
-[GenerateSerializer]
-public sealed record MetadataSnapshot(
-    [property: Id(0)] string? Name = null,
-    [property: Id(1)] Dictionary<string, string>? Labels = null,
-    [property: Id(2)] Dictionary<string, string>? Annotations = null,
-    [property: Id(3)] DateTimeOffset? CreatedAt = null)
-{
-    public static MetadataSnapshot? From(WorkflowRunMetadata? m) => m is null ? null
-        : new MetadataSnapshot(m.Name, m.Labels, m.Annotations, m.CreatedAt);
-
-    public WorkflowRunMetadata? ToDomain() => Name is null && Labels is null && Annotations is null && CreatedAt is null
-        ? null : new WorkflowRunMetadata(Name, CreatedAt ?? DateTimeOffset.MinValue, Labels, Annotations);
+    Task PatchVariablesAsync(string section, string patchJson);
+    Task PatchStageVariablesAsync(string stage, string section, string patchJson);
+    Task<string?> GetRunStatusAsync();
 }
 
 [GenerateSerializer]
 public sealed record WorkflowStartInput(
     [property: Id(0)] string? Variables = null,
     [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null,
-    [property: Id(2)] MetadataSnapshot? Metadata = null);
-
-[GenerateSerializer]
-public sealed record WorkflowVariablesSnapshot(
-    [property: Id(0)] string Variables,
-    [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null);
+    [property: Id(2)] string? Name = null,
+    [property: Id(3)] Dictionary<string, string>? Labels = null,
+    [property: Id(4)] Dictionary<string, string>? Annotations = null);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskInput(
@@ -84,67 +65,3 @@ public sealed record AddTasksBatchResult(
     [property: Id(0)] string WorkflowRunId,
     [property: Id(1)] string Stage,
     [property: Id(2)] int AddedCount);
-
-[GenerateSerializer]
-public sealed record WorkflowStatusSnapshot(
-    string WorkflowRunId,
-    string Status,
-    string? CurrentStage,
-    List<StageStatusSnapshot> Stages,
-    PendingWorkSnapshot? PendingWork,
-    FailureStatusSnapshot? Failure,
-    List<AvailableActionSnapshot> AvailableActions,
-    MetadataSnapshot? Metadata = null);
-
-[GenerateSerializer]
-public sealed record StageStatusSnapshot(
-    string Stage,
-    string Status,
-    int Order,
-    List<TaskStatusSnapshot> Tasks,
-    List<CheckStatusSnapshot> Checks,
-    ApprovalStatusSnapshot? ApprovalStatus,
-    FailureStatusSnapshot? Failure);
-
-[GenerateSerializer]
-public sealed record FailureStatusSnapshot(
-    string Reason,
-    string? Stage,
-    string? TaskId,
-    string? CheckName,
-    string? Message);
-
-[GenerateSerializer]
-public sealed record AvailableActionSnapshot(
-    string Name,
-    string Label,
-    string? Target);
-
-[GenerateSerializer]
-public sealed record TaskStatusSnapshot(
-    string Id,
-    string Title,
-    string? Uses,
-    string Status);
-
-[GenerateSerializer]
-public sealed record CheckStatusSnapshot(
-    string Name,
-    string Title,
-    string? Uses,
-    string Status,
-    string? Message);
-
-[GenerateSerializer]
-public sealed record PendingWorkSnapshot(
-    string WorkId,
-    string WorkType,
-    string? Stage,
-    string? Title,
-    string? Uses);
-
-[GenerateSerializer]
-public sealed record ApprovalStatusSnapshot(
-    string? Result,
-    string RequestedAt,
-    string? RespondedAt);

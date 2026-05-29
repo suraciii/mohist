@@ -147,8 +147,8 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
         await workflow.ReportResultAsync(RunnerId, workId, result);
 
-        var status = await workflow.GetStatusAsync();
-        if (status?.Status is "Completed" or "Failed")
+        var status = await workflow.GetRunStatusAsync();
+        if (status is "Completed" or "Failed")
         {
             _assignedWorkflows.Remove(wfId);
             var staleKeys = _workToWorkflow
@@ -160,7 +160,7 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
                     _workToWorkflow.Remove(key);
                     _workById.Remove(key);
                 }
-            _log.LogInformation("Runner {Id} released terminal workflow {WorkflowId} (status={Status})", RunnerId, wfId, status.Status);
+            _log.LogInformation("Runner {Id} released terminal workflow {WorkflowId} (status={Status})", RunnerId, wfId, status);
         }
 
         return wfId;

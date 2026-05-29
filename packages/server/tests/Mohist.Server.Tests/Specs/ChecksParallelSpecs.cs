@@ -73,7 +73,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(r2);
         Assert.Null(await runner.PollAsync());
 
-        var status = await (await StartWorkflowAsync(MultiCheckStage())).GetStatusAsync();
+        await (await StartWorkflowAsync(MultiCheckStage())).GetRunStatusAsync();
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         var (checks, r2) = await PollWorkAnyAsync();
         await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck");
 
-        var status = await workflow.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
         Assert.NotNull(status.Failure);
@@ -139,7 +139,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
             ("lint", "fail", "lint errors"),
             ("test", "fail", "test failures"));
 
-        var status = await workflow.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
         Assert.NotNull(status.Failure);
@@ -195,7 +195,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
         var (checks, r2) = await PollWorkAnyAsync();
         await ReportChecksFailAsync(r2, checks, "lint", "unused imports", "typecheck");
 
-        var status = await workflow.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
 
         var retryAction = status.AvailableActions.Find(a => a.Name == "retry");

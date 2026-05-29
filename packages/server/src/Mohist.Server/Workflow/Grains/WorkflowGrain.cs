@@ -8,7 +8,9 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -70,7 +72,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             if (_profile is null)
                 throw new InvalidOperationException("Cannot start: no workflow definition provided");
-            _run = WorkflowRun.Create(GrainKey, _profile.Definition, input?.Metadata?.ToDomain());
+            _run = WorkflowRun.Create(GrainKey, _profile.Definition,
+                input is not null ? new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, input.Annotations) : null);
         }
 
         _run.Start();
@@ -142,7 +145,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
-        ClearLease();
+        await ClearAndDeleteLeaseAsync();
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
@@ -155,7 +158,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
-        ClearLease();
+        await ClearAndDeleteLeaseAsync();
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
@@ -272,7 +275,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} received result for {WorkId}: {Status}", GrainKey, workId, result.Status);
 
         var phaseBefore = _run?.Status;
-        ClearLease();
+        await ClearAndDeleteLeaseAsync();
 
         switch (lease.WorkType)
         {
@@ -307,20 +310,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogWarning("Workflow {Id} abandoning in-flight work {WorkId} ({WorkType}): {Reason}",
             GrainKey, lease.WorkId, lease.WorkType, reason);
 
-        ClearLease();
+        await ClearAndDeleteLeaseAsync();
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_work_abandoned", "abandoned", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
         await RegisterToBacklogIfRunnableAsync();
     }
 
-    public Task<WorkflowVariablesSnapshot?> GetVariablesAsync()
-    {
-        return Task.FromResult(_variables is null
-            ? null
-            : new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables));
-    }
-
-    public async Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson)
+    public async Task PatchVariablesAsync(string section, string patchJson)
     {
         EnsureRun();
         if (string.IsNullOrWhiteSpace(section))
@@ -330,10 +326,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             .PatchSection(section, patchJson);
 
         await SaveVariablesAsync();
-        return new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables);
     }
 
-    public async Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson)
+    public async Task PatchStageVariablesAsync(string stage, string section, string patchJson)
     {
         EnsureRun();
         if (string.IsNullOrWhiteSpace(stage))
@@ -345,121 +340,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             .PatchStageSection(stage, section, patchJson);
 
         await SaveVariablesAsync();
-        return new WorkflowVariablesSnapshot(_variables.Json, _variables.StageVariables);
     }
 
-    public Task<string?> GetDefinitionYamlAsync()
+    public Task<string?> GetRunStatusAsync()
     {
-        if (_profile is null) return Task.FromResult<string?>(null);
-        var definition = new WorkflowDefinition(GrainKey, _profile.Definition.Stages);
-        return Task.FromResult<string?>(WorkflowYamlSerializer.ToYaml(definition));
-    }
-
-    public Task<WorkflowStatusSnapshot?> GetStatusAsync()
-    {
-        if (_run is null) return Task.FromResult<WorkflowStatusSnapshot?>(null);
-
-        var stages = _run.Stages.Select((s, i) =>
-        {
-            var stageFailure = s.Failure is not null
-                ? new FailureStatusSnapshot(
-                    s.Failure.Reason.ToString(),
-                    s.Failure.Stage,
-                    s.Failure.TaskId,
-                    s.Failure.CheckName,
-                    s.Failure.Message)
-                : null;
-
-            return new StageStatusSnapshot(
-                s.Id,
-                s.Status.ToString(),
-                i,
-                SnapshotTasks(s),
-                SnapshotChecks(s),
-                s.ApprovalStatus is not null
-                    ? new ApprovalStatusSnapshot(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt)
-                    : null,
-                stageFailure);
-        }).ToList();
-
-        var pending = _lease is not null
-            ? new PendingWorkSnapshot(_lease.WorkId, _lease.WorkType, _lease.Stage, _lease.Title, null)
-            : null;
-
-        var failure = _run.Failure is not null
-            ? new FailureStatusSnapshot(
-                _run.Failure.Reason.ToString(),
-                _run.Failure.Stage,
-                _run.Failure.TaskId,
-                _run.Failure.CheckName,
-                _run.Failure.Message)
-            : null;
-
-        var actions = BuildAvailableActions();
-
-        return Task.FromResult<WorkflowStatusSnapshot?>(new WorkflowStatusSnapshot(
-            _run.Id,
-            _run.Status.ToString(),
-            _run.CurrentStageId,
-            stages,
-            pending,
-            failure,
-            actions,
-            MetadataSnapshot.From(_run.Metadata)));
-    }
-
-    private List<TaskStatusSnapshot> SnapshotTasks(StageRun stage)
-    {
-        if (stage.Tasks.Count > 0)
-            return stage.Tasks.Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, t.Status.ToString())).ToList();
-
-        var definition = _profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.Id);
-        if (definition is null) return [];
-        return definition.Tasks
-            .Select(t => new TaskStatusSnapshot(t.Id, t.Title, t.Uses, "Pending"))
-            .ToList();
-    }
-
-    private List<CheckStatusSnapshot> SnapshotChecks(StageRun stage)
-    {
-        if (stage.Checks.Count > 0)
-            return stage.Checks.Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList();
-
-        var definition = _profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.Id);
-        if (definition is null) return [];
-        return definition.Checks
-            .Select(c => new CheckStatusSnapshot(c.Name, c.Title, c.Uses, "Pending", null))
-            .ToList();
-    }
-
-    private List<AvailableActionSnapshot> BuildAvailableActions()
-    {
-        if (_run is null) return [];
-
-        var actions = new List<AvailableActionSnapshot>();
-
-        if (_run.Status == WorkflowRunStatus.AwaitingApproval)
-        {
-            actions.Add(new AvailableActionSnapshot("approve", "Approve", null));
-            actions.Add(new AvailableActionSnapshot("reject", "Reject", null));
-        }
-
-        if (_run.Status == WorkflowRunStatus.Failed && _run.Failure is not null)
-        {
-            var failure = _run.Failure;
-            if (failure.Reason is FailureReason.TaskFailed && failure.TaskId is not null)
-            {
-                actions.Add(new AvailableActionSnapshot("retry", "Retry failed task", failure.TaskId));
-            }
-            else if (failure.Reason is FailureReason.CheckUnrepaired && failure.CheckName is not null)
-            {
-                actions.Add(new AvailableActionSnapshot("retry", "Retry failed check", failure.CheckName));
-            }
-
-            actions.Add(new AvailableActionSnapshot("rerun", "Rerun stage", _run.CurrentStageId));
-        }
-
-        return actions;
+        return Task.FromResult(_run?.Status.ToString());
     }
 
     private async Task ReleaseFromBacklogIfTerminalAsync()
@@ -566,6 +451,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private void ClearLease()
     {
         _lease = null;
+    }
+
+    private async Task ClearAndDeleteLeaseAsync()
+    {
+        _lease = null;
+        await _leaseStore.DeleteAsync(GrainKey);
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)
@@ -739,11 +630,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return;
         if (phaseBefore == WorkflowRunStatus.Completed || _run.Status != WorkflowRunStatus.Completed) return;
 
-        var status = await GetStatusAsync();
-        if (status is null) return;
-
         var (projectId, issueNumber) = GetHookContext();
-        var context = new WorkflowCompletionHookContext(GrainKey, projectId, issueNumber, status);
+        var context = new WorkflowCompletionHookContext(GrainKey, projectId, issueNumber);
         foreach (var hook in _completionHooks)
         {
             try

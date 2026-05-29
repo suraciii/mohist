@@ -1,7 +1,7 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -32,7 +32,7 @@ public sealed record IssueWorkflowStatus(
     string? WorkflowRunId,
     string? ChangeDir,
     string? WorkspacePath,
-    WorkflowStatusSnapshot? Workflow);
+    WorkflowStatusView? Workflow);
 
 [GenerateSerializer]
 public sealed record WorkflowProjectContext(

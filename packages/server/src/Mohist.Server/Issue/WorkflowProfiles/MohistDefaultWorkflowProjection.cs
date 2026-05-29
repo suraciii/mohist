@@ -1,5 +1,5 @@
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
 
@@ -10,7 +10,7 @@ public static class MohistDefaultWorkflowProjection
         string issueTitle,
         string issueStage,
         IssueAttention? issueAttention,
-        WorkflowStatusSnapshot? workflow)
+        WorkflowStatusView? workflow)
     {
         var approval = workflow?.Stages
             .Select(s => s.ApprovalStatus is null ? null : new StageApproval
@@ -45,7 +45,7 @@ public static class MohistDefaultWorkflowProjection
             workflow.Status == "Completed");
     }
 
-    private static IssueAttention? ProjectAttention(IssueAttention? issueAttention, WorkflowStatusSnapshot? workflow)
+    private static IssueAttention? ProjectAttention(IssueAttention? issueAttention, WorkflowStatusView? workflow)
     {
         if (workflow?.Status == "AwaitingApproval")
             return IssueAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
@@ -54,7 +54,7 @@ public static class MohistDefaultWorkflowProjection
         return issueAttention;
     }
 
-    private static string? ComputeBlockedReason(IssueAttention? attention, WorkflowStatusSnapshot? workflow) =>
+    private static string? ComputeBlockedReason(IssueAttention? attention, WorkflowStatusView? workflow) =>
         attention?.Message
         ?? (workflow?.Status == "Failed" ? workflow.Failure?.Message : null);
 

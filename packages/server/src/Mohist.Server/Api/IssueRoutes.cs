@@ -10,6 +10,8 @@ using Mohist.Server.Storage.Db;
 using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Views;
+using Mohist.Server.Workflow.Queries;
 using System.Text.Json;
 
 namespace Mohist.Server.Api;
@@ -367,9 +369,7 @@ public static class IssueRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
             var workflow = grains.GetGrain<IWorkflowGrain>(wrId);
-            if (await workflow.HasIncompleteTaskWithUsesAsync("mohist/rebase")
-                || await workflow.HasIncompleteTaskByIdAsync("resolve-rebase-conflicts")
-                || await workflow.HasIncompleteTaskByIdAsync("verify-rebase"))
+            if (await workflow.HasIncompleteTaskWithUsesAsync("mohist/rebase"))
                 return ApiResults.Conflict("Rebase task is already pending", "rebase_already_pending");
 
             var baseBranch = string.IsNullOrWhiteSpace(req?.BaseBranch) ? issue.Repository?.BaseBranch ?? "main" : req!.BaseBranch!;
@@ -490,65 +490,67 @@ public static class IssueRoutes
         });
 
         // Issue-scoped active workflow definition vars. Mohist does not expose workflow runs as standalone product resources.
-        issues.MapGet("/{number:int}/workflow/yaml", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapGet("/{number:int}/workflow/yaml", async (int number, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var yaml = await grains.GetGrain<IWorkflowGrain>(wrId).GetDefinitionYamlAsync();
+            var yaml = await reader.GetDefinitionYamlAsync(wrId);
             return yaml is null
                 ? ApiResults.NotFound("Workflow definition not found")
                 : ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, yaml });
         });
 
-        issues.MapGet("/{number:int}/workflow/vars", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapGet("/{number:int}/workflow/vars", async (int number, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).GetVariablesAsync();
+            var snapshot = await reader.GetVariablesAsync(wrId);
             return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, vars = SectionValue(snapshot?.Variables, "vars") });
         });
 
-        issues.MapGet("/{number:int}/workflow/vars/{name}", async (int number, string name, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapGet("/{number:int}/workflow/vars/{name}", async (int number, string name, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).GetVariablesAsync();
+            var snapshot = await reader.GetVariablesAsync(wrId);
             return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, name, value = VarValue(snapshot?.Variables, name) });
         });
 
-        issues.MapPatch("/{number:int}/workflow/vars/{name}", async (int number, string name, JsonElement patch, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPatch("/{number:int}/workflow/vars/{name}", async (int number, string name, JsonElement patch, string projectId, IGrainFactory grains, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).PatchVariablesAsync("vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
+            await grains.GetGrain<IWorkflowGrain>(wrId).PatchVariablesAsync("vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
+            var snapshot = await reader.GetVariablesAsync(wrId);
             return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
         });
 
-        issues.MapGet("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapGet("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).GetVariablesAsync();
+            var snapshot = await reader.GetVariablesAsync(wrId);
             return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, stage, name, value = StageVarValue(snapshot?.StageVariables, stage, name) });
         });
 
-        issues.MapPatch("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, JsonElement patch, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPatch("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, JsonElement patch, string projectId, IGrainFactory grains, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
 
-            var snapshot = await grains.GetGrain<IWorkflowGrain>(wrId).PatchStageVariablesAsync(stage, "vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
+            await grains.GetGrain<IWorkflowGrain>(wrId).PatchStageVariablesAsync(stage, "vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
+            var snapshot = await reader.GetVariablesAsync(wrId);
             return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
         });
 
@@ -562,22 +564,27 @@ public static class IssueRoutes
             ["baseBranch"] = baseBranch,
         };
 
-        var resolver = conflictResolver ?? DefaultConflictResolver();
-        if (resolver is not null)
+        if (conflictResolver?.With is not null || conflictResolver?.Uses is not null)
         {
-            with["conflictResolver"] = new
+            with["conflictResolver"] = new Dictionary<string, object?>
             {
-                id = string.IsNullOrWhiteSpace(resolver.Id) ? "resolve-rebase-conflicts" : resolver.Id,
-                title = string.IsNullOrWhiteSpace(resolver.Title) ? "Resolve rebase conflicts" : resolver.Title,
-                uses = string.IsNullOrWhiteSpace(resolver.Uses) ? "mohist/acp-agent" : resolver.Uses,
-                with = resolver.With ?? DefaultConflictResolverWith(),
+                ["title"] = string.IsNullOrWhiteSpace(conflictResolver.Title) ? "Resolve rebase conflicts" : conflictResolver.Title,
+                ["with"] = conflictResolver.With,
+            };
+        }
+        else
+        {
+            with["conflictResolver"] = new Dictionary<string, object?>
+            {
+                ["title"] = "Resolve rebase conflicts",
+                ["with"] = DefaultConflictResolverWith(),
             };
         }
 
         return JsonSerializer.Serialize(with, WorkflowVariableJson.Options);
     }
 
-    private static object WorkflowVarsResponse(int issueNumber, string workflowRunId, WorkflowVariablesSnapshot? snapshot) => new
+    private static object WorkflowVarsResponse(int issueNumber, string workflowRunId, WorkflowVariablesView? snapshot) => new
     {
         issueNumber,
         workflowRunId,
@@ -648,16 +655,8 @@ public static class IssueRoutes
             .ToDictionary(stage => stage.Key, stage => stage.Vars, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static RuntimeTaskRequest DefaultConflictResolver() => new(
-        Id: "resolve-rebase-conflicts",
-        Title: "Resolve rebase conflicts",
-        Uses: "mohist/acp-agent",
-        With: DefaultConflictResolverWith());
-
     private static Dictionary<string, object?> DefaultConflictResolverWith() => new()
     {
-        ["stage"] = "maintenance",
-        ["task"] = "resolve-rebase-conflicts",
         ["description"] = "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes.",
     };
 }

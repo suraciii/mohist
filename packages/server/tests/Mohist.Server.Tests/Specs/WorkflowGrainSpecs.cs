@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.WorkflowProfiles;
@@ -10,8 +11,9 @@ using Mohist.Server.Storage.Db;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Storage;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;
@@ -23,6 +25,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
     public IEventBus EventBus => _sharedEventBus;
+    public string ConnectionString => _keeper.ConnectionString;
 
     private readonly InMemoryEventBus _sharedEventBus = new(
         Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
@@ -38,12 +41,12 @@ public class WorkflowGrainFixture : IAsyncLifetime
         var builder = new InProcessTestClusterBuilder();
         builder.ConfigureSilo((_, siloBuilder) =>
         {
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
-            siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
+            siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
@@ -98,6 +101,15 @@ public abstract class WorkflowGrainSpecs
     }
 
     protected IGrainFactory Grains => _fixture.Grains;
+
+    protected WorkflowQueryService GetQueryService()
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        return new WorkflowQueryService(factory);
+    }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null)
     {

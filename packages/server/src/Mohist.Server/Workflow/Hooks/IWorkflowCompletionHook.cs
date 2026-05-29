@@ -1,5 +1,3 @@
-using Mohist.Server.Workflow.Grains;
-
 namespace Mohist.Server.Workflow.Hooks;
 
 public interface IWorkflowCompletionHook
@@ -10,5 +8,4 @@ public interface IWorkflowCompletionHook
 public sealed record WorkflowCompletionHookContext(
     string WorkflowRunId,
     string ProjectId,
-    int? IssueNumber,
-    WorkflowStatusSnapshot CompletedStatus);
+    int? IssueNumber);
