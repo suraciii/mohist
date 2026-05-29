@@ -13,7 +13,6 @@ public sealed record ApprovalState(
 public sealed class StageRun
 {
     public required string StageId { get; init; }
-    public required int Order { get; init; }
     public required int Attempt { get; init; }
     public required bool RequiresApproval { get; init; }
     public StageRunStatus Status { get; set; }

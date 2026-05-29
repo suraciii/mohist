@@ -371,7 +371,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_run is null) return Task.FromResult<WorkflowStatusSnapshot?>(null);
 
-        var stages = _run.Stages.Select(s =>
+        var stages = _run.Stages.Select((s, i) =>
         {
             var stageFailure = s.Failure is not null
                 ? new FailureStatusSnapshot(
@@ -385,7 +385,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             return new StageStatusSnapshot(
                 s.StageId,
                 s.Status.ToString(),
-                s.Order,
+                i,
                 SnapshotTasks(s),
                 SnapshotChecks(s),
                 s.Approval is not null

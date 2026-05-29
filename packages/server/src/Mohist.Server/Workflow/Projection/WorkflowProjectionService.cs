@@ -90,8 +90,7 @@ public class WorkflowProjectionService
     {
         var eventList = events.ToList();
         var stages = status.Stages
-            .OrderBy(s => s.Order)
-            .Select(stage => BuildStage(stage, eventList, sessions))
+            .Select((stage, i) => BuildStage(stage, i, eventList, sessions))
             .ToList();
 
         return new WorkflowTimelineDto(
@@ -103,7 +102,7 @@ public class WorkflowProjectionService
             status.AvailableActions.Select(a => new AvailableActionDto(a.Name, a.Label, a.Target)).ToList());
     }
 
-    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, List<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
+    private static WorkflowStageDto BuildStage(StageStatusSnapshot stage, int order, List<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
     {
         var stageEvents = events.Where(e => e.Stage == stage.Stage).ToList();
         var startedAt = stageEvents.FirstOrDefault()?.CreatedAt;
@@ -132,7 +131,7 @@ public class WorkflowProjectionService
         return new WorkflowStageDto(
             stage.Stage,
             NormalizeStatus(stage.Status),
-            stage.Order,
+            order,
             startedAt,
             completedAt,
             DurationMs(startedAt, completedAt),

@@ -9,11 +9,11 @@ public static class WorkflowStatusReader
 {
     public static WorkflowStatusSnapshot? Read(WorkflowRun run, WorkLease? lease)
     {
-        var stages = run.Stages.Select(s =>
+        var stages = run.Stages.Select((s, i) =>
             new StageStatusSnapshot(
                 s.StageId,
                 StageStatus(s),
-                s.Order,
+                i,
                 s.Tasks.Select(t => new TaskStatusSnapshot(
                     t.Id,
                     t.Title,

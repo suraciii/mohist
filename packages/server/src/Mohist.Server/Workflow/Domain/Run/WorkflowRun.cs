@@ -39,7 +39,6 @@ public static partial class WorkflowRunExtensions
                 .Select((def, i) => new StageRun
                 {
                     StageId = def.Stage,
-                    Order = i,
                     Attempt = 1,
                     RequiresApproval = def.RequiresApproval,
                     Status = StageRunStatus.Pending

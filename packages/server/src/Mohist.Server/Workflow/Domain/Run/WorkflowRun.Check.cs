@@ -11,7 +11,6 @@ public static partial class WorkflowRunExtensions
             check.Status = StageCheckStatus.Passed;
             check.Message = result.Message;
             check.Output = result.Output;
-            current.TryRequestApproval();
             run.Advance();
         }
 

@@ -24,7 +24,6 @@ public static partial class WorkflowRunExtensions
             if (task is null) return;
 
             task.Status = TaskRunStatus.Completed;
-            current.TryRequestApproval();
             run.Advance();
         }
 
@@ -47,6 +46,8 @@ public static partial class WorkflowRunExtensions
             bool invalidateChecks = false)
         {
             var current = run.CurrentStage();
+            if (!current.Initialized)
+                throw new WorkflowDomainException($"Cannot add runtime task: stage {current.StageId} is not initialized");
             if (!string.IsNullOrWhiteSpace(stage) && stage != current.StageId)
                 throw new WorkflowDomainException("Cannot add runtime task to stage " + stage + "; current stage is " + current.StageId);
 
