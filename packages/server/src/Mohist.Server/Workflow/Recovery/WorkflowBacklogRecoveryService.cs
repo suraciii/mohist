@@ -93,7 +93,7 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
         if (currentStage.Initialized
             && currentStage.Tasks.All(t => t.Status == TaskRunStatus.Completed)
             && currentStage.Checks.All(c => c.Status == StageCheckStatus.Passed)
-            && (!currentStage.RequiresApproval || currentStage.Approval?.Status == "approved")
+            && (!currentStage.RequiresApproval || currentStage.ApprovalStatus is { Result: "approved" })
             && currentStage == run.Stages[^1])
             return true;
 

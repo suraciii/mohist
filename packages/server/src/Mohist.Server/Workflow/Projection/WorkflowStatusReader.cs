@@ -25,8 +25,8 @@ public static class WorkflowStatusReader
                     c.Uses,
                     c.Status.ToString(),
                     c.Message)).ToList(),
-                s.Approval is not null
-                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.RequestedAt, s.Approval.RespondedAt)
+                s.ApprovalStatus is not null
+                    ? new ApprovalStatusSnapshot(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt)
                     : null,
                 s.Failure is not null
                     ? new FailureStatusSnapshot(
@@ -66,10 +66,10 @@ public static class WorkflowStatusReader
     {
         if (stage.Failure is not null) return StageRunStatus.Failed.ToString();
         if (!stage.Initialized) return StageRunStatus.Pending.ToString();
-        if (stage.Approval?.Status == "awaiting") return StageRunStatus.AwaitingApproval.ToString();
+        if (stage.IsAwaitingApproval) return StageRunStatus.AwaitingApproval.ToString();
         if (StageIsComplete(stage))
         {
-            if (stage.RequiresApproval && stage.Approval?.Status != "approved") return StageRunStatus.Running.ToString();
+            if (stage.RequiresApproval && stage.ApprovalStatus is not { Result: "approved" }) return StageRunStatus.Running.ToString();
             return StageRunStatus.Completed.ToString();
         }
         return StageRunStatus.Running.ToString();

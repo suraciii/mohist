@@ -76,8 +76,8 @@ public class StatusSpecs : WorkflowGrainSpecs
         Assert.Equal("Completed", planStage.Tasks[0].Status);
         Assert.Single(planStage.Checks);
         Assert.Equal("Passed", planStage.Checks[0].Status);
-        Assert.NotNull(planStage.Approval);
-        Assert.Equal("awaiting", planStage.Approval.Status);
+        Assert.NotNull(planStage.ApprovalStatus);
+        Assert.Null(planStage.ApprovalStatus.Result);
     }
 
     [Fact]

@@ -137,7 +137,7 @@ public class WorkflowProjectionService
             DurationMs(startedAt, completedAt),
             tasks,
             checks,
-            stage.Approval is null ? null : new ApprovalDto(stage.Approval.Status, stage.Approval.RequestedAt, stage.Approval.RespondedAt));
+            stage.ApprovalStatus is null ? null : new ApprovalDto(stage.ApprovalStatus.Result, stage.ApprovalStatus.RequestedAt, stage.ApprovalStatus.RespondedAt));
     }
 
     private async Task<IReadOnlyList<WorkflowAgentSession>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
@@ -171,10 +171,10 @@ public class WorkflowProjectionService
 }
 
 public sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, PendingWorkDto? PendingWork, IReadOnlyList<WorkflowStageDto> Stages, IReadOnlyList<AvailableActionDto> AvailableActions);
-public sealed record WorkflowStageDto(string Stage, string Status, int Order, string? StartedAt, string? CompletedAt, long? DurationMs, IReadOnlyList<WorkflowTaskDto> Tasks, IReadOnlyList<WorkflowCheckDto> Checks, ApprovalDto? Approval);
+public sealed record WorkflowStageDto(string Stage, string Status, int Order, string? StartedAt, string? CompletedAt, long? DurationMs, IReadOnlyList<WorkflowTaskDto> Tasks, IReadOnlyList<WorkflowCheckDto> Checks, ApprovalDto? ApprovalStatus);
 public sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status, string? StartedAt, string? CompletedAt, long? DurationMs, int Attempts, string? Message);
 public sealed record WorkflowCheckDto(string Name, string Title, string? Uses, string Status, string? Message, string? StartedAt, string? CompletedAt, long? DurationMs);
-public sealed record ApprovalDto(string Status, string RequestedAt, string? RespondedAt);
+public sealed record ApprovalDto(string? Result, string RequestedAt, string? RespondedAt);
 public sealed record PendingWorkDto(string WorkId, string WorkType, string? Stage, string? Title, string? Uses);
 public sealed record AvailableActionDto(string Name, string Label, string? Target);
 

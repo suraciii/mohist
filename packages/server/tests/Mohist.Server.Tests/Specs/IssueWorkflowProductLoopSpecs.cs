@@ -52,7 +52,7 @@ public class IssueWorkflowProductLoopSpecs
         var planTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
         var planStage = Assert.Single(planTimeline.Stages, s => s.Stage == "plan");
         Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "completed");
-        Assert.Equal("awaiting", planStage.Approval?.Status);
+        Assert.Null(planStage.ApprovalStatus?.Result);
 
         var planLogs = await _client.GetDataAsync<WorkflowLogDto[]>($"/api/issues/{issue.Number}/logs?projectId={project.Id}");
         Assert.Contains(planLogs, e => e.EventType == "workflow_task_completed");
@@ -248,9 +248,9 @@ public class IssueWorkflowProductLoopSpecs
     private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
     private sealed record WorkflowVariablesDto(int IssueNumber, string WorkflowRunId, string Affected);
     private sealed record WorkflowYamlDto(int IssueNumber, string WorkflowRunId, string Yaml);
-    private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? Approval);
+    private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? ApprovalStatus);
     private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
-    private sealed record ApprovalDto(string Status);
+    private sealed record ApprovalDto(string? Result);
     private sealed record WorkDispatchDto(
         string WorkflowRunId,
         string WorkId,

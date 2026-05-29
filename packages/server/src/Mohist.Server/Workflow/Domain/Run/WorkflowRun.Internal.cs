@@ -35,11 +35,13 @@ public static partial class WorkflowRunExtensions
             return stage.Checks.All(c => c.Status == StageCheckStatus.Passed);
         }
 
+        internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
+
         internal void TryRequestApproval()
         {
-            if (stage.RequiresApproval && stage.Approval is null && stage.IsComplete())
+            if (stage.RequiresApproval && stage.ApprovalStatus is null && stage.IsComplete())
             {
-                stage.Approval = new ApprovalStatus("awaiting", DateTimeOffset.UtcNow.ToString("O"), null);
+                stage.ApprovalStatus = new ApprovalStatus(null, DateTimeOffset.UtcNow.ToString("O"), null);
                 stage.Status = StageRunStatus.AwaitingApproval;
                 return;
             }
@@ -48,14 +50,14 @@ public static partial class WorkflowRunExtensions
                 stage.Status = StageRunStatus.Failed;
                 return;
             }
-            if (stage.Approval?.Status == "awaiting")
+            if (stage.IsAwaitingApproval)
             {
                 stage.Status = StageRunStatus.AwaitingApproval;
                 return;
             }
             if (stage.IsComplete())
             {
-                if (stage.RequiresApproval && stage.Approval?.Status != "approved")
+                if (stage.RequiresApproval && stage.ApprovalStatus is not { Result: "approved" })
                 {
                     stage.Status = StageRunStatus.Running;
                     return;

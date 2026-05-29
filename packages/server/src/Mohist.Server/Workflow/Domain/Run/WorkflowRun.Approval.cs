@@ -9,12 +9,12 @@ public static partial class WorkflowRunExtensions
         public void Approve()
         {
             var current = run.CurrentStage();
-            if (current.Approval?.Status != "awaiting")
+            if (!current.IsAwaitingApproval)
                 throw new WorkflowDomainException($"Stage {current.StageId} is not awaiting approval");
 
-            current.Approval = new ApprovalStatus(
+            current.ApprovalStatus = new ApprovalStatus(
                 "approved",
-                current.Approval.RequestedAt,
+                current.ApprovalStatus!.RequestedAt,
                 DateTimeOffset.UtcNow.ToString("O"));
             current.Status = StageRunStatus.Completed;
             run.Advance();
@@ -23,12 +23,12 @@ public static partial class WorkflowRunExtensions
         public void Reject(string? reason = null)
         {
             var current = run.CurrentStage();
-            if (current.Approval?.Status != "awaiting")
+            if (!current.IsAwaitingApproval)
                 throw new WorkflowDomainException($"Stage {current.StageId} is not awaiting approval");
 
-            current.Approval = new ApprovalStatus(
+            current.ApprovalStatus = new ApprovalStatus(
                 "rejected",
-                current.Approval.RequestedAt,
+                current.ApprovalStatus!.RequestedAt,
                 DateTimeOffset.UtcNow.ToString("O"));
             current.Failure = new FailureDetails(FailureReason.ApprovalRejected, current.StageId, Message: reason);
             current.Status = StageRunStatus.Failed;
