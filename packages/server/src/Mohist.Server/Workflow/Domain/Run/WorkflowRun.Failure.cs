@@ -26,13 +26,7 @@ public static partial class WorkflowRunExtensions
                     if (task is null) return;
                     task.Phase = TaskRunPhase.Failed;
                     current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, task.Id, Message: reason);
-                    current.Phase = StageRunPhase.Failed;
-                    run.Phase = WorkflowRunPhase.Failed;
-                    break;
-                }
-                case "load":
-                {
-                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason ?? "Task loading failed");
+                    run.Failure = current.Failure;
                     current.Phase = StageRunPhase.Failed;
                     run.Phase = WorkflowRunPhase.Failed;
                     break;
@@ -44,6 +38,7 @@ public static partial class WorkflowRunExtensions
                     pending.Phase = CheckRunPhase.Failed;
                     pending.Message = reason;
                     current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.StageId, CheckName: pending.Name, Message: reason);
+                    run.Failure = current.Failure;
                     current.Phase = StageRunPhase.Failed;
                     run.Phase = WorkflowRunPhase.Failed;
                     break;
@@ -51,6 +46,7 @@ public static partial class WorkflowRunExtensions
                 default:
                 {
                     current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason ?? $"In-flight work lost (type={workType})");
+                    run.Failure = current.Failure;
                     current.Phase = StageRunPhase.Failed;
                     run.Phase = WorkflowRunPhase.Failed;
                     break;

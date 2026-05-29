@@ -31,15 +31,10 @@ public sealed record StageResetAction(
 
 public sealed record StageEventPolicy(StageResetAction Reset);
 
-public sealed record WorkflowTasksFromDefinition(
-    string Uses,
-    Dictionary<string, JsonElement?>? With = null);
-
 public sealed record StageDefinition(
     string Stage,
     List<TaskDefinition> Tasks,
     List<CheckDefinition> Checks,
-    WorkflowTasksFromDefinition? TasksFrom = null,
     bool RequiresApproval = false,
     Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, StageEventPolicy>? On = null);

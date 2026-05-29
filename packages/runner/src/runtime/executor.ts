@@ -85,10 +85,6 @@ function normalize(work: WorkItem, result: WorkItemResult): WorkItemResult {
     if (status === "pending") return { ...result, status: "pending" }
     return { ...result, status: "fail" }
   }
-  if (work.workType === "load") {
-    if (["loaded", "success", "succeeded", "completed"].includes(status)) return { ...result, status: "loaded" }
-    return { ...result, status: "failed" }
-  }
   if (["completed", "success", "succeeded", "pass", "passed"].includes(status)) return { ...result, status: "completed" }
   return { ...result, status: "failed" }
 }

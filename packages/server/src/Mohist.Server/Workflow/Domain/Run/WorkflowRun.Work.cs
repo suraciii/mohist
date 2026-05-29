@@ -17,17 +17,12 @@ public sealed record WorkflowWork
     }
 
     public static WorkflowWork StageInit(string stage) => new(stage, "stage-init", new StageInitData());
-    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with)
-        => new(stage, "task", new TaskData(id, title, uses, with));
-    public static WorkflowWork Checks(string stage, List<CheckItem> items)
-        => new(stage, "checks", new ChecksData(items));
-    public static WorkflowWork Load(string stage, string uses)
-        => new(stage, "load", new LoadData(uses));
+    public static WorkflowWork Task(string stage, string id, string title, string? uses, Dictionary<string, JsonElement?>? with) => new(stage, "task", new TaskData(id, title, uses, with));
+    public static WorkflowWork Checks(string stage, List<CheckItem> items) => new(stage, "checks", new ChecksData(items));
 
     public sealed record StageInitData;
     public sealed record TaskData(string Id, string Title, string? Uses, Dictionary<string, JsonElement?>? With);
     public sealed record ChecksData(List<CheckItem> Items);
-    public sealed record LoadData(string Uses);
 }
 
 public static partial class WorkflowRunExtensions
@@ -39,9 +34,6 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             if (!current.Initialized)
                 return WorkflowWork.StageInit(current.StageId);
-
-            if (current.TasksFrom is not null)
-                return WorkflowWork.Load(current.StageId, current.TasksFrom);
 
             var pendingTask = current.FirstPendingTask();
             if (pendingTask is not null)

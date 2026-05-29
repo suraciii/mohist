@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -201,14 +202,17 @@ public class AgentSessionSpecs
             var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 ?? throw new InvalidOperationException("Empty work dispatch");
 
-            if (work.WorkType == "load")
+            if (work.WorkType == "task" && work.Uses == "mohist/openspec-tasks")
             {
+                var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+                await workflow.AddTasksAsync(new AddTasksBatchRequest([
+                    new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+                ]));
                 await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
                 {
                     workId = work.WorkId,
-                    status = "loaded",
-                    projectId = work.ProjectId,
-                    output = JsonSerializer.Serialize(new { tasks = new[] { new { id = "build-1", title = "Build task", uses = "mohist/acp-agent" } } })
+                    status = "completed",
+                    projectId = work.ProjectId
                 });
                 continue;
             }

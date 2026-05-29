@@ -105,11 +105,12 @@ stages:
           timeout: 300000
 
   - stage: build
-    tasks: []
-    tasksFrom:
-      uses: mohist/openspec-tasks
-      with:
-        path: ${{ openspecChangeDir }}/tasks.json
+    tasks:
+      - id: load-tasks
+        title: Load tasks from plan
+        uses: mohist/openspec-tasks
+        with:
+          path: ${{ openspecChangeDir }}/tasks.json
     checks:
       - name: health
         title: Health

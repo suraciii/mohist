@@ -43,27 +43,29 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StageWithDynamicTasks_LoadCompletes_DynamicTasksMaterializedBeforeChecks()
+    public async Task StageWithDynamicTasks_LoadTaskCompletes_DynamicTasksRunBeforeChecks()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinition("build", [], [new("check-1", "Check 1", "spec/check")], new WorkflowTasksFromDefinition("spec/load"))
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (load, r1) = await PollWorkAnyAsync();
-        Assert.StartsWith("load-build:", load.WorkId);
-        Assert.Equal("load", load.WorkType);
+        Assert.StartsWith("load-tasks.", load.WorkId);
+        Assert.Equal("task", load.WorkType);
         Assert.Equal("build", load.Stage);
         Assert.Equal("spec/load", load.Uses);
 
-        await ReportAsync(r1, load.WorkId, new WorkDispatchResult("loaded", Output: """
-        {
-          "tasks": [
-            { "id": "dynamic-1", "title": "Dynamic 1", "uses": "spec/task", "with": { "value": "one" } },
-            { "taskId": "dynamic-2", "title": "Dynamic 2", "uses": "spec/task" }
-          ]
-        }
-        """));
+        var addResult = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task", """{"value":"one"}"""),
+                new AddTasksBatchItem("dynamic-2", "Dynamic 2", "spec/task")
+            ]));
+        Assert.Equal(2, addResult.AddedCount);
+
+        await ReportAsync(r1, load.WorkId, "completed");
 
         var (dynamic1, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("dynamic-1.", dynamic1.WorkId);
@@ -84,32 +86,24 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StageWithDynamicTasks_LoadedTaskWithContract_DispatchPreservesWithContract()
+    public async Task StageWithDynamicTasks_TaskWithContract_DispatchPreservesWithContract()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinition("build", [], [], new WorkflowTasksFromDefinition("spec/load"))
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [])
         ]));
 
         var (load, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, load.WorkId, new WorkDispatchResult("loaded", Output: """
-        {
-          "tasks": [
-            {
-              "id": "T-001",
-              "title": "Implement feature",
-              "uses": "mohist/acp-agent",
-              "with": {
-                "prompt": "Add the feature flag service.\n- service is registered",
-                "expect": {
-                  "files": [{ "path": "src/FeatureFlags.cs" }],
-                  "markers": [{ "path": "openspec/changes/issue-1/tasks.json", "contains": "\"passes\": true" }]
-                }
-              }
-            }
-          ]
-        }
-        """));
+
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent",
+                    """{"prompt":"Add the feature flag service.\n- service is registered","expect":{"files":[{"path":"src/FeatureFlags.cs"}],"markers":[{"path":"openspec/changes/issue-1/tasks.json","contains":"\"passes\": true"}]}}""")
+            ]));
+
+        await ReportAsync(r1, load.WorkId, "completed");
 
         var (dynamicTask, _) = await PollWorkAnyAsync();
 
@@ -124,29 +118,32 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StageWithStaticAndDynamicTasks_LoadCompletes_StaticTasksRunBeforeDynamicTasks()
+    public async Task StageWithStaticAndDynamicTasks_LoadTaskThenDynamicThenStaticBeforeChecks()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition(
                 "build",
-                [new("static-1", "Static 1", "spec/task")],
-                [new("check-1", "Check 1", "spec/check")],
-                new WorkflowTasksFromDefinition("spec/load"))
+                [new("load-tasks", "Load tasks", "spec/load"), new("static-1", "Static 1", "spec/task")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (load, r1) = await PollWorkAnyAsync();
-        await ReportAsync(r1, load.WorkId, new WorkDispatchResult("loaded", Output: """
-        [{ "id": "dynamic-1", "title": "Dynamic 1", "uses": "spec/task" }]
-        """));
 
-        var (staticTask, r2) = await PollWorkAnyAsync();
-        Assert.StartsWith("static-1.", staticTask.WorkId);
-        await ReportAsync(r2, staticTask.WorkId, "completed");
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task")
+            ]));
 
-        var (dynamicTask, r3) = await PollWorkAnyAsync();
+        await ReportAsync(r1, load.WorkId, "completed");
+
+        var (dynamicTask, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("dynamic-1.", dynamicTask.WorkId);
-        await ReportAsync(r3, dynamicTask.WorkId, "completed");
+        await ReportAsync(r2, dynamicTask.WorkId, "completed");
+
+        var (staticTask, r3) = await PollWorkAnyAsync();
+        Assert.StartsWith("static-1.", staticTask.WorkId);
+        await ReportAsync(r3, staticTask.WorkId, "completed");
 
         var (check, r4) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r4, check, "check-1");
@@ -280,19 +277,24 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task StageWithDynamicTasks_LoadFails_WorkflowFails()
+    public async Task LoadTaskFails_WorkflowFails()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
-            new StageDefinition("build", [], [new("check-1", "Check 1", "spec/check")], new WorkflowTasksFromDefinition("spec/load"))
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (load, runnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("load-build:", load.WorkId);
+        Assert.StartsWith("load-tasks.", load.WorkId);
 
         await ReportAsync(runnerId, load.WorkId, "failed", "loader failed");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.True(await runner.IsAvailableAsync());
+
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
+        Assert.Equal("Failed", status!.Status);
     }
 }

@@ -38,7 +38,6 @@ public struct StageDefinitionSurrogate
     [Id(0)] public string Stage;
     [Id(1)] public List<TaskDefinition> Tasks;
     [Id(2)] public List<CheckDefinition> Checks;
-    [Id(3)] public WorkflowTasksFromDefinition? TasksFrom;
     [Id(4)] public bool RequiresApproval;
     [Id(5)] public Dictionary<string, JsonElement?>? Variables;
     [Id(6)] public Dictionary<string, StageEventPolicy>? On;
@@ -48,14 +47,13 @@ public struct StageDefinitionSurrogate
 public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefinition, StageDefinitionSurrogate>
 {
     public StageDefinition ConvertFromSurrogate(in StageDefinitionSurrogate surrogate) =>
-        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.TasksFrom, surrogate.RequiresApproval, surrogate.Variables, surrogate.On);
+        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.RequiresApproval, surrogate.Variables, surrogate.On);
 
     public StageDefinitionSurrogate ConvertToSurrogate(in StageDefinition value) => new()
     {
         Stage = value.Stage,
         Tasks = value.Tasks,
         Checks = value.Checks,
-        TasksFrom = value.TasksFrom,
         RequiresApproval = value.RequiresApproval,
         Variables = value.Variables,
         On = value.On,
@@ -154,26 +152,6 @@ public sealed class CheckFailureRetrySurrogateConverter : IConverter<CheckFailur
     {
         Limit = value.Limit,
         Task = value.Task,
-    };
-}
-
-[GenerateSerializer]
-public struct WorkflowTasksFromDefinitionSurrogate
-{
-    [Id(0)] public string Uses;
-    [Id(1)] public Dictionary<string, JsonElement?>? With;
-}
-
-[RegisterConverter]
-public sealed class WorkflowTasksFromDefinitionSurrogateConverter : IConverter<WorkflowTasksFromDefinition, WorkflowTasksFromDefinitionSurrogate>
-{
-    public WorkflowTasksFromDefinition ConvertFromSurrogate(in WorkflowTasksFromDefinitionSurrogate surrogate) =>
-        new(surrogate.Uses, surrogate.With);
-
-    public WorkflowTasksFromDefinitionSurrogate ConvertToSurrogate(in WorkflowTasksFromDefinition value) => new()
-    {
-        Uses = value.Uses,
-        With = value.With,
     };
 }
 

@@ -69,8 +69,10 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("proposal.md", JsonSerializer.Serialize(proposal.With));
 
         var build = definition.Stages[1];
-        Assert.Equal("mohist/openspec-tasks", build.TasksFrom?.Uses);
-        Assert.Contains("tasks.json", JsonSerializer.Serialize(build.TasksFrom?.With));
+        var loadTask = build.Tasks[0];
+        Assert.Equal("load-tasks", loadTask.Id);
+        Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
+        Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
 
         var merge = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:merge");
         Assert.Equal("mohist/merge", merge.Uses);
@@ -173,7 +175,7 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
-        Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].TasksFrom?.Uses);
+        Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
         Assert.Equal(2, reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry?.Limit);
     }
 }

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -162,13 +163,14 @@ public class IssueWorkflowProductLoopSpecs
         switch (work.WorkType)
         {
             case "task":
-                await ReportAsync(work.WorkId, "completed");
-                break;
-            case "load":
-                await ReportAsync(work.WorkId, "loaded", output: JsonSerializer.Serialize(new
+                if (work.Uses == "mohist/openspec-tasks")
                 {
-                    tasks = new[] { new { id = "build-1", title = "Build task", uses = "mohist/acp-agent" } }
-                }));
+                    var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+                    await workflow.AddTasksAsync(new AddTasksBatchRequest([
+                        new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+                    ]));
+                }
+                await ReportAsync(work.WorkId, "completed");
                 break;
             case "checks":
                 var checkNames = ParseCheckNames(work.With);

@@ -36,6 +36,7 @@ public static partial class WorkflowRunExtensions
 
             task.Phase = TaskRunPhase.Failed;
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, task.Id, Message: result.Reason);
+            run.Failure = current.Failure;
             current.Phase = StageRunPhase.Failed;
             run.Phase = WorkflowRunPhase.Failed;
         }
@@ -69,6 +70,33 @@ public static partial class WorkflowRunExtensions
                 current.Phase = StageRunPhase.Running;
 
             run.Phase = WorkflowRunPhase.Running;
+        }
+
+        public void InsertRuntimeTasksAfter(
+            TaskRun afterTask,
+            IReadOnlyList<LoadedTaskInput> tasks,
+            bool invalidateChecks = false)
+        {
+            var current = run.CurrentStage();
+            var insertIndex = current.Tasks.IndexOf(afterTask) + 1;
+            if (insertIndex <= 0) insertIndex = current.Tasks.Count;
+
+            foreach (var task in tasks)
+            {
+                var newTask = TaskRun.MakeTask(current.Tasks, task);
+                current.Tasks.Insert(insertIndex, newTask);
+                insertIndex++;
+            }
+
+            if (invalidateChecks)
+            {
+                foreach (var c in current.Checks)
+                {
+                    c.Phase = CheckRunPhase.Pending;
+                    c.Message = null;
+                    c.Output = null;
+                }
+            }
         }
     }
 }

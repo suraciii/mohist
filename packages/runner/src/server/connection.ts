@@ -40,6 +40,15 @@ export class ServerConnection {
     return response.json() as Promise<{ acpSessionId?: string | null; workDir?: string | null }>
   }
 
+  async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string; with?: string | null }>) {
+    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow/${encodeURIComponent(workflowRunId)}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tasks }),
+    })
+    if (!response.ok) throw new Error(`addTasks failed: ${response.status} ${await response.text()}`)
+  }
+
   async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal) {
     await this.post(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`, body, signal)
   }
