@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
+using Mohist.Server.Storage;
 
-namespace Mohist.Server.Storage;
+namespace Mohist.Server.Tests.Support;
 
 public class InMemoryStateStore<T> : IStateStore<T> where T : class
 {

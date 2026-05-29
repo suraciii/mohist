@@ -8,7 +8,6 @@ public class StageRun
 {
     private readonly List<TaskRun> _tasks = [];
     private readonly List<StageCheck> _checks = [];
-    private readonly List<CheckDefinition> _staticChecks;
     private readonly Dictionary<string, int> _taskAttempts = new();
     private bool _started;
     private bool _initialized;
@@ -50,13 +49,11 @@ public class StageRun
     public StageRun(
         string stage,
         int order,
-        List<CheckDefinition> staticChecks,
         int attempt = 1,
         bool requiresApproval = false)
     {
         Stage = stage;
         Order = order;
-        _staticChecks = staticChecks;
         Attempt = attempt;
         RequiresApproval = requiresApproval;
     }
@@ -76,9 +73,9 @@ public class StageRun
         Approval,
         Failure);
 
-    public static StageRun Restore(StageRunSnapshot snapshot, List<CheckDefinition> staticChecks)
+    public static StageRun Restore(StageRunSnapshot snapshot)
     {
-        var run = new StageRun(snapshot.Stage, snapshot.Order, staticChecks, snapshot.Attempt, snapshot.RequiresApproval)
+        var run = new StageRun(snapshot.Stage, snapshot.Order, snapshot.Attempt, snapshot.RequiresApproval)
         {
             _started = snapshot.Started,
             _initialized = snapshot.Initialized,
@@ -93,10 +90,9 @@ public class StageRun
         return run;
     }
 
-    public void InitTasks(List<LoadedTaskInput>? tasks = null)
+    public void Init(IReadOnlyList<LoadedTaskInput> tasks, List<CheckDefinition> checks)
     {
         if (_initialized) return;
-        tasks ??= [];
 
         var pendingRuntimeTasks = _tasks
             .Where(t => t.Status == TaskRunStatus.Pending)
@@ -113,7 +109,7 @@ public class StageRun
         foreach (var t in pendingRuntimeTasks)
             AddTask(t);
 
-        foreach (var c in _staticChecks)
+        foreach (var c in checks)
             _checks.Add(new StageCheck(c.Name, c.Title, c.Uses, c.With));
 
         _initialized = true;
