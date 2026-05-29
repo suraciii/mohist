@@ -26,7 +26,15 @@ public class IssueQueryServiceSpecs
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var project = new ProjectInfo { Id = "proj-1", Name = "Project One", Path = "/tmp/project" };
-        var issue = new Issue.Domain.Issue("issue_1", project.Id, 1, "Query me", labels: ["bug"], priority: "p1");
+        var issue = new Issue.Domain.Issue
+        {
+            Id = "issue_1",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Query me",
+            Labels = ["bug"],
+            Priority = "p1",
+        };
         issue.MarkReady();
         db.IssueStates.Add(new IssueStateRow
         {

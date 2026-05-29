@@ -19,8 +19,8 @@ public static class MohistDefaultWorkflowProjection
                 Stage = s.Stage,
                 Status = s.Approval.Status,
                 OutputJson = s.Approval.Output,
-                RequestedAt = s.Approval.RequestedAt,
-                RespondedAt = s.Approval.RespondedAt,
+                RequestedAt = ParseDateTime(s.Approval.RequestedAt),
+                RespondedAt = ParseNullableDateTime(s.Approval.RespondedAt),
             })
             .Where(a => a is not null)
             .LastOrDefault();
@@ -73,6 +73,12 @@ public static class MohistDefaultWorkflowProjection
     public static string ChangeName(int issueNumber) => $"issue-{issueNumber}";
 
     public static string ChangeDir(int issueNumber) => $"openspec/changes/{ChangeName(issueNumber)}";
+
+    private static DateTime ParseDateTime(string value) =>
+        DateTime.TryParse(value, out var result) ? result : DateTime.UtcNow;
+
+    private static DateTime? ParseNullableDateTime(string? value) =>
+        value is not null && DateTime.TryParse(value, out var result) ? result : null;
 }
 
 public sealed record MohistDefaultWorkflowState(

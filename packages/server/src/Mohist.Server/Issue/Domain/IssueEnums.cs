@@ -19,31 +19,3 @@ public static class IssueAttentionReasons
     public const string WorkflowFailed = "workflow_failed";
     public const string Paused = "paused";
 }
-
-public sealed class IssueAttention
-{
-    public string Reason { get; set; } = IssueAttentionReasons.Blocked;
-    public string? Message { get; set; }
-    public string Source { get; set; } = "system";
-    public string? WorkflowRunId { get; set; }
-    public string RequestedAt { get; set; } = DateTime.UtcNow.ToString("O");
-    public string[] AvailableActions { get; set; } = [];
-
-    public static IssueAttention ReviewRequired(string? workflowRunId, string? message = null) => new()
-    {
-        Reason = IssueAttentionReasons.ReviewRequired,
-        Message = message,
-        Source = "workflow",
-        WorkflowRunId = workflowRunId,
-        AvailableActions = ["approve", "request_changes"],
-    };
-
-    public static IssueAttention Blocked(string? workflowRunId, string? message = null) => new()
-    {
-        Reason = IssueAttentionReasons.Blocked,
-        Message = message,
-        Source = "workflow",
-        WorkflowRunId = workflowRunId,
-        AvailableActions = ["retry", "cancel"],
-    };
-}
