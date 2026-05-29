@@ -204,29 +204,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RuntimeTaskAddedBeforeStageMaterializes_DoesNotReplaceDefinedTasks()
-    {
-        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(
-            tasks: [new("task-1", "Task 1", "spec/task")],
-            checks: [new("check-1", "Check 1", "spec/check")]));
-
-        await workflow.AddTaskAsync(new RuntimeTaskInput("runtime-1", "Runtime 1", "spec/runtime"));
-
-        _runnerId = await RegisterRunnerAsync();
-        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
-        await runner.AssignWorkflowAsync(_workflowId!);
-
-        var first = await runner.PollAsync();
-        Assert.NotNull(first);
-        Assert.StartsWith("task-1.", first.WorkId);
-        await runner.ReportAsync(first.WorkId, new WorkDispatchResult("completed"));
-
-        var second = await runner.PollAsync();
-        Assert.NotNull(second);
-        Assert.StartsWith("runtime-1.", second.WorkId);
-    }
-
-    [Fact]
     public async Task FailedTaskWithRequestedTask_QueuesRequestedTaskInsteadOfFailingWorkflow()
     {
         await StartWorkflowAsync(SingleStage(

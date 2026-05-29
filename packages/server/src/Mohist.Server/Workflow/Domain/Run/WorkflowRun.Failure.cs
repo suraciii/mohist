@@ -88,7 +88,6 @@ public static partial class WorkflowRunExtensions
             var newStage = new StageRun
             {
                 StageId = current.StageId,
-                Order = current.Order,
                 Attempt = current.Attempt + 1,
                 RequiresApproval = current.RequiresApproval,
                 Status = StageRunStatus.Running

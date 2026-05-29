@@ -1,6 +1,10 @@
 using System.Net;
 using System.Text.Json;
 using System.Net.Http.Json;
+using Mohist.Server.Grains;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -80,6 +84,23 @@ public class ApiContractSpecs
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();
 
         await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/start?projectId={projectId}", new { });
+
+        var runnerId = $"rebase-test-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "mohist/rebase", "spec/task", "spec/check" },
+            hostname = "test-host",
+            projectId,
+        });
+
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId!, number));
+        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
+        var wrId = issueStatus!.WorkflowRunId!;
+
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.AssignWorkflowAsync(wrId);
+        await runner.PollAsync();
+
         using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
