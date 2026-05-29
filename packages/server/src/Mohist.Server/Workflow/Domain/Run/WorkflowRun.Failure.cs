@@ -10,6 +10,7 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason);
+            run.Failure = current.Failure;
             current.Phase = StageRunPhase.Failed;
             run.Phase = WorkflowRunPhase.Failed;
         }

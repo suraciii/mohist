@@ -48,6 +48,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
             ]),
             input: new WorkflowStartInput(variables));
 
+        await Grains.GetGrain<IRunnerGrain>(_runnerId!).AssignWorkflowAsync(workflowId);
         var (work, _) = await PollWorkAnyAsync();
 
         Assert.NotNull(work.Variables);
@@ -80,6 +81,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
                     [])
             ]));
 
+        await Grains.GetGrain<IRunnerGrain>(_runnerId!).AssignWorkflowAsync(workflowId);
         var (work, _) = await PollWorkAnyAsync();
 
         Assert.Null(work.Issue);

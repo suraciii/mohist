@@ -94,7 +94,11 @@ public class UpdateSpecs
             new StringWriter(),
             new StringWriter(),
             installer,
-            commands);
+            commands,
+            new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            });
 
         var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
 

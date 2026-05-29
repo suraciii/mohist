@@ -16,7 +16,7 @@ public static class RunnerRoutes
         group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName, req.ProjectId, req.CoderModels));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName, req.ProjectId ?? runnerId, req.CoderModels));
             return Results.Ok();
         });
 
@@ -105,7 +105,7 @@ public static class RunnerRoutes
     }
 }
 
-public record RunnerRegisterRequest(string[] Capabilities, string ProjectId, string? Hostname = null, string[]? CoderModels = null);
+public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null);
 public record RunnerReportRequest(string WorkId, string Status, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
 public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
 public record WorkflowAgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);

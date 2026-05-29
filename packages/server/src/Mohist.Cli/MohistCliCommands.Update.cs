@@ -318,17 +318,17 @@ internal sealed class SourceCodeUpdater
     private static string ResolveRepoRoot(string? explicitRoot)
     {
         if (!string.IsNullOrWhiteSpace(explicitRoot))
-            return Path.GetFullPath(explicitRoot);
+            return explicitRoot.Replace('\\', '/');
 
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
             if (File.Exists(Path.Combine(dir.FullName, "Mohist.sln")))
-                return dir.FullName;
+                return dir.FullName.Replace('\\', '/');
             dir = dir.Parent;
         }
 
-        return Directory.GetCurrentDirectory();
+        return Directory.GetCurrentDirectory().Replace('\\', '/');
     }
 
     private async Task<string?> ResolveCliPathAsync(string? explicitPath)
