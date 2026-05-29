@@ -116,5 +116,29 @@ public static partial class WorkflowRunExtensions
             }
             stage.Status = StageRunStatus.Running;
         }
+
+        private void RetryFailedTask(string taskRunId)
+        {
+            var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
+                ?? throw new WorkflowDomainException($"Failed task {taskRunId} not found or not in failed state");
+
+            var input = new TaskDefinition(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
+            var newTask = TaskRun.MakeTask(stage.Tasks, input);
+            stage.Tasks.Add(newTask);
+            stage.Failure = null;
+            stage.Status = StageRunStatus.Running;
+        }
+
+        private void RetryFailedCheck(string? checkName)
+        {
+            var failedCheck = stage.Checks.FirstOrDefault(c => c.Name == checkName && c.Status == StageCheckStatus.Failed)
+                ?? throw new WorkflowDomainException($"Failed check {checkName} not found or not in failed state");
+
+            failedCheck.Status = StageCheckStatus.Pending;
+            failedCheck.Message = null;
+            failedCheck.Output = null;
+            stage.Failure = null;
+            stage.Status = StageRunStatus.Running;
+        }
     }
 }

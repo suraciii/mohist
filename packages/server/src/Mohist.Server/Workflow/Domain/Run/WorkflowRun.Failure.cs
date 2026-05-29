@@ -69,12 +69,14 @@ public static partial class WorkflowRunExtensions
             switch (current.Failure.Reason)
             {
                 case FailureReason.TaskFailed when current.Failure.TaskId is not null:
-                    RetryFailedTask(run, current, current.Failure.TaskId);
+                    current.RetryFailedTask(current.Failure.TaskId);
+                    run.Status = WorkflowRunStatus.Running;
                     break;
                 case FailureReason.TaskFailed:
                     throw new WorkflowDomainException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
                 case FailureReason.CheckUnrepaired:
-                    RetryFailedCheck(run, current, current.Failure.CheckName);
+                    current.RetryFailedCheck(current.Failure.CheckName);
+                    run.Status = WorkflowRunStatus.Running;
                     break;
                 case FailureReason.ApprovalRejected:
                     throw new WorkflowDomainException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
@@ -103,31 +105,5 @@ public static partial class WorkflowRunExtensions
             var current = run.CurrentStage();
             current.Failure = null;
         }
-    }
-
-    private static void RetryFailedTask(WorkflowRun run, StageRun stage, string taskRunId)
-    {
-        var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
-            ?? throw new WorkflowDomainException($"Failed task {taskRunId} not found or not in failed state");
-
-        var input = new TaskDefinition(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
-        var newTask = TaskRun.MakeTask(stage.Tasks, input);
-        stage.Tasks.Add(newTask);
-        stage.Failure = null;
-        stage.Status = StageRunStatus.Running;
-        run.Status = WorkflowRunStatus.Running;
-    }
-
-    private static void RetryFailedCheck(WorkflowRun run, StageRun stage, string? checkName)
-    {
-        var failedCheck = stage.Checks.FirstOrDefault(c => c.Name == checkName && c.Status == StageCheckStatus.Failed)
-            ?? throw new WorkflowDomainException($"Failed check {checkName} not found or not in failed state");
-
-        failedCheck.Status = StageCheckStatus.Pending;
-        failedCheck.Message = null;
-        failedCheck.Output = null;
-        stage.Failure = null;
-        stage.Status = StageRunStatus.Running;
-        run.Status = WorkflowRunStatus.Running;
     }
 }
