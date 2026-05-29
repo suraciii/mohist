@@ -340,7 +340,7 @@ public static class IssueRoutes
             return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(pid, number));
         });
 
-        issues.MapGet("/{number:int}/coder-sessions/{sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, WorkflowAgentSessionQueryService sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions/{*sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, WorkflowAgentSessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");

@@ -49,15 +49,20 @@ public class ApiContractSpecs
     [Fact]
     public async Task OpencodeModels_ReturnsRunnerReportedModels()
     {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"models-{Guid.NewGuid():N}", path = "/tmp/project", baseBranch = "main" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+
         var runnerId = $"model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
         {
             capabilities = Array.Empty<string>(),
             hostname = "test-host",
+            projectId,
             coderModels = new[] { "zai/glm-5", "openai/gpt-5.5" },
         });
 
-        var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>("/api/opencode/models");
+        var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/opencode/models?projectId={projectId}");
 
         Assert.Contains("zai/glm-5", response.Models);
         Assert.Contains("openai/gpt-5.5", response.Models);

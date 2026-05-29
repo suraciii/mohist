@@ -30,7 +30,15 @@ public class WorkflowAgentSessionStore : IStateStore<WorkflowAgentSession>
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         state.Id = key;
-        db.WorkflowAgentSessions.Update(state);
+        var existing = await db.WorkflowAgentSessions.FindAsync(key);
+        if (existing is null)
+        {
+            db.WorkflowAgentSessions.Add(state);
+        }
+        else
+        {
+            db.Entry(existing).CurrentValues.SetValues(state);
+        }
         await db.SaveChangesAsync();
     }
 
