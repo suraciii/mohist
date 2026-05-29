@@ -33,13 +33,12 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
 
     public async Task<WorkflowAgentSessionInfo> EnsureAsync(EnsureWorkflowAgentSessionCommand command)
     {
-        var session = await _stateStore.LoadAsync(SessionId);
-        if (session is null)
+        if (_session is null)
         {
             var existing = await LoadByWorkflowAndSessionAsync(command.WorkflowRunId, command.SessionName);
             if (existing is null)
             {
-                session = WorkflowAgentSession.Create(
+                _session = WorkflowAgentSession.Create(
                     SessionId,
                     command.ProjectId,
                     command.IssueNumber ?? 0,
@@ -53,30 +52,29 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             }
             else
             {
-                session = existing;
-                session.RunnerId ??= command.RunnerId;
-                session.WorkId ??= command.WorkId;
-                session.WorkType ??= command.WorkType;
-                session.Stage ??= command.Stage;
-                session.Title ??= command.Title;
-                if (session.IssueNumber == 0 && command.IssueNumber is > 0)
-                    session.IssueNumber = command.IssueNumber.Value;
+                _session = existing;
+                _session.RunnerId ??= command.RunnerId;
+                _session.WorkId ??= command.WorkId;
+                _session.WorkType ??= command.WorkType;
+                _session.Stage ??= command.Stage;
+                _session.Title ??= command.Title;
+                if (_session.IssueNumber == 0 && command.IssueNumber is > 0)
+                    _session.IssueNumber = command.IssueNumber.Value;
             }
         }
         else
         {
-            session.RunnerId ??= command.RunnerId;
-            session.WorkId ??= command.WorkId;
-            session.WorkType ??= command.WorkType;
-            session.Stage ??= command.Stage;
-            session.Title ??= command.Title;
-            if (session.IssueNumber == 0 && command.IssueNumber is > 0)
-                session.IssueNumber = command.IssueNumber.Value;
+            _session.RunnerId ??= command.RunnerId;
+            _session.WorkId ??= command.WorkId;
+            _session.WorkType ??= command.WorkType;
+            _session.Stage ??= command.Stage;
+            _session.Title ??= command.Title;
+            if (_session.IssueNumber == 0 && command.IssueNumber is > 0)
+                _session.IssueNumber = command.IssueNumber.Value;
         }
 
-        await _stateStore.SaveAsync(SessionId, session);
-        _session = session;
-        return ToInfo(session);
+        await _stateStore.SaveAsync(SessionId, _session);
+        return ToInfo(_session);
     }
 
     public async Task<WorkflowAgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
@@ -162,8 +160,8 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
 
         db.WorkflowAgentSessionEvents.AddRange(entries);
-        db.WorkflowAgentSessions.Update(session);
         await db.SaveChangesAsync();
+        await _stateStore.SaveAsync(SessionId, session);
         _session = session;
 
         foreach (var entry in entries)
@@ -190,7 +188,6 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
 
     public async Task<WorkflowAgentSessionInfo?> GetAsync()
     {
-        _session ??= await _stateStore.LoadAsync(SessionId);
         return _session is null ? null : ToInfo(_session);
     }
 
@@ -203,18 +200,16 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
 
     private async Task<WorkflowAgentSession> GetOrCreateAsync()
     {
-        var session = await _stateStore.LoadAsync(SessionId);
-        if (session is not null) return session;
+        if (_session is not null) return _session;
 
         var parts = SessionId.Split('/');
         var projectId = parts.Length > 0 ? parts[0] : string.Empty;
         var workflowRunId = parts.Length > 1 ? parts[1] : string.Empty;
         var sessionName = parts.Length > 2 ? parts[2] : string.Empty;
 
-        session = WorkflowAgentSession.Create(SessionId, projectId, 0, workflowRunId, sessionName, null);
-        await _stateStore.SaveAsync(SessionId, session);
-        _session = session;
-        return session;
+        _session = WorkflowAgentSession.Create(SessionId, projectId, 0, workflowRunId, sessionName, null);
+        await _stateStore.SaveAsync(SessionId, _session);
+        return _session;
     }
 
     private void EmitStarted(WorkflowAgentSession session) => _eventBus.Emit("coder_session_started", new

@@ -48,7 +48,7 @@ public class WorkflowSessionSpecs
                 new { type = "agent_message_chunk", payload = new { content = new { text = "done" } } },
             },
         });
-        await PostRawAsync<WorkflowSessionDto>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/events", new
+        await PostRawAsync<SessionEventDto[]>($"/api/runner/runner-1/sessions/{projectId}/{workflowRunId}/{sessionName}/events", new
         {
             events = new object[]
             {
@@ -63,9 +63,10 @@ public class WorkflowSessionSpecs
         Assert.Equal("acp-1", detail.Session.AgentSessionId);
         Assert.Equal("completed", detail.Session.Status);
         Assert.Equal("openai/gpt-4o", detail.Session.Model);
-        Assert.Equal([1, 2], detail.Events.Select(e => e.Sequence).ToArray());
-        Assert.Equal(["mohist_prompt", "agent_message_chunk"], detail.Events.Select(e => e.Type).ToArray());
-        Assert.All(detail.Events, e => Assert.Equal("proposal", e.WorkId));
+        Assert.Equal([1, 2, 3], detail.Events.Select(e => e.Sequence).ToArray());
+        Assert.Equal(["mohist_prompt", "agent_message_chunk", "agent_session_terminal"], detail.Events.Select(e => e.Type).ToArray());
+        Assert.Equal("proposal", detail.Events[0].WorkId);
+        Assert.Equal("proposal", detail.Events[1].WorkId);
     }
 
     private async Task<T> PostRawAsync<T>(string path, object body)

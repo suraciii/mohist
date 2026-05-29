@@ -187,7 +187,7 @@ public class WorkflowAgentSessionQueryService
         if (sessionIds.Length == 0) return [];
 
         var latestSeqs = await db.WorkflowAgentSessionEvents.AsNoTracking()
-            .Where(e => sessionIds.Contains(e.SessionId))
+            .Where(e => sessionIds.Contains(e.SessionId) && e.Type != "agent_session_terminal" && e.Type != "agent_liveness_status")
             .GroupBy(e => e.SessionId)
             .Select(g => new { SessionId = g.Key, Sequence = g.Max(e => e.Sequence) })
             .ToListAsync(ct);
