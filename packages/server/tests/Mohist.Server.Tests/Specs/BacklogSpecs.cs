@@ -165,9 +165,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.NotNull(work);
         await runner.ReportAsync(work.WorkId, new WorkDispatchResult("failed", "boom"));
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Failed", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Failed", status);
 
         var anotherRunnerId = await RegisterRunnerAsync();
         var anotherRunner = Grains.GetGrain<IRunnerGrain>(anotherRunnerId);
@@ -207,9 +206,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         await ResetClusterAsync();
         var workflow = await CreateAndStartAsync(SingleStage());
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
 
         var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;

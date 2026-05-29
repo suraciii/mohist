@@ -7,6 +7,7 @@ using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Queries;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -19,6 +20,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IEventStore _events;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly Config.ConfigService _config;
+    private readonly WorkflowQueryService _workflowReader;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -27,6 +29,7 @@ public class IssueGrain : Grain, IIssueGrain
         IEventStore events,
         IssueWorkflowProfileRegistry profiles,
         Config.ConfigService config,
+        WorkflowQueryService workflowReader,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -34,6 +37,7 @@ public class IssueGrain : Grain, IIssueGrain
         _events = events;
         _profiles = profiles;
         _config = config;
+        _workflowReader = workflowReader;
         _log = log;
     }
 
@@ -159,8 +163,7 @@ public class IssueGrain : Grain, IIssueGrain
         var wrId = _issue!.WorkflowRunId;
         if (wrId is null) return null;
 
-        var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        var wfStatus = await wfGrain.GetStatusAsync();
+        var wfStatus = await _workflowReader.GetStatusAsync(wrId);
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
         var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
 

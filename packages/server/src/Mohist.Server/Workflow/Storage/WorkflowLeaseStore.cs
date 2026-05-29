@@ -35,7 +35,17 @@ public class WorkflowLeaseStore : IStateStore<WorkLease>
         await db.SaveChangesAsync();
     }
 
-    public Task DeleteAsync(string key) => throw new NotSupportedException();
+    public async Task DeleteAsync(string key)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowLeases.FindAsync(key);
+        if (row is not null)
+        {
+            db.WorkflowLeases.Remove(row);
+            await db.SaveChangesAsync();
+        }
+    }
+
     public Task<IReadOnlyList<WorkLease>> ListAsync() => throw new NotSupportedException();
 
     internal static WorkLease? Deserialize(string json) =>

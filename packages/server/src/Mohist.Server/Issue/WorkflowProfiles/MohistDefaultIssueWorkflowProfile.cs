@@ -4,6 +4,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
 
@@ -126,7 +127,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         _ => value,
     };
 
-    public MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusSnapshot? workflow) =>
+    public MohistDefaultWorkflowState ProjectWorkflowState(Domain.Issue issue, WorkflowStatusView? workflow) =>
         MohistDefaultWorkflowProjection.ProjectWorkflowState(
             issue.Number,
             issue.Title,
@@ -134,7 +135,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
             issue.Attention,
             workflow);
 
-    public MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusSnapshot? workflow) =>
+    public MohistDefaultWorkflowState ProjectWorkflowState(IssueReadModel issue, WorkflowStatusView? workflow) =>
         MohistDefaultWorkflowProjection.ProjectWorkflowState(
             issue.Number,
             issue.Title,

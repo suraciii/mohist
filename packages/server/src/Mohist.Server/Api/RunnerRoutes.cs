@@ -64,7 +64,7 @@ public static class RunnerRoutes
             if (workflowRunId is not null)
             {
                 var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
-                workflowStatus = (await workflow.GetStatusAsync())?.Status;
+                workflowStatus = await workflow.GetRunStatusAsync();
             }
 
             return Results.Ok(new RunnerReportResponse(workflowRunId, workflowStatus));

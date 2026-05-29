@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Views;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -16,8 +17,7 @@ public class StatusSpecs : WorkflowGrainSpecs
 
         var (_, r1) = await PollWorkAnyAsync();
 
-        var wf = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        var status = await wf.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);
@@ -38,7 +38,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (task1, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task1.WorkId);
 
-        var status = await wf.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.NotNull(status.PendingWork);
         Assert.Equal("task", status.PendingWork.WorkType);
@@ -48,7 +48,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (task2, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("task-2.", task2.WorkId);
 
-        var status2 = await wf.GetStatusAsync();
+        var status2 = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status2!.PendingWork);
         Assert.Equal("Task 2", status2.PendingWork.Title);
 
@@ -65,7 +65,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var status = await Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
         Assert.Equal("AwaitingApproval", status.Status);
@@ -86,12 +86,12 @@ public class StatusSpecs : WorkflowGrainSpecs
         var wf = await CreateWorkflowAsync();
         await wf.StartAsync(SingleStage(), TestInput());
 
-        var status = await wf.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);
-        Assert.DoesNotContain("Issue", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
-        Assert.DoesNotContain("Worktree", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
-        Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusSnapshot).GetProperties().Select(p => p.Name));
+        Assert.DoesNotContain("Issue", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
+        Assert.DoesNotContain("Worktree", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
+        Assert.DoesNotContain("ChangeDir", typeof(WorkflowStatusView).GetProperties().Select(p => p.Name));
     }
 }

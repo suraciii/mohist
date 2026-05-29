@@ -18,9 +18,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         await workflow.AbandonCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
 
         var r2Id = await RegisterRunnerAsync();
         var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
@@ -33,9 +32,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (checks, rr3) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(rr3, checks, "check-1");
 
-        var finalStatus = await workflow.GetStatusAsync();
-        Assert.NotNull(finalStatus);
-        Assert.Equal("Completed", finalStatus.Status);
+        var finalStatus = await workflow.GetRunStatusAsync();
+        Assert.Equal("Completed", finalStatus);
     }
 
     [Fact]
@@ -50,9 +48,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         await workflow.AbandonCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
 
         var r2Id = await RegisterRunnerAsync();
         var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
@@ -62,9 +59,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("checks", redispatched.WorkType);
         await ReportChecksPassAsync(rr2, redispatched, "check-1");
 
-        var finalStatus = await workflow.GetStatusAsync();
-        Assert.NotNull(finalStatus);
-        Assert.Equal("Completed", finalStatus.Status);
+        var finalStatus = await workflow.GetRunStatusAsync();
+        Assert.Equal("Completed", finalStatus);
     }
 
     [Fact]
@@ -74,9 +70,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         await workflow.AbandonCurrentWorkAsync(_runnerId!, "nothing in flight");
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
     }
 
     [Fact]
@@ -91,9 +86,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         await ReportAsync(r1, staleWorkId, "completed");
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
     }
 
     [Fact]
@@ -106,9 +100,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
         await runner.UnregisterAsync();
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
 
         var r2Id = await RegisterRunnerAsync();
         _runnerId = r2Id;
@@ -122,9 +115,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (checks, rr3) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(rr3, checks, "check-1");
 
-        var finalStatus = await workflow.GetStatusAsync();
-        Assert.NotNull(finalStatus);
-        Assert.Equal("Completed", finalStatus.Status);
+        var finalStatus = await workflow.GetRunStatusAsync();
+        Assert.Equal("Completed", finalStatus);
     }
 
     [Fact]
@@ -135,9 +127,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
         await runner.UnregisterAsync();
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
     }
 
     [Fact]
@@ -150,7 +141,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var otherRunnerId = await RegisterRunnerAsync();
         await workflow.AbandonCurrentWorkAsync(otherRunnerId, "wrong runner");
 
-        var status = await workflow.GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);
         Assert.NotNull(status.PendingWork);
@@ -176,9 +167,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         await workflow.AbandonCurrentWorkAsync(r1, "stale runner timeout");
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
     }
 
     [Fact]
@@ -204,9 +194,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var oldRunner = Grains.GetGrain<IRunnerGrain>(r1);
         await oldRunner.UnregisterAsync();
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
     }
 
     [Fact]
@@ -230,8 +219,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var oldRunner = Grains.GetGrain<IRunnerGrain>(r1);
         await oldRunner.UnregisterAsync();
 
-        var status = await workflow.GetStatusAsync();
-        Assert.NotNull(status);
-        Assert.Equal("Running", status.Status);
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", status);
     }
 }

@@ -15,6 +15,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Recovery;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workspace;
@@ -47,6 +48,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<WorkflowAgentSessionQueryService>();
         services.AddScoped<WorkflowProjectionService>();
+        services.AddScoped<WorkflowQueryService>();
         services.AddHostedService<WorkflowBacklogRecoveryService>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<ConfigService>();

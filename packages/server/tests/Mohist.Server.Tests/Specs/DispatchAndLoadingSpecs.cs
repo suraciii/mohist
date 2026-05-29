@@ -184,13 +184,13 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportAsync(runnerId, task.WorkId, "completed");
         var (check, checkRunnerId) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(checkRunnerId, check, "check-1");
-        var awaiting = await workflow.GetStatusAsync();
+        var awaiting = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.Equal("AwaitingApproval", awaiting!.Status);
         Assert.Equal("Passed", awaiting.Stages[0].Checks[0].Status);
 
         await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
 
-        var afterAdd = await workflow.GetStatusAsync();
+        var afterAdd = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.Equal("Running", afterAdd!.Status);
         Assert.Equal("Pending", afterAdd.Stages[0].Checks[0].Status);
 
@@ -204,53 +204,26 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task FailedTaskWithRequestedTask_QueuesRequestedTaskInsteadOfFailingWorkflow()
+    public async Task FailedTask_FailsWorkflow()
     {
         await StartWorkflowAsync(SingleStage(
             tasks: [new("rebase", "Rebase", "mohist/rebase")],
             checks: [new("check-1", "Check 1", "spec/check")]));
 
         var (rebase, runnerId) = await PollWorkAnyAsync();
-        await ReportAsync(runnerId, rebase.WorkId, new WorkDispatchResult("failed", "conflict", Output: """
+        await ReportAsync(runnerId, rebase.WorkId, new WorkDispatchResult("failed", "rebase failed", Output: """
         {
           "kind": "rebase",
-          "status": "conflict",
-          "requestedTask": {
-            "id": "resolve-rebase-conflicts",
-            "title": "Resolve rebase conflicts",
-            "uses": "mohist/acp-agent",
-            "with": {
-              "prompt": "Resolve the active git rebase conflicts."
-            },
-            "then": {
-              "id": "verify-rebase",
-              "title": "Verify rebase completed",
-              "uses": "mohist/rebase-status",
-              "with": {
-                "baseBranch": "main"
-              }
-            }
-          }
+          "status": "failed",
+          "baseBranch": "main",
+          "rebased": false,
+          "conflicts": [],
+          "resolveAttempts": 0
         }
         """));
 
-        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
-        Assert.Equal("Running", status!.Status);
-
-        var (resolver, resolverRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("resolve-rebase-conflicts.", resolver.WorkId);
-        Assert.Equal("mohist/acp-agent", resolver.Uses);
-        Assert.Contains("rebase conflicts", resolver.With);
-        Assert.Contains("prompt", resolver.With);
-
-        await ReportAsync(resolverRunnerId, resolver.WorkId, "completed");
-        var (verify, verifyRunnerId) = await PollWorkAnyAsync();
-        Assert.StartsWith("verify-rebase.", verify.WorkId);
-        Assert.Equal("mohist/rebase-status", verify.Uses);
-        await ReportAsync(verifyRunnerId, verify.WorkId, "completed");
-
-        var (check, checkRunnerId) = await PollWorkAnyAsync();
-        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
+        Assert.Equal("Failed", status);
     }
 
     [Fact]
@@ -271,7 +244,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.True(await runner.IsAvailableAsync());
 
-        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
-        Assert.Equal("Failed", status!.Status);
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
+        Assert.Equal("Failed", status);
     }
 }

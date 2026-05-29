@@ -106,7 +106,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(r6);
         Assert.Null(await runner.PollAsync());
 
-        var status = await Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetStatusAsync();
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
         Assert.Null(status.PendingWork);
