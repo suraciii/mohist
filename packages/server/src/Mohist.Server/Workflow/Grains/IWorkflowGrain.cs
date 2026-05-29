@@ -20,7 +20,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkDispatch?> GetWorkAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
-    Task FailCurrentWorkAsync(string runnerId, string reason);
+    Task AbandonCurrentWorkAsync(string runnerId, string reason);
     Task<WorkflowVariablesSnapshot?> GetVariablesAsync();
     Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson);
     Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
