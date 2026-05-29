@@ -1,9 +1,12 @@
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
+using Mohist.Server.Storage.Db;
 using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
@@ -99,6 +102,45 @@ public static class IssueRoutes
             }
         });
 
+        issues.MapPost("/{number:int}/prerequisites", async (int number, string projectId, AddPrerequisiteRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
+            try
+            {
+                var result = await grain.AddPrerequisiteAsync(req.PrerequisiteNumber);
+                if (!result.Success)
+                    return ApiResults.NotFound(result.Message);
+
+                var info = await issuesQuery.GetAsync(pid, number);
+                return ApiResults.Ok(info);
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.NotFound($"Issue #{number} not found");
+            }
+        });
+
+        issues.MapDelete("/{number:int}/prerequisites/{prerequisiteNumber:int}", async (int number, int prerequisiteNumber, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
+            try
+            {
+                await grain.RemovePrerequisiteAsync(prerequisiteNumber);
+                var info = await issuesQuery.GetAsync(pid, number);
+                return ApiResults.Ok(info);
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.NotFound($"Issue #{number} not found");
+            }
+        });
+
         issues.MapPost("/{number:int}/start", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var pid = projectId;
@@ -118,6 +160,33 @@ public static class IssueRoutes
             {
                 return ApiResults.Conflict(ex.Message);
             }
+        });
+
+        issues.MapPost("/{number:int}/comments", async (int number, string projectId, AddCommentRequest req, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var project = await projectsQuery.GetByIdAsync(pid);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var issue = await issuesQuery.GetAsync(pid, number, project);
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            var comment = new IssueCommentEntry
+            {
+                Id = $"cmt_{Guid.NewGuid():N}",
+                ProjectId = pid,
+                IssueId = issue.Id,
+                IssueNumber = number,
+                Body = req.Body,
+            };
+
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.IssueComments.Add(comment);
+            await db.SaveChangesAsync();
+
+            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
         });
 
         issues.MapPost("/{number:int}/close", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
@@ -626,3 +695,7 @@ public sealed record RuntimeTaskRequest(
     string? Title = null,
     string? Uses = null,
     Dictionary<string, object?>? With = null);
+
+public record AddPrerequisiteRequest(int PrerequisiteNumber);
+
+public record AddCommentRequest(string Body);

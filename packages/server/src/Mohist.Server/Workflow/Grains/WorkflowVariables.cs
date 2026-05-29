@@ -147,12 +147,18 @@ public sealed record WorkflowExecutionContext(
     public string? String(string section, string property)
     {
         using var document = JsonDocument.Parse(Json);
-        return document.RootElement.ValueKind == JsonValueKind.Object
-            && document.RootElement.TryGetProperty(section, out var sectionValue)
-            && sectionValue.ValueKind == JsonValueKind.Object
-            && sectionValue.TryGetProperty(property, out var propertyValue)
-            ? propertyValue.GetString()
-            : null;
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty(section, out var sectionValue)
+            || sectionValue.ValueKind != JsonValueKind.Object
+            || !sectionValue.TryGetProperty(property, out var propertyValue))
+            return null;
+
+        return propertyValue.ValueKind switch
+        {
+            JsonValueKind.String => propertyValue.GetString(),
+            JsonValueKind.Number => propertyValue.GetRawText(),
+            _ => propertyValue.GetRawText(),
+        };
     }
 
     private static Dictionary<string, JsonElement?> ParseObject(string json)

@@ -27,6 +27,7 @@ public static partial class WorkflowRunExtensions
                 current.Failure = new FailureDetails(
                     FailureReason.CheckUnrepaired, current.StageId,
                     CheckName: check.Name, Message: result.Message);
+                run.Failure = current.Failure;
             }
             current.Phase = StageRunPhase.Failed;
             run.Phase = WorkflowRunPhase.Failed;

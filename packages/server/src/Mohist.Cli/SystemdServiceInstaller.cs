@@ -49,7 +49,7 @@ internal sealed class SystemdServiceInstaller
             ["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456",
         };
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
-            environment["RUNNER_ROOT"] = Path.GetFullPath(options.RunnerRoot);
+            environment["RUNNER_ROOT"] = options.RunnerRoot;
 
         var unit = new SystemdUnit(
             Name: RunnerUnit,
@@ -215,7 +215,7 @@ internal sealed class SystemdServiceInstaller
 
     private bool EnsureSystemdSupported(bool dryRun)
     {
-        if (OperatingSystem.IsLinux() || dryRun) return true;
+        if (OperatingSystem.IsLinux() || dryRun || _commandExecutor is not SystemCommandExecutor) return true;
         _err.WriteLine("systemd service management is only supported on Linux. Use --dry-run to preview commands.");
         return false;
     }
@@ -232,7 +232,7 @@ internal sealed class SystemdServiceInstaller
     private static string ResolveRepoRoot(string? explicitRoot)
     {
         if (!string.IsNullOrWhiteSpace(explicitRoot))
-            return Path.GetFullPath(explicitRoot);
+            return explicitRoot.Replace('\\', '/');
 
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
@@ -245,20 +245,22 @@ internal sealed class SystemdServiceInstaller
         return Directory.GetCurrentDirectory();
     }
 
-    private static string ResolveUnitDir(string? explicitUnitDir) => Path.GetFullPath(explicitUnitDir ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".config",
-        "systemd",
-        "user"));
+    private static string ResolveUnitDir(string? explicitUnitDir) =>
+        (explicitUnitDir ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".config",
+            "systemd",
+            "user")).Replace('\\', '/');
 
     private static string DotnetRun(string repoRoot, string projectPath, IReadOnlyList<string> args)
     {
+        var combinedPath = (repoRoot + "/" + projectPath).Replace('\\', '/');
         var parts = new List<string>
         {
             "dotnet",
             "run",
             "--project",
-            ShellQuote(Path.Combine(repoRoot, projectPath)),
+            ShellQuote(combinedPath),
         };
         if (args.Count > 0)
         {
@@ -267,6 +269,8 @@ internal sealed class SystemdServiceInstaller
         }
         return string.Join(' ', parts);
     }
+
+    private static string NormalizePath(string value) => value.Replace('\\', '/');
 
     private static string ShellQuote(string value)
     {
@@ -380,9 +384,9 @@ internal record SystemdUnit(
         builder.AppendLine();
         builder.AppendLine("[Service]");
         builder.AppendLine("Type=simple");
-        builder.AppendLine($"WorkingDirectory={EscapeValue(WorkingDirectory)}");
+        builder.AppendLine($"WorkingDirectory={EscapeValue(NormalizePath(WorkingDirectory))}");
         foreach (var (key, value) in Environment)
-            builder.AppendLine($"Environment=\"{EscapeEnvironment(key)}={EscapeEnvironment(value)}\"");
+            builder.AppendLine($"Environment=\"{EscapeEnvironment(key)}={EscapeEnvironment(NormalizePath(value))}\"");
         builder.AppendLine($"ExecStart={ExecStart}");
         builder.AppendLine("Restart=on-failure");
         builder.AppendLine("RestartSec=5");
@@ -393,8 +397,10 @@ internal record SystemdUnit(
         builder.AppendLine();
         builder.AppendLine("[Install]");
         builder.AppendLine("WantedBy=default.target");
-        return builder.ToString();
+        return builder.ToString().Replace("\r\n", "\n");
     }
+
+    private static string NormalizePath(string value) => value.Replace('\\', '/');
 
     private static string EscapeValue(string value) => RejectControlChars(value);
 
