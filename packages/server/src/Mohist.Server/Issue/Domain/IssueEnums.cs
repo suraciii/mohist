@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Issue.Domain;
 
 public enum IssueStage
@@ -9,13 +11,14 @@ public enum IssueStage
     Cancelled
 }
 
-public static class IssueAttentionReasons
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum IssueAttentionReason
 {
-    public const string ReviewRequired = "review_required";
-    public const string Blocked = "blocked";
-    public const string MergeConflict = "merge_conflict";
-    public const string ApprovalRejected = "approval_rejected";
-    public const string MissingPrerequisite = "missing_prerequisite";
-    public const string WorkflowFailed = "workflow_failed";
-    public const string Paused = "paused";
+    [JsonStringEnumMemberName("review_required")] ReviewRequired,
+    [JsonStringEnumMemberName("blocked")] Blocked,
+    [JsonStringEnumMemberName("merge_conflict")] MergeConflict,
+    [JsonStringEnumMemberName("approval_rejected")] ApprovalRejected,
+    [JsonStringEnumMemberName("missing_prerequisite")] MissingPrerequisite,
+    [JsonStringEnumMemberName("workflow_failed")] WorkflowFailed,
+    [JsonStringEnumMemberName("paused")] Paused,
 }

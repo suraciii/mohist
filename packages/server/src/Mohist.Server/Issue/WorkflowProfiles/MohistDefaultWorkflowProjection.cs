@@ -10,7 +10,6 @@ public static class MohistDefaultWorkflowProjection
         string issueTitle,
         string issueStage,
         IssueAttention? issueAttention,
-        string? fallbackBlockedReason,
         WorkflowStatusSnapshot? workflow)
     {
         var approval = workflow?.Stages
@@ -30,7 +29,7 @@ public static class MohistDefaultWorkflowProjection
             return new MohistDefaultWorkflowState(
                 issueStage,
                 RuntimeStatus(issueStage, attention),
-                fallbackBlockedReason,
+                ComputeBlockedReason(attention, null),
                 null,
                 attention,
                 ChangeDir(issueNumber),
@@ -40,7 +39,7 @@ public static class MohistDefaultWorkflowProjection
         return new MohistDefaultWorkflowState(
             issueStage,
             RuntimeStatus(issueStage, attention, workflow.Status),
-            attention?.Message ?? (workflow.Status == "Failed" ? workflow.Failure?.Message : fallbackBlockedReason),
+            ComputeBlockedReason(attention, workflow),
             approval,
             attention,
             ChangeDir(issueNumber),
@@ -56,11 +55,15 @@ public static class MohistDefaultWorkflowProjection
         return issueAttention;
     }
 
+    private static string? ComputeBlockedReason(IssueAttention? attention, WorkflowStatusSnapshot? workflow) =>
+        attention?.Message
+        ?? (workflow?.Status == "Failed" ? workflow.Failure?.Message : null);
+
     private static string RuntimeStatus(string issueStatus, IssueAttention? attention, string? workflowStatus = null)
     {
         if (issueStatus == "done") return "done";
         if (issueStatus == "cancelled") return "cancelled";
-        if (attention?.Reason is IssueAttentionReasons.Blocked or IssueAttentionReasons.WorkflowFailed) return "blocked";
+        if (attention?.Reason is IssueAttentionReason.Blocked or IssueAttentionReason.WorkflowFailed) return "blocked";
         if (attention is not null) return "attention";
         return workflowStatus switch
         {
