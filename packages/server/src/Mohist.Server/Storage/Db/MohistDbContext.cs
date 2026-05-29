@@ -25,7 +25,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicIssueEntry> EpicIssues { get; set; } = null!;
     public DbSet<IssueStateRow> IssueStates { get; set; } = null!;
     public DbSet<IssueProfileRow> IssueProfiles { get; set; } = null!;
-    public DbSet<WorkflowRunStateRow> WorkflowRunStates { get; set; } = null!;
+    public DbSet<WorkflowRunEntity> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowRunProfileRow> WorkflowRunProfiles { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
@@ -166,11 +166,23 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.StateJson).IsRequired();
         });
 
-        modelBuilder.Entity<WorkflowRunStateRow>(entity =>
+        modelBuilder.Entity<WorkflowRunEntity>(entity =>
         {
             entity.HasKey(e => e.WorkflowRunId);
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.StateJson).IsRequired();
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(50);
+            entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.MetadataName).HasMaxLength(100);
+            entity.Property(e => e.MetadataProjectId).HasMaxLength(50);
+            entity.Property(e => e.MetadataDefinitionId).HasMaxLength(50);
+            entity.Property(e => e.Phase).HasMaxLength(20);
+            entity.Property(e => e.CurrentStageId).HasMaxLength(50);
+            entity.HasIndex(e => e.MetadataProjectId);
+            entity.HasIndex(e => e.MetadataDefinitionId);
+            entity.HasIndex(e => e.Phase);
+            entity.HasIndex(e => new { e.MetadataProjectId, e.Phase });
+            entity.HasIndex(e => new { e.MetadataDefinitionId, e.Phase });
+            entity.HasIndex(e => e.MetadataCreatedAt);
+            entity.HasIndex(e => e.PhaseUpdatedAt);
         });
 
         modelBuilder.Entity<WorkflowRunProfileRow>(entity =>

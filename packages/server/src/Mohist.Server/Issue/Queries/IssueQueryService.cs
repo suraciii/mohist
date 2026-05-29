@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
@@ -14,6 +16,12 @@ namespace Mohist.Server.Issue.Queries;
 
 public class IssueQueryService
 {
+    private static readonly JsonSerializerOptions RunJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
 
@@ -168,7 +176,7 @@ public class IssueQueryService
             .ToArray();
         if (workflowRunIds.Length == 0) return [];
 
-var runRows = await db.WorkflowRunStates
+var runRows = await db.WorkflowRuns
             .AsNoTracking()
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
@@ -183,10 +191,10 @@ var runRows = await db.WorkflowRunStates
         var workflows = new Dictionary<string, WorkflowStatusSnapshot>(StringComparer.Ordinal);
         foreach (var row in runRows)
         {
-            var state = WorkflowRunStore.Deserialize(row.StateJson);
-            if (state is null) continue;
+            var run = DeserializeRun(row.State);
+            if (run is null) continue;
             leases.TryGetValue(row.WorkflowRunId, out var lease);
-            var snapshot = WorkflowStatusReader.Read(state, lease);
+            var snapshot = WorkflowStatusReader.Read(run, lease);
             if (snapshot is not null)
                 workflows[row.WorkflowRunId] = snapshot;
         }
@@ -330,4 +338,10 @@ var runRows = await db.WorkflowRunStates
         Stage = issue.Stage,
         Status = issue.RuntimeStatus,
     };
+
+    private static WorkflowRun? DeserializeRun(string json)
+    {
+        try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
+        catch { return null; }
+    }
 }

@@ -1,14 +1,21 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Grains;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Workflow.Recovery;
 
 public sealed class WorkflowBacklogRecoveryService : IHostedService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
     private readonly ILogger<WorkflowBacklogRecoveryService> _log;
@@ -26,19 +33,19 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
-        var rows = await db.WorkflowRunStates
+        var rows = await db.WorkflowRuns
             .AsNoTracking()
-            .Select(row => new { row.WorkflowRunId, row.StateJson })
+            .Select(row => new { row.WorkflowRunId, row.State, row.MetadataProjectId })
             .ToListAsync(cancellationToken);
 
         var recovered = 0;
 
         foreach (var row in rows)
         {
-            if (!TryRestoreRunnableWorkflow(row.StateJson, out var projectId, out var hasWork)) continue;
+            if (!TryRestoreRunnableWorkflow(row.State, row.MetadataProjectId, out var hasWork)) continue;
             if (!hasWork) continue;
 
-            var backlog = _grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId ?? "default"));
+            var backlog = _grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(row.MetadataProjectId ?? "default"));
             await backlog.RegisterAsync(row.WorkflowRunId);
             recovered++;
         }
@@ -49,27 +56,23 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private static bool TryRestoreRunnableWorkflow(string jsonState, out string? projectId, out bool hasWork)
+    private static bool TryRestoreRunnableWorkflow(string jsonState, string? entityProjectId, out bool hasWork)
     {
-        projectId = null;
         hasWork = false;
 
         try
         {
-            var state = WorkflowRunStore.Deserialize(jsonState);
-            if (state is null) return false;
+            var run = Deserialize(jsonState);
+            if (run is null) return false;
 
-            projectId = state.ProjectId;
-
-            var run = state.Run;
-            if (!run.Started) return false;
+            if (run.StartedAt is null) return false;
 
             if (IsTerminal(run)) return true;
 
-            var currentIndex = Math.Clamp(run.CurrentStageIndex, 0, run.Stages.Count - 1);
-            if (run.Stages.Count == 0 || currentIndex >= run.Stages.Count) return false;
+            if (run.CurrentStageId is null) return false;
+            var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
+            if (currentStage is null) return false;
 
-            var currentStage = run.Stages[currentIndex];
             hasWork = HasPendingWork(currentStage);
             return true;
         }
@@ -79,17 +82,17 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
         }
     }
 
-    private static bool IsTerminal(WorkflowRunSnapshot run)
+    private static bool IsTerminal(WorkflowRun run)
     {
-        var currentIndex = Math.Clamp(run.CurrentStageIndex, 0, run.Stages.Count - 1);
-        if (currentIndex >= run.Stages.Count || run.Stages.Count == 0) return true;
-        var currentStage = run.Stages[currentIndex];
+        if (run.CurrentStageId is null) return true;
+        var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
+        if (currentStage is null) return true;
 
-        if (currentStage.Failure is not null && !run.Paused) return true;
+        if (currentStage.Failure is not null && run.Phase != WorkflowRunPhase.Paused) return true;
 
         if (currentStage.Initialized
-            && currentStage.Tasks.All(t => t.Status == TaskRunStatus.Completed)
-            && currentStage.Checks.All(c => c.Status == CheckRunStatus.Passed)
+            && currentStage.Tasks.All(t => t.Phase == TaskRunPhase.Completed)
+            && currentStage.Checks.All(c => c.Phase == CheckRunPhase.Passed)
             && (!currentStage.RequiresApproval || currentStage.Approval?.Status == "approved")
             && currentStage.Order == run.Stages.Max(s => s.Order))
             return true;
@@ -97,11 +100,17 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
         return false;
     }
 
-    private static bool HasPendingWork(StageRunSnapshot stage)
+    private static bool HasPendingWork(StageRun stage)
     {
         if (!stage.Initialized) return true;
 
-        return stage.Tasks.Any(t => t.Status is TaskRunStatus.Pending or TaskRunStatus.Running)
-            || stage.Checks.Any(c => c.Status is CheckRunStatus.Pending);
+        return stage.Tasks.Any(t => t.Phase is TaskRunPhase.Pending or TaskRunPhase.Running)
+            || stage.Checks.Any(c => c.Phase is CheckRunPhase.Pending);
+    }
+
+    private static WorkflowRun? Deserialize(string json)
+    {
+        try { return JsonSerializer.Deserialize<WorkflowRun>(json, JsonOptions); }
+        catch { return null; }
     }
 }
