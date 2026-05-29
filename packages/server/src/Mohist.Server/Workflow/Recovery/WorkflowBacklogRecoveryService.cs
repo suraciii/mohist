@@ -70,7 +70,7 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
             if (IsTerminal(run)) return true;
 
             if (run.CurrentStageId is null) return false;
-            var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
+            var currentStage = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
             if (currentStage is null) return false;
 
             hasWork = HasPendingWork(currentStage);
@@ -85,7 +85,7 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
     private static bool IsTerminal(WorkflowRun run)
     {
         if (run.CurrentStageId is null) return true;
-        var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
+        var currentStage = run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId);
         if (currentStage is null) return true;
 
         if (currentStage.Failure is not null && run.Status != WorkflowRunStatus.Paused) return true;

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -33,11 +34,11 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             if (!current.Initialized)
-                return WorkflowWork.StageInit(current.StageId);
+                return WorkflowWork.StageInit(current.Id);
 
             var pendingTask = current.FirstPendingTask();
             if (pendingTask is not null)
-                return WorkflowWork.Task(current.StageId, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput);
+                return WorkflowWork.Task(current.Id, pendingTask.Id, pendingTask.Title, pendingTask.Uses, pendingTask.WithInput);
 
             var pendingChecks = current.Checks
                 .Where(c => c.Status == StageCheckStatus.Pending)
@@ -45,9 +46,78 @@ public static partial class WorkflowRunExtensions
                 .ToList();
 
             if (pendingChecks.Any())
-                return WorkflowWork.Checks(current.StageId, pendingChecks);
+                return WorkflowWork.Checks(current.Id, pendingChecks);
 
             return null;
+        }
+
+        public void AddRuntimeTask(
+            TaskDefinition task,
+            string? stage = null,
+            bool invalidateChecks = false)
+        {
+            var current = run.CurrentStage();
+            if (!current.Initialized)
+                throw new WorkflowDomainException($"Cannot add runtime task: stage {current.Id} is not initialized");
+            if (!string.IsNullOrWhiteSpace(stage) && stage != current.Id)
+                throw new WorkflowDomainException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
+
+            var newTask = TaskRun.MakeTask(current.Tasks, task);
+            current.Tasks.Add(newTask);
+
+            if (invalidateChecks)
+            {
+                foreach (var c in current.Checks)
+                {
+                    c.Status = StageCheckStatus.Pending;
+                    c.Message = null;
+                    c.Output = null;
+                }
+            }
+
+            current.Failure = null;
+            if (current.IsAwaitingApproval)
+                current.ApprovalStatus = null;
+            if (current.Initialized)
+                current.Status = StageRunStatus.Running;
+
+            run.Status = WorkflowRunStatus.Running;
+        }
+
+        public void InsertRuntimeTasksAfter(
+            TaskRun afterTask,
+            IReadOnlyList<TaskDefinition> tasks,
+            bool invalidateChecks = false)
+        {
+            var current = run.CurrentStage();
+            var insertIndex = current.Tasks.IndexOf(afterTask) + 1;
+            if (insertIndex <= 0) insertIndex = current.Tasks.Count;
+
+            foreach (var task in tasks)
+            {
+                var newTask = TaskRun.MakeTask(current.Tasks, task);
+                current.Tasks.Insert(insertIndex, newTask);
+                insertIndex++;
+            }
+
+            if (invalidateChecks)
+            {
+                foreach (var c in current.Checks)
+                {
+                    c.Status = StageCheckStatus.Pending;
+                    c.Message = null;
+                    c.Output = null;
+                }
+            }
+        }
+
+        public void InjectRetryTask(string checkName, TaskDefinition task)
+        {
+            var current = run.CurrentStage();
+            var newTask = TaskRun.MakeTask(current.Tasks, task);
+            current.Tasks.Add(newTask);
+            var check = current.FindCheck(checkName);
+            check.RetryCount++;
         }
 
         public bool HasIncompleteTaskUsing(string uses)

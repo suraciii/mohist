@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
 
@@ -10,7 +11,7 @@ public static partial class WorkflowRunExtensions
         public void FailStage(string reason)
         {
             var current = run.CurrentStage();
-            current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason);
+            current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, Message: reason);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
             run.Status = WorkflowRunStatus.Failed;
@@ -27,7 +28,7 @@ public static partial class WorkflowRunExtensions
                     var task = current.FirstPendingTask();
                     if (task is null) return;
                     task.Status = TaskRunStatus.Failed;
-                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, task.Id, Message: reason);
+                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, task.Id, Message: reason);
                     run.Failure = current.Failure;
                     current.Status = StageRunStatus.Failed;
                     run.Status = WorkflowRunStatus.Failed;
@@ -39,7 +40,7 @@ public static partial class WorkflowRunExtensions
                     if (pending is null) return;
                     pending.Status = StageCheckStatus.Failed;
                     pending.Message = reason;
-                    current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.StageId, CheckName: pending.Name, Message: reason);
+                    current.Failure = new FailureDetails(FailureReason.CheckUnrepaired, current.Id, CheckName: pending.Name, Message: reason);
                     run.Failure = current.Failure;
                     current.Status = StageRunStatus.Failed;
                     run.Status = WorkflowRunStatus.Failed;
@@ -47,7 +48,7 @@ public static partial class WorkflowRunExtensions
                 }
                 default:
                 {
-                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.StageId, Message: reason ?? $"In-flight work lost (type={workType})");
+                    current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, Message: reason ?? $"In-flight work lost (type={workType})");
                     run.Failure = current.Failure;
                     current.Status = StageRunStatus.Failed;
                     run.Status = WorkflowRunStatus.Failed;
@@ -63,7 +64,7 @@ public static partial class WorkflowRunExtensions
 
             var current = run.CurrentStage();
             if (current.Failure is null)
-                throw new WorkflowDomainException($"Stage {current.StageId} is not failed");
+                throw new WorkflowDomainException($"Stage {current.Id} is not failed");
 
             switch (current.Failure.Reason)
             {
@@ -71,12 +72,12 @@ public static partial class WorkflowRunExtensions
                     RetryFailedTask(run, current, current.Failure.TaskId);
                     break;
                 case FailureReason.TaskFailed:
-                    throw new WorkflowDomainException($"Stage {current.StageId} task failure has no task ID; use rerun to restart the stage");
+                    throw new WorkflowDomainException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
                 case FailureReason.CheckUnrepaired:
                     RetryFailedCheck(run, current, current.Failure.CheckName);
                     break;
                 case FailureReason.ApprovalRejected:
-                    throw new WorkflowDomainException($"Stage {current.StageId} failure is approval rejection; use rerun to restart the stage");
+                    throw new WorkflowDomainException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
                 default:
                     throw new WorkflowDomainException($"Unknown failure reason: {current.Failure.Reason}");
             }
@@ -85,16 +86,22 @@ public static partial class WorkflowRunExtensions
         public void Rerun()
         {
             var current = run.CurrentStage();
-            var stageIdx = run.Stages.FindIndex(s => s.StageId == current.StageId);
+            var stageIdx = run.Stages.FindIndex(s => s.Id == current.Id);
             var newStage = new StageRun
             {
-                StageId = current.StageId,
+                Id = current.Id,
                 Attempt = current.Attempt + 1,
                 RequiresApproval = current.RequiresApproval,
                 Status = StageRunStatus.Running
             };
             run.Stages[stageIdx] = newStage;
             run.Status = WorkflowRunStatus.Running;
+        }
+
+        public void ClearStageFailure()
+        {
+            var current = run.CurrentStage();
+            current.Failure = null;
         }
     }
 

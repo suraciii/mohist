@@ -9,7 +9,7 @@ public sealed record ApprovalStatus(
 
 public sealed class StageRun
 {
-    public required string StageId { get; init; }
+    public required string Id { get; init; }
     public required int Attempt { get; init; }
     public required bool RequiresApproval { get; init; }
     public StageRunStatus Status { get; set; }
