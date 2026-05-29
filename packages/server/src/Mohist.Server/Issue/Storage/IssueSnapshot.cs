@@ -74,25 +74,26 @@ public sealed class IssueSnapshot
         Repository = issue.Repository,
     };
 
-    public Domain.Issue ToDomain() =>
-        Domain.Issue.Restore(
-            Id,
-            ProjectId,
-            Number,
-            Title,
-            Body,
-            Labels,
-            Priority,
-            CreatedAt == default ? DateTime.UtcNow : CreatedAt,
-            UpdatedAt == default ? DateTime.UtcNow : UpdatedAt,
-            ArchivedAt,
-            WorkflowRunId,
-            Stage,
-            Attention,
-            StageApproval,
-            RetryCount,
-            ConflictRetryCount,
-            BlockedReason,
-            PrerequisiteNumbers,
-Repository);
+public Domain.Issue ToDomain() => new Domain.Issue
+    {
+        Id = Id,
+        ProjectId = ProjectId,
+        Number = Number,
+        Title = Title,
+        Body = Body,
+        Labels = Labels,
+        Priority = Priority,
+        CreatedAt = CreatedAt == default ? DateTime.UtcNow : CreatedAt,
+        UpdatedAt = UpdatedAt == default ? DateTime.UtcNow : UpdatedAt,
+        ArchivedAt = ArchivedAt,
+        WorkflowRunId = WorkflowRunId,
+        Stage = Stage,
+        Attention = Attention,
+        StageApproval = StageApproval,
+        RetryCount = RetryCount,
+        ConflictRetryCount = ConflictRetryCount,
+        BlockedReason = BlockedReason,
+        PrerequisiteNumbers = PrerequisiteNumbers,
+        Repository = Repository,
+    };
 }

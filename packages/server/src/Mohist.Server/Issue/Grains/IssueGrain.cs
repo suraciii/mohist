@@ -181,7 +181,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
 
-        var issue = new Domain.Issue(
+        var issue = Domain.Issue.Create(
             $"issue_{Guid.NewGuid():N}",
             projectId,
             number,

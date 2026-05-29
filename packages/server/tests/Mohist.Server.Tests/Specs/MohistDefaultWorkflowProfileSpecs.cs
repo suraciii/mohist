@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Infrastructure;
@@ -30,7 +31,13 @@ public class MohistDefaultWorkflowProfileSpecs
     public void IssueWithNonAsciiTitle_BuildsIssueNumberBasedOpenSpecChangeVariables()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
-        var issue = new Mohist.Server.Issue.Domain.Issue("issue-154", "project-1", 154, "支持中文标题 🚀");
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-154",
+            ProjectId = "project-1",
+            Number = 154,
+            Title = "支持中文标题 🚀",
+        };
 
         var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
 
@@ -83,11 +90,13 @@ public class MohistDefaultWorkflowProfileSpecs
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
-        var issue = new Mohist.Server.Issue.Domain.Issue(
-            "issue-1",
-            "project-1",
-            1,
-            "Agent config");
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-1",
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Agent config",
+        };
 
         var variables = profile.BuildVariables(
             "wr-1",
@@ -106,7 +115,13 @@ public class MohistDefaultWorkflowProfileSpecs
     public void StageVariables_MergesStageOverrides()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
-        var issue = new Mohist.Server.Issue.Domain.Issue("issue-1", "project-1", 1, "Stage vars");
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-1",
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Stage vars",
+        };
 
         var stageVariables = profile.BuildStageVariables(
             issue,
@@ -124,7 +139,13 @@ public class MohistDefaultWorkflowProfileSpecs
     {
         var loader = new FakePromptLoader();
         var profile = new MohistDefaultIssueWorkflowProfile(loader);
-        var issue = new Mohist.Server.Issue.Domain.Issue("issue-1", "project-1", 1, "Test");
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-1",
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Test",
+        };
 
         var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
 
