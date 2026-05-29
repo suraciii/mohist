@@ -25,7 +25,7 @@ fi
 # 发布 CLI 为单文件可执行程序
 echo "Publishing Mohist CLI as single-file executable..."
 cd "$REPO_ROOT"
-dotnet publish packages/server/src/Mohist.Cli/Mohist.Cli.csproj \
+dotnet publish packages/cli/Mohist.Cli/Mohist.Cli.csproj \
     -c Release \
     -r linux-x64 \
     -o "$REPO_ROOT/.publish/mo" \

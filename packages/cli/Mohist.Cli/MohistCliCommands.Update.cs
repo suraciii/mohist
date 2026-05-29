@@ -180,7 +180,7 @@ internal sealed class SourceCodeUpdater
         if (dryRun)
         {
             _out.WriteLine("Dry run: would execute:");
-            _out.WriteLine($"  cd {root} && dotnet publish packages/server/src/Mohist.Cli/Mohist.Cli.csproj -c Release -r {RuntimeIdentifier()} --self-contained true /p:PublishSingleFile=true -o {publishDir}");
+            _out.WriteLine($"  cd {root} && dotnet publish packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -r {RuntimeIdentifier()} --self-contained true /p:PublishSingleFile=true -o {publishDir}");
             _out.WriteLine($"  cp {binary} {tempTarget}");
             _out.WriteLine($"  chmod +x {tempTarget}");
             _out.WriteLine($"  mv {tempTarget} {target}");
@@ -190,7 +190,7 @@ internal sealed class SourceCodeUpdater
         var publishArgs = new[]
         {
             "publish",
-            "packages/server/src/Mohist.Cli/Mohist.Cli.csproj",
+            "packages/cli/Mohist.Cli/Mohist.Cli.csproj",
             "-c",
             "Release",
             "-r",

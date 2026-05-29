@@ -5,7 +5,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server", "packages\server\src\Mohist.Server\Mohist.Server.csproj", "{A1B2C3D4-0001-0001-0001-000000000001}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Cli", "packages\server\src\Mohist.Cli\Mohist.Cli.csproj", "{A1B2C3D4-0002-0002-0002-000000000002}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Cli", "packages\cli\Mohist.Cli\Mohist.Cli.csproj", "{A1B2C3D4-0002-0002-0002-000000000002}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.Tests", "packages\server\tests\Mohist.Server.Tests\Mohist.Server.Tests.csproj", "{A1B2C3D4-0003-0003-0003-000000000003}"
 EndProject

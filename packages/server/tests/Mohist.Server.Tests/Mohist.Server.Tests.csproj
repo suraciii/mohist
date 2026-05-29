@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
-    <ProjectReference Include="..\..\src\Mohist.Cli\Mohist.Cli.csproj" />
+    <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
   </ItemGroup>
 
 </Project>
