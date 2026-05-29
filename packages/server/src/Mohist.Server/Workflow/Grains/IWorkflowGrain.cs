@@ -103,7 +103,7 @@ public sealed record StageStatusSnapshot(
     int Order,
     List<TaskStatusSnapshot> Tasks,
     List<CheckStatusSnapshot> Checks,
-    ApprovalStatusSnapshot? Approval,
+    ApprovalStatusSnapshot? ApprovalStatus,
     FailureStatusSnapshot? Failure);
 
 [GenerateSerializer]
@@ -145,6 +145,6 @@ public sealed record PendingWorkSnapshot(
 
 [GenerateSerializer]
 public sealed record ApprovalStatusSnapshot(
-    string Status,
+    string? Result,
     string RequestedAt,
     string? RespondedAt);

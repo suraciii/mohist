@@ -60,8 +60,8 @@ public static partial class WorkflowRunExtensions
             }
 
             current.Failure = null;
-            if (current.Approval?.Status == "awaiting")
-                current.Approval = null;
+            if (current.IsAwaitingApproval)
+                current.ApprovalStatus = null;
             if (current.Initialized)
                 current.Status = StageRunStatus.Running;
 

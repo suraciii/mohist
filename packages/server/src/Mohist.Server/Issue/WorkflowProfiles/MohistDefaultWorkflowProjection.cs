@@ -13,12 +13,12 @@ public static class MohistDefaultWorkflowProjection
         WorkflowStatusSnapshot? workflow)
     {
         var approval = workflow?.Stages
-            .Select(s => s.Approval is null ? null : new StageApproval
+            .Select(s => s.ApprovalStatus is null ? null : new StageApproval
             {
                 Stage = s.Stage,
-                Status = s.Approval.Status,
-                RequestedAt = ParseDateTime(s.Approval.RequestedAt),
-                RespondedAt = ParseNullableDateTime(s.Approval.RespondedAt),
+                Status = s.ApprovalStatus.Result ?? "awaiting",
+                RequestedAt = ParseDateTime(s.ApprovalStatus.RequestedAt),
+                RespondedAt = ParseNullableDateTime(s.ApprovalStatus.RespondedAt),
             })
             .Where(a => a is not null)
             .LastOrDefault();

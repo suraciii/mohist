@@ -385,8 +385,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 i,
                 SnapshotTasks(s),
                 SnapshotChecks(s),
-                s.Approval is not null
-                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.RequestedAt, s.Approval.RespondedAt)
+                s.ApprovalStatus is not null
+                    ? new ApprovalStatusSnapshot(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt)
                     : null,
                 stageFailure);
         }).ToList();
