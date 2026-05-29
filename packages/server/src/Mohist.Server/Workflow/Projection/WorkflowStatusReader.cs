@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
@@ -5,44 +7,41 @@ namespace Mohist.Server.Workflow.Projection;
 
 public static class WorkflowStatusReader
 {
-    public static WorkflowStatusSnapshot? Read(WorkflowRunState state, WorkLease? lease)
+    public static WorkflowStatusSnapshot? Read(WorkflowRun run, WorkLease? lease)
     {
-        var run = state.Run;
-
-        var stages = run.Stages.Select(stage =>
+        var stages = run.Stages.Select(s =>
             new StageStatusSnapshot(
-                stage.Stage,
-                StageStatus(stage),
-                stage.Order,
-                stage.Tasks.Select(task => new TaskStatusSnapshot(
-                    task.DefinitionId,
-                    task.Title,
-                    task.Uses,
-                    task.Status.ToString())).ToList(),
-                stage.Checks.Select(check => new CheckStatusSnapshot(
-                    check.Name,
-                    check.Title,
-                    check.Uses,
-                    check.Status.ToString(),
-                    check.Message)).ToList(),
-                stage.Approval is not null
-                    ? new ApprovalStatusSnapshot(stage.Approval.Status, stage.Approval.Output?.ToString(), stage.Approval.RequestedAt, stage.Approval.RespondedAt)
+                s.StageId,
+                StageStatus(s),
+                s.Order,
+                s.Tasks.Select(t => new TaskStatusSnapshot(
+                    t.Id,
+                    t.Title,
+                    t.Uses,
+                    t.Phase.ToString())).ToList(),
+                s.Checks.Select(c => new CheckStatusSnapshot(
+                    c.Name,
+                    c.Title,
+                    c.Uses,
+                    c.Phase.ToString(),
+                    c.Message)).ToList(),
+                s.Approval is not null
+                    ? new ApprovalStatusSnapshot(s.Approval.Status, s.Approval.Output?.ToString(), s.Approval.RequestedAt, s.Approval.RespondedAt)
                     : null,
-                stage.Failure is not null
+                s.Failure is not null
                     ? new FailureStatusSnapshot(
-                        stage.Failure.Reason.ToString(),
-                        stage.Failure.Stage,
-                        stage.Failure.TaskId,
-                        stage.Failure.CheckName,
-                        stage.Failure.Message)
+                        s.Failure.Reason.ToString(),
+                        s.Failure.Stage,
+                        s.Failure.TaskId,
+                        s.Failure.CheckName,
+                        s.Failure.Message)
                     : null)).ToList();
 
         var pending = lease is not null
             ? new PendingWorkSnapshot(lease.WorkId, lease.WorkType, lease.Stage, null, null)
             : null;
 
-        var currentStageIndex = Math.Clamp(run.CurrentStageIndex, 0, run.Stages.Count - 1);
-        var currentStage = run.Stages.Count == 0 ? null : run.Stages[currentStageIndex];
+        var currentStage = run.Stages.FirstOrDefault(s => s.StageId == run.CurrentStageId);
         var failure = currentStage?.Failure is not null
             ? new FailureStatusSnapshot(
                 currentStage.Failure.Reason.ToString(),
@@ -54,40 +53,30 @@ public static class WorkflowStatusReader
 
         return new WorkflowStatusSnapshot(
             run.Id,
-            WorkflowStatus(run, currentStage),
-            currentStage?.Stage,
+            run.Phase.ToString(),
+            currentStage?.StageId,
             stages,
             pending,
             failure,
-            []);
+            [],
+            MetadataSnapshot.From(run.Metadata));
     }
 
-    private static string WorkflowStatus(WorkflowRunSnapshot run, StageRunSnapshot? currentStage)
+    private static string StageStatus(StageRun stage)
     {
-        if (!run.Started) return WorkflowRunStatus.Pending.ToString();
-        if (currentStage is null) return WorkflowRunStatus.Running.ToString();
-        if (currentStage.Failure is not null) return WorkflowRunStatus.Failed.ToString();
-        if (run.Paused) return WorkflowRunStatus.Paused.ToString();
-        if (StageStatus(currentStage) == StageRunStatus.AwaitingApproval.ToString()) return WorkflowRunStatus.AwaitingApproval.ToString();
-        if (StageStatus(currentStage) == StageRunStatus.Completed.ToString() && currentStage.Order == run.Stages.Max(s => s.Order)) return WorkflowRunStatus.Completed.ToString();
-        return WorkflowRunStatus.Running.ToString();
-    }
-
-    private static string StageStatus(StageRunSnapshot stage)
-    {
-        if (stage.Failure is not null) return StageRunStatus.Failed.ToString();
-        if (!stage.Started) return StageRunStatus.Pending.ToString();
-        if (stage.Approval?.Status == "awaiting") return StageRunStatus.AwaitingApproval.ToString();
+        if (stage.Failure is not null) return StageRunPhase.Failed.ToString();
+        if (!stage.Initialized) return StageRunPhase.Pending.ToString();
+        if (stage.Approval?.Status == "awaiting") return StageRunPhase.AwaitingApproval.ToString();
         if (StageIsComplete(stage))
         {
-            if (stage.RequiresApproval && stage.Approval?.Status != "approved") return StageRunStatus.Running.ToString();
-            return StageRunStatus.Completed.ToString();
+            if (stage.RequiresApproval && stage.Approval?.Status != "approved") return StageRunPhase.Running.ToString();
+            return StageRunPhase.Completed.ToString();
         }
-        return StageRunStatus.Running.ToString();
+        return StageRunPhase.Running.ToString();
     }
 
-    private static bool StageIsComplete(StageRunSnapshot stage) =>
+    private static bool StageIsComplete(StageRun stage) =>
         stage.Initialized &&
-        stage.Tasks.All(t => t.Status == TaskRunStatus.Completed) &&
-        stage.Checks.All(c => c.Status == CheckRunStatus.Passed);
+        stage.Tasks.All(t => t.Phase == TaskRunPhase.Completed) &&
+        stage.Checks.All(c => c.Phase == CheckRunPhase.Passed);
 }

@@ -10,6 +10,7 @@ using Mohist.Server.Storage.Db;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Grains;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
@@ -38,7 +39,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowRunState>, InMemoryStateStore<WorkflowRunState>>();
+            siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));

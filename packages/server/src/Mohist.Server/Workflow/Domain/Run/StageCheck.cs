@@ -2,54 +2,12 @@ using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public class StageCheck
-{
-    public string Name { get; }
-    public string Title { get; }
-    public string? Uses { get; }
-    public Dictionary<string, JsonElement?>? WithInput { get; }
-    public CheckRunStatus Status { get; private set; } = CheckRunStatus.Pending;
-    public int RetryCount { get; private set; }
-    public string? Message { get; set; }
-    public JsonElement? Output { get; set; }
-
-    public StageCheck(string name, string title, string? uses = null, Dictionary<string, JsonElement?>? withInput = null)
-    {
-        Name = name;
-        Title = title;
-        Uses = uses;
-        WithInput = withInput;
-    }
-
-    private StageCheck(string name, string title, string? uses, Dictionary<string, JsonElement?>? withInput, CheckRunStatus status, int retryCount, string? message, JsonElement? output)
-        : this(name, title, uses, withInput)
-    {
-        Status = status;
-        RetryCount = retryCount;
-        Message = message;
-        Output = output;
-    }
-
-    public void Reset()
-    {
-        Status = CheckRunStatus.Pending;
-        Message = null;
-        Output = null;
-    }
-
-    public void Pass() => Status = CheckRunStatus.Passed;
-    public void Fail() => Status = CheckRunStatus.Failed;
-    public int RecordRetry() => ++RetryCount;
-
-    public StageCheckSnapshot Snapshot() => new(Name, Title, Uses, WithInput, Status, RetryCount, Message, Output);
-
-    public static StageCheck Restore(StageCheckSnapshot snapshot) => new(
-        snapshot.Name,
-        snapshot.Title,
-        snapshot.Uses,
-        snapshot.WithInput,
-        snapshot.Status,
-        snapshot.RetryCount,
-        snapshot.Message,
-        snapshot.Output);
-}
+public record StageCheck(
+    string Name,
+    string Title,
+    string? Uses,
+    Dictionary<string, JsonElement?>? WithInput,
+    CheckRunPhase Phase,
+    int RetryCount,
+    string? Message,
+    JsonElement? Output);

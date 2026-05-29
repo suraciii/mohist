@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Workflow.Grains;
 
@@ -24,12 +25,28 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task<WorkflowStatusSnapshot?> GetStatusAsync();
     Task<string?> GetDefinitionYamlAsync();
+    Task PatchMetadataAsync(MetadataSnapshot patch);
+}
+
+[GenerateSerializer]
+public sealed record MetadataSnapshot(
+    [property: Id(0)] string? Name = null,
+    [property: Id(1)] Dictionary<string, string>? Labels = null,
+    [property: Id(2)] Dictionary<string, string>? Annotations = null,
+    [property: Id(3)] DateTimeOffset? CreatedAt = null)
+{
+    public static MetadataSnapshot? From(WorkflowRunMetadata? m) => m is null ? null
+        : new MetadataSnapshot(m.Name, m.Labels, m.Annotations, m.CreatedAt);
+
+    public WorkflowRunMetadata? ToDomain() => Name is null && Labels is null && Annotations is null && CreatedAt is null
+        ? null : new WorkflowRunMetadata(Name, CreatedAt ?? DateTimeOffset.MinValue, Labels, Annotations);
 }
 
 [GenerateSerializer]
 public sealed record WorkflowStartInput(
     [property: Id(0)] string? Variables = null,
-    [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null);
+    [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null,
+    [property: Id(2)] MetadataSnapshot? Metadata = null);
 
 [GenerateSerializer]
 public sealed record WorkflowVariablesSnapshot(
@@ -59,7 +76,8 @@ public sealed record WorkflowStatusSnapshot(
     List<StageStatusSnapshot> Stages,
     PendingWorkSnapshot? PendingWork,
     FailureStatusSnapshot? Failure,
-    List<AvailableActionSnapshot> AvailableActions);
+    List<AvailableActionSnapshot> AvailableActions,
+    MetadataSnapshot? Metadata = null);
 
 [GenerateSerializer]
 public sealed record StageStatusSnapshot(

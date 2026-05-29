@@ -3,17 +3,10 @@ using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Completed, Failed }
-
-public sealed record WorkLease(
-    string WorkId,
-    string WorkType,
-    string Stage,
-    string LogicalId,
-    string? RunnerId = null);
-public enum StageRunStatus { Pending, Running, AwaitingApproval, Completed, Failed }
-public enum TaskRunStatus { Pending, Running, Completed, Failed }
-public enum CheckRunStatus { Pending, Passed, Failed }
+public enum WorkflowRunPhase { Pending, Running, AwaitingApproval, Paused, Completed, Failed }
+public enum StageRunPhase { Pending, Running, AwaitingApproval, Completed, Failed }
+public enum TaskRunPhase { Pending, Running, Completed, Failed }
+public enum CheckRunPhase { Pending, Passed, Failed }
 public enum FailureReason { TaskFailed, CheckUnrepaired, ApprovalRejected }
 
 public sealed record FailureDetails(
@@ -76,72 +69,21 @@ public abstract record WorkflowWork
         List<CheckItem> Items) : WorkflowWork;
 }
 
-public sealed record TaskRunState(
-    string Id,
-    string Title,
-    string? Uses,
-    Dictionary<string, JsonElement?>? With,
-    TaskRunStatus Status);
-
-public sealed record CheckRunState(
-    string Name,
-    string Title,
-    string? Uses,
-    Dictionary<string, JsonElement?>? With,
-    CheckRunStatus Status,
-    string? Message,
-    JsonElement? Output);
-
 public sealed record ApprovalState(
     string Status,
     JsonElement? Output,
     string RequestedAt,
     string? RespondedAt);
 
-public sealed record StageRunState(
+public sealed record WorkflowRunMetadata(
+    string? Name,
+    DateTimeOffset CreatedAt,
+    Dictionary<string, string>? Labels = null,
+    Dictionary<string, string>? Annotations = null);
+
+public sealed record WorkLease(
+    string WorkId,
+    string WorkType,
     string Stage,
-    StageRunStatus Status,
-    int Order,
-    List<TaskRunState> Tasks,
-    List<CheckRunState> Checks,
-    ApprovalState? Approval,
-    FailureDetails? Failure);
-
-public sealed record WorkflowRunSnapshot(
-    string Id,
-    bool Started,
-    bool Paused,
-    int CurrentStageIndex,
-    Dictionary<string, int> StageAttempts,
-    List<StageRunSnapshot> Stages);
-
-public sealed record StageRunSnapshot(
-    string Stage,
-    int Order,
-    int Attempt,
-    bool RequiresApproval,
-    bool Started,
-    bool Initialized,
-    Dictionary<string, int> TaskAttempts,
-    List<TaskRunSnapshot> Tasks,
-    List<StageCheckSnapshot> Checks,
-    ApprovalState? Approval,
-    FailureDetails? Failure);
-
-public sealed record TaskRunSnapshot(
-    string DefinitionId,
-    int Attempt,
-    string Title,
-    string? Uses,
-    Dictionary<string, JsonElement?>? WithInput,
-    TaskRunStatus Status);
-
-public sealed record StageCheckSnapshot(
-    string Name,
-    string Title,
-    string? Uses,
-    Dictionary<string, JsonElement?>? WithInput,
-    CheckRunStatus Status,
-    int RetryCount,
-    string? Message,
-    JsonElement? Output);
+    string LogicalId,
+    string? RunnerId = null);

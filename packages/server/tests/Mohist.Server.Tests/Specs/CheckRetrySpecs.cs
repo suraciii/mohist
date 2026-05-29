@@ -1,7 +1,10 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -115,19 +118,25 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     public void CheckRetryCount_IsStageCheckStateAndSurvivesSnapshotRestore()
     {
         var definition = StageWithRetryCheck(retryLimit: 2);
-        var profile = new WorkflowRunProfile("wf-domain", definition);
-        var run = new WorkflowRun("wf-domain", profile);
+        var run = WorkflowOperations.Create("wf-domain", definition);
 
-        run.Start();
-        run.InitStage([new("task-1", "Task 1", "spec/task")], definition.Stages[0].Checks);
-        run.CompleteTask();
-        run.InjectRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
+        run = WorkflowOperations.Start(run);
+        run = WorkflowOperations.InitStage(run, [new("task-1", "Task 1", "spec/task")], definition.Stages[0].Checks);
+        run = WorkflowOperations.CompleteTask(run);
+        run = WorkflowOperations.InjectRetryTask(run, "check-1", new("fix-check", "Fix check", "spec/fix"));
 
-        var snapshot = run.Snapshot();
-        Assert.Equal(1, snapshot.Stages[0].Checks.Single(c => c.Name == "check-1").RetryCount);
+        var currentStage = run.Stages.First(s => s.StageId == run.CurrentStageId);
+        Assert.Equal(1, currentStage.Checks.Single(c => c.Name == "check-1").RetryCount);
 
-        var restored = WorkflowRun.Restore(profile, snapshot);
-        Assert.Equal(1, restored.RetryCountForCheck("check-1"));
+        var jsonOptions = new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        };
+        var json = JsonSerializer.Serialize(run, jsonOptions);
+        var restored = JsonSerializer.Deserialize<WorkflowRun>(json, jsonOptions)!;
+        Assert.Equal(1, WorkflowOperations.RetryCountForCheck(restored, "check-1"));
     }
 
     [Fact]
