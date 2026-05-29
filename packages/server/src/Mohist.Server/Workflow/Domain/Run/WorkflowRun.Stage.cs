@@ -68,14 +68,14 @@ public static partial class WorkflowRunExtensions
     {
         internal bool IsAwaitingApproval => stage.ApprovalStatus is { Result: null };
 
-        internal TaskRun? FirstPendingTask()
+        private TaskRun? CurrentTask()
             => stage.Tasks.FirstOrDefault(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
 
         private StageCheck FindCheck(string name)
             => stage.Checks.FirstOrDefault(c => c.Name == name)
                 ?? throw new WorkflowDomainException($"Check {name} not found in stage {stage.Id}");
 
-        private StageCheck FirstPendingCheck()
+        private StageCheck CurrentCheck()
             => stage.Checks.FirstOrDefault(c => c.Status == StageCheckStatus.Pending)!;
 
         private bool IsComplete()

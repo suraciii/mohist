@@ -241,20 +241,16 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, with));
         }
 
-        var insertAfter = current.FirstPendingTask();
-        if (insertAfter is null)
-            throw new InvalidOperationException("No pending task to insert after");
+        _run!.InsertRuntimeTasksAfter(tasksToInsert);
 
-        _run!.InsertRuntimeTasksAfter(insertAfter, tasksToInsert);
-
-        _log.LogInformation("Workflow {Id} added {Count} tasks after {AfterTaskId} in stage {Stage}",
-            GrainKey, tasksToInsert.Count, insertAfter.Id, current.Id);
+        _log.LogInformation("Workflow {Id} added {Count} tasks in stage {Stage}",
+            GrainKey, tasksToInsert.Count, current.Id);
 
         _ = SaveRunAsync();
         _ = AppendWorkflowEventAsync(
             "workflow_tasks_batch_added", "batch_added",
             $"Added {tasksToInsert.Count} tasks to workflow stage {current.Id}",
-            Payload: new { Count = tasksToInsert.Count, InsertedAfter = insertAfter.Id });
+            Payload: new { Count = tasksToInsert.Count });
 
         _ = RegisterToBacklogAsync();
 
@@ -584,89 +580,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private void ProcessTaskResult(WorkDispatchResult result)
     {
         if (result.Status == "completed")
-        {
-            TryAddRequestedTaskFromCurrentTask();
             _run!.CompleteTask();
-        }
         else
-        {
-            if (TryAddRequestedTask(result))
-                _run!.CompleteTask();
-            else
-                _run!.FailTask(new TaskResult("failed", result.Message));
-        }
-    }
-
-    private bool TryAddRequestedTask(WorkDispatchResult result)
-    {
-        if (string.IsNullOrWhiteSpace(result.Output)) return false;
-
-        try
-        {
-            using var document = JsonDocument.Parse(result.Output);
-            if (!TryParseRequestedTask(document.RootElement, out var task)) return false;
-            _run!.AddRuntimeTask(task);
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private bool TryAddRequestedTaskFromCurrentTask()
-    {
-        var currentTask = GetCurrentTask();
-        if (currentTask is null) return false;
-        
-        var with = currentTask.WithInput;
-        if (with is null || !with.TryGetValue("requestedTask", out var requested) || requested is null)
-            return false;
-        if (requested.Value.ValueKind != JsonValueKind.Object)
-            return false;
-
-        if (!TryParseRequestedTask(new Dictionary<string, JsonElement?> { ["requestedTask"] = requested }, out var task))
-            return false;
-
-        _run!.AddRuntimeTask(task);
-        return true;
-    }
-
-    private static bool TryParseRequestedTask(JsonElement root, out TaskDefinition task)
-    {
-        task = default!;
-        if (!root.TryGetProperty("requestedTask", out var requested) || requested.ValueKind != JsonValueKind.Object)
-            return false;
-
-        var id = requested.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
-        if (string.IsNullOrWhiteSpace(id)) return false;
-
-        var title = requested.TryGetProperty("title", out var titleProp)
-            ? titleProp.GetString()
-            : id;
-        var uses = requested.TryGetProperty("uses", out var usesProp)
-            ? usesProp.GetString()
-            : null;
-        var with = requested.TryGetProperty("with", out var withProp) && withProp.ValueKind == JsonValueKind.Object
-            ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withProp.GetRawText())
-            : null;
-
-        if (requested.TryGetProperty("then", out var thenProp) && thenProp.ValueKind == JsonValueKind.Object)
-        {
-            with ??= [];
-            with["requestedTask"] = thenProp.Clone();
-        }
-
-        task = new TaskDefinition(id!, title ?? id!, uses, with);
-        return true;
-    }
-
-    private static bool TryParseRequestedTask(Dictionary<string, JsonElement?> root, out TaskDefinition task)
-    {
-        task = default!;
-        if (!root.TryGetValue("requestedTask", out var requested) || requested is null)
-            return false;
-        return TryParseRequestedTask(JsonSerializer.SerializeToElement(new { requestedTask = requested.Value }), out task);
+            _run!.FailTask(new TaskResult("failed", result.Message));
     }
 
     private async Task ProcessCheckResultAsync(WorkDispatchResult result)
@@ -769,12 +685,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_run is null)
             throw new InvalidOperationException($"Workflow '{GrainKey}' has no workflow run");
-    }
-
-    private TaskRun? GetCurrentTask()
-    {
-        if (_run?.CurrentStageId is null) return null;
-        return _run.CurrentStage().FirstPendingTask();
     }
 
     private StageDefinition RequireStageDefinition(string stage) =>
