@@ -17,7 +17,7 @@ public static partial class WorkflowRunExtensions
             run.Status = WorkflowRunStatus.Failed;
         }
 
-        public void FailInFlightWork(string workType, string? reason)
+        public void FailCurrentWork(string workType, string? reason)
         {
             var current = run.CurrentStage();
 
@@ -98,7 +98,7 @@ public static partial class WorkflowRunExtensions
             run.Status = WorkflowRunStatus.Running;
         }
 
-        public void ClearStageFailure()
+        public void ResetStageFailure()
         {
             var current = run.CurrentStage();
             current.Failure = null;

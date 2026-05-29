@@ -17,7 +17,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var (task, _) = await PollWorkAnyAsync();
 
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -37,7 +37,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var (checks, _) = await PollWorkAnyAsync();
 
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -53,7 +53,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var (task, _) = await PollWorkAnyAsync();
 
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -70,7 +70,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         await workflow.RetryAsync();
 
@@ -100,7 +100,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await ReportAsync(r1, task.WorkId, "completed");
 
         var (checks, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         await workflow.RetryAsync();
 
@@ -124,7 +124,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -144,7 +144,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         var staleWorkId = task.WorkId;
 
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         await ReportAsync(r1, staleWorkId, "completed");
 
@@ -158,7 +158,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     {
         var workflow = await StartWorkflowAsync(SingleStage());
 
-        await workflow.FailInFlightWorkAsync(_runnerId!, "nothing in flight");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "nothing in flight");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -208,7 +208,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("task", loadWork.WorkType);
         Assert.StartsWith("load-tasks.", loadWork.WorkId);
 
-        await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
+        await workflow.FailCurrentWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);
@@ -249,7 +249,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
         var (checks, _) = await PollWorkAnyAsync();
-        await workflow.FailInFlightWorkAsync(r1, "timeout");
+        await workflow.FailCurrentWorkAsync(r1, "timeout");
 
         await workflow.RetryAsync();
 
@@ -287,7 +287,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (retried, _) = await PollWorkAnyAsync();
         Assert.Equal("task", retried.WorkType);
 
-        await workflow.FailInFlightWorkAsync(r1, "stale runner timeout");
+        await workflow.FailCurrentWorkAsync(r1, "stale runner timeout");
 
         var status = await workflow.GetStatusAsync();
         Assert.NotNull(status);

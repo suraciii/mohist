@@ -121,9 +121,9 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         var run = WorkflowRun.Create("wf-domain", definition);
 
         run.Start();
-        run.InitStage([new("task-1", "Task 1", "spec/task")], definition.Stages[0].Checks);
+        run.InitializeStage([new("task-1", "Task 1", "spec/task")], definition.Stages[0].Checks);
         run.CompleteTask();
-        run.InjectRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
+        run.AddRetryTask("check-1", new("fix-check", "Fix check", "spec/fix"));
 
         var currentStage = run.Stages.First(s => s.Id == run.CurrentStageId);
         Assert.Equal(1, currentStage.Checks.Single(c => c.Name == "check-1").RetryCount);
@@ -136,7 +136,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         };
         var json = JsonSerializer.Serialize(run, jsonOptions);
         var restored = JsonSerializer.Deserialize<WorkflowRun>(json, jsonOptions)!;
-        Assert.Equal(1, restored.RetryCountForCheck("check-1"));
+        Assert.Equal(1, restored.GetRetryCount("check-1"));
     }
 
     [Fact]

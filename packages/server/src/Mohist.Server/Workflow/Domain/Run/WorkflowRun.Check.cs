@@ -44,6 +44,5 @@ public static partial class WorkflowRunExtensions
             check.Output = result.Output;
         }
 
-        public void PendingCheck(CheckResult result) => run.ResetCheck(result);
     }
 }

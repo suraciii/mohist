@@ -7,7 +7,7 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public void InitStage(
+        public void InitializeStage(
             IReadOnlyList<TaskDefinition> tasks,
             List<CheckDefinition> checks)
         {

@@ -16,11 +16,11 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task RerunAsync();
     Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
     Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
-    Task<bool> HasIncompleteTaskUsingAsync(string uses);
-    Task<bool> HasIncompleteTaskIdAsync(string id);
+    Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
+    Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkDispatch?> GetWorkAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
-    Task FailInFlightWorkAsync(string runnerId, string reason);
+    Task FailCurrentWorkAsync(string runnerId, string reason);
     Task<WorkflowVariablesSnapshot?> GetVariablesAsync();
     Task<WorkflowVariablesSnapshot> PatchVariablesAsync(string section, string patchJson);
     Task<WorkflowVariablesSnapshot> PatchStageVariablesAsync(string stage, string section, string patchJson);
