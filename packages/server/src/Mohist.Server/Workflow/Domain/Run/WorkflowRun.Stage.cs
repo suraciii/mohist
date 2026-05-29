@@ -7,7 +7,7 @@ public static partial class WorkflowRunExtensions
     extension(WorkflowRun run)
     {
         public void InitStage(
-            IReadOnlyList<LoadedTaskInput> tasks,
+            IReadOnlyList<TaskDefinition> tasks,
             List<CheckDefinition> checks)
         {
             var current = run.CurrentStage();

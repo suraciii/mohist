@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -19,7 +20,7 @@ internal static class TaskRunExtensions
 {
     extension(TaskRun)
     {
-        internal static TaskRun MakeTask(IEnumerable<TaskRun> existing, LoadedTaskInput input)
+        internal static TaskRun MakeTask(IEnumerable<TaskRun> existing, TaskDefinition input)
         {
             var attempt = existing
                               .Where(t => t.DefinitionId == input.Id)

@@ -1,3 +1,4 @@
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Run;
@@ -102,7 +103,7 @@ public static partial class WorkflowRunExtensions
         var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
             ?? throw new WorkflowDomainException($"Failed task {taskRunId} not found or not in failed state");
 
-        var input = new LoadedTaskInput(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
+        var input = new TaskDefinition(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
         var newTask = TaskRun.MakeTask(stage.Tasks, input);
         stage.Tasks.Add(newTask);
         stage.Failure = null;

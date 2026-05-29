@@ -177,7 +177,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var phaseBefore = _run.Status;
         var with = ParseWith(task.With);
-        _run!.AddRuntimeTask(new LoadedTaskInput(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
+        _run!.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
         var stage = _run.CurrentStageId ?? "unknown";
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
@@ -232,7 +232,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (!current.Initialized)
             throw new InvalidOperationException("Cannot add tasks before stage is initialized");
 
-        var tasksToInsert = new List<LoadedTaskInput>();
+        var tasksToInsert = new List<TaskDefinition>();
         foreach (var t in request.Tasks)
         {
             if (string.IsNullOrWhiteSpace(t.Id))
@@ -241,7 +241,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 throw new InvalidOperationException("Task title is required");
 
             var with = ParseWith(t.With);
-            tasksToInsert.Add(new LoadedTaskInput(t.Id, t.Title, t.Uses, with));
+            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, with));
         }
 
         var insertAfter = current.FirstPendingTask();
@@ -511,7 +511,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             case "stage-init":
                 var stageDef = RequireStageDefinition(work.Stage);
-                _run!.InitStage(MaterializeTasks(stageDef), stageDef.Checks);
+                _run!.InitStage(stageDef.Tasks, stageDef.Checks);
                 return PrepareFromDomain(runnerId);
 
             case "task":
@@ -635,7 +635,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return true;
     }
 
-    private static bool TryParseRequestedTask(JsonElement root, out LoadedTaskInput task)
+    private static bool TryParseRequestedTask(JsonElement root, out TaskDefinition task)
     {
         task = default!;
         if (!root.TryGetProperty("requestedTask", out var requested) || requested.ValueKind != JsonValueKind.Object)
@@ -660,11 +660,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             with["requestedTask"] = thenProp.Clone();
         }
 
-        task = new LoadedTaskInput(id!, title ?? id!, uses, with);
+        task = new TaskDefinition(id!, title ?? id!, uses, with);
         return true;
     }
 
-    private static bool TryParseRequestedTask(Dictionary<string, JsonElement?> root, out LoadedTaskInput task)
+    private static bool TryParseRequestedTask(Dictionary<string, JsonElement?> root, out TaskDefinition task)
     {
         task = default!;
         if (!root.TryGetValue("requestedTask", out var requested) || requested is null)
@@ -759,7 +759,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var retryWith = retry.Task.With is not null
             ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
             : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
-        _run!.InjectRetryTask(checkName, new LoadedTaskInput(
+        _run!.InjectRetryTask(checkName, new TaskDefinition(
             $"{retry.Task.Id}:{retryCount + 1}",
             retry.Task.Title,
             retry.Task.Uses,
@@ -783,13 +783,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private StageDefinition RequireStageDefinition(string stage) =>
         _profile?.Definition.Stages.Find(s => s.Stage == stage)
         ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{stage}'");
-
-    private static List<LoadedTaskInput> MaterializeTasks(StageDefinition stage)
-    {
-        return stage.Tasks
-            .Select(t => new LoadedTaskInput(t.Id, t.Title, t.Uses, t.With))
-            .ToList();
-    }
 
     private static Dictionary<string, JsonElement?>? MergeTaskWith(Dictionary<string, JsonElement?>? existingWith, string title)
     {
