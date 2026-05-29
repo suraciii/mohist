@@ -86,7 +86,7 @@ public static partial class WorkflowRunExtensions
             run.Status = WorkflowRunStatus.Running;
         }
 
-        public void ResetStageFailure()
+        private void ResetStageFailure()
         {
             var current = run.CurrentStage();
             current.Failure = null;

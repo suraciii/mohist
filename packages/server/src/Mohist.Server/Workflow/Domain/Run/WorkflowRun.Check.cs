@@ -20,15 +20,20 @@ public static partial class WorkflowRunExtensions
                         run.ResetCheck(a.Result);
                         break;
                     case "retry":
-                        run.AddRetryTask(a.Result.Name, a.RetryTask!);
-                        run.ResetCheck(a.Result);
-                        run.ResetStageFailure();
+                        run.RepairFailedCheck(a.Result, a.RetryTask!);
                         break;
                     case "fail":
                         run.FailCheck(a.Result);
                         return;
                 }
             }
+        }
+
+        public void RepairFailedCheck(CheckResult result, TaskDefinition repairTask)
+        {
+            run.AddRetryTask(result.Name, repairTask);
+            run.ResetCheck(result);
+            run.ResetStageFailure();
         }
 
         public void PassCheck(CheckResult result)
