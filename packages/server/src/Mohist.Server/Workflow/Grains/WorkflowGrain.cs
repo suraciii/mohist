@@ -219,6 +219,51 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return dispatch;
     }
 
+    public Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
+    {
+        EnsureRun();
+        if (request.Tasks is null || request.Tasks.Count == 0)
+            throw new InvalidOperationException("AddTasksBatchRequest requires at least one task");
+
+        if (_run?.CurrentStageId is null)
+            throw new InvalidOperationException("Workflow has no current stage");
+
+        var current = _run.CurrentStage();
+        if (!current.Initialized)
+            throw new InvalidOperationException("Cannot add tasks before stage is initialized");
+
+        var tasksToInsert = new List<LoadedTaskInput>();
+        foreach (var t in request.Tasks)
+        {
+            if (string.IsNullOrWhiteSpace(t.Id))
+                throw new InvalidOperationException("Task ID is required");
+            if (string.IsNullOrWhiteSpace(t.Title))
+                throw new InvalidOperationException("Task title is required");
+
+            var with = ParseWith(t.With);
+            tasksToInsert.Add(new LoadedTaskInput(t.Id, t.Title, t.Uses, with));
+        }
+
+        var insertAfter = current.FirstPendingTask();
+        if (insertAfter is null)
+            throw new InvalidOperationException("No pending task to insert after");
+
+        _run!.InsertRuntimeTasksAfter(insertAfter, tasksToInsert);
+
+        _log.LogInformation("Workflow {Id} added {Count} tasks after {AfterTaskId} in stage {Stage}",
+            GrainKey, tasksToInsert.Count, insertAfter.Id, current.StageId);
+
+        _ = SaveRunAsync();
+        _ = AppendWorkflowEventAsync(
+            "workflow_tasks_batch_added", "batch_added",
+            $"Added {tasksToInsert.Count} tasks to workflow stage {current.StageId}",
+            Payload: new { Count = tasksToInsert.Count, InsertedAfter = insertAfter.Id });
+
+        _ = RegisterToBacklogAsync();
+
+        return Task.FromResult(new AddTasksBatchResult(GrainKey, current.StageId, tasksToInsert.Count));
+    }
+
     public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
     {
         var lease = _lease;
@@ -245,15 +290,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             case "check":
             case "checks":
                 await ProcessCheckResultAsync(result);
-                break;
-            case "load":
-                ProcessLoadResult(result);
-                await AppendWorkflowEventAsync(result.Status is "completed" or "loaded" ? "workflow_tasks_loaded" : "workflow_tasks_load_failed",
-                    result.Status,
-                    result.Message ?? "Workflow tasks load reported",
-                    TaskId: lease.LogicalId,
-                    RunnerId: runnerId,
-                    Payload: new { result.Status, result.Message, result.Output, result.ExitCode });
                 break;
         }
 
@@ -484,17 +520,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             case "stage-init":
                 var stageDef = RequireStageDefinition(work.Stage);
-                if (stageDef.TasksFrom is not null)
-                {
-                    _run!.MarkLoadPending(stageDef.TasksFrom.Uses);
-                    return PrepareFromDomain(runnerId);
-                }
                 _run!.InitStage(MaterializeTasks(stageDef), stageDef.Checks);
                 return PrepareFromDomain(runnerId);
 
             case "task":
                 var t = (WorkflowWork.TaskData)work.Data;
-                return MakeDispatch(work.Stage, t.Id, "task", t.Title, t.Uses, t.With, runnerId);
+                var taskWith = MergeTaskWith(t.With, t.Title);
+                return MakeDispatch(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -506,10 +538,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                     ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
                 }).ToList();
                 return MakeDispatch(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
-
-            case "load":
-                var ld = (WorkflowWork.LoadData)work.Data;
-                return MakeDispatch(work.Stage, $"load-{work.Stage}", "load", $"Load tasks", uses: ld.Uses, with: null, runnerId);
 
             default:
                 return null;
@@ -725,21 +753,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return new CheckResult(name!, status, message, output);
     }
 
-    private void ProcessLoadResult(WorkDispatchResult result)
-    {
-        switch (result.Status)
-        {
-            case "completed":
-            case "loaded":
-                var stageDef = RequireStageDefinition(_run!.CurrentStageId!);
-                _run!.InitStage(MaterializeTasks(stageDef, ParseLoadedTasks(result.Output)), stageDef.Checks);
-                break;
-            default:
-                _run!.FailStage(result.Message ?? "Task loading failed");
-                break;
-        }
-    }
-
     private bool TryInjectRetryTask(string stage, string checkName, CheckResult result)
     {
         var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == stage);
@@ -773,64 +786,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private TaskRun? GetCurrentTask()
     {
         if (_run?.CurrentStageId is null) return null;
-        var current = _run.Stages.FirstOrDefault(s => s.StageId == _run.CurrentStageId);
-        return current?.Tasks.FirstOrDefault(t => t.Phase == TaskRunPhase.Running);
+        return _run.CurrentStage().FirstPendingTask();
     }
 
     private StageDefinition RequireStageDefinition(string stage) =>
         _profile?.Definition.Stages.Find(s => s.Stage == stage)
         ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{stage}'");
 
-    private static List<LoadedTaskInput> MaterializeTasks(StageDefinition stage, List<LoadedTaskInput>? dynamicTasks = null)
+    private static List<LoadedTaskInput> MaterializeTasks(StageDefinition stage)
     {
-        var tasks = stage.Tasks
+        return stage.Tasks
             .Select(t => new LoadedTaskInput(t.Id, t.Title, t.Uses, t.With))
             .ToList();
-
-        if (dynamicTasks is not null)
-            tasks.AddRange(dynamicTasks);
-
-        return tasks;
     }
 
-    private static List<LoadedTaskInput> ParseLoadedTasks(string? output)
+    private static Dictionary<string, JsonElement?>? MergeTaskWith(Dictionary<string, JsonElement?>? existingWith, string title)
     {
-        if (string.IsNullOrWhiteSpace(output)) return [];
-
-        using var document = JsonDocument.Parse(output);
-        var root = document.RootElement;
-        var taskArray = root.ValueKind == JsonValueKind.Array
-            ? root
-            : root.TryGetProperty("tasks", out var tasksProperty) && tasksProperty.ValueKind == JsonValueKind.Array
-                ? tasksProperty
-                : default;
-
-        if (taskArray.ValueKind != JsonValueKind.Array) return [];
-
-        var tasks = new List<LoadedTaskInput>();
-        foreach (var item in taskArray.EnumerateArray())
-        {
-            var id = item.TryGetProperty("id", out var idProperty)
-                ? idProperty.GetString()
-                : item.TryGetProperty("taskId", out var taskIdProperty)
-                    ? taskIdProperty.GetString()
-                    : null;
-            if (string.IsNullOrWhiteSpace(id)) continue;
-
-            var title = item.TryGetProperty("title", out var titleProperty)
-                ? titleProperty.GetString()
-                : id;
-            var uses = item.TryGetProperty("uses", out var usesProperty)
-                ? usesProperty.GetString()
-                : null;
-            var with = item.TryGetProperty("with", out var withProperty) && withProperty.ValueKind == JsonValueKind.Object
-                ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(withProperty.GetRawText())
-                : null;
-
-            tasks.Add(new LoadedTaskInput(id, title ?? id, uses, with));
-        }
-
-        return tasks;
+        var with = existingWith is not null
+            ? new Dictionary<string, JsonElement?>(existingWith)
+            : new Dictionary<string, JsonElement?>();
+        with["title"] = JsonSerializer.SerializeToElement(title);
+        return with.Count > 0 ? with : null;
     }
 
     private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
@@ -871,7 +847,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             {
                 "task" => "workflow_task_started",
                 "checks" => "workflow_check_started",
-                "load" => "workflow_tasks_load_started",
                 _ => "workflow_work_dispatched",
             },
             "started",

@@ -61,12 +61,10 @@ public static class WorkflowYamlSerializer
         if (string.IsNullOrWhiteSpace(stage))
             throw new InvalidOperationException("Workflow stage requires stage");
 
-        var tasksFrom = OptionalMap(map, "tasksFrom");
         return new StageDefinition(
             stage,
             List(map, "tasks").Select(ToTask).ToList(),
             List(map, "checks").Select(ToCheck).ToList(),
-            tasksFrom is null ? null : new WorkflowTasksFromDefinition(String(tasksFrom, "uses"), JsonElementMap(OptionalMap(tasksFrom, "with"))),
             Bool(map, "requiresApproval"),
             Variables: JsonElementMap(OptionalMap(map, "variables")));
     }
@@ -119,12 +117,6 @@ public static class WorkflowYamlSerializer
         };
         if (stage.RequiresApproval) map["requiresApproval"] = true;
         if (stage.Variables is not null) map["variables"] = ObjectMap(stage.Variables);
-        if (stage.TasksFrom is not null)
-        {
-            var tasksFrom = new Dictionary<string, object?> { ["uses"] = stage.TasksFrom.Uses };
-            AddWith(tasksFrom, stage.TasksFrom.With);
-            map["tasksFrom"] = tasksFrom;
-        }
         return map;
     }
 

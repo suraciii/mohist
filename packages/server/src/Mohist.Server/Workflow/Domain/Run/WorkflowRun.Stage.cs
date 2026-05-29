@@ -11,7 +11,7 @@ public static partial class WorkflowRunExtensions
             List<CheckDefinition> checks)
         {
             var current = run.CurrentStage();
-            if (current.Initialized && current.TasksFrom is null) return;
+            if (current.Initialized) return;
 
             var pendingRuntimeTasks = current.Tasks
                 .Where(t => t.Phase == TaskRunPhase.Pending)
@@ -36,23 +36,9 @@ public static partial class WorkflowRunExtensions
                 })
                 .ToList();
             current.Initialized = true;
-            current.TasksFrom = null;
             current.Phase = StageRunPhase.Running;
             current.TryRequestApproval();
             run.Advance();
-        }
-
-        public void MarkLoadPending(string? uses)
-        {
-            var current = run.CurrentStage();
-            current.Initialized = true;
-            current.TasksFrom = uses;
-        }
-
-        public void ClearTasksFrom()
-        {
-            var current = run.CurrentStage();
-            current.TasksFrom = null;
         }
 
         public void Advance()

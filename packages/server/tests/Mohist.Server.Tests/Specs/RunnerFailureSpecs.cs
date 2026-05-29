@@ -191,18 +191,18 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task InFlightLoad_LosesRunner_WorkflowFails()
+    public async Task InFlightLoadTask_LosesRunner_WorkflowFails()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition("build",
-                [],
-                [new("check-1", "Check 1", "spec/check")],
-                new WorkflowTasksFromDefinition("spec/loader"))
+                [new("load-tasks", "Load tasks", "spec/loader")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (loadWork, _) = await PollWorkAnyAsync();
-        Assert.Equal("load", loadWork.WorkType);
+        Assert.Equal("task", loadWork.WorkType);
+        Assert.StartsWith("load-tasks.", loadWork.WorkId);
 
         await workflow.FailInFlightWorkAsync(_runnerId!, "Runner heartbeat timeout");
 
@@ -291,14 +291,13 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task LoadWorkFails_UserViewsStatus_RetryActionIsNotAvailable()
+    public async Task LoadTaskFails_UserViewsStatus_RetryActionIsAvailable()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition("build",
-                [],
-                [new("check-1", "Check 1", "spec/check")],
-                new WorkflowTasksFromDefinition("spec/loader"))
+                [new("load-tasks", "Load tasks", "spec/loader")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
@@ -309,18 +308,17 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("Failed", status.Status);
 
         var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
-        Assert.Null(retryAction);
+        Assert.NotNull(retryAction);
     }
 
     [Fact]
-    public async Task LoadWorkFails_UserViewsStatus_RerunActionIsAvailable()
+    public async Task LoadTaskFails_UserViewsStatus_RerunActionIsAvailable()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition("build",
-                [],
-                [new("check-1", "Check 1", "spec/check")],
-                new WorkflowTasksFromDefinition("spec/loader"))
+                [new("load-tasks", "Load tasks", "spec/loader")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
@@ -334,14 +332,13 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task LoadWorkFails_UserRerunsStage_LoadRunsAgain()
+    public async Task LoadTaskFails_UserRerunsStage_LoadTaskRunsAgain()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition("build",
-                [],
-                [new("check-1", "Check 1", "spec/check")],
-                new WorkflowTasksFromDefinition("spec/loader"))
+                [new("load-tasks", "Load tasks", "spec/loader")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
@@ -355,24 +352,32 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         await r2.AssignWorkflowAsync(_workflowId!);
 
         var (retried, _) = await PollWorkAnyAsync();
-        Assert.Equal("load", retried.WorkType);
+        Assert.Equal("task", retried.WorkType);
+        Assert.StartsWith("load-tasks.", retried.WorkId);
     }
 
     [Fact]
-    public async Task LoadWorkFails_UserRetriesWorkflow_RetryIsRejected()
+    public async Task LoadTaskFails_UserRetriesWorkflow_RetryWorks()
     {
         var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
         [
             new StageDefinition("build",
-                [],
-                [new("check-1", "Check 1", "spec/check")],
-                new WorkflowTasksFromDefinition("spec/loader"))
+                [new("load-tasks", "Load tasks", "spec/loader")],
+                [new("check-1", "Check 1", "spec/check")])
         ]));
 
         var (loadWork, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, loadWork.WorkId, "failed", "loader crashed");
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
-            await workflow.RetryAsync());
+        await workflow.RetryAsync();
+
+        var r2Id = await RegisterRunnerAsync();
+        _runnerId = r2Id;
+        var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
+        await r2.AssignWorkflowAsync(_workflowId!);
+
+        var (retried, _) = await PollWorkAnyAsync();
+        Assert.StartsWith("load-tasks.", retried.WorkId);
+        Assert.Equal("task", retried.WorkType);
     }
 }

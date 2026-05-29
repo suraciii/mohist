@@ -20,10 +20,16 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   const tasks = sourceTasks.flatMap((task) => {
     const id = stringInput(task, "id") ?? stringInput(task, "taskId")
     if (!id?.trim()) return []
-    return [{ id, title: stringInput(task, "title") ?? id, uses: stringInput(task, "uses") ?? defaultUses, with: mergeTaskWith(defaultWith, task, context.variables) }]
+    const title = stringInput(task, "title") ?? id
+    const uses = stringInput(task, "uses") ?? defaultUses
+    const mergedWith = mergeTaskWith(defaultWith, task, context.variables)
+    return [{ id, title, uses, with: mergedWith ? JSON.stringify(mergedWith) : null }]
   })
 
-  return { status: "loaded", message: `Loaded ${tasks.length} tasks`, output: JSON.stringify({ tasks }) }
+  if (!context.serverConnection) return { status: "failure", message: "Server connection not available" }
+  await context.serverConnection.addTasks(context.workflowRunId, tasks)
+
+  return { status: "success", message: `Loaded ${tasks.length} tasks`, output: JSON.stringify({ loaded: tasks.length }) }
 }
 
 export async function openspecSyncAction(context: ActionContext): Promise<ActionResult> {

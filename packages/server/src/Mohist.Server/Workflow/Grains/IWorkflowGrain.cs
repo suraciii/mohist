@@ -15,6 +15,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task RetryAsync();
     Task RerunAsync();
     Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task);
+    Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
     Task<bool> HasIncompleteTaskUsingAsync(string uses);
     Task<bool> HasIncompleteTaskIdAsync(string id);
     Task<WorkDispatch?> GetWorkAsync(string runnerId);
@@ -67,6 +68,23 @@ public sealed record RuntimeTaskAddedResult(
     [property: Id(0)] string WorkflowRunId,
     [property: Id(1)] string Stage,
     [property: Id(2)] string TaskId);
+
+[GenerateSerializer]
+public sealed record AddTasksBatchRequest(
+    [property: Id(0)] List<AddTasksBatchItem> Tasks);
+
+[GenerateSerializer]
+public sealed record AddTasksBatchItem(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string Title,
+    [property: Id(2)] string? Uses = null,
+    [property: Id(3)] string? With = null);
+
+[GenerateSerializer]
+public sealed record AddTasksBatchResult(
+    [property: Id(0)] string WorkflowRunId,
+    [property: Id(1)] string Stage,
+    [property: Id(2)] int AddedCount);
 
 [GenerateSerializer]
 public sealed record WorkflowStatusSnapshot(

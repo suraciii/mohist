@@ -18,7 +18,6 @@ public sealed class StageRun
     public required bool RequiresApproval { get; init; }
     public StageRunPhase Phase { get; set; }
     public bool Initialized { get; set; }
-    public string? TasksFrom { get; set; }
     public List<TaskRun> Tasks { get; set; } = new();
     public List<StageCheck> Checks { get; set; } = new();
     public ApprovalState? Approval { get; set; }
