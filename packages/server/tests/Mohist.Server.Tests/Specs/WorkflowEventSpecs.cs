@@ -18,6 +18,9 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         _fixture = fixture;
     }
 
+    private static WorkflowStartInput TestInput() =>
+        new(Variables: """{"project":{"id":"test-project"}}""");
+
     [Fact]
     public void EventBus_DirectEmit_Works()
     {
@@ -37,7 +40,7 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         try
         {
             var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistWorkflow.Definition);
+            await wf.StartAsync(MohistWorkflow.Definition, TestInput());
 
             Assert.Single(received);
             var json = System.Text.Json.JsonSerializer.Serialize(received[0]);
@@ -60,7 +63,7 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         try
         {
             var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistWorkflow.Definition);
+            await wf.StartAsync(MohistWorkflow.Definition, TestInput());
             received.Clear();
 
             await wf.PauseAsync("user-requested");
@@ -86,7 +89,7 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         try
         {
             var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistWorkflow.Definition);
+            await wf.StartAsync(MohistWorkflow.Definition, TestInput());
             await wf.PauseAsync();
             received.Clear();
 
