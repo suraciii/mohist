@@ -36,7 +36,7 @@ public class IssueQueryServiceSpecs
             Labels = ["bug"],
             Priority = "p1",
         };
-        issue.MarkReady();
+        issue.Status = Issue.Domain.IssueStatus.Todo;
         db.IssueStates.Add(new IssueStateRow
         {
             Key = $"{project.Id}:1",
@@ -50,7 +50,7 @@ public class IssueQueryServiceSpecs
 
         var item = Assert.Single(list);
         Assert.Equal("Query me", item.Title);
-        Assert.Equal("todo", item.Stage);
+        Assert.Equal("todo", item.Status);
         Assert.Equal("Project One", item.ProjectName);
     }
 }

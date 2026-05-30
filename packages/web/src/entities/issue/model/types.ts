@@ -1,4 +1,4 @@
-export enum IssueStage {
+export enum IssueStatus {
   Backlog = 'backlog',
   Todo = 'todo',
   InProgress = 'in_progress',
@@ -14,12 +14,12 @@ export enum WorkflowStage {
   Done = 'done',
 }
 
-export const STAGE_ORDER: IssueStage[] = [
-  IssueStage.Backlog,
-  IssueStage.Todo,
-  IssueStage.InProgress,
-  IssueStage.Done,
-  IssueStage.Cancelled,
+export const STATUS_ORDER: IssueStatus[] = [
+  IssueStatus.Backlog,
+  IssueStatus.Todo,
+  IssueStatus.InProgress,
+  IssueStatus.Done,
+  IssueStatus.Cancelled,
 ]
 
 export const WORKFLOW_STAGE_ORDER: WorkflowStage[] = [
@@ -30,10 +30,7 @@ export const WORKFLOW_STAGE_ORDER: WorkflowStage[] = [
   WorkflowStage.Done,
 ]
 
-export const Stage = { ...IssueStage, ...WorkflowStage } as const
-export type Stage = IssueStage | WorkflowStage
-
-export enum IssueStatus {
+export enum IssueHealth {
   Active = 'active',
   Paused = 'paused',
   Blocked = 'blocked',
@@ -62,8 +59,8 @@ export interface IssuePrerequisiteSummary {
   number: number
   title: string
   completed: boolean
-  stage: IssueStage
   status: IssueStatus
+  health: IssueHealth
 }
 
 export interface IssueStartEligibility {
@@ -121,12 +118,12 @@ export interface Issue {
   number: number
   title: string
   body?: string
-  stage: IssueStage
+  status: IssueStatus
   workflowStage?: WorkflowStage | null
   workflowStatus?: string | null
   workflowRunId?: string | null
   workflowProfileId?: string | null
-  status: IssueStatus
+  health: IssueHealth
   projectId: string
   labels: string[]
   createdAt: string

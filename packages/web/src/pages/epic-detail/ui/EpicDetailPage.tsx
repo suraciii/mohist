@@ -10,7 +10,6 @@ import {
   useRemoveEpicIssue,
 } from '../../../entities/epic'
 import { EpicStatus, type LinkedIssue } from '../../../entities/epic'
-import { IssueStatus } from '../../../entities/issue'
 import { ApiError } from '../../../shared/api/client'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
@@ -51,12 +50,12 @@ function toTitleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-function issueStatusTone(status: IssueStatus) {
-  switch (status) {
+function issueStatusTone(health: string) {
+  switch (health) {
     case 'blocked':
       return 'bg-red-50 text-red-700'
-    case IssueStatus.Done:
-    case IssueStatus.Cancelled:
+    case 'done':
+    case 'cancelled':
       return 'bg-green-50 text-green-700'
     default:
       return 'bg-gray-50 text-gray-700'
@@ -71,8 +70,8 @@ function LinkedIssueRow({ issue, onRemove, disabled }: { issue: LinkedIssue; onR
           <Link to={`/issue/${issue.number}`} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
             #{issue.number}
           </Link>
-          <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.status)}`}>{issue.status}</span>
-          <Badge variant="secondary">{toTitleCase(issue.stage)}</Badge>
+          <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
+          <Badge variant="secondary">{toTitleCase(issue.status)}</Badge>
           {issue.priority && <Badge variant="secondary">{issue.priority.toUpperCase()}</Badge>}
         </div>
         <div className="mt-1 truncate text-sm font-medium text-foreground">{issue.title}</div>

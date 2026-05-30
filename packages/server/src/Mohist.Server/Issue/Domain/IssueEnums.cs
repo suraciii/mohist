@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Issue.Domain;
 
-public enum IssueStage
+public enum IssueStatus
 {
     Backlog,
     Todo,

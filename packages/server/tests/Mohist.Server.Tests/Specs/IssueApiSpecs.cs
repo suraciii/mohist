@@ -131,12 +131,12 @@ public class IssueApiSpecs
         var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/status?projectId={project.Id}");
 
         Assert.Equal(1, status.Issues);
-        Assert.Equal(1, status.IssuesByStage["in_progress"]);
-        Assert.Contains("ready", status.IssuesByStage.Keys);
-        Assert.Contains("cancelled", status.IssuesByStage.Keys);
-        Assert.DoesNotContain("plan", status.IssuesByStage.Keys);
-        Assert.DoesNotContain("build", status.IssuesByStage.Keys);
-        Assert.DoesNotContain("check", status.IssuesByStage.Keys);
+        Assert.Equal(1, status.IssuesByStatus["in_progress"]);
+        Assert.Contains("ready", status.IssuesByStatus.Keys);
+        Assert.Contains("cancelled", status.IssuesByStatus.Keys);
+        Assert.DoesNotContain("plan", status.IssuesByStatus.Keys);
+        Assert.DoesNotContain("build", status.IssuesByStatus.Keys);
+        Assert.DoesNotContain("check", status.IssuesByStatus.Keys);
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public class IssueApiSpecs
     private sealed record PrimaryEpicDto(string Id, string Title);
     private sealed record LogLevelDto(string Level);
     private sealed record AgentRuntimeDto(int Timeout, int MaxConcurrent);
-    private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStage);
+    private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStatus);
     private sealed record OpencodeRuntimeDto(string Mode, string Command, string? Model);
     private sealed record SystemInfoDto(ServerInfoDto Server);
     private sealed record ServerInfoDto(string Status);

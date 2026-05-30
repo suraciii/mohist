@@ -131,7 +131,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         MohistDefaultWorkflowProjection.ProjectWorkflowState(
             issue.Number,
             issue.Title,
-            IssueDomainNames.Stage(issue.Stage),
+            IssueDomainNames.StatusName(issue.Status),
             issue.Attention,
             workflow);
 
@@ -139,7 +139,7 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
         MohistDefaultWorkflowProjection.ProjectWorkflowState(
             issue.Number,
             issue.Title,
-            issue.Stage,
+            issue.Status,
             issue.Attention,
             workflow);
 }

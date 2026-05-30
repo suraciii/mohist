@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
-import { Stage } from '../src/entities/issue'
+import { WorkflowStage, IssueStatus } from '../src/entities/issue'
 import { WorkflowStatusTimeline } from '../src/widgets/coder-session/ui/SessionTimeline'
 
 describe('Integrate stage rendering', () => {
@@ -39,28 +39,28 @@ describe('Integrate stage rendering', () => {
   describe('Stage enum and order', () => {
     it('should have Integrate between Check and Done', () => {
       const stageOrder = [
-        Stage.Backlog,
-        Stage.Plan,
-        Stage.Build,
-        Stage.Check,
-        Stage.Integrate,
-        Stage.Done,
+        IssueStatus.Backlog,
+        WorkflowStage.Plan,
+        WorkflowStage.Build,
+        WorkflowStage.Check,
+        WorkflowStage.Integrate,
+        WorkflowStage.Done,
       ]
 
-      const checkIdx = stageOrder.indexOf(Stage.Check)
-      const integrateIdx = stageOrder.indexOf(Stage.Integrate)
-      const doneIdx = stageOrder.indexOf(Stage.Done)
+      const checkIdx = stageOrder.indexOf(WorkflowStage.Check)
+      const integrateIdx = stageOrder.indexOf(WorkflowStage.Integrate)
+      const doneIdx = stageOrder.indexOf(WorkflowStage.Done)
 
       expect(checkIdx).toBeLessThan(integrateIdx)
       expect(integrateIdx).toBeLessThan(doneIdx)
     })
 
     it('should have Stage.Integrate with value integrate', () => {
-      expect(Stage.Integrate).toBe('integrate')
+      expect(WorkflowStage.Integrate).toBe('integrate')
     })
 
     it('should have Backlog as initial stage', () => {
-      expect(Stage.Backlog).toBe('backlog')
+      expect(IssueStatus.Backlog).toBe('backlog')
     })
   })
 })

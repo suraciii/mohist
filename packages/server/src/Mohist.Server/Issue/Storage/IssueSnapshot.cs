@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Issue.Storage;
@@ -40,8 +40,7 @@ public sealed class IssueSnapshot
     public DateTime UpdatedAt { get; set; }
     public DateTime? ArchivedAt { get; set; }
     public string? WorkflowRunId { get; set; }
-    [JsonPropertyName("Status")]
-    public IssueStage Stage { get; set; } = IssueStage.Backlog;
+    public IssueStatus Status { get; set; } = IssueStatus.Backlog;
     public IssueAttention? Attention { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public RepositoryInfo? Repository { get; set; }
@@ -59,7 +58,7 @@ public sealed class IssueSnapshot
         UpdatedAt = issue.UpdatedAt,
         ArchivedAt = issue.ArchivedAt,
         WorkflowRunId = issue.WorkflowRunId,
-        Stage = issue.Stage,
+        Status = issue.Status,
         Attention = issue.Attention,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         Repository = issue.Repository,
@@ -78,7 +77,7 @@ public sealed class IssueSnapshot
         UpdatedAt = UpdatedAt == default ? DateTime.UtcNow : UpdatedAt,
         ArchivedAt = ArchivedAt,
         WorkflowRunId = WorkflowRunId,
-        Stage = Stage,
+        Status = Status,
         Attention = Attention,
         PrerequisiteNumbers = PrerequisiteNumbers,
         Repository = Repository,

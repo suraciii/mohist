@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStage, IssueStatus, WorkflowStage, type Issue, type ApprovalState } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type ApprovalState } from '../../../entities/issue'
 import {
   parseBoardQuery,
   serializeBoardQuery,
@@ -33,8 +33,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     id: `issue-${Math.random().toString(36).slice(2)}`,
     number: 1,
     title: 'Test Issue',
-    stage: IssueStage.Backlog,
-    status: IssueStatus.Active,
+    status: IssueStatus.Backlog,
+    health: IssueHealth.Active,
     projectId: 'proj-1',
     labels: [],
     priority: 'p2',
@@ -319,10 +319,10 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
   it('renders all columns with unfiltered issues', () => {
     const issues = [
-      makeIssue({ number: 1, stage: IssueStage.Backlog }),
-      makeIssue({ number: 2, stage: IssueStage.Backlog }),
-      makeIssue({ number: 3, stage: IssueStage.Todo }),
-      makeIssue({ number: 4, stage: IssueStage.InProgress }),
+      makeIssue({ number: 1, status: IssueStatus.Backlog }),
+      makeIssue({ number: 2, status: IssueStatus.Backlog }),
+      makeIssue({ number: 3, status: IssueStatus.Todo }),
+      makeIssue({ number: 4, status: IssueStatus.InProgress }),
     ]
     const queryClient = new QueryClient()
 
@@ -362,10 +362,10 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
 
   it('displays filtered issue count after priority filter applied', () => {
     const issues = [
-      makeIssue({ number: 1, stage: IssueStage.Backlog, priority: 'p0' }),
-      makeIssue({ number: 2, stage: IssueStage.Backlog, priority: 'p1' }),
-      makeIssue({ number: 3, stage: IssueStage.Backlog, priority: 'p2' }),
-      makeIssue({ number: 4, stage: IssueStage.Todo, priority: 'p0' }),
+      makeIssue({ number: 1, status: IssueStatus.Backlog, priority: 'p0' }),
+      makeIssue({ number: 2, status: IssueStatus.Backlog, priority: 'p1' }),
+      makeIssue({ number: 3, status: IssueStatus.Backlog, priority: 'p2' }),
+      makeIssue({ number: 4, status: IssueStatus.Todo, priority: 'p0' }),
     ]
 
     Object.defineProperty(window, 'location', {
@@ -406,10 +406,10 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
   describe('Desktop layout regression - horizontal multi-column contract at md+', () => {
     it('renders desktop board container with horizontal multi-column layout at md+', () => {
       const issues = [
-        makeIssue({ number: 1, stage: IssueStage.Backlog }),
-        makeIssue({ number: 2, stage: IssueStage.Todo }),
-        makeIssue({ number: 3, stage: IssueStage.InProgress }),
-        makeIssue({ number: 4, stage: IssueStage.InProgress }),
+        makeIssue({ number: 1, status: IssueStatus.Backlog }),
+        makeIssue({ number: 2, status: IssueStatus.Todo }),
+        makeIssue({ number: 3, status: IssueStatus.InProgress }),
+        makeIssue({ number: 4, status: IssueStatus.InProgress }),
       ]
       const queryClient = new QueryClient()
 
@@ -428,9 +428,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('does not stack all stage columns vertically in desktop board container', () => {
       const issues = [
-        makeIssue({ number: 1, stage: IssueStage.Backlog }),
-        makeIssue({ number: 2, stage: IssueStage.Todo }),
-        makeIssue({ number: 3, stage: IssueStage.Done }),
+        makeIssue({ number: 1, status: IssueStatus.Backlog }),
+        makeIssue({ number: 2, status: IssueStatus.Todo }),
+        makeIssue({ number: 3, health: IssueHealth.Done }),
       ]
       const queryClient = new QueryClient()
 
@@ -450,8 +450,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('reveals cancelled issues after clicking the show cancelled control', async () => {
       const issues = [
-        makeIssue({ number: 1, title: 'Active work', stage: IssueStage.InProgress, status: IssueStatus.Active }),
-        makeIssue({ number: 2, title: 'Cancelled work', stage: IssueStage.Cancelled, status: IssueStatus.Cancelled }),
+        makeIssue({ number: 1, title: 'Active work', status: IssueStatus.InProgress, health: IssueHealth.Active }),
+        makeIssue({ number: 2, title: 'Cancelled work', status: IssueStatus.Cancelled, health: IssueHealth.Cancelled }),
       ]
       const queryClient = new QueryClient()
 
@@ -480,8 +480,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const approvalAwaitingIssue = makeIssue({
         number: 180,
         title: 'Plan awaits review',
-        stage: IssueStage.Todo,
-        status: IssueStatus.Active,
+        status: IssueStatus.Todo,
+        health: IssueHealth.Active,
         approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' } as ApprovalState,
       })
       const queryClient = new QueryClient()
@@ -505,8 +505,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const interruptedIssue = makeIssue({
         number: 17,
         title: 'Resume available',
-        stage: IssueStage.InProgress,
-        status: IssueStatus.Interrupted,
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Interrupted,
       })
       const queryClient = new QueryClient()
 
@@ -529,9 +529,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const failedIssue = makeIssue({
         number: 206,
         title: 'integrate task failed',
-        stage: IssueStage.InProgress,
+        status: IssueStatus.InProgress,
         workflowStage: WorkflowStage.Integrate,
-        status: IssueStatus.Blocked,
+        health: IssueHealth.Blocked,
         blockedReason: 'integration task failed',
       })
       const queryClient = new QueryClient()
@@ -555,9 +555,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const failedIssue = makeIssue({
         number: 207,
         title: 'integration blocked by merge conflict',
-        stage: IssueStage.InProgress,
+        status: IssueStatus.InProgress,
         workflowStage: WorkflowStage.Integrate,
-        status: IssueStatus.Blocked,
+        health: IssueHealth.Blocked,
         blockedReason: 'merge conflict',
       })
       const queryClient = new QueryClient()
@@ -582,9 +582,9 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const failedIssue = makeIssue({
         number: 208,
         title: 'integration interrupted',
-        stage: IssueStage.InProgress,
+        status: IssueStatus.InProgress,
         workflowStage: WorkflowStage.Integrate,
-        status: IssueStatus.Interrupted,
+        health: IssueHealth.Interrupted,
       })
       const queryClient = new QueryClient()
 
@@ -607,8 +607,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const doneUnmergedIssue = makeIssue({
         number: 42,
         title: 'Completed issue',
-        stage: IssueStage.Done,
         status: IssueStatus.Done,
+        health: IssueHealth.Done,
       })
       const queryClient = new QueryClient()
 
@@ -628,8 +628,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const doneUnmergedIssue = makeIssue({
         number: 44,
         title: 'Blocked completed issue',
-        stage: IssueStage.Done,
-        status: IssueStatus.Blocked,
+        status: IssueStatus.Done,
+        health: IssueHealth.Blocked,
         blockedReason: 'Manual intervention required',
       })
       const queryClient = new QueryClient()
@@ -650,8 +650,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const blockedIssue = makeIssue({
         number: 99,
         title: 'Issue blocked by dependency',
-        stage: IssueStage.InProgress,
-        status: IssueStatus.Blocked,
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Blocked,
         blockedReason: 'waiting on #88',
       })
       const queryClient = new QueryClient()
@@ -675,8 +675,8 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const normalIssue = makeIssue({
         number: 1,
         title: 'Normal issue',
-        stage: IssueStage.Backlog,
-        status: IssueStatus.Active,
+        status: IssueStatus.Backlog,
+        health: IssueHealth.Active,
       })
       const queryClient = new QueryClient()
 
@@ -788,10 +788,10 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
     it('updates board counts after selecting a label beyond the first eight', async () => {
       const issues = [
-        makeIssue({ number: 1, stage: IssueStage.Backlog, labels: ['reliability'] }),
-        makeIssue({ number: 2, stage: IssueStage.Backlog, labels: ['bug'] }),
-        makeIssue({ number: 3, stage: IssueStage.Todo, labels: ['session'] }),
-        makeIssue({ number: 4, stage: IssueStage.InProgress, labels: ['agent'] }),
+        makeIssue({ number: 1, status: IssueStatus.Backlog, labels: ['reliability'] }),
+        makeIssue({ number: 2, status: IssueStatus.Backlog, labels: ['bug'] }),
+        makeIssue({ number: 3, status: IssueStatus.Todo, labels: ['session'] }),
+        makeIssue({ number: 4, status: IssueStatus.InProgress, labels: ['agent'] }),
       ]
       const queryClient = new QueryClient()
 

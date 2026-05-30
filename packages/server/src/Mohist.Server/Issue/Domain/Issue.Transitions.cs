@@ -1,4 +1,4 @@
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Domain;
 
 namespace Mohist.Server.Issue.Domain;
 
@@ -43,35 +43,31 @@ public static partial class IssueExtensions
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
-        public void MarkReady()
-        {
-            if (issue.Stage == IssueStage.Cancelled)
-                throw new InvalidOperationException($"Issue #{issue.Number} is cancelled");
-            issue.Stage = IssueStage.Todo;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
-
         public void StartWorkflow(string wrId)
         {
-            if (issue.Stage == IssueStage.Cancelled || issue.Stage == IssueStage.Done)
-                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Stage}");
+            if (issue.Status == IssueStatus.Cancelled || issue.Status == IssueStatus.Done)
+                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}");
+            if (issue.WorkflowRunId is not null)
+                throw new InvalidOperationException($"Issue #{issue.Number} already has workflow {issue.WorkflowRunId}");
             issue.WorkflowRunId = wrId;
-            issue.Stage = IssueStage.InProgress;
+            issue.Status = IssueStatus.InProgress;
             issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
         public void Complete()
         {
-            issue.Stage = IssueStage.Done;
+            if (issue.Status != IssueStatus.InProgress)
+                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}, only InProgress can complete");
+            issue.Status = IssueStatus.Done;
             issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
         public void Archive()
         {
-            if (issue.Stage != IssueStage.Done)
-                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Stage}, only Done can archive");
+            if (issue.Status != IssueStatus.Done)
+                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}, only Done can archive");
             issue.ArchivedAt = DateTime.UtcNow;
             issue.UpdatedAt = DateTime.UtcNow;
         }
@@ -84,9 +80,9 @@ public static partial class IssueExtensions
 
         public void Close()
         {
-            if (issue.Stage == IssueStage.Done || issue.ArchivedAt != null)
+            if (issue.Status == IssueStatus.Done || issue.ArchivedAt != null)
                 throw new InvalidOperationException($"Issue #{issue.Number} cannot close");
-            issue.Stage = IssueStage.Cancelled;
+            issue.Status = IssueStatus.Cancelled;
             issue.WorkflowRunId = null;
             issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
@@ -94,9 +90,9 @@ public static partial class IssueExtensions
 
         public void Reopen()
         {
-            if (issue.Stage != IssueStage.Cancelled)
+            if (issue.Status != IssueStatus.Cancelled)
                 throw new InvalidOperationException($"Issue #{issue.Number} is not cancelled");
-            issue.Stage = IssueStage.Backlog;
+            issue.Status = IssueStatus.Backlog;
             issue.UpdatedAt = DateTime.UtcNow;
         }
     }

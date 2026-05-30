@@ -53,8 +53,8 @@ public class IssueCreationSpecs
         Assert.Equal(1, issue.Number);
         Assert.Equal("Test issue", issue.Title);
         Assert.Equal("body", issue.Body);
-        Assert.Equal("backlog", issue.Stage);
-        Assert.Equal("active", issue.RuntimeStatus);
+        Assert.Equal("backlog", issue.Status);
+        Assert.Equal("active", issue.Health);
         Assert.Equal(project.Id, issue.ProjectId);
         Assert.StartsWith("issue_", issue.Id);
         Assert.Equal("mohist/default", issue.WorkflowProfileId);
@@ -157,8 +157,8 @@ public class IssueCreationSpecs
 
         var info = await GetIssueInfoAsync(project.Id, created.Number);
         Assert.NotNull(info);
-        Assert.Equal("cancelled", info.Stage);
-        Assert.Equal("cancelled", info.RuntimeStatus);
+        Assert.Equal("cancelled", info.Status);
+        Assert.Equal("cancelled", info.Health);
     }
 
     [Fact]

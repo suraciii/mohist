@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/ui/components/badge'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStage, WorkflowStage, IssueStatus, type Issue } from '../../../entities/issue'
+import { IssueStatus, WorkflowStage, IssueHealth, type Issue } from '../../../entities/issue'
 import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getStripColor, getLabelStyle, formatPriority, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
@@ -22,15 +22,15 @@ type BadgeType = 'conflict' | 'attention' | 'approval' | 'running' | 'waiting' |
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (issue.workflowStage === WorkflowStage.Integrate) {
-    if (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) {
+    if (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) {
       return 'attention'
     }
     return 'running'
   }
-  if (issue.status === IssueStatus.Blocked) {
+  if (issue.health === IssueHealth.Blocked) {
     return 'attention'
   }
-  if (issue.stage === IssueStage.Cancelled) {
+  if (issue.status === IssueStatus.Cancelled) {
     return 'attention'
   }
   if (issue.approvalState?.status === 'awaiting') {
@@ -111,9 +111,9 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
     (a) => a.issueNumber === issue.number,
   ) ?? false
   const badge = getBadgeType(issue, isAgentRunning)
-  const isBlocked = issue.status === IssueStatus.Blocked
-  const isCancelled = issue.stage === IssueStage.Cancelled
-  const isInterrupted = issue.status === IssueStatus.Interrupted
+  const isBlocked = issue.health === IssueHealth.Blocked
+  const isCancelled = issue.status === IssueStatus.Cancelled
+  const isInterrupted = issue.health === IssueHealth.Interrupted
   const isAwaitingApproval = issue.approvalState?.status === 'awaiting'
 
   const resumeMutation = useMutation({
@@ -189,7 +189,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             {badge && badge !== 'attention' && badge !== 'running' && (
               <StatusBadge type={badge} driftDecision={issue.drift?.decision ?? undefined} />
             )}
-            {showArchiveButton && issue.stage === IssueStage.Done && (
+            {showArchiveButton && issue.status === IssueStatus.Done && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -267,7 +267,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           </div>
         )}
 
-        {!isCancelled && !isBlocked && !isInterrupted && !isAwaitingApproval && issue.workflowStage && issue.stage !== IssueStage.Done && !isAgentRunning && (
+        {!isCancelled && !isBlocked && !isInterrupted && !isAwaitingApproval && issue.workflowStage && issue.status !== IssueStatus.Done && !isAgentRunning && (
           <div className="mt-2 flex justify-end">
             <Button
               variant="outline"

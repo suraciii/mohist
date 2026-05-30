@@ -1,6 +1,6 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Domain;
 using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Issue.Queries;
@@ -11,9 +11,9 @@ public class IssueReadModel
     public int Number { get; set; }
     public string Title { get; set; } = null!;
     public string? Body { get; set; }
-    public string Stage { get; set; } = "backlog";
-    [JsonPropertyName("status")]
-    public string RuntimeStatus { get; set; } = "active";
+    public string Status { get; set; } = "backlog";
+    [JsonPropertyName("health")]
+    public string Health { get; set; } = "active";
     public string ProjectId { get; set; } = null!;
     public string? ProjectName { get; set; }
     public string[] Labels { get; set; } = [];

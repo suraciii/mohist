@@ -4,7 +4,7 @@ import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { approveIssue, rejectIssue, resumeIssue, startIssue } from '../../../entities/issue'
 import { onAgentEvent } from '../../../entities/agent'
-import { IssueStage, WorkflowStage, IssueStatus } from '../../../entities/issue'
+import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import { useWorkflowTimeline } from '../../../entities/issue'
@@ -50,7 +50,7 @@ function getStageStatus(
 
   if (issue.workflowStage === stage && !stageState) return 'running'
 
-  if (issue.stage === IssueStage.Done && stage === WorkflowStage.Done) return 'completed'
+  if (issue.status === IssueStatus.Done && stage === WorkflowStage.Done) return 'completed'
 
   if (currentStageIdx < 0 || stageOrder > currentStageIdx) return 'pending'
 
@@ -874,7 +874,7 @@ function SpecialStatePanel({
 
   if (readOnly) return null
 
-  if (issue.stage === IssueStage.Backlog) {
+  if (issue.status === IssueStatus.Backlog) {
     return (
       <div className="flex justify-center py-4">
         <Button
@@ -888,7 +888,7 @@ function SpecialStatePanel({
     )
   }
 
-  if (issue.status === IssueStatus.Blocked) {
+  if (issue.health === IssueHealth.Blocked) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
         <div className="flex items-center gap-2">
@@ -902,7 +902,7 @@ function SpecialStatePanel({
     )
   }
 
-  if (issue.status === IssueStatus.Interrupted) {
+  if (issue.health === IssueHealth.Interrupted) {
     return (
       <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
         <div className="flex items-center gap-2">
@@ -1013,7 +1013,7 @@ export function CheckRepairPanel({ checkRepair }: { checkRepair: CheckRepairStat
 
 function IntegrateFailurePanel({ issue }: { issue: Issue }) {
   if (issue.workflowStage !== WorkflowStage.Integrate) return null
-  if (issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted) return null
+  if (issue.health !== IssueHealth.Blocked && issue.health !== IssueHealth.Interrupted) return null
 
   const blockedReason = issue.blockedReason ?? 'Integration step failed'
 
@@ -1084,9 +1084,9 @@ function IntegrateFailurePanel({ issue }: { issue: Issue }) {
 }
 
 export function WorkflowView({ issue }: { issue: Issue }) {
-  const isClosed = issue.stage === IssueStage.Cancelled
-  const isCompleted = issue.stage === IssueStage.Done
-  const isBacklog = issue.stage === IssueStage.Backlog
+  const isClosed = issue.status === IssueStatus.Cancelled
+  const isCompleted = issue.status === IssueStatus.Done
+  const isBacklog = issue.status === IssueStatus.Backlog
   const readOnly = isClosed
   const { data: timeline } = useWorkflowTimeline(issue.number, !isBacklog)
   const stageStateMap = useMemo(() => workflowTimelineToStageStateMap(timeline), [timeline])
@@ -1196,7 +1196,7 @@ export function WorkflowView({ issue }: { issue: Issue }) {
         runningDurations={runningDurations}
       />
 
-      {(isBacklog || issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
+      {(isBacklog || issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
         <SpecialStatePanel issue={issue} issueNumber={issue.number} readOnly={readOnly} />
       )}
 
@@ -1210,7 +1210,7 @@ export function WorkflowView({ issue }: { issue: Issue }) {
         />
       )}
 
-      {issue.workflowStage === WorkflowStage.Integrate && (issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (
+      {issue.workflowStage === WorkflowStage.Integrate && (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (
         <IntegrateFailurePanel issue={issue} />
       )}
 

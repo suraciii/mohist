@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStage, type Issue } from '../../../entities/issue'
+import { IssueStatus, type Issue } from '../../../entities/issue'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -356,7 +356,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
     return withIssues ? withIssues.key : STAGES[0].key
   }, [displayedColumns])
 
-  const [selectedStage, setSelectedStage] = useState<IssueStage>(defaultStage)
+  const [selectedStage, setSelectedStage] = useState<IssueStatus>(defaultStage)
 
   useEffect(() => {
     setSelectedStage(defaultStage)
@@ -413,7 +413,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
           ))}
         </div>
 
-        {selectedStage === IssueStage.Cancelled && closedCount > 0 && !showClosed && (
+        {selectedStage === IssueStatus.Cancelled && closedCount > 0 && !showClosed && (
           <div className="px-4 py-2">
             <Button
               variant="link"
@@ -445,8 +445,8 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
             label={col.label}
             issues={col.issues}
             agentStatus={agentStatus}
-            isDone={col.key === IssueStage.Done}
-            archivedCount={col.key === IssueStage.Done ? archivedCount : undefined}
+            isDone={col.key === IssueStatus.Done}
+            archivedCount={col.key === IssueStatus.Done ? archivedCount : undefined}
             sort={localState.sort}
             onSortChange={(s) => updateState({ ...localState, sort: s })}
           />

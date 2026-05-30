@@ -266,8 +266,8 @@ public static class IssueRoutes
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var all = await issuesQuery.ListAsync(pid, null, all: true);
-            var completed = all.Where(i => i.Stage == "done" && i.ArchivedAt == null).ToList();
-            var skipped = all.Where(i => i.Stage != "done" && i.ArchivedAt == null).ToList();
+            var completed = all.Where(i => i.Status == "done" && i.ArchivedAt == null).ToList();
+            var skipped = all.Where(i => i.Status != "done" && i.ArchivedAt == null).ToList();
             var cleanupFailed = 0;
 
             foreach (var issue in completed)

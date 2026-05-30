@@ -1,35 +1,35 @@
-import { IssueStatus } from '../model/types'
+import { IssueHealth } from '../model/types'
 
-export function statusBadge(status: IssueStatus): string {
-  switch (status) {
-    case IssueStatus.Active:
+export function statusBadge(health: IssueHealth): string {
+  switch (health) {
+    case IssueHealth.Active:
       return 'text-green-700 bg-green-50'
-    case IssueStatus.Paused:
+    case IssueHealth.Paused:
       return 'text-amber-700 bg-amber-50'
-    case IssueStatus.Blocked:
+    case IssueHealth.Blocked:
       return 'text-red-700 bg-red-50'
-    case IssueStatus.Interrupted:
+    case IssueHealth.Interrupted:
       return 'text-orange-700 bg-orange-50'
     default:
       return 'text-gray-700 bg-gray-50'
   }
 }
 
-export function statusLabel(status: IssueStatus): string {
-  switch (status) {
-    case IssueStatus.Active:
+export function statusLabel(health: IssueHealth): string {
+  switch (health) {
+    case IssueHealth.Active:
       return 'Active'
-    case IssueStatus.Paused:
+    case IssueHealth.Paused:
       return 'Paused'
-    case IssueStatus.Blocked:
+    case IssueHealth.Blocked:
       return 'Needs Action'
-    case IssueStatus.Interrupted:
+    case IssueHealth.Interrupted:
       return 'Interrupted'
-    case IssueStatus.Cancelled:
+    case IssueHealth.Cancelled:
       return 'Cancelled'
-    case IssueStatus.Done:
+    case IssueHealth.Done:
       return 'Done'
     default:
-      return status
+      return health
   }
 }
