@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.GrainStorage;
+using Mohist.Server.Infrastructure.Persistence.Workflow;
 
 namespace Mohist.Server.Tests.Support;
 

@@ -1,4 +1,4 @@
-using Mohist.Server.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Grains;
 

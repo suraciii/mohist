@@ -1,4 +1,4 @@
-using Mohist.Server.Workspace;
+using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Tests.Support;
 

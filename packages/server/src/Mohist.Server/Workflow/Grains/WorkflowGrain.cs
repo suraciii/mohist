@@ -1,15 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
-using Mohist.Server.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Storage;
+using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
-using Mohist.Server.Workflow.GrainStorage;
+using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -354,7 +354,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         {
             var projectId = GetProjectId();
             if (string.IsNullOrWhiteSpace(projectId)) return;
-            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(projectId));
+            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
             await backlog.ReleaseAsync(GrainKey);
             _log.LogInformation("Workflow {Id} released from backlog (status={Status})", GrainKey, _run.Status);
         }
@@ -364,7 +364,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Grains.GrainKey.WorkflowBacklog(projectId));
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
         await backlog.RegisterAsync(GrainKey);
         _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
     }

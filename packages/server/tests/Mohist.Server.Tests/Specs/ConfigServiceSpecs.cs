@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Configuration;
-using Mohist.Server.Config;
+using Mohist.Server.Infrastructure.Config;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

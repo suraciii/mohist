@@ -6,9 +6,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Config;
-using Mohist.Server.Events;
-using Mohist.Server.Workspace;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Workspace;
 using Xunit;
 
 namespace Mohist.Server.Tests.Support;

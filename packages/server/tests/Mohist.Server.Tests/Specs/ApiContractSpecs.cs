@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Net.Http.Json;
-using Mohist.Server.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Grains;

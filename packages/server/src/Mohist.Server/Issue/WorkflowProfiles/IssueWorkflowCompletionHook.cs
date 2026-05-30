@@ -1,7 +1,7 @@
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Workflow.Hooks;
-using Mohist.Server.Workspace;
+using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
 

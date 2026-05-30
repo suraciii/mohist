@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 
 namespace Mohist.Server.Sessions.Queries;
 
