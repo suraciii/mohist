@@ -1,7 +1,8 @@
 import type { RunnerOptions, WorkItemResult } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
+import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
-import { WorkspaceManager } from "./workspace.js"
+import { WorkspaceManager, defaultRunnerRoot } from "./workspace.js"
 import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
@@ -16,16 +17,28 @@ export class RunnerHost {
   private readonly connection: ServerConnection
   private readonly executor: WorkExecutor
   private readonly sessionManager = new AcpSessionManager()
+  private readonly signalR: RunnerSignalRClient
   private acpConnection: SharedAcpConnection | null = null
 
   constructor(private readonly options: RunnerOptions) {
     this.connection = new ServerConnection(options)
-    this.executor = new WorkExecutor(createDefaultRegistry(), new WorkspaceManager(options.runnerRoot), this.connection, this.sessionManager, null)
+    const workspace = new WorkspaceManager(options.runnerRoot)
+    this.executor = new WorkExecutor(createDefaultRegistry(), workspace, this.connection, this.sessionManager, null)
+    this.signalR = new RunnerSignalRClient(
+      options.serverUrl,
+      options.runnerId,
+      (issueNumber) => workspace.getExistingWorkDir(issueNumber),
+    )
   }
 
   async run(signal: AbortSignal) {
     while (!signal.aborted) {
       await this.connectWhenServerIsReady(signal)
+      try {
+        await this.signalR.start()
+      } catch (error) {
+        console.error("signalr connection failed, will retry:", error)
+      }
       const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
       try {
         while (!signal.aborted) {

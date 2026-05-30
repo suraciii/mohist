@@ -1,5 +1,6 @@
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { readdirSync } from "node:fs"
 import type { JsonObject, WorkItem } from "../core/types.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText } from "../system/process.js"
 
@@ -11,6 +12,20 @@ export interface WorkspaceInfo {
 
 export class WorkspaceManager {
   constructor(private readonly runnerRoot = defaultRunnerRoot()) {}
+
+  getExistingWorkDir(issueNumber: number): string | null {
+    const target = `issue-${issueNumber}`
+    try {
+      for (const project of readdirSync(this.runnerRoot, { withFileTypes: true })) {
+        if (!project.isDirectory()) continue
+        const worktreesDir = join(this.runnerRoot, project.name, "worktrees")
+        if (!exists(worktreesDir)) continue
+        const candidate = join(worktreesDir, target)
+        if (exists(candidate)) return resolve(candidate)
+      }
+    } catch {}
+    return null
+  }
 
   async ensure(work: WorkItem, signal: AbortSignal): Promise<WorkspaceInfo> {
     const variables = work.variables ?? {}

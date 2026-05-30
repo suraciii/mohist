@@ -1,133 +1,216 @@
+using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Runner.SignalR;
+using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Api;
 
 public static class WorkspaceRoutes
 {
+    private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(15);
+
     public static WebApplication MapWorkspaceRoutes(this WebApplication app)
     {
         var issues = app.MapGroup("/api/issues/{number:int}");
 
-        issues.MapGet("/worktree-status", async (int number, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        var workflow = issues.MapGroup("/workflow");
+
+        workflow.MapGet("/diff", async (
+            int number, string? projectId,
+            IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var (repoPath, baseBranch) = ResolveRepo(issue);
-            var status = await git.GetWorktreeStatusAsync(repoPath, issue.ProjectName ?? "project", number, baseBranch);
-            return ApiResults.Ok(status);
-        });
+            var runId = issue.WorkflowRunId;
+            if (string.IsNullOrEmpty(runId))
+                return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
 
-        issues.MapGet("/diff", async (int number, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (issue is null) return ApiResults.NotFound("Issue not found");
+            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
+            if (runnerId is null || connId is null)
+                return ApiResults.Ok(new { available = false, reason = "no_runner", message = "No active runner for this workflow" });
 
-            var (repoPath, baseBranch) = ResolveRepo(issue);
-            var head = $"mo/issue-{number}";
-
-            var branchExists = await git.BranchExistsAsync(repoPath, head);
-            if (!branchExists)
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
-
-            var diff = await git.GetDiffAsync(repoPath, baseBranch, head);
-            var mergeBase = await git.GetMergeBaseAsync(repoPath, baseBranch, head) ?? baseBranch;
-            var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, baseBranch, head);
-            var commits = await git.GetCommitsAsync(repoPath, baseBranch, head);
-            return ApiResults.Ok(new
+            try
             {
-                available = true,
-                reason = (string?)null,
-                @base = baseBranch,
-                head,
-                mergeBase,
-                ahead,
-                behind,
-                canFastForward = behind == 0,
-                comparison = "merge-base",
-                summary = new { filesChanged = diff.Files.Count, commits = commits.Length, additions = diff.TotalAdditions, deletions = diff.TotalDeletions },
-                files = diff.Files,
-            });
-        });
+                var result = await hub.Clients.Client(connId)
+                    .InvokeAsync<RunnerDiffResponse>("GetDiff", number, QueryTimeout, ct);
 
-        issues.MapGet("/commits", async (int number, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (issue is null) return ApiResults.NotFound("Issue not found");
+                if (result is null)
+                    return ApiResults.Ok(new { available = false, reason = "empty", message = "No diff available" });
 
-            var (repoPath, baseBranch) = ResolveRepo(issue);
-            var head = $"mo/issue-{number}";
-
-            if (!await git.BranchExistsAsync(repoPath, head))
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
-
-            var commits = await git.GetCommitsAsync(repoPath, baseBranch, head);
-            var diff = await git.GetDiffAsync(repoPath, baseBranch, head);
-            var mergeBase = await git.GetMergeBaseAsync(repoPath, baseBranch, head) ?? baseBranch;
-            var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, baseBranch, head);
-            return ApiResults.Ok(new
-            {
-                available = true,
-                reason = (string?)null,
-                @base = baseBranch,
-                head,
-                mergeBase,
-                ahead,
-                behind,
-                canFastForward = behind == 0,
-                comparison = "merge-base",
-                summary = new { filesChanged = diff.Files.Count, commits = commits.Length, additions = diff.TotalAdditions, deletions = diff.TotalDeletions },
-                commits = commits.Select(c => new
+                return ApiResults.Ok(new
                 {
-                    c.Hash,
-                    c.ShortHash,
-                    c.Message,
-                    c.Author,
-                    c.Date,
-                    filesChanged = c.Files.Length,
-                    additions = 0,
-                    deletions = 0,
-                    c.Files,
-                }),
-            });
+                    available = true,
+                    reason = (string?)null,
+                    @base = result.Base,
+                    head = result.Head,
+                    mergeBase = result.MergeBase,
+                    ahead = result.Ahead,
+                    behind = result.Behind,
+                    canFastForward = result.Behind == 0,
+                    comparison = "merge-base",
+                    summary = new { filesChanged = result.Files.Count, commits = result.CommitCount, additions = result.TotalAdditions, deletions = result.TotalDeletions },
+                    files = result.Files,
+                });
+            }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            {
+                return ApiResults.Ok(new { available = false, reason = "timeout", message = "Runner query timed out" });
+            }
         });
 
-        issues.MapGet("/commits/{hash}/diff", async (int number, string hash, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        workflow.MapGet("/commits", async (
+            int number, string? projectId,
+            IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var (repoPath, baseBranch) = ResolveRepo(issue);
-            var head = $"mo/issue-{number}";
+            var runId = issue.WorkflowRunId;
+            if (string.IsNullOrEmpty(runId))
+                return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
 
-            if (!await git.BranchExistsAsync(repoPath, head))
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found", hash, diff = "" });
+            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
+            if (runnerId is null || connId is null)
+                return ApiResults.Ok(new { available = false, reason = "no_runner", message = "No active runner for this workflow" });
 
-            var diff = await git.GetCommitDiffAsync(repoPath, hash);
-            return diff is null
-                ? ApiResults.NotFound($"Commit {hash} not found")
-                : ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff });
+            try
+            {
+                var result = await hub.Clients.Client(connId)
+                    .InvokeAsync<RunnerCommitsResponse>("GetCommits", number, QueryTimeout, ct);
+
+                if (result is null)
+                    return ApiResults.Ok(new { available = false, reason = "empty", message = "No commits available" });
+
+                return ApiResults.Ok(new
+                {
+                    available = true,
+                    reason = (string?)null,
+                    @base = result.Base,
+                    head = result.Head,
+                    mergeBase = result.MergeBase,
+                    ahead = result.Ahead,
+                    behind = result.Behind,
+                    canFastForward = result.Behind == 0,
+                    comparison = "merge-base",
+                    summary = new { filesChanged = result.FilesChanged, commits = result.Commits.Count, additions = result.TotalAdditions, deletions = result.TotalDeletions },
+                    commits = result.Commits,
+                });
+            }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            {
+                return ApiResults.Ok(new { available = false, reason = "timeout", message = "Runner query timed out" });
+            }
         });
 
-        issues.MapGet("/file-content", async (int number, string path, string? projectId, IGitService git, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        workflow.MapGet("/commits/{hash}/diff", async (
+            int number, string hash, string? projectId,
+            IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
 
-            var (repoPath, baseBranch) = ResolveRepo(issue);
-            var baseContent = await git.GetFileContentAsync(repoPath, baseBranch, path);
-            var headContent = await git.GetFileContentAsync(repoPath, $"mo/issue-{number}", path);
+            var runId = issue.WorkflowRunId;
+            if (string.IsNullOrEmpty(runId))
+                return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow", hash, diff = "" });
 
-            return ApiResults.Ok(new { @base = baseContent, head = headContent });
+            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
+            if (runnerId is null || connId is null)
+                return ApiResults.Ok(new { available = false, reason = "no_runner", message = "No active runner for this workflow", hash, diff = "" });
+
+            try
+            {
+                var result = await hub.Clients.Client(connId)
+                    .InvokeAsync<RunnerCommitDiffResponse>("GetCommitDiff", number, hash, QueryTimeout, ct);
+
+                if (result is null)
+                    return ApiResults.NotFound($"Commit {hash} not found");
+
+                return ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff = result.Diff });
+            }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            {
+                return ApiResults.Ok(new { available = false, reason = "timeout", message = "Runner query timed out", hash, diff = "" });
+            }
+        });
+
+        workflow.MapGet("/worktree-status", async (
+            int number, string? projectId,
+            IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            CancellationToken ct) =>
+        {
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
+
+            var runId = issue.WorkflowRunId;
+            if (string.IsNullOrEmpty(runId))
+                return ApiResults.Ok(new { exists = false });
+
+            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
+            if (runnerId is null || connId is null)
+                return ApiResults.Ok(new { exists = false, reason = "no_runner" });
+
+            try
+            {
+                var result = await hub.Clients.Client(connId)
+                    .InvokeAsync<RunnerWorktreeStatusResponse>("GetWorktreeStatus", number, QueryTimeout, ct);
+
+                return result is null
+                    ? ApiResults.Ok(new { exists = false })
+                    : ApiResults.Ok(result);
+            }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            {
+                return ApiResults.Ok(new { exists = false, reason = "timeout" });
+            }
+        });
+
+        workflow.MapGet("/file-content", async (
+            int number, string path, string? projectId,
+            IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            CancellationToken ct) =>
+        {
+            var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            if (issue is null) return ApiResults.NotFound("Issue not found");
+
+            var runId = issue.WorkflowRunId;
+            if (string.IsNullOrEmpty(runId))
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
+
+            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
+            if (runnerId is null || connId is null)
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
+
+            try
+            {
+                var result = await hub.Clients.Client(connId)
+                    .InvokeAsync<RunnerFileContentResponse>("GetFileContent", number, path, QueryTimeout, ct);
+
+                return result is null
+                    ? ApiResults.Ok(new { @base = (string?)null, head = (string?)null })
+                    : ApiResults.Ok(new { @base = result.Base, head = result.Head });
+            }
+            catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+            {
+                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
+            }
         });
 
         issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
@@ -169,6 +252,18 @@ public static class WorkspaceRoutes
         });
 
         return app;
+    }
+
+    private static async Task<(string? RunnerId, string? ConnectionId)> ResolveRunnerAsync(
+        string runId, IGrainFactory grains, RunnerConnectionTracker tracker)
+    {
+        var workflowGrain = grains.GetGrain<IWorkflowGrain>(runId);
+        var runnerId = await workflowGrain.GetAssignedRunnerIdAsync();
+        if (string.IsNullOrEmpty(runnerId))
+            return (null, null);
+
+        var connId = tracker.GetConnectionId(runnerId);
+        return (runnerId, connId);
     }
 
     private static (string RepoPath, string BaseBranch) ResolveRepo(IssueReadModel issue)
@@ -219,3 +314,27 @@ public static class WorkspaceRoutes
         return resolved?.Id;
     }
 }
+
+public record RunnerDiffResponse(
+    string Base, string Head, string? MergeBase,
+    int Ahead, int Behind, int CommitCount,
+    int TotalAdditions, int TotalDeletions,
+    List<RunnerDiffFile> Files);
+
+public record RunnerDiffFile(string File, int Additions, int Deletions, string Diff, bool IsBinary);
+
+public record RunnerCommitsResponse(
+    string Base, string Head, string? MergeBase,
+    int Ahead, int Behind,
+    int FilesChanged, int TotalAdditions, int TotalDeletions,
+    List<RunnerCommit> Commits);
+
+public record RunnerCommit(string Hash, string ShortHash, string Message, string Author, string Date, string[] Files);
+
+public record RunnerCommitDiffResponse(string Diff);
+
+public record RunnerWorktreeStatusResponse(
+    bool Exists, string? Branch, string? BaseBranch,
+    int Ahead, int Behind, bool RebaseInProgress, string[] ConflictingFiles);
+
+public record RunnerFileContentResponse(string? Base, string? Head);

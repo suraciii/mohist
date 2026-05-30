@@ -24,6 +24,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task PatchVariablesAsync(string section, string patchJson);
     Task PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task<string?> GetRunStatusAsync();
+    Task<string?> GetAssignedRunnerIdAsync();
 }
 
 [GenerateSerializer]

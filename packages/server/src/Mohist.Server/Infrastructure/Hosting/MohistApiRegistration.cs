@@ -1,4 +1,5 @@
 using Mohist.Server.Api;
+using Mohist.Server.Runner.SignalR;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -25,6 +26,7 @@ public static class MohistApiRegistration
         app.MapEpicRoutes();
         app.MapAgentRoutes();
         app.MapRunnerRoutes();
+        app.MapHub<RunnerHub>("/hubs/runner");
         return app;
     }
 }

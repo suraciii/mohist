@@ -20,6 +20,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkflowRun? _run;
     private WorkLease? _lease;
     private WorkflowExecutionContext? _variables;
+    private string? _lastRunnerId;
     private readonly IStateStore<WorkflowRunProfile> _profileStore;
     private readonly IWorkflowRunStore _runStore;
     private readonly IStateStore<WorkLease> _leaseStore;
@@ -58,6 +59,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _lease = await _leaseStore.LoadAsync(GrainKey);
         _variables = await _variablesStore.LoadAsync(GrainKey);
 
+        _lastRunnerId = _lease?.RunnerId;
         _lease = null;
     }
 
@@ -347,6 +349,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.FromResult(_run?.Status.ToString());
     }
 
+    public Task<string?> GetAssignedRunnerIdAsync()
+    {
+        var runnerId = _lease?.RunnerId ?? _lastRunnerId;
+        return Task.FromResult(runnerId);
+    }
+
     private async Task ReleaseFromBacklogIfTerminalAsync()
     {
         if (_run is null) return;
@@ -445,6 +453,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             Title: title,
             Issue: issueRef);
         _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId);
+        _lastRunnerId = runnerId;
         return dispatch;
     }
 
