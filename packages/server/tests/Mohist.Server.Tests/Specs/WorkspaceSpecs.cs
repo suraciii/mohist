@@ -87,6 +87,6 @@ public class WorkspaceSpecs
     private sealed record CleanupResourceDto(string Type, string Status, string? Path, string? Reason);
     private sealed record WorktreeRemovalResultDto(bool Removed, string Status, string? Path, string? Reason, string Message)
     {
-        public Mohist.Server.Workspace.WorktreeRemovalResult ToDomain() => new(Removed, Status, Path, Reason, Message);
+        public Mohist.Server.Infrastructure.Workspace.WorktreeRemovalResult ToDomain() => new(Removed, Status, Path, Reason, Message);
     }
 }

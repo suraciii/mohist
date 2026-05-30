@@ -1,5 +1,5 @@
-using Mohist.Server.Config;
-using Mohist.Server.Grains;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Api;

@@ -1,4 +1,4 @@
-using Mohist.Server.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Queries;
@@ -8,7 +8,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;
-using Mohist.Server.Workspace;
+using Mohist.Server.Infrastructure.Workspace;
 using System.Text.Json;
 
 namespace Mohist.Server.Api;

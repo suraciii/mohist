@@ -1,11 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.GrainStorage;
+using Mohist.Server.Infrastructure.Persistence.Issue;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Storage.Db;
-using Mohist.Server.Storage.Db.Entities;
+using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Persistence.Db.Entities;
 using Mohist.Server.Tests.Support;
 using Xunit;
 

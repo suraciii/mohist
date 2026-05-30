@@ -1,13 +1,14 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Storage;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Queries;
 
@@ -21,7 +22,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IStateStore<IssueWorkflowProfile> _profileStore;
     private readonly IEventStore _events;
     private readonly IssueWorkflowProfileRegistry _profiles;
-    private readonly Config.ConfigService _config;
+    private readonly ConfigService _config;
     private readonly WorkflowQueryService _workflowReader;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<IssueGrain> _log;
@@ -31,7 +32,7 @@ public class IssueGrain : Grain, IIssueGrain
         IStateStore<IssueWorkflowProfile> profileStore,
         IEventStore events,
         IssueWorkflowProfileRegistry profiles,
-        Config.ConfigService config,
+        ConfigService config,
         WorkflowQueryService workflowReader,
         IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<IssueGrain> log)

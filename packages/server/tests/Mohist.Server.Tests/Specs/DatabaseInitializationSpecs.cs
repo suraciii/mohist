@@ -1,6 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

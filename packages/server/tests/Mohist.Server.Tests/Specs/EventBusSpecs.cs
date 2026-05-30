@@ -1,4 +1,4 @@
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

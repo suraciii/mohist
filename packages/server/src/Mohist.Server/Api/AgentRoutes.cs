@@ -1,7 +1,7 @@
-using Mohist.Server.Grains;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Queries;
-using Mohist.Server.Config;
+using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Workflow.Projection;
 
 namespace Mohist.Server.Api;

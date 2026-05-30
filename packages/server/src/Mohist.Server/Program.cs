@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Config;
-using Mohist.Server.Hosting;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Persistence.Db;
 
 var builder = WebApplication.CreateBuilder(args);
 

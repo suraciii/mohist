@@ -1,12 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Storage;
+using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.GrainStorage;
+using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Orleans.TestingHost;
 using Xunit;
 

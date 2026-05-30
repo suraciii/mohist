@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Tests.Support;
 using Xunit;
 

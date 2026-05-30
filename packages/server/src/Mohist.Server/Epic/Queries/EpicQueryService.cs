@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
 using Mohist.Server.Issue.Queries;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 
 namespace Mohist.Server.Epic.Queries;
 

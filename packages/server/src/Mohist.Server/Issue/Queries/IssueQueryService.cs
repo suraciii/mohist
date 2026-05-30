@@ -6,7 +6,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Projection;

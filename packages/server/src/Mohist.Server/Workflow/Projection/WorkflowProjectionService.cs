@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;

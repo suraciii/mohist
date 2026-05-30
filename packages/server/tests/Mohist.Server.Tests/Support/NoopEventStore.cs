@@ -1,4 +1,4 @@
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Tests.Support;
 

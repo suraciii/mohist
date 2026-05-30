@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 
 namespace Mohist.Server.Api;
 

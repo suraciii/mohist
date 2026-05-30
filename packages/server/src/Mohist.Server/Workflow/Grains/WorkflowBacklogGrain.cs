@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Storage;
+using Mohist.Server.Infrastructure.Persistence;
 
 namespace Mohist.Server.Workflow.Grains;
 

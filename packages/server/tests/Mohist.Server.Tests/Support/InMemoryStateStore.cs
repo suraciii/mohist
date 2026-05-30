@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using Mohist.Server.Storage;
+using Mohist.Server.Infrastructure.Persistence;
 
 namespace Mohist.Server.Tests.Support;
 

@@ -3,7 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 
 #nullable disable
 
@@ -91,7 +91,25 @@ namespace Mohist.Server.Migrations
                     b.ToTable("Epics");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Events.WorkflowEventRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Persistence.Db.Entities.ConfigRow", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("Configs");
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Persistence.Events.WorkflowEventRow", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -473,24 +491,6 @@ namespace Mohist.Server.Migrations
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
                     b.ToTable("WorkflowAgentSessions", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Storage.Db.Entities.ConfigRow", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Key");
-
-                    b.ToTable("Configs");
                 });
 
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.BacklogStateRow", b =>

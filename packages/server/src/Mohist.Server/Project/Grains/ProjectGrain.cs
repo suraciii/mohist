@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Project.Storage;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using System.Text.Json;
 
 namespace Mohist.Server.Project.Grains;

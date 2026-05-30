@@ -1,4 +1,4 @@
-using Mohist.Server.Events;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Grains;
 using Xunit;

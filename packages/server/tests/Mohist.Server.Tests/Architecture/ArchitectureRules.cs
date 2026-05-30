@@ -2,9 +2,10 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnit;
-using Mohist.Server.Storage.Db;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
+using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
 
 namespace Mohist.Server.Tests.Architecture;
 
@@ -37,12 +38,12 @@ public class ArchitectureRules
 
     private static readonly IObjectProvider<IType> StorageLayer = Types()
         .That().ResideInNamespace("Mohist.Server.*.Storage", useRegularExpressions: true)
-        .And().DoNotResideInNamespace("Mohist.Server.*.GrainStorage", useRegularExpressions: true)
-        .Or().ResideInNamespace("Mohist.Server.Storage")
+        .And().DoNotResideInNamespace("Mohist.Server.Infrastructure.Persistence", useRegularExpressions: true)
         .As("Storage Layer");
 
     private static readonly IObjectProvider<IType> GrainStorageLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.GrainStorage", useRegularExpressions: true)
+        .That().ResideInNamespace("Mohist.Server.Infrastructure.Persistence", useRegularExpressions: true)
+        .And().HaveNameEndingWith("Store")
         .As("GrainStorage Layer");
 
     private static readonly IObjectProvider<IType> QueryLayer = Types()
@@ -110,12 +111,12 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void GrainStorage_IsSeparatedFromStorage()
+    public void GrainStorage_IsInInfrastructurePersistence()
     {
         Classes().That().HaveNameEndingWith("Store")
-            .And().ResideInNamespace("Mohist.Server.*.GrainStorage", useRegularExpressions: true)
+            .And().ResideInNamespace("Mohist.Server.Infrastructure.Persistence", useRegularExpressions: true)
             .Should().Exist()
-            .Because("Grain storage implementations should be in GrainStorage namespace")
+            .Because("Grain storage implementations should be in Infrastructure.Persistence namespace")
             .Check(_architecture);
     }
 
@@ -170,7 +171,7 @@ public class ArchitectureRules
     [Fact]
     public void EfEntities_ShouldEndWithRow()
     {
-        var dbSetProperties = typeof(Mohist.Server.Storage.Db.MohistDbContext)
+        var dbSetProperties = typeof(Mohist.Server.Infrastructure.Persistence.Db.MohistDbContext)
             .GetProperties()
             .Where(p => p.PropertyType.IsGenericType &&
                         p.PropertyType.GetGenericTypeDefinition() == typeof(Microsoft.EntityFrameworkCore.DbSet<>))
@@ -183,5 +184,81 @@ public class ArchitectureRules
                 $"EF entity '{entityType.Name}' must end with 'Row'. " +
                 $"Entity type: {entityType.FullName}");
         });
+    }
+
+    private static readonly string[] DomainNamespaces =
+        ["Issue", "Workflow", "Epic", "Project", "Runner", "Sessions"];
+
+    private static readonly (string from, string to)[] AllowedDomainDependencies =
+    [
+        ("Issue", "Workflow"),
+        ("Issue", "Epic"),
+        ("Issue", "Project"),
+        ("Runner", "Sessions"),
+        ("Runner", "Workflow"),
+        ("Workflow", "Sessions"),
+    ];
+
+    [Fact]
+    public void DomainModules_ShouldNotDependOnEachOther()
+    {
+        for (int i = 0; i < DomainNamespaces.Length; i++)
+        {
+            for (int j = i + 1; j < DomainNamespaces.Length; j++)
+            {
+                var a = DomainNamespaces[i];
+                var b = DomainNamespaces[j];
+
+                if (AllowedDomainDependencies.Contains((a, b)) ||
+                    AllowedDomainDependencies.Contains((b, a)))
+                    continue;
+
+                var aTypes = Types()
+                    .That().ResideInNamespace($"Mohist.Server.{a}", useRegularExpressions: true)
+                    .And().DoNotResideInNamespace("OrleansCodeGen", true)
+                    .As($"{a}");
+
+                var bTypes = Types()
+                    .That().ResideInNamespace($"Mohist.Server.{b}", useRegularExpressions: true)
+                    .And().DoNotResideInNamespace("OrleansCodeGen", true)
+                    .As($"{b}");
+
+                Types().That().Are(aTypes)
+                    .Should().NotDependOnAny(bTypes)
+                    .Check(_architecture);
+            }
+        }
+    }
+
+    [Fact]
+    public void DomainInternalLayers_ShouldBeFreeOfCycles()
+    {
+        var domainsWithKnownCycles = new HashSet<string> { "Issue", "Workflow" };
+
+        foreach (var domain in DomainNamespaces)
+        {
+            if (domainsWithKnownCycles.Contains(domain))
+                continue;
+
+            Slices().Matching($"Mohist.Server.{domain}.(*)")
+                .Should().BeFreeOfCycles()
+                .Check(_architecture);
+        }
+    }
+
+    [Fact(Skip = "Tech debt: Issue has internal cycles (Storage↔WorkflowProfiles↔Queries, Grains↔WorkflowProfiles)")]
+    public void IssueInternalLayers_ShouldBeFreeOfCycles()
+    {
+        Slices().Matching("Mohist.Server.Issue.(*)")
+            .Should().BeFreeOfCycles()
+            .Check(_architecture);
+    }
+
+    [Fact(Skip = "Tech debt: Workflow has internal cycles (Storage↔WorkflowProfiles↔Queries, Grains↔WorkflowProfiles)")]
+    public void WorkflowInternalLayers_ShouldBeFreeOfCycles()
+    {
+        Slices().Matching("Mohist.Server.Workflow.(*)")
+            .Should().BeFreeOfCycles()
+            .Check(_architecture);
     }
 }

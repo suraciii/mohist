@@ -1,7 +1,7 @@
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Workspace;
+using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Workflow.Projection;
 
 namespace Mohist.Server.Api;
