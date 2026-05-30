@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "0.21.0"
+    "@agentclientprotocol/sdk": "0.21.0",
+    "@microsoft/signalr": "^10.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
