@@ -2,6 +2,7 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnit;
+using Mohist.Server.Storage.Db;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
 
@@ -164,5 +165,23 @@ public class ArchitectureRules
             .Should().NotDependOnAny(OrleansTypes)
             .Because("API layer should not depend on Orleans directly")
             .Check(_architecture);
+    }
+
+    [Fact]
+    public void EfEntities_ShouldEndWithRow()
+    {
+        var dbSetProperties = typeof(Mohist.Server.Storage.Db.MohistDbContext)
+            .GetProperties()
+            .Where(p => p.PropertyType.IsGenericType &&
+                        p.PropertyType.GetGenericTypeDefinition() == typeof(Microsoft.EntityFrameworkCore.DbSet<>))
+            .Select(p => p.PropertyType.GetGenericArguments()[0])
+            .ToList();
+
+        Assert.All(dbSetProperties, entityType =>
+        {
+            Assert.True(entityType.Name.EndsWith("Row"),
+                $"EF entity '{entityType.Name}' must end with 'Row'. " +
+                $"Entity type: {entityType.FullName}");
+        });
     }
 }

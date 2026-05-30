@@ -244,7 +244,7 @@ var runRows = await db.WorkflowRuns
             .Where(p => p.ProjectId == projectId && numbers.Contains(p.IssueNumber))
             .ToListAsync();
         var prereqRows = issues
-            .SelectMany(issue => issue.PrerequisiteNumbers.Select(prerequisiteNumber => new IssuePrerequisiteEntry
+            .SelectMany(issue => issue.PrerequisiteNumbers.Select(prerequisiteNumber => new IssuePrerequisiteRow
             {
                 ProjectId = projectId,
                 IssueNumber = issue.Number,
@@ -315,7 +315,7 @@ var runRows = await db.WorkflowRuns
     private static async Task<IssueReadModel> EnrichAsync(MohistDbContext db, IssueReadModel issue) =>
         (await EnrichAsync(db, [issue]))[0];
 
-    public static IssueCommentDto ToCommentDto(IssueCommentEntry comment) =>
+    public static IssueCommentDto ToCommentDto(IssueCommentRow comment) =>
         new(comment.Id, comment.IssueId, comment.Body, comment.CreatedAt.ToString("o"));
 
     private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueReadModel issue) => new()

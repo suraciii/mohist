@@ -47,7 +47,7 @@ public class ProjectQueryService
         return all.Count == 1 ? all[0] : null;
     }
 
-    internal static ProjectInfo ToInfo(ProjectEntry e) => new()
+    internal static ProjectInfo ToInfo(ProjectRow e) => new()
     {
         Id = e.Id,
         Name = e.Name,

@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace Mohist.Server.Workflow.Storage;
 
 [Table("workflow_runs")]
-public class WorkflowRunEntity
+public class WorkflowRunRow
 {
     [Key]
     [MaxLength(50)]

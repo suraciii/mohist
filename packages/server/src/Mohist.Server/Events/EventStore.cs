@@ -18,7 +18,7 @@ public class EventStore : IEventStore
     public async Task<EventDto> AppendAsync(EventInput input, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var entry = new WorkflowEventEntry
+        var entry = new WorkflowEventRow
         {
             ProjectId = input.ProjectId,
             IssueId = input.IssueId,
@@ -80,7 +80,7 @@ public class EventStore : IEventStore
         return rows.Select(ToDto).ToList();
     }
 
-    private static EventDto ToDto(WorkflowEventEntry entry) => new(
+    private static EventDto ToDto(WorkflowEventRow entry) => new(
         entry.Id.ToString(),
         entry.ProjectId,
         entry.IssueId,

@@ -1,9 +1,10 @@
-namespace Mohist.Server.Issue.Storage;
+namespace Mohist.Server.Epics;
 
-public class IssuePrerequisiteEntry
+public class EpicIssueRow
 {
+    public string EpicId { get; set; } = null!;
     public string ProjectId { get; set; } = null!;
+    public string IssueId { get; set; } = null!;
     public int IssueNumber { get; set; }
-    public int PrerequisiteNumber { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

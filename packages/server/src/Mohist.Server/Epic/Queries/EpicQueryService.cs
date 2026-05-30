@@ -36,23 +36,23 @@ public class EpicQueryService
         return epic is null ? null : await ToDetailAsync(db, epic);
     }
 
-    private async Task<EpicWithProgressDto> ToWithProgressAsync(MohistDbContext db, EpicEntry epic)
+    private async Task<EpicWithProgressDto> ToWithProgressAsync(MohistDbContext db, EpicRow epic)
     {
         var progress = await BuildProgressAsync(db, epic);
         return new EpicWithProgressDto(epic.Id, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), progress);
     }
 
-    private async Task<EpicDetailDto> ToDetailAsync(MohistDbContext db, EpicEntry epic)
+    private async Task<EpicDetailDto> ToDetailAsync(MohistDbContext db, EpicRow epic)
     {
         var linked = await GetLinkedIssuesAsync(db, epic);
         var progress = BuildProgress(linked);
         return new EpicDetailDto(epic.Id, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress);
     }
 
-    private async Task<EpicProgressDto> BuildProgressAsync(MohistDbContext db, EpicEntry epic) =>
+    private async Task<EpicProgressDto> BuildProgressAsync(MohistDbContext db, EpicRow epic) =>
         BuildProgress(await GetLinkedIssuesAsync(db, epic));
 
-    private async Task<List<LinkedIssueDto>> GetLinkedIssuesAsync(MohistDbContext db, EpicEntry epic)
+    private async Task<List<LinkedIssueDto>> GetLinkedIssuesAsync(MohistDbContext db, EpicRow epic)
     {
         var links = await db.EpicIssues.AsNoTracking()
             .Where(link => link.ProjectId == epic.ProjectId && link.EpicId == epic.Id)
