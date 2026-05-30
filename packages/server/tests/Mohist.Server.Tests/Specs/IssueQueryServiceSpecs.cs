@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.GrainStorage;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Queries;

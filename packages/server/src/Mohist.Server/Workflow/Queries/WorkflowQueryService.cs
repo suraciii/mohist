@@ -4,10 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Workflow.Queries;
 
@@ -75,7 +73,7 @@ public class WorkflowQueryService
 
         if (json is null) return null;
 
-        var ctx = JsonSerializer.Deserialize<WorkflowExecutionContext>(json, StorageJsonOptions);
+        var ctx = JsonSerializer.Deserialize<VariablesDto>(json, StorageJsonOptions);
         return ctx is null
             ? null
             : new WorkflowVariablesView(ctx.Json, ctx.StageVariables);
@@ -125,4 +123,6 @@ public class WorkflowQueryService
             : null;
         return run?.HasIncompleteTaskById(id) ?? false;
     }
+
+    private sealed record VariablesDto(string Json, Dictionary<string, Dictionary<string, string>>? StageVariables);
 }

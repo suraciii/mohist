@@ -9,7 +9,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.GrainStorage;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Workflow.Grains;

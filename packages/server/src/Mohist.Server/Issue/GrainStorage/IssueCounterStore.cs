@@ -1,9 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 
-namespace Mohist.Server.Issue.Storage;
+namespace Mohist.Server.Issue.GrainStorage;
 
 public class IssueCounterStore : IStateStore<IssueCounterState>
 {
@@ -39,10 +40,4 @@ public class IssueCounterStore : IStateStore<IssueCounterState>
     public Task DeleteAsync(string key) => throw new NotSupportedException();
 
     public Task<IReadOnlyList<IssueCounterState>> ListAsync() => throw new NotSupportedException();
-}
-
-public class IssueCounterRow
-{
-    public string ProjectId { get; set; } = string.Empty;
-    public int Next { get; set; } = 1;
 }

@@ -1,41 +1,131 @@
 import { join } from "node:path"
 import { exists } from "../system/process.js"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
-import { objectInput, stringInput } from "../core/json.js"
+import { numberInput, objectInput, stringInput } from "../core/json.js"
+import { acpAgentAction } from "./acp-agent.js"
 import { git } from "./git.js"
+
+const DEFAULT_MAX_CONFLICT_RETRIES = 3
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
+  const maxRetries = numberInput(context.with, "maxConflictRetries") ?? DEFAULT_MAX_CONFLICT_RETRIES
   const conflictResolver = objectInput(context.with, "conflictResolver")
   const before = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
-  const result = await git(context.workDir, ["rebase", baseBranch], context.signal)
-  const after = result.success ? await git(context.workDir, ["rev-parse", "HEAD"], context.signal) : null
-  const conflicts = result.success ? [] : await conflictFiles(context)
+  const beforeSha = before.success ? before.stdout.trim() : null
 
-  if (!result.success && conflicts.length > 0 && conflictResolver) {
-    const output = JSON.stringify({
-      kind: "rebase",
-      status: "conflict",
-      baseBranch,
-      beforeHeadSha: before.success ? before.stdout.trim() : null,
-      conflicts,
-      output: result.combinedOutput,
-      requestedTask: buildRequestedTask(conflictResolver, conflicts, baseBranch),
-    })
-    return { status: "failure", message: "Rebase conflict; conflict resolver task requested", output, exitCode: result.exitCode }
+  const result = await git(context.workDir, ["rebase", baseBranch], context.signal)
+  if (result.success) {
+    const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+    return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, [], 0, result.combinedOutput)
   }
 
+  let conflicts = await conflictFiles(context)
+  if (conflicts.length === 0) {
+    return rebaseOutput(false, baseBranch, beforeSha, null, [], 0, result.combinedOutput, result.exitCode)
+  }
+
+  if (!conflictResolver) {
+    await git(context.workDir, ["rebase", "--abort"], context.signal)
+    return rebaseOutput(false, baseBranch, beforeSha, null, conflicts, 0, result.combinedOutput, result.exitCode)
+  }
+
+  const allConflicts: string[][] = [conflicts]
+  let attempts = 0
+
+  while (attempts < maxRetries) {
+    attempts++
+    const agentResult = await runConflictResolver(context, conflictResolver, conflicts, baseBranch, attempts)
+    if (agentResult.status !== "success") {
+      await git(context.workDir, ["rebase", "--abort"], context.signal)
+      return rebaseOutput(false, baseBranch, beforeSha, null, conflicts, attempts, result.combinedOutput, 1)
+    }
+
+    await git(context.workDir, ["add", "."], context.signal)
+    const continued = await git(context.workDir, ["-c", "core.editor=true", "rebase", "--continue"], context.signal)
+    if (continued.success) {
+      const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+      return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, conflicts.flat(), attempts, result.combinedOutput)
+    }
+
+    conflicts = await conflictFiles(context)
+    if (conflicts.length === 0) {
+      const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+      return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, allConflicts.flat(), attempts, result.combinedOutput)
+    }
+    allConflicts.push(conflicts)
+  }
+
+  await git(context.workDir, ["rebase", "--abort"], context.signal)
+  return rebaseOutput(false, baseBranch, beforeSha, null, allConflicts.flat(), attempts, result.combinedOutput, 1)
+}
+
+function rebaseOutput(
+  rebased: boolean,
+  baseBranch: string,
+  beforeSha: string | null,
+  afterSha: string | null,
+  conflicts: string[],
+  resolveAttempts: number,
+  gitOutput: string,
+  exitCode: number | null = null,
+): ActionResult {
   const output = JSON.stringify({
     kind: "rebase",
-    status: result.success ? "completed" : conflicts.length > 0 ? "conflict" : "failed",
+    status: rebased ? "completed" : "failed",
     baseBranch,
-    beforeHeadSha: before.success ? before.stdout.trim() : null,
-    afterHeadSha: after?.success ? after.stdout.trim() : null,
-    rebased: result.success,
+    beforeHeadSha: beforeSha,
+    afterHeadSha: afterSha,
+    rebased,
     conflicts,
-    output: result.combinedOutput,
+    resolveAttempts,
+    output: gitOutput,
   })
-  return result.success ? { status: "success", message: "Rebase completed", output, exitCode: result.exitCode } : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
+  return rebased
+    ? { status: "success", message: "Rebase completed", output }
+    : { status: "failure", message: `Rebase failed after ${resolveAttempts} conflict resolution attempts`, output, exitCode: exitCode ?? 1 }
+}
+
+async function runConflictResolver(
+  context: ActionContext,
+  conflictResolver: JsonObject,
+  conflicts: string[],
+  baseBranch: string,
+  attempt: number,
+): Promise<ActionResult> {
+  const resolverWith: JsonObject = {
+    prompt: buildConflictPrompt(conflicts, baseBranch, attempt),
+    ...objectInput(conflictResolver, "with"),
+  }
+
+  const resolverContext: ActionContext = {
+    ...context,
+    workId: `${context.workId}-conflict-resolve-${attempt}`,
+    workType: "task",
+    title: stringInput(conflictResolver, "title") ?? "Resolve rebase conflicts",
+    with: resolverWith,
+  }
+
+  return acpAgentAction(resolverContext)
+}
+
+function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: number): string {
+  const fileList = conflicts.map((f) => `- ${f}`).join("\n")
+  return [
+    `## Git Rebase Conflict Resolution (attempt ${attempt})`,
+    "",
+    `A \`git rebase ${baseBranch}\` produced merge conflicts in the following files:`,
+    "",
+    fileList,
+    "",
+    "Resolve every conflict marker in each file listed above. For each file:",
+    "1. Open the file and find all `<<<<<<<`, `=======`, and `>>>>>>>` markers.",
+    "2. Choose the correct resolution (typically keep incoming changes from the branch being rebased onto, unless the current branch has newer intentional changes).",
+    "3. Remove all conflict markers and leave clean, correct code.",
+    "4. Do NOT run `git add` or `git rebase --continue` — those will be handled automatically.",
+    "",
+    "After resolving all conflicts, verify the project still builds/tests pass if possible.",
+  ].join("\n")
 }
 
 export async function rebaseStatusAction(context: ActionContext): Promise<ActionResult> {
@@ -75,22 +165,4 @@ async function isRebaseInProgress(context: ActionContext) {
 
 function resolveGitPath(workDir: string, path: string) {
   return path.match(/^[A-Za-z]:[\\/]|^\//) ? path : join(workDir, path)
-}
-
-function buildRequestedTask(conflictResolver: JsonObject, conflicts: string[], baseBranch: string) {
-  const withInput = objectInput(conflictResolver, "with") ?? {}
-  const withResolved: JsonObject = {
-    stage: "maintenance",
-    task: "resolve-rebase-conflicts",
-    conflicts,
-    description: "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes.",
-    ...withInput,
-  }
-  return {
-    id: stringInput(conflictResolver, "id") ?? "resolve-rebase-conflicts",
-    title: stringInput(conflictResolver, "title") ?? "Resolve rebase conflicts",
-    uses: stringInput(conflictResolver, "uses") ?? "mohist/acp-agent",
-    with: withResolved,
-    then: { id: "verify-rebase", title: "Verify rebase completed", uses: "mohist/rebase-status", with: { baseBranch } },
-  }
 }

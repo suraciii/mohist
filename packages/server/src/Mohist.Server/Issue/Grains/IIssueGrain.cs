@@ -20,6 +20,7 @@ public interface IIssueGrain : IGrainWithStringKey
     Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber);
     Task RemovePrerequisiteAsync(int prerequisiteNumber);
     Task<IssueStartEligibility> GetStartEligibilityAsync();
+    Task<IssueCommentResult> AddCommentAsync(string body);
 }
 
 [GenerateSerializer]
@@ -56,3 +57,8 @@ public sealed record IssuePrerequisiteResult(
     public static IssuePrerequisiteResult PrerequisiteNotFound(int number) => new(false, "prerequisite_not_found", $"Issue #{number} not found");
     public static IssuePrerequisiteResult Circular() => new(false, "circular_prerequisite", "Issue cannot depend on itself");
 }
+
+[GenerateSerializer]
+public sealed record IssueCommentResult(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string Body);

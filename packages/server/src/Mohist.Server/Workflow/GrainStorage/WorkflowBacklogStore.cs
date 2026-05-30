@@ -3,8 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Storage;
 
-namespace Mohist.Server.Workflow.Storage;
+namespace Mohist.Server.Workflow.GrainStorage;
 
 public class WorkflowBacklogStore : IStateStore<WorkflowBacklogState>
 {
@@ -47,10 +48,4 @@ public class WorkflowBacklogStore : IStateStore<WorkflowBacklogState>
 
     private static string Serialize(WorkflowBacklogState state) =>
         JsonSerializer.Serialize(state);
-}
-
-public class BacklogStateRow
-{
-    public string ProjectId { get; set; } = string.Empty;
-    public string StateJson { get; set; } = "{}";
 }

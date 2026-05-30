@@ -3,8 +3,9 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Storage;
 
-namespace Mohist.Server.Workflow.Storage;
+namespace Mohist.Server.Workflow.GrainStorage;
 
 public interface IWorkflowRunStore
 {

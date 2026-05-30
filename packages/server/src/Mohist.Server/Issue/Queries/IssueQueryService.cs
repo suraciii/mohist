@@ -10,7 +10,6 @@ using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Projection;
-using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Issue.Queries;
 
@@ -50,7 +49,7 @@ public class IssueQueryService
         var key = $"{projectId}:{number}"; var row = await db.IssueStates
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.Key == key);
-        return row is null ? null : IssueStore.Deserialize(row.StateJson);
+        return row is null ? null : IssueSnapshot.DeserializeIssue(row.StateJson);
     }
 
     public async Task<List<IssueReadModel>> ListAsync(
@@ -67,7 +66,7 @@ public class IssueQueryService
             .Where(row => EF.Functions.Like(row.Key, projectId + ":%"))
             .ToListAsync();
         var list = rows
-            .Select(row => IssueStore.Deserialize(row.StateJson))
+            .Select(row => IssueSnapshot.DeserializeIssue(row.StateJson))
             .Where(issue => issue is not null)
             .Cast<Domain.Issue>()
             .Where(issue => issue.ProjectId == projectId)
@@ -176,7 +175,7 @@ var runRows = await db.WorkflowRuns
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
-        var leases = leaseRows.ToDictionary(r => r.WorkflowRunId, r => WorkflowLeaseStore.Deserialize(r.StateJson), StringComparer.Ordinal);
+        var leases = leaseRows.ToDictionary(r => r.WorkflowRunId, r => DeserializeLease(r.StateJson), StringComparer.Ordinal);
 
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
@@ -266,7 +265,7 @@ var runRows = await db.WorkflowRuns
                 .ToListAsync();
             foreach (var row in rows)
             {
-                var issue = IssueStore.Deserialize(row.StateJson);
+                var issue = IssueSnapshot.DeserializeIssue(row.StateJson);
                 if (issue is not null)
                     prereqIssues[issue.Number] = ToReadModel(ToInfo(issue));
             }
@@ -334,4 +333,12 @@ var runRows = await db.WorkflowRuns
         try { return JsonSerializer.Deserialize<WorkflowRun>(json, RunJsonOptions); }
         catch { return null; }
     }
+
+    private static readonly JsonSerializerOptions LeaseJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    private static WorkLease? DeserializeLease(string json) =>
+        json == "null" ? null : JsonSerializer.Deserialize<WorkLease>(json, LeaseJsonOptions);
 }

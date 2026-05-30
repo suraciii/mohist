@@ -83,4 +83,7 @@ public sealed class IssueSnapshot
         PrerequisiteNumbers = PrerequisiteNumbers,
         Repository = Repository,
     };
+
+    public static Domain.Issue? DeserializeIssue(string json) =>
+        JsonSerializer.Deserialize<IssueSnapshot>(json)?.ToDomain();
 }
