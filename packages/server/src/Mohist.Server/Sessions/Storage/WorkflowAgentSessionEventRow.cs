@@ -1,6 +1,6 @@
 namespace Mohist.Server.Sessions.Storage;
 
-public class WorkflowAgentSessionEvent
+public class WorkflowAgentSessionEventRow
 {
     public long Id { get; set; }
     public string SessionId { get; set; } = string.Empty;

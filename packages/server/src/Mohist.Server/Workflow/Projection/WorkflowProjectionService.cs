@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
@@ -42,13 +43,14 @@ public class WorkflowProjectionService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.WorkflowAgentSessions.AsNoTracking()
-            .Where(s => s.CompletedAt == null && (s.Status == AgentSessionStatus.Created || s.Status == AgentSessionStatus.Running || s.Status == AgentSessionStatus.Probing));
+            .Where(s => s.CompletedAt == null && (s.Status == "created" || s.Status == "running" || s.Status == "probing"));
         if (!string.IsNullOrWhiteSpace(projectId)) query = query.Where(s => s.ProjectId == projectId);
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+        var domainSessions = sessions.Select(ToDomain).ToList();
         var result = new List<ActiveAgentDto>();
 
-        foreach (var session in sessions)
+        foreach (var session in domainSessions)
         {
             var status = await _workflowReader.GetStatusAsync(session.WorkflowRunId);
             var pending = status?.PendingWork;
@@ -142,11 +144,20 @@ public class WorkflowProjectionService
     private async Task<IReadOnlyList<WorkflowAgentSession>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.WorkflowAgentSessions.AsNoTracking()
+        var rows = await db.WorkflowAgentSessions.AsNoTracking()
             .Where(s => s.WorkflowRunId == workflowRunId)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
+        return rows.Select(ToDomain).ToList();
     }
+
+    private static WorkflowAgentSession ToDomain(WorkflowAgentSessionRow r) => WorkflowAgentSession.Restore(
+        r.Id, r.ProjectId, r.IssueNumber, r.WorkflowRunId, r.SessionName,
+        r.WorkId, r.WorkType, r.Stage, r.Title, r.RunnerId, r.AgentSessionId,
+        AgentSessionStatusNames.Parse(r.Status), r.Model,
+        r.WorkDir, r.ChangeDir, r.ProcessPid,
+        r.CreatedAt, r.StartedAt, r.LastDataAt, r.LastHeartbeatAt,
+        r.CompletedAt, r.FailureReason, r.ExitCode);
 
     private static string NormalizeStatus(string value) => value.ToLowerInvariant() switch
     {

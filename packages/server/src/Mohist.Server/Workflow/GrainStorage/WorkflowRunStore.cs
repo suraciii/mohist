@@ -38,7 +38,7 @@ public class WorkflowRunStore : IWorkflowRunStore
 
         if (entity is null)
         {
-            db.WorkflowRuns.Add(new WorkflowRunEntity { WorkflowRunId = run.Id, State = json });
+            db.WorkflowRuns.Add(new WorkflowRunRow { WorkflowRunId = run.Id, State = json });
         }
         else
         {

@@ -1,6 +1,6 @@
 namespace Mohist.Server.Events;
 
-public class WorkflowEventEntry
+public class WorkflowEventRow
 {
     public long Id { get; set; }
     public string ProjectId { get; set; } = string.Empty;

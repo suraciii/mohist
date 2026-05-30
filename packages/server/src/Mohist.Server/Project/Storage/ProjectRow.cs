@@ -1,6 +1,6 @@
 namespace Mohist.Server.Project.Storage;
 
-public class ProjectEntry
+public class ProjectRow
 {
     public string Id { get; set; } = null!;
     public string Name { get; set; } = null!;

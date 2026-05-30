@@ -112,7 +112,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             .Select(e => (long?)e.Sequence)
             .MaxAsync() ?? 0;
 
-        var entries = new List<WorkflowAgentSessionEvent>();
+        var entries = new List<WorkflowAgentSessionEventRow>();
 
         foreach (var e in command.Events)
         {
@@ -136,7 +136,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
                     session.Complete(now, exitCode);
             }
 
-            entries.Add(new WorkflowAgentSessionEvent
+            entries.Add(new WorkflowAgentSessionEventRow
             {
                 SessionId = session.Id,
                 ProjectId = session.ProjectId,
@@ -195,8 +195,15 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
     private async Task<WorkflowAgentSession?> LoadByWorkflowAndSessionAsync(string workflowRunId, string sessionName)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.WorkflowAgentSessions.AsNoTracking()
+        var row = await db.WorkflowAgentSessions.AsNoTracking()
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName);
+        return row is null ? null : WorkflowAgentSession.Restore(
+            row.Id, row.ProjectId, row.IssueNumber, row.WorkflowRunId, row.SessionName,
+            row.WorkId, row.WorkType, row.Stage, row.Title, row.RunnerId, row.AgentSessionId,
+            AgentSessionStatusNames.Parse(row.Status), row.Model,
+            row.WorkDir, row.ChangeDir, row.ProcessPid,
+            row.CreatedAt, row.StartedAt, row.LastDataAt, row.LastHeartbeatAt,
+            row.CompletedAt, row.FailureReason, row.ExitCode);
     }
 
     private async Task<WorkflowAgentSession> GetOrCreateAsync()
@@ -226,7 +233,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         title = session.Title,
     });
 
-    private void EmitTranscriptEntry(WorkflowAgentSession session, WorkflowAgentSessionEvent entry)
+    private void EmitTranscriptEntry(WorkflowAgentSession session, WorkflowAgentSessionEventRow entry)
     {
         var text = ExtractText(entry.PayloadJson);
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
@@ -312,7 +319,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         s.FailureReason,
         s.ExitCode);
 
-    private static WorkflowAgentSessionEventInfo ToEventInfo(WorkflowAgentSessionEvent e) => new(
+    private static WorkflowAgentSessionEventInfo ToEventInfo(WorkflowAgentSessionEventRow e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.ProjectId,

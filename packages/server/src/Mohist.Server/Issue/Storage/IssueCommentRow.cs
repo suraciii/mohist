@@ -1,6 +1,6 @@
 namespace Mohist.Server.Issue.Storage;
 
-public class IssueCommentEntry
+public class IssueCommentRow
 {
     public string Id { get; set; } = null!;
     public string ProjectId { get; set; } = null!;

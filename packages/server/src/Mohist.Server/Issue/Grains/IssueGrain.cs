@@ -367,7 +367,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null) throw new InvalidOperationException("Issue not found");
 
-        var comment = new IssueCommentEntry
+        var comment = new IssueCommentRow
         {
             Id = $"cmt_{Guid.NewGuid():N}",
             ProjectId = _issue.ProjectId,

@@ -19,7 +19,7 @@ public class EpicGrain : Grain, IEpicGrain
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var now = DateTimeOffset.UtcNow;
-        var epic = new EpicEntry
+        var epic = new EpicRow
         {
             Id = $"epic_{Guid.NewGuid():N}",
             ProjectId = projectId,
@@ -55,7 +55,7 @@ public class EpicGrain : Grain, IEpicGrain
 
         if (existing is null)
         {
-            db.EpicIssues.Add(new EpicIssueEntry
+            db.EpicIssues.Add(new EpicIssueRow
             {
                 EpicId = epicId,
                 ProjectId = projectId,
@@ -99,6 +99,6 @@ public class EpicGrain : Grain, IEpicGrain
         return ToDto(epic);
     }
 
-    private static EpicDto ToDto(EpicEntry epic) =>
+    private static EpicDto ToDto(EpicRow epic) =>
         new(epic.Id, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"));
 }

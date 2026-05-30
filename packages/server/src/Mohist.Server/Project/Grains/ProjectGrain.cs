@@ -47,7 +47,7 @@ public class ProjectGrain : Grain, IProjectGrain
             },
         };
 
-        var entry = new ProjectEntry
+        var entry = new ProjectRow
         {
             Id = GrainKey,
             Name = name,
