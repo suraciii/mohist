@@ -6,7 +6,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Grains;
@@ -115,7 +115,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null) return;
         if (_issue.WorkflowRunId != workflowRunId) return;
-        if (_issue.Stage == IssueStage.Done) return;
+        if (_issue.Status == IssueStatus.Done) return;
 
         _issue.Complete();
         await SaveIssueAsync();
@@ -177,8 +177,8 @@ public class IssueGrain : Grain, IIssueGrain
             _issue.Id,
             _issue.Number,
             _issue.Title,
-            projection.IssueStage,
-            projection.RuntimeStatus,
+            projection.IssueStatus,
+            projection.Health,
             wrId,
             projection.ChangeDir,
             null,
@@ -318,7 +318,7 @@ public class IssueGrain : Grain, IIssueGrain
             type,
             IssueId: _issue.Id,
             WorkflowRunId: _issue.WorkflowRunId,
-            Stage: IssueDomainNames.Stage(_issue.Stage),
+            Stage: IssueDomainNames.StatusName(_issue.Status),
             Status: status,
             Message: message,
             Payload: payload));
@@ -336,33 +336,13 @@ public class IssueGrain : Grain, IIssueGrain
         try
         {
             var issue = await _issueStore.LoadAsync($"{_issue.ProjectId}:{issueNumber}");
-            return issue is null ? null : ToPrerequisiteSummary(issue);
+            return issue is null ? null : IssuePrerequisiteSummary.FromDomain(issue);
         }
         catch (InvalidOperationException)
         {
             return null;
         }
     }
-
-    private static IssuePrerequisiteSummary ToPrerequisiteSummary(Domain.Issue issue) => new()
-    {
-        IssueId = issue.Id,
-        Number = issue.Number,
-        Title = issue.Title,
-        Completed = issue.Stage == IssueStage.Done,
-        Stage = IssueDomainNames.Stage(issue.Stage),
-        Status = IssueRuntimeSummary(issue.Stage, issue.Attention),
-    };
-
-    private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
-        status switch
-        {
-            IssueStage.Done => "done",
-            IssueStage.Cancelled => "cancelled",
-            _ when attention?.Reason is IssueAttentionReason.Blocked or IssueAttentionReason.WorkflowFailed => "blocked",
-            _ when attention is not null => "attention",
-            _ => "active",
-        };
 
     public async Task<IssueCommentResult> AddCommentAsync(string body)
     {

@@ -1,5 +1,5 @@
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, WorkflowStage, type Issue } from '../../../entities/issue'
+import { IssueHealth, WorkflowStage, type Issue } from '../../../entities/issue'
 
 export interface AttentionItem {
   issueNumber: number
@@ -12,8 +12,8 @@ function isIntegrateFailure(issue: Issue): boolean {
   return (
     issue.workflowStage === WorkflowStage.Integrate
     && (
-      issue.status === IssueStatus.Blocked
-      || issue.status === IssueStatus.Interrupted
+      issue.health === IssueHealth.Blocked
+      || issue.health === IssueHealth.Interrupted
     )
   )
 }
@@ -41,7 +41,7 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
         label: 'Integration failed',
         detail: issue.title,
       })
-    } else if (issue.status === IssueStatus.Interrupted) {
+    } else if (issue.health === IssueHealth.Interrupted) {
       seen.add(issue.id)
       items.push({
         issueNumber: issue.number,
@@ -49,7 +49,7 @@ function deriveAttentionItems(issues: Issue[], _agentStatus: AgentStatus): Atten
         label: 'Interrupted',
         detail: issue.title,
       })
-    } else if (issue.status === IssueStatus.Blocked) {
+    } else if (issue.health === IssueHealth.Blocked) {
       seen.add(issue.id)
       items.push({
         issueNumber: issue.number,

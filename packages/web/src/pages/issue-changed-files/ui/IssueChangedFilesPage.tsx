@@ -93,8 +93,8 @@ function PageHeader({
       <div className="mb-4">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm font-mono text-gray-400">#{issue.number}</span>
-          <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.status)}`}>
-            {statusLabel(issue.status)}
+          <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.health)}`}>
+            {statusLabel(issue.health)}
           </span>
         </div>
         <h1 className="text-2xl font-bold text-gray-900">{issue.title}</h1>
@@ -151,7 +151,7 @@ function DiffSummaryCard({
         <span className="text-green-600">+{diffData.summary.additions}</span>
         <span className="text-red-500">-{diffData.summary.deletions}</span>
         <span className="text-gray-300">·</span>
-        <span className="text-xs text-gray-400 capitalize">{issue.stage} · {issue.status}</span>
+        <span className="text-xs text-gray-400 capitalize">{issue.status} · {issue.health}</span>
       </div>
       <div className="mt-2 flex items-center gap-3 text-xs text-gray-400">
         <span>showing merge-base → {diffData.head}</span>

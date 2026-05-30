@@ -5,6 +5,7 @@ using Mohist.Server.Epics;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain.Run;
@@ -84,7 +85,7 @@ public class IssueQueryService
             query = query.Where(i => i.ArchivedAt == null);
 
         if (!string.IsNullOrEmpty(stage))
-            query = query.Where(i => string.Equals(i.Stage, stage, StringComparison.OrdinalIgnoreCase));
+            query = query.Where(i => string.Equals(i.Status, stage, StringComparison.OrdinalIgnoreCase));
 
         if (!string.IsNullOrEmpty(label))
             query = query.Where(i => i.Labels.Contains(label, StringComparer.OrdinalIgnoreCase));
@@ -110,8 +111,8 @@ public class IssueQueryService
             Number = issue.Number,
             Title = issue.Title,
             Body = issue.Body,
-            Stage = IssueDomainNames.Stage(issue.Stage),
-            RuntimeStatus = IssueRuntimeSummary(issue.Stage, issue.Attention),
+            Status = IssueDomainNames.StatusName(issue.Status),
+            Health = IssueDomainNames.Health(issue.Status, issue.Attention),
             ProjectId = issue.ProjectId,
             ProjectName = project?.Name,
             Labels = issue.Labels,
@@ -137,8 +138,8 @@ public class IssueQueryService
         Number = issue.Number,
         Title = issue.Title,
         Body = issue.Body,
-Stage = issue.Stage,
-        RuntimeStatus = issue.RuntimeStatus,
+Status = issue.Status,
+        Health = issue.Health,
         ProjectId = issue.ProjectId,
         ProjectName = issue.ProjectName,
         Labels = issue.Labels,
@@ -198,8 +199,8 @@ var runRows = await db.WorkflowRuns
 
             var projection = _profiles.Get(issue.WorkflowProfileId).ProjectWorkflowState(issue, status);
 
-            issue.Stage = projection.IssueStage;
-            issue.RuntimeStatus = projection.RuntimeStatus;
+            issue.Status = projection.IssueStatus;
+            issue.Health = projection.Health;
             issue.BlockedReason = projection.BlockedReason;
             issue.StageApproval = projection.StageApproval;
             issue.Attention = projection.Attention;
@@ -207,16 +208,6 @@ var runRows = await db.WorkflowRuns
             issue.WorkflowStatus = status.Status;
         }
     }
-
-    private static string IssueRuntimeSummary(IssueStage status, IssueAttention? attention) =>
-        status switch
-        {
-            IssueStage.Done => "done",
-            IssueStage.Cancelled => "cancelled",
-            _ when attention?.Reason is IssueAttentionReason.Blocked or IssueAttentionReason.WorkflowFailed => "blocked",
-            _ when attention is not null => "attention",
-            _ => "active",
-        };
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
     {
@@ -274,7 +265,7 @@ var runRows = await db.WorkflowRuns
         {
             if (!byNumber.TryGetValue(group.Key, out var issue)) continue;
             var summaries = group
-                .Select(p => prereqIssues.TryGetValue(p.PrerequisiteNumber, out var prereq) ? ToPrerequisiteSummary(prereq) : null)
+                .Select(p => prereqIssues.TryGetValue(p.PrerequisiteNumber, out var prereq) ? IssuePrerequisiteSummary.FromReadModel(prereq) : null)
                 .Where(p => p is not null)
                 .Cast<IssuePrerequisiteSummary>()
                 .ToArray();
@@ -317,16 +308,6 @@ var runRows = await db.WorkflowRuns
 
     public static IssueCommentDto ToCommentDto(IssueCommentRow comment) =>
         new(comment.Id, comment.IssueId, comment.Body, comment.CreatedAt.ToString("o"));
-
-    private static IssuePrerequisiteSummary ToPrerequisiteSummary(IssueReadModel issue) => new()
-    {
-        IssueId = issue.Id,
-        Number = issue.Number,
-        Title = issue.Title,
-        Completed = issue.Stage == "done" || issue.RuntimeStatus is "done" or "completed",
-        Stage = issue.Stage,
-        Status = issue.RuntimeStatus,
-    };
 
     private static WorkflowRun? DeserializeRun(string json)
     {

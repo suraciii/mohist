@@ -1,4 +1,5 @@
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Queries;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
@@ -84,8 +85,8 @@ public static class MohistDefaultWorkflowProjection
 }
 
 public sealed record MohistDefaultWorkflowState(
-    string IssueStage,
-    string RuntimeStatus,
+    string IssueStatus,
+    string Health,
     string? BlockedReason,
     StageApproval? StageApproval,
     IssueAttention? Attention,

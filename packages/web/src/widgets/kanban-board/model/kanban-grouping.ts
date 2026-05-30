@@ -1,24 +1,24 @@
-import { IssueStage, type Issue } from '../../../entities/issue'
+import { IssueStatus, type Issue } from '../../../entities/issue'
 
 export interface Column {
-  key: IssueStage
+  key: IssueStatus
   label: string
   issues: Issue[]
 }
 
-export const STAGES: { key: IssueStage; label: string }[] = [
-  { key: IssueStage.Backlog, label: 'Backlog' },
-  { key: IssueStage.Todo, label: 'Ready' },
-  { key: IssueStage.InProgress, label: 'In Progress' },
-  { key: IssueStage.Done, label: 'Done' },
-  { key: IssueStage.Cancelled, label: 'Cancelled' },
+export const STAGES: { key: IssueStatus; label: string }[] = [
+  { key: IssueStatus.Backlog, label: 'Backlog' },
+  { key: IssueStatus.Todo, label: 'Ready' },
+  { key: IssueStatus.InProgress, label: 'In Progress' },
+  { key: IssueStatus.Done, label: 'Done' },
+  { key: IssueStatus.Cancelled, label: 'Cancelled' },
 ]
 
 export function groupIssuesByStage(issues: Issue[]): Column[] {
-  const map = new Map<IssueStage, Issue[]>()
+  const map = new Map<IssueStatus, Issue[]>()
   for (const s of STAGES) map.set(s.key, [])
   for (const issue of issues) {
-    const list = map.get(issue.stage)
+    const list = map.get(issue.status)
     if (list) list.push(issue)
   }
   return STAGES.map((s) => ({
@@ -33,7 +33,7 @@ export function filterClosedFromDone(
 ): Column[] {
   if (showClosed) return columns
   return columns.map((col) =>
-    col.key === IssueStage.Cancelled
+    col.key === IssueStatus.Cancelled
       ? {
           ...col,
           issues: [],
@@ -46,9 +46,9 @@ export function getDoneColumnCounts(columns: Column[]): {
   closedCount: number
   doneTotalCount: number
 } {
-  const cancelledColumn = columns.find((c) => c.key === IssueStage.Cancelled)
+  const cancelledColumn = columns.find((c) => c.key === IssueStatus.Cancelled)
   const cancelledIssues = cancelledColumn?.issues ?? []
-  const doneColumn = columns.find((c) => c.key === IssueStage.Done)
+  const doneColumn = columns.find((c) => c.key === IssueStatus.Done)
   const doneIssues = doneColumn?.issues ?? []
   return {
     closedCount: cancelledIssues.length,

@@ -1,4 +1,4 @@
-import type { IssueStage, IssueStatus } from '../../issue/@x/types'
+import type { IssueStatus, IssueHealth } from '../../issue/@x/types'
 
 export enum EpicStatus {
   Active = 'active',
@@ -36,7 +36,7 @@ export interface LinkedIssue {
   number: number
   title: string
   status: IssueStatus
-  stage: IssueStage
+  health: IssueHealth
   priority: string | null
 }
 

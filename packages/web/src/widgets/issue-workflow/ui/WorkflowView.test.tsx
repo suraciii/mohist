@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { render } from '../../../../tests/test-utils'
 import { WorkflowView } from './WorkflowView'
-import { IssueStage, IssueStatus, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type WorkflowTimeline } from '../../../entities/issue'
 import { useWorkflowTimeline } from '../../../entities/issue'
 
 vi.mock('../../../entities/issue', async (importOriginal) => ({
@@ -18,9 +18,9 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     number: 1,
     title: 'Implement workflow naming',
     body: '',
-    stage: IssueStage.InProgress,
+    status: IssueStatus.InProgress,
     workflowStage: WorkflowStage.Build,
-    status: IssueStatus.Active,
+    health: IssueHealth.Active,
     projectId: 'test-project',
     labels: [],
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -99,7 +99,7 @@ describe('WorkflowView', () => {
   it('does not request workflow timeline for backlog issues', () => {
     mockedUseWorkflowTimeline.mockReturnValue({ data: undefined } as ReturnType<typeof useWorkflowTimeline>)
 
-    render(<WorkflowView issue={makeIssue({ stage: IssueStage.Backlog, workflowStage: null })} />)
+    render(<WorkflowView issue={makeIssue({ status: IssueStatus.Backlog, workflowStage: null })} />)
 
     expect(mockedUseWorkflowTimeline).toHaveBeenCalledWith(1, false)
   })
@@ -134,7 +134,7 @@ describe('WorkflowView', () => {
 
     render(<WorkflowView issue={makeIssue({
       workflowStage: WorkflowStage.Plan,
-      status: 'attention' as IssueStatus,
+      health: 'attention' as IssueHealth,
       approvalState: {
         status: 'awaiting',
         stage: WorkflowStage.Plan,

@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Domain;
 
 namespace Mohist.Server.Issue.Queries;
 
@@ -12,8 +12,8 @@ public class IssueInfo
     public int Number { get; set; }
     public string Title { get; set; } = null!;
     public string? Body { get; set; }
-    public string Stage { get; set; } = "backlog";
-    [JsonPropertyName("status")] public string RuntimeStatus { get; set; } = "active";
+    public string Status { get; set; } = "backlog";
+    [JsonPropertyName("health")] public string Health { get; set; } = "active";
     public string ProjectId { get; set; } = null!;
     public string? ProjectName { get; set; }
     public string[] Labels { get; set; } = [];
@@ -45,6 +45,26 @@ public class IssuePrerequisiteSummary
     [Id(3)] public bool Completed { get; set; }
     [Id(4)] public string Stage { get; set; } = null!;
     [Id(5)] public string Status { get; set; } = null!;
+
+    public static IssuePrerequisiteSummary FromDomain(Domain.Issue issue) => new()
+    {
+        IssueId = issue.Id,
+        Number = issue.Number,
+        Title = issue.Title,
+        Completed = issue.Status == IssueStatus.Done,
+        Stage = IssueDomainNames.StatusName(issue.Status),
+        Status = IssueDomainNames.Health(issue.Status, issue.Attention),
+    };
+
+    public static IssuePrerequisiteSummary FromReadModel(IssueReadModel issue) => new()
+    {
+        IssueId = issue.Id,
+        Number = issue.Number,
+        Title = issue.Title,
+        Completed = issue.Status == "done" || issue.Health is "done" or "completed",
+        Stage = issue.Status,
+        Status = issue.Health,
+    };
 }
 
 [GenerateSerializer]

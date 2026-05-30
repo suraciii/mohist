@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/components/button'
 import type { ToolCallEntry, TaskProgressMap, LoopProgress } from '../../../entities/coder-session'
-import type { Stage } from '../../../entities/issue'
+import type { WorkflowStage } from '../../../entities/issue'
 import type { Round, RecoveryEvent, RecoveryStatus, PlanProgress } from '../model/useSessionTimeline'
 import { deriveToolCallTitle } from '../model/useSessionTimeline'
 import { PlanProgressPanel } from '../../issue-workflow/ui/PlanProgressPanel'
@@ -10,7 +10,7 @@ interface SessionTimelineProps {
   rounds: Round[]
   isStreaming: boolean
   isLoading: boolean
-  currentStage: Stage | string
+  currentStage: WorkflowStage | string
   isLive: boolean
   taskProgress: TaskProgressMap
   loopProgress: LoopProgress | null

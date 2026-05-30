@@ -5,7 +5,7 @@ import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import { IssueStatus, Stage } from '../src/entities/issue'
+import { IssueHealth, WorkflowStage } from '../src/entities/issue'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -108,8 +108,8 @@ function makeIssue(overrides: any = {}) {
     number: 1,
     title: 'Test Issue',
     body: '',
-    stage: 'backlog',
     status: 'backlog',
+    health: 'active',
     projectId: 'project-1',
     labels: [],
     createdAt: '2024-01-01T10:00:00.000Z',
@@ -451,8 +451,8 @@ describe('IssueDetailPage Markdown rendering', () => {
     it('displays retry mutation error in action error area', async () => {
       mocks.issue = makeIssue({
         body: 'Issue body',
-        stage: Stage.Plan,
-        status: IssueStatus.Blocked,
+        status: WorkflowStage.Plan,
+        health: IssueHealth.Blocked,
         recovery: { allowedActions: ['retry'], latestAttemptState: 'failed' },
       })
       const issueApi = await import('../src/entities/issue/api/client')
@@ -470,8 +470,8 @@ describe('IssueDetailPage Markdown rendering', () => {
     it('allows user to see other recovery actions after retry error appears', async () => {
       mocks.issue = makeIssue({
         body: 'Issue body',
-        stage: Stage.Plan,
-        status: IssueStatus.Blocked,
+        status: WorkflowStage.Plan,
+        health: IssueHealth.Blocked,
         recovery: { allowedActions: ['retry', 'rerun'], latestAttemptState: 'failed' },
       })
       const issueApi = await import('../src/entities/issue/api/client')

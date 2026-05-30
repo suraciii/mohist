@@ -18,7 +18,7 @@ public static class StatusRoutes
                 foreach (var project in projects)
                 {
                     var issues = await issuesQuery.ListAsync(project.Id, project, all: true);
-                    var activeIssues = issues.Count(i => i.RuntimeStatus == "active");
+                    var activeIssues = issues.Count(i => i.Health == "active");
 
                     status.Add(new
                     {
@@ -37,7 +37,7 @@ public static class StatusRoutes
                 return ApiResults.BadRequest("No active project. Pass projectId or create/select a project in the web UI.");
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
-            var active = allIssues.Where(i => i.RuntimeStatus == "active").ToList();
+            var active = allIssues.Where(i => i.Health == "active").ToList();
 
             var versionInfo = GetVersionInfo();
 
@@ -47,13 +47,13 @@ public static class StatusRoutes
                 path = current.Path,
                 issues = allIssues.Count,
                 activeIssues = active.Count,
-                issuesByStage = new Dictionary<string, int>
+                issuesByStatus = new Dictionary<string, int>
                 {
-                    ["backlog"] = allIssues.Count(i => i.Stage == "backlog"),
-                    ["ready"] = allIssues.Count(i => i.Stage == "ready" || i.Stage == "todo"),
-                    ["in_progress"] = allIssues.Count(i => i.Stage == "in_progress"),
-                    ["done"] = allIssues.Count(i => i.Stage == "done"),
-                    ["cancelled"] = allIssues.Count(i => i.Stage == "cancelled"),
+                    ["backlog"] = allIssues.Count(i => i.Status == "backlog"),
+                    ["ready"] = allIssues.Count(i => i.Status == "ready" || i.Status == "todo"),
+                    ["in_progress"] = allIssues.Count(i => i.Status == "in_progress"),
+                    ["done"] = allIssues.Count(i => i.Status == "done"),
+                    ["cancelled"] = allIssues.Count(i => i.Status == "cancelled"),
                 },
                 version = versionInfo.Version,
                 gitHash = versionInfo.GitHash,

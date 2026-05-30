@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { IssueStage, IssueStatus, type RecoveryProjection } from '../../../entities/issue'
+import { IssueStatus, IssueHealth, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -145,7 +145,7 @@ export function IssueDetailPage() {
   const { data: issue, isLoading, isError } = useIssue(issueNumber)
   const { data: agentStatus } = useAgentStatus()
   const { data: diffData } = useIssueDiff(issueNumber)
-  const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.stage !== IssueStage.Backlog)
+  const { data: workflowTimeline } = useWorkflowTimeline(issueNumber, !!issue && issue.status !== IssueStatus.Backlog)
 
   useEffect(() => {
     if (descriptionBodyRef.current) {
@@ -283,7 +283,7 @@ export function IssueDetailPage() {
   const agentProgress = thisAgent?.progress
   const isCapacityFull = activeAgents.length >= maxConcurrent
   const runnerUnavailable = agentStatus?.runnerAvailable === false
-  const isBacklog = issue.stage === IssueStage.Backlog
+  const isBacklog = issue.status === IssueStatus.Backlog
   const workflowStage = issue.workflowStage ?? null
   const workflowAllowedActions = workflowTimeline?.availableActions.map((action) => action.name) ?? []
   const allowedActions = Array.from(new Set([...recoveryAllowedActions, ...workflowAllowedActions]))
@@ -317,9 +317,9 @@ export function IssueDetailPage() {
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-mono text-gray-400">#{issue.number}</span>
               <span
-                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.status)}`}
+                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.health)}`}
               >
-                {statusLabel(issue.status)}
+                {statusLabel(issue.health)}
               </span>
               {isAgentRunningOnThis && (
                 <span className="inline-flex items-center gap-1 text-xs text-blue-600">
@@ -585,7 +585,7 @@ export function IssueDetailPage() {
                 <dl className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <dt className="text-gray-500">Issue Stage</dt>
-                    <dd className="text-gray-900 font-medium">{formatStageName(issue.stage)}</dd>
+                    <dd className="text-gray-900 font-medium">{formatStageName(issue.status)}</dd>
                   </div>
                   {issue.workflowProfileId && (
                     <div className="flex justify-between">
@@ -602,9 +602,9 @@ export function IssueDetailPage() {
                   <div className="flex justify-between">
                     <dt className="text-gray-500">Status</dt>
                     <dd
-                      className={`font-medium capitalize ${statusBadge(issue.status)}`}
+                      className={`font-medium capitalize ${statusBadge(issue.health)}`}
                     >
-                      {statusLabel(issue.status)}
+                      {statusLabel(issue.health)}
                     </dd>
                   </div>
                   {issue.projectName && (
@@ -700,7 +700,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {issue.status === IssueStatus.Interrupted && (
+              {issue.health === IssueHealth.Interrupted && (
                 <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
                   <h2 className="text-sm font-semibold text-orange-800 mb-2">
                     Workflow Interrupted
@@ -712,7 +712,7 @@ export function IssueDetailPage() {
                 </div>
               )}
 
-              {(issue.status === IssueStatus.Blocked || issue.convergence) && (
+              {(issue.health === IssueHealth.Blocked || issue.convergence) && (
                 <WorkflowConvergencePanel convergence={issue.convergence} />
               )}
 
@@ -752,7 +752,7 @@ export function IssueDetailPage() {
                     </>
                   )}
 
-                  {issue.status === IssueStatus.Active && !isBacklog && !isAgentRunningOnThis && (
+                  {issue.health === IssueHealth.Active && !isBacklog && !isAgentRunningOnThis && (
                     <Button
                       variant="outline"
                       onClick={() => closeMutation.mutate()}
@@ -827,7 +827,7 @@ export function IssueDetailPage() {
                     </div>
                   )}
 
-                  {(issue.status === IssueStatus.Blocked || issue.status === IssueStatus.Interrupted) && (() => {
+                  {(issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) && (() => {
                     const canRetry = canRetryWorkflow
                     const canResume = canResumeWorkflow
                     const canRerun = canRerunWorkflow
@@ -889,7 +889,7 @@ export function IssueDetailPage() {
                     )
                   })()}
 
-                  {!isBacklog && issue.stage !== IssueStage.Done && workflowStage && !isAgentRunningOnThis && canRerunWorkflow && issue.status !== IssueStatus.Blocked && issue.status !== IssueStatus.Interrupted && !showCheckRepairActions && (
+                  {!isBacklog && issue.status !== IssueStatus.Done && workflowStage && !isAgentRunningOnThis && canRerunWorkflow && issue.health !== IssueHealth.Blocked && issue.health !== IssueHealth.Interrupted && !showCheckRepairActions && (
                     <Button
                       variant="outline"
                       onClick={() => rerunMutation.mutate()}

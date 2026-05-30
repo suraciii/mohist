@@ -63,7 +63,7 @@ public class EpicQueryService
         var allIssues = await _issuesQuery.ListAsync(epic.ProjectId, all: true);
         var byId = allIssues.ToDictionary(i => i.Id);
         return links
-            .Select(link => byId.TryGetValue(link.IssueId, out var issue) ? new LinkedIssueDto(issue.Id, issue.Number, issue.Title, issue.RuntimeStatus, issue.Stage, issue.Priority) : null)
+            .Select(link => byId.TryGetValue(link.IssueId, out var issue) ? new LinkedIssueDto(issue.Id, issue.Number, issue.Title, issue.Health, issue.Status, issue.Priority) : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
             .ToList();
@@ -82,5 +82,5 @@ public class EpicQueryService
             linked.Count > 0 && completed.Count == linked.Count);
     }
 
-    private static bool IsCompleted(LinkedIssueDto issue) => issue.Stage == "done" || issue.Status is "done" or "completed";
+    private static bool IsCompleted(LinkedIssueDto issue) => issue.Status is "done" or "completed";
 }
