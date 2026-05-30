@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Queries;
@@ -6,6 +7,7 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Storage;
+using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Queries;
 
@@ -21,6 +23,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly Config.ConfigService _config;
     private readonly WorkflowQueryService _workflowReader;
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -30,6 +33,7 @@ public class IssueGrain : Grain, IIssueGrain
         IssueWorkflowProfileRegistry profiles,
         Config.ConfigService config,
         WorkflowQueryService workflowReader,
+        IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -38,6 +42,7 @@ public class IssueGrain : Grain, IIssueGrain
         _profiles = profiles;
         _config = config;
         _workflowReader = workflowReader;
+        _dbFactory = dbFactory;
         _log = log;
     }
 
@@ -357,6 +362,26 @@ public class IssueGrain : Grain, IIssueGrain
             _ when attention is not null => "attention",
             _ => "active",
         };
+
+    public async Task<IssueCommentResult> AddCommentAsync(string body)
+    {
+        if (_issue is null) throw new InvalidOperationException("Issue not found");
+
+        var comment = new IssueCommentEntry
+        {
+            Id = $"cmt_{Guid.NewGuid():N}",
+            ProjectId = _issue.ProjectId,
+            IssueId = _issue.Id,
+            IssueNumber = _issue.Number,
+            Body = body,
+        };
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        db.IssueComments.Add(comment);
+        await db.SaveChangesAsync();
+
+        return new IssueCommentResult(comment.Id, comment.Body);
+    }
 }
 
 [GenerateSerializer]

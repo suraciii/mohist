@@ -1,9 +1,10 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 
-namespace Mohist.Server.Issue.Storage;
+namespace Mohist.Server.Issue.GrainStorage;
 
 public class IssueStore : IStateStore<Domain.Issue>
 {
@@ -49,10 +50,4 @@ public class IssueStore : IStateStore<Domain.Issue>
 
     public static string Serialize(Domain.Issue issue) =>
         JsonSerializer.Serialize(IssueSnapshot.FromDomain(issue));
-}
-
-public class IssueStateRow
-{
-    public string Key { get; set; } = string.Empty;
-    public string StateJson { get; set; } = "{}";
 }

@@ -21,7 +21,15 @@ public class EpicIssueEntry
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
-public sealed record EpicDto(string Id, string Title, string Description, string Priority, string Status, string CreatedAt, string UpdatedAt);
+[GenerateSerializer]
+public sealed record EpicDto(
+    [property: Id(0)] string Id,
+    [property: Id(1)] string Title,
+    [property: Id(2)] string Description,
+    [property: Id(3)] string Priority,
+    [property: Id(4)] string Status,
+    [property: Id(5)] string CreatedAt,
+    [property: Id(6)] string UpdatedAt);
 
 public sealed record EpicProgressDto(
     int CompletedCount,

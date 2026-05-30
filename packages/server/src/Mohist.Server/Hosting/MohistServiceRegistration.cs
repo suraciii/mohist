@@ -1,14 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Config;
 using Mohist.Server.Events;
+using Mohist.Server.Epic.Queries;
 using Mohist.Server.Project.Queries;
+using Mohist.Server.Issue.GrainStorage;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Queries;
-using Mohist.Server.Sessions.Storage;
+using Mohist.Server.Sessions.GrainStorage;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
@@ -17,7 +19,7 @@ using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Recovery;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.GrainStorage;
 using Mohist.Server.Workspace;
 
 namespace Mohist.Server.Hosting;
@@ -42,6 +44,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<WorkflowAgentSession>, WorkflowAgentSessionStore>();
         services.AddSingleton<ProjectQueryService>();
         services.AddScoped<IssueQueryService>();
+        services.AddScoped<EpicQueryService>();
         services.AddSingleton<Workflow.Prompts.IPromptLoader, Workflow.Prompts.FilePromptLoader>();
         services.AddSingleton<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();

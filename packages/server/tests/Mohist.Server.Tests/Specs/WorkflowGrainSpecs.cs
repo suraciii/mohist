@@ -13,7 +13,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Queries;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.GrainStorage;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;

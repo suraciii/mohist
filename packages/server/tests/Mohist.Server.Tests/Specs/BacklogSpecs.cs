@@ -6,7 +6,7 @@ using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.GrainStorage;
 using Orleans.TestingHost;
 using Xunit;
 

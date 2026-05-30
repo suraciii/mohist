@@ -1,10 +1,11 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 
-namespace Mohist.Server.Issue.Storage;
+namespace Mohist.Server.Issue.GrainStorage;
 
 public class IssueProfileStore : IStateStore<IssueWorkflowProfile>
 {
@@ -47,10 +48,4 @@ public class IssueProfileStore : IStateStore<IssueWorkflowProfile>
 
     public static string Serialize(IssueWorkflowProfile profile) =>
         JsonSerializer.Serialize(IssueWorkflowProfileSnapshot.FromDomain(profile));
-}
-
-public class IssueProfileRow
-{
-    public string Key { get; set; } = string.Empty;
-    public string StateJson { get; set; } = "{}";
 }

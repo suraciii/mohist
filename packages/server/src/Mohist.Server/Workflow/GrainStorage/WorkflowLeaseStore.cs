@@ -4,8 +4,9 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Storage;
 
-namespace Mohist.Server.Workflow.Storage;
+namespace Mohist.Server.Workflow.GrainStorage;
 
 public class WorkflowLeaseStore : IStateStore<WorkLease>
 {
@@ -53,10 +54,4 @@ public class WorkflowLeaseStore : IStateStore<WorkLease>
 
     internal static string Serialize(WorkLease state) =>
         JsonSerializer.Serialize(state, WorkflowStorageJson.Options);
-}
-
-public class WorkflowLeaseRow
-{
-    public string WorkflowRunId { get; set; } = string.Empty;
-    public string StateJson { get; set; } = "{}";
 }

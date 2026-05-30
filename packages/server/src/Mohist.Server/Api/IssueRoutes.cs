@@ -1,17 +1,14 @@
-using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
-using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
-using Mohist.Server.Storage.Db;
-using Mohist.Server.Workspace;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workspace;
 using System.Text.Json;
 
 namespace Mohist.Server.Api;
@@ -164,31 +161,21 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/comments", async (int number, string projectId, AddCommentRequest req, IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPost("/{number:int}/comments", async (int number, string projectId, AddCommentRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
-            var project = await projectsQuery.GetByIdAsync(pid);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
-            var issue = await issuesQuery.GetAsync(pid, number, project);
-            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-            var comment = new IssueCommentEntry
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
+            try
             {
-                Id = $"cmt_{Guid.NewGuid():N}",
-                ProjectId = pid,
-                IssueId = issue.Id,
-                IssueNumber = number,
-                Body = req.Body,
-            };
-
-            await using var db = await dbFactory.CreateDbContextAsync();
-            db.IssueComments.Add(comment);
-            await db.SaveChangesAsync();
-
-            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
+                var comment = await grain.AddCommentAsync(req.Body);
+                return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.NotFound($"Issue #{number} not found");
+            }
         });
 
         issues.MapPost("/{number:int}/close", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>

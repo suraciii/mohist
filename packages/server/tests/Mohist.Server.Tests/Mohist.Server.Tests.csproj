@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="TngTech.ArchUnitNET.xUnit" />
   </ItemGroup>
 
   <ItemGroup>

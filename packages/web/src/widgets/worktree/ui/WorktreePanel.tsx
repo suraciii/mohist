@@ -71,8 +71,6 @@ export function WorktreePanel({ issueNumber, isAgentRunning, isDone }: WorktreeP
     onSuccess: (data) => {
       if (data.status === 'queued') {
         setRebaseResult({ type: 'queued', message: 'Rebase task queued' })
-      } else if (data.status === 'resolving-conflicts') {
-        setRebaseResult({ type: 'info', message: 'Resolving conflicts...' })
       } else if (data.conflicts && data.conflicts.length > 0) {
         setRebaseResult({ type: 'error', message: 'Rebase aborted due to conflicts', conflicts: data.conflicts })
       } else if (data.rebased) {

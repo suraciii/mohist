@@ -3,7 +3,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Storage;
 using Mohist.Server.Storage.Db;
 
-namespace Mohist.Server.Sessions.Storage;
+namespace Mohist.Server.Sessions.GrainStorage;
 
 public class WorkflowAgentSessionStore : IStateStore<WorkflowAgentSession>
 {
