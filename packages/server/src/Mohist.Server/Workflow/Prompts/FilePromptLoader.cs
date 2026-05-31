@@ -5,11 +5,13 @@ namespace Mohist.Server.Workflow.Prompts;
 public sealed class FilePromptLoader : IPromptLoader
 {
     private readonly string _promptsDirectory;
+    private readonly IPromptFileStore _files;
     private readonly Dictionary<string, string> _cache = new(StringComparer.Ordinal);
 
-    public FilePromptLoader(string? promptsDirectory = null)
+    public FilePromptLoader(string? promptsDirectory = null, IPromptFileStore? files = null)
     {
         _promptsDirectory = promptsDirectory ?? ResolveDefaultPromptsDirectory();
+        _files = files ?? RealPromptFileStore.Instance;
     }
 
     public Dictionary<string, string> LoadAll()
@@ -18,13 +20,13 @@ public sealed class FilePromptLoader : IPromptLoader
             return new Dictionary<string, string>(_cache, StringComparer.Ordinal);
 
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!Directory.Exists(_promptsDirectory))
+        if (!_files.DirectoryExists(_promptsDirectory))
             return result;
 
-        foreach (var filePath in Directory.EnumerateFiles(_promptsDirectory, "*.prompt"))
+        foreach (var filePath in _files.EnumeratePromptFiles(_promptsDirectory))
         {
             var name = Path.GetFileNameWithoutExtension(filePath);
-            var content = File.ReadAllText(filePath);
+            var content = _files.ReadAllText(filePath);
             result[name] = content;
             _cache[name] = content;
         }
@@ -66,4 +68,26 @@ public sealed class FilePromptLoader : IPromptLoader
         var fallback = Path.Combine(baseDir, "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Prompts");
         return Path.GetFullPath(fallback);
     }
+}
+
+public interface IPromptFileStore
+{
+    bool DirectoryExists(string path);
+    IEnumerable<string> EnumeratePromptFiles(string path);
+    string ReadAllText(string path);
+}
+
+internal sealed class RealPromptFileStore : IPromptFileStore
+{
+    public static readonly RealPromptFileStore Instance = new();
+
+    private RealPromptFileStore()
+    {
+    }
+
+    public bool DirectoryExists(string path) => Directory.Exists(path);
+
+    public IEnumerable<string> EnumeratePromptFiles(string path) => Directory.EnumerateFiles(path, "*.prompt");
+
+    public string ReadAllText(string path) => File.ReadAllText(path);
 }

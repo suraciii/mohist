@@ -53,12 +53,12 @@ public class AgentSessionSpecs
         Assert.Contains("hello from agent", JsonSerializer.Serialize(detail.Turns));
 
         var current = await _client.GetDataAsync<WorkflowAgentSessionInfoDto[]>($"/api/agent/sessions?projectId={project.Id}");
-        Assert.Contains(current, s => s.SessionId == session.Id);
+        Assert.Contains(current, s => s.SessionId == session.Id && s.IssueTitle == issue.Title);
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.Equal(issue.Number, card.IssueNumber);
-        Assert.Equal("Issue #1", card.IssueTitle);
+        Assert.Equal(issue.Title, card.IssueTitle);
         Assert.Equal("completed", card.Status);
         Assert.Equal("hello from agent\n", card.LastActivity?.Text);
         Assert.Equal("text", card.LastActivity?.Kind);
@@ -268,7 +268,7 @@ public class AgentSessionSpecs
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
     private sealed record WorkflowAgentSessionSummaryDto(string Id, string Status);
     private sealed record WorkflowAgentSessionTranscript(string Id, JsonElement Turns);
-    private sealed record WorkflowAgentSessionInfoDto(string SessionId);
+    private sealed record WorkflowAgentSessionInfoDto(string SessionId, string IssueTitle);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     private sealed record ActivitySlotUsageDto(int Active, int Max);

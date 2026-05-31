@@ -56,9 +56,10 @@ public class WorkflowAgentSessionQueryService
         if (!string.IsNullOrWhiteSpace(status) && AgentSessionStatusNames.TryParse(status, out var s))
             query = query.Where(x => x.Status == AgentSessionStatusNames.ToName(s));
         var rows = await query.OrderByDescending(s => s.CreatedAt).Take(limit).ToListAsync(ct);
+        var issueTitles = await LoadIssueTitlesAsync(db, projectId, rows.Select(r => r.IssueNumber), ct);
         return rows.Select(s => new WorkflowAgentSessionInfoDto(
             s.IssueNumber,
-            $"Issue #{s.IssueNumber}",
+            IssueTitle(issueTitles, s.IssueNumber),
             s.Stage ?? string.Empty,
             s.Id,
             s.Status,
@@ -165,9 +166,10 @@ public class WorkflowAgentSessionQueryService
 
         var sessionIds = sessions.Select(s => s.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
+        var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(s => s.IssueNumber), ct);
 
         var cards = sessions
-            .Select(s => ToActivityCard(s, latestEvents.GetValueOrDefault(s.Id)))
+            .Select(s => ToActivityCard(s, latestEvents.GetValueOrDefault(s.Id), IssueTitle(issueTitles, s.IssueNumber)))
             .ToList();
 
         waiting ??= [];
@@ -203,13 +205,13 @@ public class WorkflowAgentSessionQueryService
             .ToDictionary(e => e.SessionId);
     }
 
-    private static ActivityCardDto ToActivityCard(WorkflowAgentSessionRow s, WorkflowAgentSessionEventRow? latestEvent)
+    private static ActivityCardDto ToActivityCard(WorkflowAgentSessionRow s, WorkflowAgentSessionEventRow? latestEvent, string issueTitle)
     {
         var lastActivityAt = (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o");
         return new ActivityCardDto(
             $"issue_{s.ProjectId}_{s.IssueNumber}",
             s.IssueNumber,
-            $"Issue #{s.IssueNumber}",
+            issueTitle,
             s.Stage ?? string.Empty,
             null,
             s.Id,
@@ -224,6 +226,34 @@ public class WorkflowAgentSessionQueryService
             latestEvent is null ? null : ToPreview(latestEvent),
             s.FailureReason);
     }
+
+    private static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
+        MohistDbContext db,
+        string projectId,
+        IEnumerable<int> issueNumbers,
+        CancellationToken ct)
+    {
+        var numbers = issueNumbers.Distinct().ToArray();
+        if (numbers.Length == 0) return [];
+
+        var keys = numbers.Select(n => $"{projectId}:{n}").ToArray();
+        var rows = await db.IssueStates.AsNoTracking()
+            .Where(r => keys.Contains(r.Key))
+            .Select(r => r.StateJson)
+            .ToListAsync(ct);
+
+        return rows
+            .Select(Issue.Storage.IssueSnapshot.DeserializeIssue)
+            .Where(i => i is not null && i.ProjectId == projectId)
+            .Cast<Issue.Domain.Issue>()
+            .Where(i => numbers.Contains(i.Number))
+            .ToDictionary(i => i.Number, i => i.Title);
+    }
+
+    private static string IssueTitle(IReadOnlyDictionary<int, string> titles, int issueNumber) =>
+        titles.TryGetValue(issueNumber, out var title) && !string.IsNullOrWhiteSpace(title)
+            ? title
+            : $"Issue #{issueNumber}";
 
     private static ActivityPreviewDto ToPreview(WorkflowAgentSessionEventRow e)
     {

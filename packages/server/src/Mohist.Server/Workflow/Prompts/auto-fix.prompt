@@ -18,6 +18,8 @@ A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and `## Fix S
 - If a fix cannot be safely applied, skip it and note why
 - Each fix must be atomic — do not bundle unrelated fixes
 - New tests must focus on the specific fix
+- Do NOT remove Mohist workflow artifacts under `${{ openspecChangeDir }}/` unless the review finding explicitly identifies corrupted artifact content and the safe fix is to update that artifact.
+- Workflow artifacts under `${{ openspecChangeDir }}/` are planning/review context, not product deliverables to delete during auto-fix.
 
 ## Output
 

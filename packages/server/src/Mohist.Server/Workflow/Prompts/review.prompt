@@ -5,6 +5,17 @@ Perform a comprehensive code review of the current change and write `review.md`.
 Review the post-build candidate snapshot, not the intended plan.
 </task>
 
+<candidate_boundary>
+Mohist workflow artifacts under `${{ openspecChangeDir }}/` are review context and evidence, not product deliverables by themselves.
+They are expected to exist during Plan, Build, Check, and Integrate.
+
+When the issue asks for a "documentation-only" or similarly scoped product change:
+- Treat files outside `${{ openspecChangeDir }}/` as the candidate deliverable.
+- Do not fail solely because `${{ openspecChangeDir }}/proposal.md`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, or delta specs exist.
+- Do not remove workflow artifacts as a review repair.
+- You may report workflow artifact quality only when it causes an actual workflow, spec-sync, merge, or traceability risk.
+</candidate_boundary>
+
 <dependencies>
 Read the issue, proposal, specs, design, tasks, and all changed files before producing the final review.
 </dependencies>
