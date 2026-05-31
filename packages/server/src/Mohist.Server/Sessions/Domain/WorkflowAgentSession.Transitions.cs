@@ -12,17 +12,40 @@ public static partial class WorkflowAgentSessionExtensions
             string? runnerId,
             string? workId,
             string? workType,
-            string? stage,
-            string? title,
-            int? issueNumber)
+                string? stage,
+                string? title,
+                int? issueNumber)
         {
-            session.RunnerId ??= runnerId;
+            session.RunnerId = runnerId ?? session.RunnerId;
             session.WorkId ??= workId;
             session.WorkType ??= workType;
             session.Stage ??= stage;
             session.Title ??= title;
             if (session.IssueNumber == 0 && issueNumber is > 0)
                 session.IssueNumber = issueNumber.Value;
+        }
+
+        public void Reopen(
+            string? runnerId,
+            string? workId,
+            string? workType,
+            string? stage,
+            string? title,
+            int? issueNumber,
+            DateTime now)
+        {
+            session.Status = AgentSessionStatus.Created;
+            session.RunnerId = runnerId ?? session.RunnerId;
+            session.WorkId = workId ?? session.WorkId;
+            session.WorkType = workType ?? session.WorkType;
+            session.Stage = stage ?? session.Stage;
+            session.Title = title ?? session.Title;
+            if (session.IssueNumber == 0 && issueNumber is > 0)
+                session.IssueNumber = issueNumber.Value;
+            session.CompletedAt = null;
+            session.FailureReason = null;
+            session.ExitCode = null;
+            session.LastHeartbeatAt = now;
         }
 
         public bool AttachAgent(

@@ -1,6 +1,10 @@
+import { mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it, beforeEach, vi } from "vitest"
 import type { WorkExecutor } from "../src/runtime/executor.js"
 import type { ActionRegistry } from "../src/actions/registry.js"
+import { createDefaultRegistry } from "../src/actions/registry.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../src/runtime/acp-connection.js"
 import type { WorkItem } from "../src/core/types.js"
@@ -81,4 +85,47 @@ describe("Check verdict validation", () => {
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("pass")
   })
+
+  it("PromiseFAILVerdictWithPASSMention_DoesNotPassMarkerCheck", async () => {
+    const dir = mkTestDir()
+    try {
+      writeFileSync(join(dir, "review.md"), [
+        "# Review Report",
+        "",
+        "## Result: FAIL",
+        "",
+        "This report mentions <promise>PASS</promise> as the expected success marker.",
+        "",
+        "<promise>FAIL</promise>",
+      ].join("\n"))
+
+      const mockWorkspaceManager = {
+        ensure: vi.fn().mockResolvedValue({ path: dir, branch: "main", changeDir: dir }),
+      }
+      const mod = await import("../src/runtime/executor.js")
+      const realExecutor = new mod.WorkExecutor(
+        createDefaultRegistry(),
+        mockWorkspaceManager as any,
+        {} as unknown as ServerConnection,
+        {} as unknown as AcpSessionManager,
+        null,
+        mockFallbackWorkDir,
+      )
+
+      const work = makeCheckWork([{ name: "review-passed", uses: "core/marker", with: { path: "review.md", expect: "<promise>PASS</promise>" } }])
+      const result = await realExecutor.execute(work, new AbortController().signal)
+
+      expect(result.status).toBe("fail")
+      expect(result.message).toContain("review-passed")
+      expect(result.message).toContain("expected verdict marker '<promise>PASS</promise>'")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
+
+function mkTestDir(): string {
+  const dir = join(tmpdir(), `mohist-check-verdict-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  mkdirSync(dir, { recursive: true })
+  return dir
+}

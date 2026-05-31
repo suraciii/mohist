@@ -135,6 +135,64 @@ public class AgentSessionSpecs
     }
 
     [Fact]
+    public async Task WorkflowAgentSessionEnsure_TerminalSessionExists_ReopensSameSessionForRetry()
+    {
+        var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-reuse");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new { type = "agent_session_terminal", payload = new { status = "failed", failureReason = "first attempt", exitCode = 1 } }
+            }
+        });
+
+        var retryRunnerId = $"{_runnerId}-retry";
+        var grain = _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id);
+        var reopened = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+            project.Id,
+            session.IssueNumber,
+            session.WorkflowRunId,
+            session.SessionName,
+            retryRunnerId,
+            work.WorkId,
+            work.WorkType,
+            work.Stage,
+            work.Title));
+
+        Assert.Equal(session.Id, reopened.Id);
+        Assert.Equal("created", reopened.Status);
+        Assert.Equal(retryRunnerId, reopened.RunnerId);
+        Assert.Null(reopened.CompletedAt);
+        Assert.Null(reopened.FailureReason);
+        Assert.Null(reopened.ExitCode);
+
+        await _client.PostOkAsync($"/api/runner/{retryRunnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = "retry-agent-session", workDir = project.Path, processPid = 5678 });
+
+        var grainSession = await grain.GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal(session.Id, grainSession.Id);
+        Assert.Equal("running", grainSession.Status);
+        Assert.Equal("retry-agent-session", grainSession.AgentSessionId);
+
+        var nextRunnerId = $"{_runnerId}-next";
+        var repeated = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+            project.Id,
+            session.IssueNumber,
+            session.WorkflowRunId,
+            session.SessionName,
+            nextRunnerId,
+            work.WorkId,
+            work.WorkType,
+            work.Stage,
+            work.Title));
+
+        Assert.Equal(session.Id, repeated.Id);
+        Assert.Equal("running", repeated.Status);
+        Assert.Equal(nextRunnerId, repeated.RunnerId);
+    }
+
+    [Fact]
     public async Task RunnerUnregisters_WorkInFlight_FailsRunningSession()
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister");

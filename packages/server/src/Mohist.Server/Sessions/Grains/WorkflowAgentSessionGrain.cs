@@ -54,12 +54,18 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             else
             {
                 _session = existing;
-                _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+                if (_session.IsTerminal)
+                    _session.Reopen(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
+                else
+                    _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
             }
         }
         else
         {
-            _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+            if (_session.IsTerminal)
+                _session.Reopen(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
+            else
+                _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
