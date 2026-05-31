@@ -6,6 +6,50 @@ public static partial class WorkflowAgentSessionExtensions
     {
         public bool IsTerminal => session.Status is AgentSessionStatus.Completed or AgentSessionStatus.Failed or AgentSessionStatus.Cancelled;
 
+        public bool IsCreated => session.Status == AgentSessionStatus.Created;
+
+        public void MergeContext(
+            string? runnerId,
+            string? workId,
+            string? workType,
+            string? stage,
+            string? title,
+            int? issueNumber)
+        {
+            session.RunnerId ??= runnerId;
+            session.WorkId ??= workId;
+            session.WorkType ??= workType;
+            session.Stage ??= stage;
+            session.Title ??= title;
+            if (session.IssueNumber == 0 && issueNumber is > 0)
+                session.IssueNumber = issueNumber.Value;
+        }
+
+        public bool AttachAgent(
+            string agentSessionId,
+            string? model,
+            string? workDir,
+            string? changeDir,
+            int? processPid,
+            DateTime now)
+        {
+            if (session.IsTerminal) return false;
+
+            session.AgentSessionId = agentSessionId;
+            session.Model = model ?? session.Model;
+            session.WorkDir = workDir ?? session.WorkDir;
+            session.ChangeDir = changeDir ?? session.ChangeDir;
+            session.ProcessPid = processPid ?? session.ProcessPid;
+            session.Start(model, now);
+            return true;
+        }
+
+        public void EnsureActive(DateTime now)
+        {
+            if (session.IsCreated)
+                session.MarkActive("running", now);
+        }
+
         public void Start(string? model, DateTime now)
         {
             if (session.IsTerminal) return;

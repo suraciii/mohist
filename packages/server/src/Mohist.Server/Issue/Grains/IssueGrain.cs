@@ -114,10 +114,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task CompleteWorkAsync(string workflowRunId)
     {
         if (_issue is null) return;
-        if (_issue.WorkflowRunId != workflowRunId) return;
-        if (_issue.Status == IssueStatus.Done) return;
-
-        _issue.Complete();
+        if (!_issue.Complete(workflowRunId)) return;
         await SaveIssueAsync();
         await AppendIssueEventAsync("issue_completed", "completed", "Issue completed", new { workflowRunId });
     }

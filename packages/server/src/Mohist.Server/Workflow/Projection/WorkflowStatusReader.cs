@@ -12,7 +12,7 @@ public static class WorkflowStatusReader
         var stages = run.Stages.Select((s, i) =>
             new StageStatusView(
                 s.Id,
-                StageStatus(s),
+                s.Status.ToString(),
                 i,
                 s.Tasks.Select(t => new TaskStatusView(
                     t.Id,
@@ -61,22 +61,4 @@ public static class WorkflowStatusReader
             [],
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt));
     }
-
-    private static string StageStatus(StageRun stage)
-    {
-        if (stage.Failure is not null) return StageRunStatus.Failed.ToString();
-        if (!stage.Initialized) return StageRunStatus.Pending.ToString();
-        if (stage.IsAwaitingApproval) return StageRunStatus.AwaitingApproval.ToString();
-        if (StageIsComplete(stage))
-        {
-            if (stage.RequiresApproval && stage.ApprovalStatus is not { Result: "approved" }) return StageRunStatus.Running.ToString();
-            return StageRunStatus.Completed.ToString();
-        }
-        return StageRunStatus.Running.ToString();
-    }
-
-    private static bool StageIsComplete(StageRun stage) =>
-        stage.Initialized &&
-        stage.Tasks.All(t => t.Status == TaskRunStatus.Completed) &&
-        stage.Checks.All(c => c.Status == StageCheckStatus.Passed);
 }

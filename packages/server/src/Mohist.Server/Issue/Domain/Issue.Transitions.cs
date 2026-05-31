@@ -55,13 +55,16 @@ public static partial class IssueExtensions
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
-        public void Complete()
+        public bool Complete(string workflowRunId)
         {
+            if (issue.WorkflowRunId != workflowRunId) return false;
+            if (issue.Status == IssueStatus.Done) return false;
             if (issue.Status != IssueStatus.InProgress)
                 throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}, only InProgress can complete");
             issue.Status = IssueStatus.Done;
             issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
+            return true;
         }
 
         public void Archive()
