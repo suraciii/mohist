@@ -104,6 +104,15 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
+  it("ToolUpdatesContinue_LongCommandRunning_DoesNotProbeWhileToolIsActive", async () => {
+    const fixture = createFixture("tool-liveness")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "run tests", livenessQuietThresholdMs: 30, probeTimeoutMs: 100, timeout: 1_000 }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
+  })
+
   it("AbortSignalFires_PromptRunning_SendsSessionCancelBeforeCleanup", async () => {
     const fixture = createFixture("abort")
     const controller = new AbortController()
@@ -148,7 +157,7 @@ function createFixture(scenario: Scenario) {
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "abort"
+type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "tool-liveness" | "abort"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -192,6 +201,7 @@ class FakeAcpAgent {
         }
         if (self.scenario === "liveness") return await self.runLivenessPrompt(params.sessionId)
         if (self.scenario === "abort") return await new Promise(() => {})
+        if (self.scenario === "tool-liveness") return await self.runToolLivenessPrompt(params.sessionId)
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         else await self.emitBasicEvents(params.sessionId)
         return { stopReason: "end_turn" }
@@ -212,6 +222,16 @@ class FakeAcpAgent {
         await this.connection.sessionUpdate(textUpdate(sessionId, "done-after-probe"))
         this.initialPromptResolve?.({ stopReason: "end_turn" })
       }, 20)
+    return { stopReason: "end_turn" as const }
+  }
+
+  private async runToolLivenessPrompt(sessionId: string) {
+    await this.connection.sessionUpdate({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-liveness", title: "Run tests", kind: "execute", status: "in_progress", rawInput: { command: "dotnet test" } } })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await this.connection.sessionUpdate({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-liveness", title: "Run tests", status: "in_progress", rawOutput: { text: "still running" } } })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await this.connection.sessionUpdate({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-liveness", title: "Run tests", status: "completed", rawOutput: { text: "passed" } } })
+    await this.connection.sessionUpdate(textUpdate(sessionId, "done"))
     return { stopReason: "end_turn" as const }
   }
 

@@ -225,8 +225,10 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
-      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
+      if (isSessionActivity(update)) {
         notifyData()
+      }
+      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
         if (!agentTextTruncated) {
           agentText += String(update.content.text)
           if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
@@ -292,8 +294,10 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
-      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
+      if (isSessionActivity(update)) {
         notifyData()
+      }
+      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
         if (!agentTextTruncated) {
           agentText += String(update.content.text)
           if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
@@ -379,8 +383,10 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
-      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
+      if (isSessionActivity(update)) {
         notifyData()
+      }
+      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
         if (!agentTextTruncated) {
           agentText += String(update.content.text)
           if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
@@ -462,9 +468,11 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
   const connection = new ClientSideConnection(
     () => ({
       sessionUpdate: async (notification: SessionNotification) => {
-        notifyData()
         const update = notification.update
         const type = update.sessionUpdate
+        if (isSessionActivity(update)) {
+          notifyData()
+        }
         if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
           const text = String(update.content.text)
           if (!agentTextTruncated) {
@@ -590,6 +598,10 @@ async function cancelAndReturn(connection: ClientSideConnection, sessionId: stri
 function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"data"> {
   if (done()) return Promise.resolve("data")
   return new Promise((resolve) => waiters.add(() => resolve("data")))
+}
+
+function isSessionActivity(update: SessionNotification["update"]) {
+  return Boolean(update.sessionUpdate)
 }
 
 async function emitSessionStarted(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined) {

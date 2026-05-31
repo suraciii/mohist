@@ -1,6 +1,8 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Errors;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Queries;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -169,6 +171,55 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
             await workflow.RetryAsync());
+    }
+
+    [Fact]
+    public async Task ApprovalRejected_UserViewsWorkflowStatus_RerunActionIsAvailable()
+    {
+        var workflow = await StartWorkflowAsync(ApprovalStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+        var (checks, r2) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(r2, checks, "plan-ok");
+
+        await workflow.RejectAsync("needs rework");
+
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        Assert.NotNull(status);
+        Assert.Equal("Failed", status.Status);
+        Assert.NotNull(status.Failure);
+        Assert.Equal("ApprovalRejected", status.Failure.Reason);
+
+        Assert.Null(status.AvailableActions.Find(a => a.Name == "retry"));
+        var rerunAction = status.AvailableActions.Find(a => a.Name == "rerun");
+        Assert.NotNull(rerunAction);
+        Assert.Equal("plan", rerunAction.Target);
+    }
+
+    [Fact]
+    public async Task LegacyApprovalRejectedWithoutWorkflowFailure_UserViewsWorkflowStatus_RerunActionIsAvailable()
+    {
+        var run = WorkflowRun.Create("legacy-approval-rejected", ApprovalStage());
+        run.Start();
+        var stage = run.CurrentStage();
+        stage.Initialized = true;
+        stage.Status = StageRunStatus.Failed;
+        stage.ApprovalStatus = new ApprovalStatus(
+            "rejected",
+            DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O"),
+            DateTimeOffset.UtcNow.ToString("O"));
+        stage.Failure = new FailureDetails(FailureReason.ApprovalRejected, stage.Id, Message: "needs rework");
+        run.Status = WorkflowRunStatus.Failed;
+
+        var status = WorkflowStatusMapper.BuildStatusView(run, null, null);
+
+        Assert.NotNull(status);
+        Assert.NotNull(status.Failure);
+        Assert.Equal("ApprovalRejected", status.Failure.Reason);
+        var rerunAction = status.AvailableActions.Find(a => a.Name == "rerun");
+        Assert.NotNull(rerunAction);
+        Assert.Equal("plan", rerunAction.Target);
     }
 
     [Fact]
