@@ -1,0 +1,96 @@
+<artifact id="tasks" schema="mohist-default">
+
+<task>
+Create the tasks artifact for the current change.
+Implementation task graph for autonomous Mohist execution.
+</task>
+
+<dependencies>
+Read these files for context before creating this artifact:
+
+<dependency id="proposal" status="expected">
+  <path>${{ openspecChangeDir }}/proposal.md</path>
+  <description>Initial proposal document outlining the change</description>
+</dependency>
+
+<dependency id="specs" status="expected">
+  <path>${{ openspecChangeDir }}/specs</path>
+  <description>Detailed specifications for the change</description>
+</dependency>
+
+<dependency id="design" status="expected">
+  <path>${{ openspecChangeDir }}/design.md</path>
+  <description>Technical design document with implementation details</description>
+</dependency>
+</dependencies>
+
+<output>
+Write to: `${{ openspecChangeDir }}/tasks.json`
+</output>
+
+<instruction>
+Create `tasks.json`, a machine-readable implementation plan for Mohist agents.
+
+Tasks must be smallest independently testable units that deliver value. Split by outcome, not by files or layers.
+Each task should be completable in one agent iteration and have clear acceptance criteria.
+
+Reference specs for what needs to be built and design for how to build it.
+</instruction>
+
+<template>
+<!-- Use this JSON structure for the output file. Fill in all fields. -->
+{
+  "project": "<project name>",
+  "description": "<short change summary>",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Short task title",
+      "spec": "specs/<capability>/spec.md#<requirement>",
+      "description": "What to implement in 2-3 sentences",
+      "acceptanceCriteria": ["verifiable criterion"],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "expected output artifact or result",
+      "dependsOn": [],
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
+</template>
+
+<field_guidance>
+- `id`: Task identifier (`T-001`, `T-002`, ...).
+- `title`: Short task title.
+- `spec`: Reference to a spec requirement when applicable.
+- `description`: Outcome-focused implementation description.
+- `acceptanceCriteria`: Verifiable criteria. For tasks with `spec`, these supplement spec scenarios.
+- `priority`: Execution order. Lower number means earlier.
+- `mode`: `AFK` or `HITL`. Use `AFK` unless human judgment is required.
+- `type`: One of `WRITE`, `TEST`, `MIGRATE`, `CONFIG`, `REVIEW`.
+- `output`: Expected output file, artifact, or observable result.
+- `dependsOn`: Task IDs this task depends on. Dependencies must reference lower-priority tasks.
+- `passes`: Always start as `false`.
+- `notes`: Optional implementation notes.
+</field_guidance>
+
+<dependency_analysis>
+Before writing final JSON:
+1. Compare every pair of tasks.
+2. Identify whether one task consumes output from another.
+3. Add `dependsOn` whenever a later task needs a prior output.
+4. Verify the dependency graph is a DAG.
+5. Verify every `dependsOn` references an existing task with a strictly lower priority number.
+</dependency_analysis>
+
+<success_criteria>
+- `tasks.json` is valid JSON.
+- Every task is complete and deliverable.
+- Every task has verifiable acceptance criteria.
+- Dependencies are valid, acyclic, and point only to earlier tasks.
+- Tasks map back to specs and design where applicable.
+</success_criteria>
+
+</artifact>

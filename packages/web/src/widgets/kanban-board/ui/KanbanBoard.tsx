@@ -1,0 +1,469 @@
+import { useMemo, useState, useEffect, useCallback } from 'react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
+import { Button } from '@/shared/ui/components/button'
+import { Input } from '@/shared/ui/components/input'
+import type { AgentStatus } from '../../../entities/agent'
+import { IssueStatus, type Issue } from '../../../entities/issue'
+import { StageColumn } from './StageColumn'
+import { IssueCard } from './IssueCard'
+import {
+  groupIssuesByStage,
+  filterClosedFromDone,
+  getDoneColumnCounts,
+  STAGES,
+} from '../model/kanban-grouping'
+import {
+  parseBoardQuery,
+  deriveBoardColumns,
+  serializeBoardQuery,
+  type BoardQueryState,
+  type SortMode,
+} from '../model/board-query'
+import { useLabels } from '../../../entities/issue'
+import { getPriorityStyle } from '../../../shared/lib/label-colors'
+import { deriveAttentionItems } from '../model/homepage-attention'
+
+interface Props {
+  issues: Issue[]
+  agentStatus: AgentStatus
+  archivedCount?: number
+}
+
+const ALL_PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
+
+function FilterBar({
+  state,
+  onChange,
+  allLabels,
+  sort,
+  onSortChange,
+}: {
+  state: BoardQueryState
+  onChange: (state: BoardQueryState) => void
+  allLabels: string[]
+  sort: SortMode
+  onSortChange: (s: SortMode) => void
+}) {
+  const [labelSearch, setLabelSearch] = useState('')
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+
+  const filteredLabels = useMemo(() => {
+    if (!labelSearch.trim()) return allLabels
+    const q = labelSearch.toLowerCase()
+    return allLabels.filter((l) => l.toLowerCase().includes(q))
+  }, [allLabels, labelSearch])
+
+  const togglePriority = useCallback(
+    (p: string) => {
+      const has = state.priorities.includes(p)
+      const next = has
+        ? state.priorities.filter((x) => x !== p)
+        : [...state.priorities, p]
+      onChange({ ...state, priorities: next })
+    },
+    [state, onChange],
+  )
+
+  const toggleLabel = useCallback(
+    (label: string) => {
+      const has = state.labels.includes(label)
+      const next = has ? state.labels.filter((x) => x !== label) : [...state.labels, label]
+      onChange({ ...state, labels: next })
+    },
+    [state, onChange],
+  )
+
+  const activeFilterCount = state.priorities.length + state.labels.length
+
+  const renderPriorityControls = () => (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-muted-foreground font-medium">Priority:</span>
+      <div className="flex flex-wrap gap-1">
+        {ALL_PRIORITIES.map((p) => {
+          const style = getPriorityStyle(p)
+          const active = state.priorities.includes(p)
+          return (
+            <Button
+              key={p}
+              variant="ghost"
+              size="xs"
+              onClick={() => togglePriority(p)}
+              className={`rounded-full ${
+                active ? 'ring-1 ring-offset-1' : 'hover:opacity-80'
+              }`}
+              style={{
+                backgroundColor: style.bg,
+                color: style.text,
+                ...(active ? { ringColor: style.text } : {}),
+              }}
+            >
+              {p.toUpperCase()}
+            </Button>
+          )
+        })}
+        {state.priorities.length > 0 && (
+          <Button
+            variant="link"
+            size="xs"
+            onClick={() => onChange({ ...state, priorities: [] })}
+            className="ml-1 h-auto p-0 text-muted-foreground/70 hover:text-muted-foreground"
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+
+  const renderLabelControl = () => {
+    if (allLabels.length === 0) return null
+
+    return (
+      <Popover>
+        <PopoverTrigger className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors">
+            <span className="text-xs text-muted-foreground font-medium">Labels:</span>
+            {state.labels.length > 0 ? (
+              <span className="bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5">{state.labels.length}</span>
+            ) : (
+              <span className="text-muted-foreground/70">All</span>
+            )}
+            <svg className="h-3 w-3 text-muted-foreground/70" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+        </PopoverTrigger>
+        <PopoverContent className="origin-top-right w-72">
+          <div className="p-2 border-b">
+            <Input
+              type="text"
+              placeholder="Search labels..."
+              className="text-xs"
+              value={labelSearch}
+              onChange={(e) => setLabelSearch(e.target.value)}
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto p-2">
+            {filteredLabels.length === 0 ? (
+              <div className="py-4 text-center text-xs text-muted-foreground/70">No labels found</div>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {filteredLabels.map((label) => {
+                  const active = state.labels.includes(label)
+                  return (
+                    <Button
+                      key={label}
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => toggleLabel(label)}
+                      className={`rounded-full ${
+                        active
+                          ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
+                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                      }`}
+                    >
+                      {label}
+                    </Button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          {state.labels.length > 0 && (
+            <div className="border-t p-2">
+              <Button
+                variant="link"
+                size="xs"
+                onClick={() => onChange({ ...state, labels: [] })}
+                className="h-auto p-0 text-muted-foreground/70 hover:text-muted-foreground"
+              >
+                Clear all labels
+              </Button>
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
+  const renderSearchInput = () => (
+    <Input
+      type="text"
+      value={state.search}
+      onChange={(e) => onChange({ ...state, search: e.target.value })}
+      placeholder="Search titles..."
+      className="text-xs"
+    />
+  )
+
+  return (
+    <div className="bg-background border-b">
+      <div className="hidden md:flex flex-wrap items-center gap-3 px-4 py-2">
+        {renderPriorityControls()}
+        {renderLabelControl()}
+        <div className="flex-1 min-w-[160px] max-w-xs">
+          {renderSearchInput()}
+        </div>
+      </div>
+
+      <div className="md:hidden px-3 py-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            {renderSearchInput()}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="mobile-filter-toggle"
+            onClick={() => setMobileFiltersOpen((open) => !open)}
+          >
+            Filters{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+          </Button>
+        </div>
+
+        {mobileFiltersOpen && (
+          <div data-testid="mobile-filter-panel" className="space-y-2 rounded-md border bg-muted p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {renderPriorityControls()}
+              {renderLabelControl()}
+            </div>
+            <div className="flex items-center gap-1.5 border-t pt-2">
+              <span className="text-xs text-muted-foreground font-medium">Sort:</span>
+              <SortSwitcher sort={sort} onChange={onSortChange} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SortSwitcher({
+  sort,
+  onChange,
+}: {
+  sort: SortMode
+  onChange: (s: SortMode) => void
+}) {
+  const options: { value: SortMode; label: string }[] = [
+    { value: 'priority', label: 'Priority' },
+    { value: 'number', label: '#' },
+    { value: 'updated', label: 'Updated' },
+  ]
+
+  return (
+    <div className="flex items-center gap-0.5">
+      {options.map((opt) => (
+        <Button
+          key={opt.value}
+          variant="ghost"
+          size="xs"
+          onClick={() => onChange(opt.value)}
+          className={`rounded ${
+            sort === opt.value
+              ? 'bg-blue-100 text-blue-700 font-medium'
+              : 'text-muted-foreground/70 hover:text-muted-foreground hover:bg-muted'
+          }`}
+        >
+          {opt.label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+function NeedsAttentionSummary({
+  items,
+}: {
+  items: Array<{ issueNumber: number; issueId: string; label: string; detail?: string }>
+}) {
+  if (items.length === 0) return null
+
+  return (
+    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100">
+      <div className="text-xs font-semibold text-amber-700 mb-1.5">Needs attention</div>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <a
+            key={item.issueId}
+            href={`/issues/${item.issueNumber}`}
+            className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow-md transition-shadow border border-amber-200"
+          >
+            <span className="font-mono text-amber-600">#{item.issueNumber}</span>
+            <span className="font-medium text-amber-700">{item.label}</span>
+            {item.detail && (
+              <span className="text-muted-foreground max-w-[200px] truncate">{item.detail}</span>
+            )}
+          </a>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RunnerUnavailableBanner({ agentStatus }: { agentStatus: AgentStatus }) {
+  if (agentStatus.runnerAvailable !== false) return null
+
+  return (
+    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+      {agentStatus.runnerMessage ?? 'No runner is connected. Start a runner before starting workflow work.'}
+    </div>
+  )
+}
+
+function getSearchParams(): string {
+  return typeof window !== 'undefined' ? window.location.search : ''
+}
+
+export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
+  const { data: allLabels = [] } = useLabels()
+
+  const queryState = useMemo(() => parseBoardQuery(getSearchParams()), [])
+
+  const allColumns = useMemo(() => groupIssuesByStage(issues), [issues])
+
+  const [showClosed, setShowClosed] = useState(false)
+  const [localState, setLocalState] = useState<BoardQueryState>(queryState)
+
+  useEffect(() => {
+    const handler = () => setLocalState(parseBoardQuery(getSearchParams()))
+    window.addEventListener('popstate', handler)
+    return () => window.removeEventListener('popstate', handler)
+  }, [])
+
+  const filteredColumns = useMemo(
+    () => deriveBoardColumns(allColumns, localState),
+    [allColumns, localState],
+  )
+
+  const { closedCount } = useMemo(
+    () => getDoneColumnCounts(filteredColumns),
+    [filteredColumns],
+  )
+
+  const updateState = useCallback((newState: BoardQueryState) => {
+    setLocalState(newState)
+    const search = serializeBoardQuery(newState)
+    const newUrl = search ? `${window.location.pathname}?${search}` : window.location.pathname
+    window.history.pushState({}, '', newUrl)
+  }, [])
+
+  const displayedColumns = useMemo(
+    () => filterClosedFromDone(filteredColumns, showClosed),
+    [filteredColumns, showClosed],
+  )
+
+  const defaultStage = useMemo(() => {
+    const withIssues = displayedColumns.find((c) => c.issues.length > 0)
+    return withIssues ? withIssues.key : STAGES[0].key
+  }, [displayedColumns])
+
+  const [selectedStage, setSelectedStage] = useState<IssueStatus>(defaultStage)
+
+  useEffect(() => {
+    setSelectedStage(defaultStage)
+  }, [defaultStage])
+
+  const selectedColumn = displayedColumns.find((c) => c.key === selectedStage) ?? displayedColumns[0]
+
+  const attentionItems = useMemo(
+    () => deriveAttentionItems(issues, agentStatus),
+    [issues, agentStatus],
+  )
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-4rem)]">
+      <RunnerUnavailableBanner agentStatus={agentStatus} />
+      <NeedsAttentionSummary items={attentionItems} />
+      <FilterBar
+        state={localState}
+        onChange={updateState}
+        allLabels={allLabels}
+        sort={localState.sort}
+        onSortChange={(s) => updateState({ ...localState, sort: s })}
+      />
+
+      <div className="md:hidden flex flex-col flex-1">
+        <div className="flex overflow-x-auto snap-x snap-mandatory border-b bg-background px-2 shrink-0">
+          {displayedColumns.map((col) => (
+            <Button
+              key={col.key}
+              variant="ghost"
+              onClick={() => setSelectedStage(col.key)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap snap-start transition-colors min-h-[44px] border-b-2 rounded-none ${
+                col.key === selectedStage
+                  ? 'text-blue-600 border-blue-600'
+                  : 'text-muted-foreground border-transparent hover:text-foreground/80'
+              }`}
+            >
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  col.key === selectedStage ? 'bg-blue-500' : 'bg-muted'
+                }`}
+              />
+              {col.label}
+              <span
+                className={`text-xs rounded-full px-1.5 py-0.5 ${
+                  col.key === selectedStage
+                    ? 'bg-blue-50 text-blue-600'
+                    : 'bg-muted text-muted-foreground/70'
+                }`}
+              >
+                {col.issues.length}
+              </span>
+            </Button>
+          ))}
+        </div>
+
+        {selectedStage === IssueStatus.Cancelled && closedCount > 0 && !showClosed && (
+          <div className="px-4 py-2">
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => setShowClosed(true)}
+            >
+              Show cancelled ({closedCount})
+            </Button>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {selectedColumn.issues.length === 0 ? (
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground/70">
+              No issues in {selectedColumn.label}
+            </div>
+          ) : (
+            selectedColumn.issues.map((issue) => (
+              <IssueCard key={issue.id} issue={issue} agentStatus={agentStatus} />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="hidden md:flex flex-row gap-4 overflow-x-auto p-4 flex-1">
+        {displayedColumns.map((col) => (
+          <StageColumn
+            key={col.key}
+            label={col.label}
+            issues={col.issues}
+            agentStatus={agentStatus}
+            isDone={col.key === IssueStatus.Done}
+            archivedCount={col.key === IssueStatus.Done ? archivedCount : undefined}
+            sort={localState.sort}
+            onSortChange={(s) => updateState({ ...localState, sort: s })}
+          />
+        ))}
+        {closedCount > 0 && !showClosed && (
+          <div className="flex items-start pt-2">
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => setShowClosed(true)}
+              className="whitespace-nowrap"
+            >
+              Show cancelled ({closedCount})
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

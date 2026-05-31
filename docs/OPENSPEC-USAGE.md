@@ -8,9 +8,9 @@ Mohist 的 OpenSpec 工作流：结构化 Change 产物 + Ralph 式任务执行�
 Plan → Build → Check → Integrate → Done
 ```
 
-- **Plan**: AI 生成 Change 产物 (proposal, design, specs, tasks.json)，含自审
+- **Plan**: 外部 coder agent 生成 Change 产物 (proposal, design, specs, tasks.json)，含自审
 - **Build**: Ralph 式任务循环执行
-- **Check**: AI 代码审查 + merge-ready 检查
+- **Check**: 外部 coder agent 代码审查 + merge-ready 检查
 - **Integrate**: 规格同步 + 归档 + 合并 + 集成后健康检查
 
 ## 核心概念
@@ -27,8 +27,8 @@ openspec/changes/{issue-number}-{slug}/
 │   ├── capability-a/spec.md
 │   └── capability-b/spec.md
 ├── tasks.json         # 带执行状态的任务列表 (Ralph 式)
-├── self-review.md     # Plan 阶段 Agent 自审报告
-├── review.md          # Check 阶段 AI 审查报告
+├── self-review.md     # Plan 阶段 外部 coder agent 自审报告
+├── review.md          # Check 阶段 外部 coder agent 审查报告
 └── session-memories/  # 任务执行的学习记录
     └── T-001.json
 ```
@@ -39,7 +39,7 @@ Ralph 式执行按顺序遍历 `tasks.json` 中的任务：
 
 1. 按 order 选择下一个待执行任务
 2. 组装完整上下文 (proposal + design + spec + learnings)
-3. 使用 AI agent 执行
+3. 使用 外部 coder agent 执行
 4. 验证验收标准
 5. 存储学习记录
 6. 重复直到所有任务完成
@@ -60,9 +60,9 @@ mo propose 42 --force
 
 该命令：
 1. 创建 `openspec/changes/{issue-number}-{slug}/`
-2. 启动 AI agent 探索代码库
-3. Agent 生成 proposal, design, specs
-4. Agent 执行自审（最多 3 次迭代）
+2. 启动 外部 coder agent 探索代码库
+3. 外部 coder agent 生成 proposal, design, specs
+4. 外部 coder agent 执行自审（最多 3 次迭代）
 5. 自审通过后生成 `tasks.json`
 
 ### `mo issue resume <number>`
@@ -82,15 +82,15 @@ mo issue resume 42 --skip-to-review
 
 ### Plan 阶段
 
-Agent 探索 Issue 和代码库，生成：
+外部 coder agent 探索 Issue 和代码库，生成：
 
 - **proposal.md**: 动机、目标、非目标
 - **design.md**: 架构决策、权衡
 - **specs/**: 每个能力的详细需求
 - **tasks.json**: 从 specs 派生的任务列表
-- **self-review.md**: Agent 自审 report（最多 3 次迭代）
+- **self-review.md**: 外部 coder agent 自审 report（最多 3 次迭代）
 
-Plan gate 包含用户审批和健康门控（`npm run typecheck`）。
+Plan gate 包含用户审批和健康检查（`git diff --check`）。
 
 ### Build 阶段
 
@@ -101,11 +101,11 @@ Ralph loop 执行 `tasks.json` 中的任务：
 - 失败分析后带有失败上下文重试
 - 任务状态通过每个任务上的 `passes`/`attempts`/`error` 追踪
 
-Build gate 包含健康门控（`npm run build`）和全部任务完成检查。
+Build gate 包含健康检查（`git diff --check`）和全部任务完成检查。
 
 ### Check 阶段
 
-- AI agent 审查代码，生成 `review.md`
+- 外部 coder agent 审查代码，生成 `review.md`
 - 合并就绪检查（worktree 快进合并）
 - 用户审批后进入 Integrate
 
@@ -114,7 +114,7 @@ Build gate 包含健康门控（`npm run build`）和全部任务完成检查。
 - 增量规格同步到主规格
 - Change 归档到 `openspec/changes/archive/`
 - 压缩合并到目标分支
-- 集成后健康门控（`npm run build && npm test`）
+- 集成后健康检查（`git diff --check`）
 
 ## 示例工作流
 
@@ -130,7 +130,7 @@ mo server start
 mo propose 42
 ```
 
-Agent 探索 Issue 并生成产物。
+外部 coder agent 探索 Issue 并生成产物。
 
 ### 3. 审查产物
 
@@ -145,7 +145,7 @@ mo issue approve 42
 
 ### 4. Build 自动执行
 
-Agent 运行 Ralph loop，执行 `tasks.json` 中的每个任务。
+外部 coder agent 运行 Ralph loop，执行 `tasks.json` 中的每个任务。
 
 ### 5. Check 审查
 
@@ -211,7 +211,7 @@ openspec/changes/{change}/session-memories/{task-id}.json
 
 ### Build 任务 T-003 失败
 
-1. Agent 带失败上下文重试（最多 2 次）
+1. 外部 coder agent 带失败上下文重试（最多 2 次）
 2. 仍失败则暂停
 3. 用户手动修复问题
 4. 用户运行 `mo issue resume 42 --skip-to-review`

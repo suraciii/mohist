@@ -9,10 +9,10 @@
 #   cp $(which opencode) test/agentic/shared/bin/opencode
 #   podman build -t mohist-walkthrough -f test/agentic/shared/Containerfile.layer2 test/agentic/
 
-FROM node:20-slim
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git curl python3 make g++ && \
+    apt-get install -y --no-install-recommends git curl nodejs npm python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -g 1001 motest && useradd -m -u 1001 -g motest motest
@@ -23,12 +23,15 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
-COPY packages/cli/package.json packages/cli/package-lock.json packages/cli/
+COPY packages/web/package.json packages/web/package-lock.json packages/web/
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci -w packages/cli
+    npm ci -w packages/web
 
-COPY packages/cli/ packages/cli/
-RUN npm run build -w packages/cli
+COPY packages/web/ packages/web/
+COPY packages/runner/ packages/runner/
+COPY packages/server/ packages/server/
+RUN npm run build:web
+RUN dotnet build Mohist.sln
 
 RUN mkdir -p /app/workspace /home/motest/.mohist/projects /home/motest/.mohist/logs && \
     chown -R motest:motest /app /home/motest

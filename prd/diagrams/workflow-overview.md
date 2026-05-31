@@ -22,8 +22,8 @@ mohist:   想法 ──▶ 方案 ──▶ 代码 ──▶ 验证 ──▶ �
 │   ┌─────────────────────────────────────────────────────────────┐   │
 │   │                     mohist 流水线                             │   │
 │   │                                                             │   │
-│   │   Explore Mode    │    Pipeline (PLAN → BUILD → CHECK)      │   │
-│   │   (Pipeline 外)    │                                        │   │
+│   │   Explore Mode    │    Workflow (PLAN → BUILD → CHECK)      │   │
+│   │   (Workflow 外)    │                                        │   │
 │   │                   │    ┌──────┐   ┌──────┐   ┌──────┐       │   │
 │   │   AI 面试你       │    │ Plan │──▶│ Build│──▶│ Check│──▶ done│   │
 │   │   梳理需求        │    │      │   │      │   │      │       │   │
@@ -44,7 +44,7 @@ mohist:   想法 ──▶ 方案 ──▶ 代码 ──▶ 验证 ──▶ �
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
-│  Explore Mode (Pipeline 外)                                          │
+│  Explore Mode (Workflow 外)                                          │
 │  ─────────────────────────                                           │
 │  AI: 结构化面试，按分支逐个追问                                        │
 │      · 每个参与者及其需求                                             │
@@ -117,11 +117,11 @@ Explore ──▶ Plan ──────▶ Build ──▶ Check ────�
 ## 如果发现问题
 
 ```
-在 Pipeline 内：
+在 Workflow 内：
   CHECK → PLAN: 自动循环，CHECK 发现问题回到 PLAN 重新规划
   HITL task: Agent 在决策点暂停等你
   小问题: Agent 用 ask_user 问具体问题，继续推进
-  大问题: Agent 标记 blocked，退出 Pipeline 回到 Explore Mode
+  大问题: Agent 标记 blocked，退出 Workflow 回到 Explore Mode
 
 随时可以：
   "暂停"     ──▶ 先停下来

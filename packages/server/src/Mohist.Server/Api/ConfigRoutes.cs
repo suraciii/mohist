@@ -1,0 +1,112 @@
+using Mohist.Server.Infrastructure.Config;
+
+namespace Mohist.Server.Api;
+
+public static class ConfigRoutes
+{
+    public static WebApplication MapConfigRoutes(this WebApplication app)
+    {
+        app.MapGet("/api/model", async (ConfigService svc) =>
+        {
+            var agent = await svc.GetAgentConfigAsync();
+            var model = agent?.GetValueOrDefault("model")?.ToString();
+            return ApiResults.Ok(new { model = string.IsNullOrWhiteSpace(model) ? null : model });
+        });
+
+        app.MapPut("/api/model", async (ModelRequest req, ConfigService svc) =>
+        {
+            await svc.SetAgentModelAsync(req.Model);
+            return ApiResults.Ok(new { req.Model });
+        });
+
+        app.MapGet("/api/opencode-model", async (ConfigService svc) =>
+        {
+            var agent = await svc.GetAgentConfigAsync();
+            var model = agent?.GetValueOrDefault("model")?.ToString();
+            return ApiResults.Ok(new { model = string.IsNullOrWhiteSpace(model) ? null : model });
+        });
+
+        app.MapPut("/api/opencode-model", async (ModelRequest req, ConfigService svc) =>
+        {
+            await svc.SetAgentModelAsync(req.Model);
+            return ApiResults.Ok(new { req.Model });
+        });
+
+        app.MapGet("/api/agent-config", async (ConfigService svc) =>
+        {
+            var agent = await svc.GetAgentConfigAsync();
+            var stageAgents = await svc.GetStageAgentConfigsAsync();
+            return ApiResults.Ok(new { agent, stageAgents = stageAgents.Count == 0 ? null : stageAgents });
+        });
+
+        app.MapPut("/api/agent-config", async (AgentConfigRequest req, ConfigService svc) =>
+        {
+            if (req.Agent is null) await svc.ClearAsync("agent");
+            else await svc.SetAsync("agent", req.Agent);
+
+            if (req.StageAgents is null) await svc.ClearAsync("stageAgents");
+            else await svc.SetAsync("stageAgents", req.StageAgents);
+
+            return ApiResults.Ok(new { agent = await svc.GetAgentConfigAsync(), stageAgents = await svc.GetStageAgentConfigsAsync() });
+        });
+
+        app.MapGet("/api/stage-models", async (ConfigService svc) =>
+        {
+            var all = await svc.GetAllAsync();
+            if (!all.TryGetValue("stageModels", out var json) || string.IsNullOrWhiteSpace(json))
+                return ApiResults.Ok(new { stageModels = (Dictionary<string, string>?)null });
+            return ApiResults.Ok(new { stageModels = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) });
+        });
+
+        app.MapPut("/api/stage-models", async (StageModelsRequest req, ConfigService svc) =>
+        {
+            if (req.StageModels is null) await svc.ClearAsync("stageModels");
+            else await svc.SetAsync("stageModels", req.StageModels);
+            return ApiResults.Ok(new { req.StageModels });
+        });
+
+        var config = app.MapGroup("/api/config");
+
+        config.MapGet("/", async (ConfigService svc) =>
+        {
+            var cfg = await svc.GetConfigAsync();
+            return ApiResults.Ok(cfg);
+        });
+
+        config.MapGet("/list", async (ConfigService svc) =>
+        {
+            var all = await svc.GetAllAsync();
+            var safe = new Dictionary<string, string>();
+            foreach (var (key, value) in all)
+            {
+                safe[key] = key.Contains("token", StringComparison.OrdinalIgnoreCase)
+                    || key.Contains("key", StringComparison.OrdinalIgnoreCase)
+                    || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
+                    ? "***"
+                    : value;
+            }
+            return ApiResults.Ok(safe);
+        });
+
+        config.MapPut("/{key}", async (string key, ConfigValueRequest req, ConfigService svc) =>
+        {
+            if (req.Value is null)
+                return ApiResults.BadRequest("value is required");
+
+            var (valid, error) = svc.Validate(key, req.Value.ToString()!);
+            if (!valid)
+                return ApiResults.BadRequest(error!);
+
+            await svc.SetAsync(key, req.Value);
+            var cfg = await svc.GetConfigAsync();
+            return ApiResults.Ok(cfg);
+        });
+
+        return app;
+    }
+}
+
+public record ConfigValueRequest(object? Value);
+public record ModelRequest(string? Model);
+public record StageModelsRequest(Dictionary<string, string>? StageModels);
+public record AgentConfigRequest(Dictionary<string, object?>? Agent, Dictionary<string, Dictionary<string, object?>>? StageAgents = null);

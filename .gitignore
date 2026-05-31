@@ -3,8 +3,12 @@ node_modules/
 .pnpm-store/
 
 # Build outputs
+**/bin/
+**/obj/
 **/dist/
 build/
+.publish/
+nupkg/
 *.tsbuildinfo
 
 # Logs
@@ -60,3 +64,4 @@ coverage/
 tmp/
 temp/
 *.tmp
+packages/server/tests/Mohist.Server.Tests/TestResults/

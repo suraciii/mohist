@@ -20,7 +20,7 @@ AgentSession
   负责对话、工具调用、transcript、可观察性和取消/关闭
 ```
 
-当前 config-driven runtime 的问题是把 `agent-session` task 默认解释成“每个 task 创建并关闭一个 session”。这破坏了 Plan 的连续规划体验：
+当前 generic runtime 的问题是把 `agent-session` task 默认解释成“每个 task 创建并关闭一个 session”。这破坏了 Plan 的连续规划体验：
 
 ```text
 当前行为:
@@ -178,6 +178,6 @@ Plan transcripts
 
 ## 开放问题
 
-- session owner 边界应由 `AgentSessionTaskHandler` 自己根据 WorkflowRun 判断，还是由 `ConfigDrivenStageRunner` 在 stage/work completion 后统一 close？
+- session owner 边界应由 `AgentSessionTaskHandler` 自己根据 WorkflowRun 判断，还是由 `GenericStageRunner` 在 stage/work completion 后统一 close？
 - named agent session 的运行态是否需要 first-class 持久化在 `WorkflowRun.StageRun.sessions[]`，还是仅由 `coder_session` 和 task output 中的 `acpSessionId` 投影？
 - 对于 stage 中动态追加的 runtime task，是否允许引用既有 named agent session，还是默认必须 task-local？

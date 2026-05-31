@@ -1,16 +1,18 @@
 ---
 name: mohist
-description: 执行 mohist CLI 操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 "mo" 命令的操作时使用。触发词包括 "create issue"、"创建 issue"、"list issues"、"start issue"、"approve"、"reject"、"mo issue"、"mo status"、"查看 issue"、"issue 日志"。
+description: 执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。
 hidden: true
 ---
 
 # mohist
 
-获取完整指令：
-```bash
-mo skills get mohist           # 基础版本
-mo skills get mohist --full    # 包含 issue 模板参考
-```
+旧 Node CLI 已移除，不要再使用 `node packages/cli/bin/mo` 或 `mo-server`。
 
-The CLI serves skill content that always matches the installed version,
-so instructions never go stale.
+当前操作应优先通过：
+
+- ASP.NET Core API: `http://localhost:3456/api/...`
+- Server: `dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj`
+- Runner: `npm run dev:runner`
+- Tests: `dotnet test packages/server/Mohist.sln`
+
+如果用户明确要求旧 `mo` 命令，说明它已经废弃，并改用当前 API 或 Web UI 路径完成同等操作。
