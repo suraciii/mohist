@@ -50,12 +50,12 @@ public static class IssueRoutes
             return ApiResults.Ok(list);
         });
 
-        issues.MapPost("/", async (CreateIssueRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPost("/", async (CreateIssueRequest req, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
 
-            var pid = req.ProjectId;
+            var pid = projectId ?? req.ProjectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var project = await projectsQuery.GetByIdAsync(pid);

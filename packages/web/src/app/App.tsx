@@ -46,9 +46,12 @@ function AppContent() {
       <Routes>
         <Route element={<ProjectGuard />}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/issue/:number" element={<IssueDetailPage />} />
-          <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
-          <Route path="/issue/:number/session/:sessionId" element={<SessionPage />} />
+          <Route path="/issue/:number" element={<NavigateToIssues />} />
+          <Route path="/issue/:number/files" element={<NavigateToIssues />} />
+          <Route path="/issue/:number/session/:sessionId" element={<NavigateToIssues />} />
+          <Route path="/issues/:number" element={<IssueDetailPage />} />
+          <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+          <Route path="/issues/:number/session/:sessionId" element={<SessionPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
           <Route path="/settings/:section" element={<SettingsPage />} />
@@ -63,6 +66,11 @@ function AppContent() {
     </div>
     </LiveTaskProvider>
   )
+}
+
+function NavigateToIssues() {
+  const location = useLocation()
+  return <Navigate to={location.pathname.replace(/^\/issue\//, '/issues/')} replace />
 }
 
 export default function App() {

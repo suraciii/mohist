@@ -1752,7 +1752,7 @@ describe('SessionPage header and states', () => {
 
 
 describe('SessionHeader navigation', () => {
-  it('session header link routes to /issue/:number/session/:sessionId', async () => {
+  it('session header link routes to /issues/:number/session/:sessionId', async () => {
     const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = {
       id: 'session-abc',
@@ -1776,7 +1776,7 @@ describe('SessionHeader navigation', () => {
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
 
     const link = screen.getByRole('link')
-    expect(link.getAttribute('href')).toBe('/issue/42/session/session-abc')
+    expect(link.getAttribute('href')).toBe('/issues/42/session/session-abc')
   })
 
   it('session header shows session label', async () => {
@@ -1829,7 +1829,7 @@ describe('SessionHeader navigation', () => {
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} showTranscriptLink />)
 
     const link = screen.getByRole('link')
-    expect(link.getAttribute('href')).toBe('/issue/42/session/session-abc')
+    expect(link.getAttribute('href')).toBe('/issues/42/session/session-abc')
     expect(screen.getByText('View transcript')).toBeInTheDocument()
   })
 

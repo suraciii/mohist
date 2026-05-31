@@ -452,7 +452,7 @@ export function IssueDetailPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/issue/${issueNumber}/files`)}
+                      onClick={() => navigate(`/issues/${issueNumber}/files`)}
                       className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
                     >
                       View files
@@ -470,7 +470,7 @@ export function IssueDetailPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/issue/${issueNumber}/files`)}
+                      onClick={() => navigate(`/issues/${issueNumber}/files`)}
                       className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
                     >
                       View all commits

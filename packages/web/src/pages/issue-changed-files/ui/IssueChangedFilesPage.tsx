@@ -61,7 +61,7 @@ function BackToIssueButton({ issueNumber }: { issueNumber: number }) {
   return (
     <Button
       variant="link"
-      onClick={() => navigate(`/issue/${issueNumber}`)}
+      onClick={() => navigate(`/issues/${issueNumber}`)}
       className="mb-4 h-auto p-0 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
     >
       <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -170,7 +170,7 @@ function ErrorState({ issueNumber, issueError, diffError }: { issueNumber: numbe
           <p className="text-sm text-red-700 mb-4">
             {issueError ? 'Failed to load issue details.' : diffError ? 'Failed to load issue diff.' : 'Failed to load issue commits.'}
           </p>
-          <Button variant="link" onClick={() => navigate(`/issue/${issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
+          <Button variant="link" onClick={() => navigate(`/issues/${issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
             View issue detail
           </Button>
         </div>
@@ -318,7 +318,7 @@ function ReaderPane(props: ReaderPaneProps) {
         <div>Failed to load commit diff.</div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={props.onExitCommitMode}>Exit commit mode</Button>
-          <Button variant="link" onClick={() => navigate(`/issue/${props.issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">Back to issue</Button>
+          <Button variant="link" onClick={() => navigate(`/issues/${props.issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">Back to issue</Button>
         </div>
       </div>
     )

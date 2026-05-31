@@ -16,9 +16,14 @@ class ApiError extends Error {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers,
   })
   const text = await res.text()
   let json: ApiResponse<T> | null = null
@@ -47,10 +52,11 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T
 }
 
-export function withProject(path: string, projectId?: string | null): string {
-  if (!projectId) return path
-  const separator = path.includes('?') ? '&' : '?'
-  return `${path}${separator}projectId=${encodeURIComponent(projectId)}`
+export function withProject(init: RequestInit | undefined, projectId?: string | null): RequestInit | undefined {
+  if (!projectId) return init
+  const headers = new Headers(init?.headers)
+  headers.set('X-Mohist-Project-Id', projectId)
+  return { ...init, headers }
 }
 
 export { ApiError }

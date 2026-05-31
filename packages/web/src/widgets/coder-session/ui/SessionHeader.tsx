@@ -115,7 +115,7 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       </span>
       {showTranscriptLink ? (
         <Link
-          to={`/issue/${issueNumber}/session/${session.id}`}
+          to={`/issues/${issueNumber}/session/${session.id}`}
           className="text-xs text-blue-600 hover:text-blue-800 shrink-0 ml-2"
         >
           View transcript
@@ -142,7 +142,7 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
 
   return (
     <Link
-      to={`/issue/${issueNumber}/session/${session.id}`}
+      to={`/issues/${issueNumber}/session/${session.id}`}
       className="flex items-center gap-2.5 w-full text-left px-3 py-2 hover:bg-gray-50/80 transition-colors rounded-t-lg"
     >
       {content}

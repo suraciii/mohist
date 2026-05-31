@@ -67,7 +67,7 @@ function LinkedIssueRow({ issue, onRemove, disabled }: { issue: LinkedIssue; onR
     <Card className="flex items-center justify-between gap-4 p-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Link to={`/issue/${issue.number}`} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
+          <Link to={`/issues/${issue.number}`} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
             #{issue.number}
           </Link>
           <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
@@ -218,7 +218,7 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next Issue</div>
             {epic.progress.nextIssue ? (
-              <Link to={`/issue/${epic.progress.nextIssue.number}`} className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
+              <Link to={`/issues/${epic.progress.nextIssue.number}`} className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
                 #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
               </Link>
             ) : epic.progress.readyToMarkDone ? (

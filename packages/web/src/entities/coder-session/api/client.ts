@@ -2,13 +2,13 @@ import { request, withProject } from '../../../shared/api/client'
 import type { CoderSessionDetail, CoderSessionSummary, WorkflowLogItem } from '../model/types'
 
 export function getCoderSessions(number: number, projectId?: string | null) {
-  return request<CoderSessionSummary[]>(withProject(`/issues/${number}/coder-sessions`, projectId))
+  return request<CoderSessionSummary[]>(`/issues/${number}/coder-sessions`, withProject(undefined, projectId))
 }
 
 export function getCoderSessionDetail(number: number, sessionId: string, projectId?: string | null) {
-  return request<CoderSessionDetail>(withProject(`/issues/${number}/coder-sessions/${sessionId}`, projectId))
+  return request<CoderSessionDetail>(`/issues/${number}/coder-sessions/${sessionId}`, withProject(undefined, projectId))
 }
 
 export function getWorkflowLogs(number: number, projectId?: string | null) {
-  return request<WorkflowLogItem[]>(withProject(`/issues/${number}/logs`, projectId))
+  return request<WorkflowLogItem[]>(`/issues/${number}/logs`, withProject(undefined, projectId))
 }
