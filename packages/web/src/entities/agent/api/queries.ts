@@ -4,9 +4,11 @@ import { useProject } from '../../project/@x/project-context'
 import { getAgentActivity, getAgentSessions, getAgentStatus } from './client'
 
 export function useAgentStatus() {
+  const { projectId } = useProject()
   return useQuery({
-    queryKey: ['agent-status'],
-    queryFn: () => getAgentStatus(),
+    queryKey: ['agent-status', projectId],
+    queryFn: () => getAgentStatus(projectId),
+    enabled: !!projectId,
     refetchInterval: 5000,
   })
 }

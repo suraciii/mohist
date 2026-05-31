@@ -1,4 +1,4 @@
-import { request } from '../../../shared/api/client'
+import { request, withProject } from '../../../shared/api/client'
 import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 
 export function getConfig() {
@@ -12,8 +12,8 @@ export function updateConfig(key: string, value: number) {
   })
 }
 
-export function getOpencodeModels() {
-  return request<{ models: string[] }>('/opencode/models')
+export function getOpencodeModels(projectId?: string | null) {
+  return request<{ models: string[] }>(withProject('/opencode/models', projectId))
 }
 
 export function getOpencodeModel() {

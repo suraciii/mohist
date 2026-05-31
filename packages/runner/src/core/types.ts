@@ -63,7 +63,7 @@ export interface ActionResult {
 export interface RunnerOptions {
   serverUrl: string
   runnerId: string
-  projectId: string
+  projectId?: string
   runnerRoot: string
   pollIntervalMs: number
   heartbeatIntervalMs: number
@@ -71,7 +71,7 @@ export interface RunnerOptions {
 
 export interface RunnerRegistration {
   capabilities: string[]
-  projectId: string
+  projectId?: string
   hostname?: string
   coderModels?: string[]
 }

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import { useProject } from '../../project/@x/project-context'
 import { getAgentRuntime, getConfig, getLogLevel, getModel, getOpencodeModel, getOpencodeModelConfig, getOpencodeModels, getOpencodeRuntime, getStageModels, getSystemInfo, getWorkflowProfile, getWorkflowProfiles, setLogLevel, setModel, setOpencodeModel, setStageModels, updateAgentRuntime, updateConfig, updateOpencodeModel } from './client'
 
 export function useConfig() {
@@ -76,12 +77,14 @@ export function useUpdateOpencodeModel() {
 }
 
 export function useAvailableModelIds() {
+  const { projectId } = useProject()
   return useQuery<string[]>({
-    queryKey: ['opencode-model-ids'],
+    queryKey: ['opencode-model-ids', projectId],
     queryFn: async () => {
-      const response = await getOpencodeModels()
+      const response = await getOpencodeModels(projectId)
       return response.models
     },
+    enabled: !!projectId,
   })
 }
 

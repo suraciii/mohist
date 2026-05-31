@@ -10,5 +10,7 @@ public interface IRunnerRegistryGrain : IGrainWithStringKey
 
 public static class RunnerRegistryKeys
 {
+    public const string Global = "__global__";
+
     public static string ForProject(string projectId) => projectId;
 }

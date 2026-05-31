@@ -73,6 +73,29 @@ public class ApiContractSpecs
     }
 
     [Fact]
+    public async Task OpencodeModels_WhenProjectIdMissing_ReturnsGlobalRunnerModels()
+    {
+        var runnerId = $"global-model-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = Array.Empty<string>(),
+            hostname = "test-host",
+            coderModels = new[] { "openai/gpt-5.5" },
+        });
+
+        try
+        {
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>("/api/opencode/models");
+
+            Assert.Contains("openai/gpt-5.5", response.Models);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task IssueRebaseApi_QueuesWorkflowTask()
     {
         var projectName = $"proj-{Guid.NewGuid():N}";

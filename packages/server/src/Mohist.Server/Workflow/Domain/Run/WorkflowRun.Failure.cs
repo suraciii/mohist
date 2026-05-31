@@ -30,12 +30,14 @@ public static partial class WorkflowRunExtensions
             {
                 case FailureReason.TaskFailed when current.Failure.TaskId is not null:
                     current.RetryFailedTask(current.Failure.TaskId);
+                    run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
                     break;
                 case FailureReason.TaskFailed:
                     throw new WorkflowDomainException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
                 case FailureReason.CheckUnrepaired:
                     current.RetryFailedCheck(current.Failure.CheckName);
+                    run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
                     break;
                 case FailureReason.ApprovalRejected:
@@ -57,6 +59,7 @@ public static partial class WorkflowRunExtensions
                 Status = StageRunStatus.Running
             };
             run.Stages[stageIdx] = newStage;
+            run.Failure = null;
             run.Status = WorkflowRunStatus.Running;
         }
 

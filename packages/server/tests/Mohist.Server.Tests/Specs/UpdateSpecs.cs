@@ -285,6 +285,60 @@ public class UpdateSpecs
     }
 
     [Fact]
+    public async Task UpdateServer_WhenBuildFails_PrintsCommandOutput()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        commands.SetNextResult(1, "npm error EBADPLATFORM", "MSB3073");
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands);
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(1, exitCode);
+        var output = stderr.ToString();
+        Assert.Contains("npm error EBADPLATFORM", output);
+        Assert.Contains("MSB3073", output);
+        Assert.Contains("Build failed", output);
+    }
+
+    [Fact]
+    public async Task UpdateCli_WhenPublishFails_PrintsCommandOutput()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        commands.SetNextResult(1, "publish stdout", "publish stderr");
+        var stderr = new StringWriter();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            stderr,
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            stderr,
+            installer,
+            commands);
+
+        var exitCode = await updater.UpdateCliAsync("/repo", dryRun: false, cliPath: "/home/user/.local/bin/mo");
+
+        Assert.Equal(1, exitCode);
+        var output = stderr.ToString();
+        Assert.Contains("publish stdout", output);
+        Assert.Contains("publish stderr", output);
+        Assert.Contains("CLI publish failed", output);
+    }
+
+    [Fact]
     public async Task UpdateServer_InDryRunMode_PreviewsCommands()
     {
         var files = new FakeFileSystem();
@@ -333,10 +387,17 @@ public class UpdateSpecs
         public readonly List<(string FileName, string[] Args, string? WorkingDirectory)> ExecutedCommands = new();
         private readonly Queue<int> _exitCodes = new();
         private readonly Queue<string> _stdout = new();
+        private readonly Queue<string> _stderr = new();
         private readonly List<(string FileName, Func<string[], bool> Match, int ExitCode)> _exitCodeRules = new();
 
         public void SetNextExitCode(int code) => _exitCodes.Enqueue(code);
         public void SetNextStdout(string stdout) => _stdout.Enqueue(stdout);
+        public void SetNextResult(int exitCode, string stdout, string stderr)
+        {
+            _exitCodes.Enqueue(exitCode);
+            _stdout.Enqueue(stdout);
+            _stderr.Enqueue(stderr);
+        }
         public void SetExitCodeFor(string fileName, Func<string[], bool> match, int code) => _exitCodeRules.Add((fileName, match, code));
 
         public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteAsync(
@@ -346,7 +407,8 @@ public class UpdateSpecs
             var rule = _exitCodeRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
             var code = rule.Match is not null ? rule.ExitCode : _exitCodes.Count > 0 ? _exitCodes.Dequeue() : 0;
             var stdout = _stdout.Count > 0 ? _stdout.Dequeue() : "";
-            return Task.FromResult((code, stdout, ""));
+            var stderr = _stderr.Count > 0 ? _stderr.Dequeue() : "";
+            return Task.FromResult((code, stdout, stderr));
         }
     }
 

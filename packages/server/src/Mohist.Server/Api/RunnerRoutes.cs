@@ -16,7 +16,7 @@ public static class RunnerRoutes
         group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName, req.ProjectId ?? runnerId, req.CoderModels));
+            await runner.RegisterAsync(new RunnerInfo(runnerId, req.Capabilities, req.Hostname ?? Environment.MachineName, req.ProjectId, req.CoderModels));
             return Results.Ok();
         });
 

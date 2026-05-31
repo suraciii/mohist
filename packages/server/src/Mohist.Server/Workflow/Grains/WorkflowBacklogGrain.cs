@@ -9,11 +9,13 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
     private readonly Dictionary<string, string> _running = new();
     private readonly HashSet<string> _all = new();
     private readonly IStateStore<WorkflowBacklogState> _store;
+    private readonly IWorkflowBacklogDirectory _directory;
     private readonly ILogger<WorkflowBacklogGrain> _log;
 
-    public WorkflowBacklogGrain(IStateStore<WorkflowBacklogState> store, ILogger<WorkflowBacklogGrain> log)
+    public WorkflowBacklogGrain(IStateStore<WorkflowBacklogState> store, IWorkflowBacklogDirectory directory, ILogger<WorkflowBacklogGrain> log)
     {
         _store = store;
+        _directory = directory;
         _log = log;
     }
 
@@ -21,6 +23,7 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        _directory.RegisterProject(GrainKey);
         var state = await _store.LoadAsync(GrainKey);
         if (state is null) return;
         foreach (var wfId in state.Waiting)
