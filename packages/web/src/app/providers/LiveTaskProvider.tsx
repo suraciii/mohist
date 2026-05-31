@@ -99,7 +99,8 @@ function useSSEInner(projectId: string | null): LiveTaskState {
           eventName === 'coder_session_completed' ||
           eventName === 'coder_session_failed' ||
           eventName === 'coder_session_cancelled' ||
-          eventName === 'coder_session_status_changed'
+          eventName === 'coder_session_status_changed' ||
+          eventName === 'agent_liveness_status'
         ) {
           queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
         }
@@ -298,6 +299,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
       'coder_session_failed',
       'coder_session_cancelled',
       'coder_session_status_changed',
+      'agent_liveness_status',
       'merge_queued',
       'merge_started',
       'merge_completed',

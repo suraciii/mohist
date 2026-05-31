@@ -37,11 +37,183 @@ const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
 const PROBE_PROMPT = "If this session is still alive, briefly report the current step and continue from existing context. Do not restart completed work."
 
+const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "tool_result",
+  "tool_result_update",
+])
+
+type AcpLivenessActivity =
+  | { isActivity: false }
+  | { isActivity: true; activityType: string }
+
+function classifyAcpLivenessActivity(source:
+  | { kind: "session_update"; update: SessionNotification["update"] }
+  | { kind: "protocol_response"; response: "initialize" | "new_session" | "resume_session" | "set_session_config" | "set_session_model" }
+): AcpLivenessActivity {
+  if (source.kind === "protocol_response") {
+    return { isActivity: true, activityType: source.response }
+  }
+
+  const update = source.update
+  const type = update.sessionUpdate
+  if (!type) return { isActivity: false }
+  if (QUALIFYING_LIVENESS_NOTIFICATION_TYPES.has(type)) {
+    return { isActivity: true, activityType: type }
+  }
+
+  if (type === "session_info_update" && hasMessageGrowth(update)) {
+    return { isActivity: true, activityType: "message_growth" }
+  }
+
+  if (type.includes("tool") && (type.includes("result") || type.includes("output") || type.includes("update"))) {
+    return { isActivity: true, activityType: type }
+  }
+
+  return { isActivity: false }
+}
+
+function assistantMessageChunkText(update: SessionNotification["update"]): string | undefined {
+  if (update.sessionUpdate !== "agent_message_chunk") return undefined
+  if (!("content" in update) || !update.content || typeof update.content !== "object") return undefined
+  return "text" in update.content ? String(update.content.text) : undefined
+}
+
+function hasMessageGrowth(update: SessionNotification["update"]): boolean {
+  const candidate = update as Record<string, unknown>
+  for (const key of ["messages", "message", "messageCount", "messageDelta"]) {
+    const value = candidate[key]
+    if (Array.isArray(value) && value.length > 0) return true
+    if (typeof value === "string" && value.trim().length > 0) return true
+    if (typeof value === "number" && value > 0) return true
+  }
+  return false
+}
+
+function recordLivenessActivity(notify: (activityType?: string) => void, activity: AcpLivenessActivity) {
+  if (activity.isActivity) notify(activity.activityType)
+}
+
+function createAcpSessionUpdateHandler(options: {
+  notifyData(activityType?: string): void
+  appendAssistantText(text: string): void
+  emitUpdate(type: string, update: SessionNotification["update"]): Promise<void>
+}) {
+  return async (notification: SessionNotification) => {
+    const update = notification.update
+    const type = update.sessionUpdate
+    recordLivenessActivity(options.notifyData, classifyAcpLivenessActivity({ kind: "session_update", update }))
+
+    const chunkText = assistantMessageChunkText(update)
+    if (chunkText !== undefined) options.appendAssistantText(chunkText)
+
+    await options.emitUpdate(type, update)
+  }
+}
+
 interface AgentConfig {
   model?: string
   timeoutMs?: number
   livenessQuietThresholdMs?: number
   probeTimeoutMs?: number
+}
+
+interface LivenessProbeState {
+  probeSentAt?: string
+  probeDeadlineAt?: string
+  probeVersion?: number
+  lastDataAt: number
+  lastActivityType?: string
+  dataVersion: number
+  postProbeActivity?: boolean
+}
+
+interface SessionLivenessState {
+  probeSentAt?: string
+  probeDeadlineAt?: string
+  probeVersion?: number
+  lastDataAt: number
+  lastActivityType?: string
+  dataVersion: number
+}
+
+type LivenessFailureReason = "probe_timeout" | "probe_send_failed" | "protocol_disconnect" | "process_exit"
+
+function createSessionLivenessState(): SessionLivenessState {
+  return {
+    lastDataAt: Date.now(),
+    dataVersion: 0,
+  }
+}
+
+function recordSessionLivenessActivity(state: SessionLivenessState, activityType?: string) {
+  state.lastDataAt = Date.now()
+  state.dataVersion += 1
+  if (activityType) state.lastActivityType = activityType
+}
+
+function beginLivenessProbe(state: SessionLivenessState, probeTimeoutMs: number) {
+  const probeSentAt = new Date()
+  const probeDeadlineAt = new Date(probeSentAt.getTime() + probeTimeoutMs)
+  state.probeSentAt = probeSentAt.toISOString()
+  state.probeDeadlineAt = probeDeadlineAt.toISOString()
+  state.probeVersion = state.dataVersion
+  return { probeSentAt: state.probeSentAt, probeDeadlineAt: state.probeDeadlineAt, probeVersion: state.probeVersion }
+}
+
+function clearLivenessProbe(state: SessionLivenessState) {
+  state.probeSentAt = undefined
+  state.probeDeadlineAt = undefined
+  state.probeVersion = undefined
+}
+
+function hasPostProbeActivity(state: SessionLivenessState) {
+  return state.probeVersion !== undefined && state.dataVersion > state.probeVersion
+}
+
+function probeWasSatisfied(state: SessionLivenessState) {
+  if (state.probeVersion === undefined || !state.probeDeadlineAt) return false
+  return hasPostProbeActivity(state) && state.lastDataAt <= Date.parse(state.probeDeadlineAt)
+}
+
+function buildLivenessEventPayload(context: ActionContext, state: SessionLivenessState, status: "probing" | "running" | "failed", extras?: {
+  acpSessionId?: string
+  activeProbeVersion?: number
+  satisfiedProbeVersion?: number
+  failureReason?: LivenessFailureReason
+  postProbeActivity?: boolean
+}): JsonObject {
+  return cleanJson({
+    sessionName: sessionNameFromContext(context),
+    acpSessionId: extras?.acpSessionId ?? null,
+    workId: context.workId,
+    workType: context.workType,
+    stage: context.stage ?? null,
+    status,
+    lastDataAt: new Date(state.lastDataAt).toISOString(),
+    lastActivityType: state.lastActivityType,
+    probeSentAt: state.probeSentAt,
+    probeDeadlineAt: state.probeDeadlineAt,
+    probeVersion: state.probeVersion,
+    dataVersion: state.dataVersion,
+    postProbeActivity: extras?.postProbeActivity,
+    activeProbeVersion: extras?.activeProbeVersion,
+    satisfiedProbeVersion: extras?.satisfiedProbeVersion,
+    failureReason: extras?.failureReason,
+  })
+}
+
+async function emitLivenessStatusEvent(context: ActionContext, state: SessionLivenessState, status: "probing" | "running" | "failed", extras?: {
+  acpSessionId?: string
+  activeProbeVersion?: number
+  satisfiedProbeVersion?: number
+  failureReason?: LivenessFailureReason
+  postProbeActivity?: boolean
+}) {
+  await emitSessionEvent(context, "agent_liveness_status", buildLivenessEventPayload(context, state, status, extras))
 }
 
 interface AcpSessionResult {
@@ -196,32 +368,30 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   let agentText = ""
   let agentTextTruncated = false
   const toolIds = new ToolCallIdGenerator()
-  let lastDataAt = Date.now()
-  let dataVersion = 0
+  const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
-  const notifyData = () => {
-    lastDataAt = Date.now()
-    dataVersion += 1
+  const notifyData = (activityType?: string) => {
+    recordSessionLivenessActivity(liveness, activityType)
     for (const waiter of dataWaiters) waiter()
     dataWaiters.clear()
   }
+  const appendAssistantText = (chunkText: string) => {
+    if (agentTextTruncated) return
+    agentText += chunkText
+    if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
+      agentText = truncateAgentText(agentText)
+      agentTextTruncated = true
+    }
+  }
 
   acp.setActiveHandlers(
-    async (notification: SessionNotification) => {
-      const update = notification.update
-      const type = update.sessionUpdate
-      notifyData()
-      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-        if (!agentTextTruncated) {
-          agentText += String(update.content.text)
-          if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
-            agentText = truncateAgentText(agentText)
-            agentTextTruncated = true
-          }
-        }
-      }
-      await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, entry.sessionId, toolIds))
-    },
+    createAcpSessionUpdateHandler({
+      notifyData,
+      appendAssistantText,
+      emitUpdate: async (type, update) => {
+        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, entry.sessionId, toolIds))
+      },
+    }),
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
       return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
@@ -236,9 +406,8 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       timeoutMs,
       livenessQuietThresholdMs: agentConfig?.livenessQuietThresholdMs ?? numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
       probeTimeoutMs: agentConfig?.probeTimeoutMs ?? numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
-      lastDataAt: () => lastDataAt,
-      dataVersion: () => dataVersion,
-      waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
+      livenessState: liveness,
+      waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
       return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1 }
@@ -261,33 +430,31 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
   let agentText = ""
   let agentTextTruncated = false
-  let lastDataAt = Date.now()
-  let dataVersion = 0
+  const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
-  const notifyData = () => {
-    lastDataAt = Date.now()
-    dataVersion += 1
+  const notifyData = (activityType?: string) => {
+    recordSessionLivenessActivity(liveness, activityType)
     for (const waiter of dataWaiters) waiter()
     dataWaiters.clear()
   }
+  const appendAssistantText = (chunkText: string) => {
+    if (agentTextTruncated) return
+    agentText += chunkText
+    if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
+      agentText = truncateAgentText(agentText)
+      agentTextTruncated = true
+    }
+  }
 
   acp.setActiveHandlers(
-    async (notification: SessionNotification) => {
-      const update = notification.update
-      const type = update.sessionUpdate
-      notifyData()
-      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-        if (!agentTextTruncated) {
-          agentText += String(update.content.text)
-          if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
-            agentText = truncateAgentText(agentText)
-            agentTextTruncated = true
-          }
-        }
-      }
-      await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
-    },
+    createAcpSessionUpdateHandler({
+      notifyData,
+      appendAssistantText,
+      emitUpdate: async (type, update) => {
+        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
+      },
+    }),
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
       return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
@@ -300,18 +467,20 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       timeout(timeoutMs),
     ])
     if (resumeResult === "timeout") throw new Error("Timed out during ACP resumeSession")
-    notifyData()
+    recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "resume_session" }))
 
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
-        await connection.setSessionConfigOption({ sessionId: acpSessionId, configId: "model", value: model })
-      } catch {
-        try {
-          await connection.unstable_setSessionModel({ sessionId: acpSessionId, modelId: model })
-        } catch {}
+          await connection.setSessionConfigOption({ sessionId: acpSessionId, configId: "model", value: model })
+          recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
+        } catch {
+          try {
+            await connection.unstable_setSessionModel({ sessionId: acpSessionId, modelId: model })
+            recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
+          } catch {}
+        }
       }
-    }
 
     await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig)
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
@@ -320,9 +489,8 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       timeoutMs,
       livenessQuietThresholdMs: agentConfig?.livenessQuietThresholdMs ?? numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
       probeTimeoutMs: agentConfig?.probeTimeoutMs ?? numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
-      lastDataAt: () => lastDataAt,
-      dataVersion: () => dataVersion,
-      waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
+      livenessState: liveness,
+      waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
       return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1 }
@@ -347,33 +515,31 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
-  let lastDataAt = Date.now()
-  let dataVersion = 0
+  const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
-  const notifyData = () => {
-    lastDataAt = Date.now()
-    dataVersion += 1
+  const notifyData = (activityType?: string) => {
+    recordSessionLivenessActivity(liveness, activityType)
     for (const waiter of dataWaiters) waiter()
     dataWaiters.clear()
   }
+  const appendAssistantText = (chunkText: string) => {
+    if (agentTextTruncated) return
+    agentText += chunkText
+    if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
+      agentText = truncateAgentText(agentText)
+      agentTextTruncated = true
+    }
+  }
 
   acp.setActiveHandlers(
-    async (notification: SessionNotification) => {
-      const update = notification.update
-      const type = update.sessionUpdate
-      notifyData()
-      if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-        if (!agentTextTruncated) {
-          agentText += String(update.content.text)
-          if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
-            agentText = truncateAgentText(agentText)
-            agentTextTruncated = true
-          }
-        }
-      }
-      await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
-    },
+    createAcpSessionUpdateHandler({
+      notifyData,
+      appendAssistantText,
+      emitUpdate: async (type, update) => {
+        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
+      },
+    }),
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
       return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
@@ -387,18 +553,20 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     ])
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
     sessionId = session.sessionId
-    notifyData()
+    recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
 
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
-        await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
-      } catch {
-        try {
-          await connection.unstable_setSessionModel({ sessionId, modelId: model })
-        } catch {}
+          await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
+          recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
+        } catch {
+          try {
+            await connection.unstable_setSessionModel({ sessionId, modelId: model })
+            recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
+          } catch {}
+        }
       }
-    }
 
     await emitSessionStarted(context, sessionId, acp.processPid, agentConfig)
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
@@ -407,9 +575,8 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       timeoutMs,
       livenessQuietThresholdMs: agentConfig?.livenessQuietThresholdMs ?? numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
       probeTimeoutMs: agentConfig?.probeTimeoutMs ?? numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
-      lastDataAt: () => lastDataAt,
-      dataVersion: () => dataVersion,
-      waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
+      livenessState: liveness,
+      waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
       try { await connection.closeSession?.({ sessionId }) } catch {}
@@ -431,35 +598,32 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
-  let lastDataAt = Date.now()
-  let dataVersion = 0
+  const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
-  const notifyData = () => {
-    lastDataAt = Date.now()
-    dataVersion += 1
+  const notifyData = (activityType?: string) => {
+    recordSessionLivenessActivity(liveness, activityType)
     for (const waiter of dataWaiters) waiter()
     dataWaiters.clear()
+  }
+  const appendAssistantText = (chunkText: string) => {
+    if (agentTextTruncated) return
+    agentText += chunkText
+    if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
+      agentText = truncateAgentText(agentText)
+      agentTextTruncated = true
+    }
   }
 
   const connection = new ClientSideConnection(
     () => ({
-      sessionUpdate: async (notification: SessionNotification) => {
-        notifyData()
-        const update = notification.update
-        const type = update.sessionUpdate
-        if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-          const text = String(update.content.text)
-          if (!agentTextTruncated) {
-            agentText += text
-            if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
-              agentText = truncateAgentText(agentText)
-              agentTextTruncated = true
-            }
-          }
-        }
-        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
-      },
+      sessionUpdate: createAcpSessionUpdateHandler({
+        notifyData,
+        appendAssistantText,
+        emitUpdate: async (type, update) => {
+          await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
+        },
+      }),
       requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
         const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
         return allow ? { outcome: { outcome: "selected", optionId: allow.optionId } } : { outcome: { outcome: "cancelled" } }
@@ -477,7 +641,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     ])
     acpProcess.markInitialized()
     if (initialize === "timeout") throw new Error("Timed out during ACP initialize")
-    notifyData()
+    recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "initialize" }))
 
     const session = await Promise.race([
       connection.newSession({ cwd: context.workDir, mcpServers: [] }),
@@ -486,18 +650,20 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     ])
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
     sessionId = session.sessionId
-    notifyData()
+    recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
 
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
-        await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
-      } catch {
-        try {
-          await connection.unstable_setSessionModel({ sessionId, modelId: model })
-        } catch {}
+          await connection.setSessionConfigOption({ sessionId, configId: "model", value: model })
+          recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_config" }))
+        } catch {
+          try {
+            await connection.unstable_setSessionModel({ sessionId, modelId: model })
+            recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "set_session_model" }))
+          } catch {}
+        }
       }
-    }
 
     await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig)
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
@@ -506,9 +672,8 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       timeoutMs,
       livenessQuietThresholdMs: agentConfig?.livenessQuietThresholdMs ?? numberInput(context.with, "livenessQuietThresholdMs") ?? DEFAULT_LIVENESS_QUIET_THRESHOLD_MS,
       probeTimeoutMs: agentConfig?.probeTimeoutMs ?? numberInput(context.with, "probeTimeoutMs") ?? DEFAULT_PROBE_TIMEOUT_MS,
-      lastDataAt: () => lastDataAt,
-      dataVersion: () => dataVersion,
-      waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
+      livenessState: liveness,
+      waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
       exitFailure: acpProcess.exitFailure,
     })
     if (promptResult !== "completed") {
@@ -524,57 +689,86 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
   }
 }
 
-async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; lastDataAt(): number; dataVersion(): number; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string }> {
+async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string }> {
   const startedAt = Date.now()
   const promptPromise = connection.prompt({ sessionId, prompt: [{ type: "text", text: prompt }] })
   const exitFailure = options.exitFailure ?? new Promise<never>(() => {})
-  let nextProbeAt = 0
 
   while (true) {
     const now = Date.now()
     const timeoutRemaining = startedAt + options.timeoutMs - now
     if (timeoutRemaining <= 0) return await cancelAndReturn(connection, sessionId, `Timed out after ${options.timeoutMs / 1000}s`)
-    const quietRemaining = Math.max(0, options.lastDataAt() + options.livenessQuietThresholdMs - now)
-    const probeCooldownRemaining = Math.max(0, nextProbeAt - now)
-    const waitMs = quietRemaining > 0 ? quietRemaining : probeCooldownRemaining
+    const quietRemaining = Math.max(0, options.livenessState.lastDataAt + options.livenessQuietThresholdMs - now)
+    const waitMs = quietRemaining
     const result = await Promise.race([
       promptPromise.then(() => "completed" as const),
       timeout(Math.min(timeoutRemaining, Math.max(waitMs, 1))),
       aborted(context.signal),
-      exitFailure,
+      exitFailure.catch((error) => error),
     ])
     if (result === "completed") return "completed"
     if (result === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
-    if (Date.now() - options.lastDataAt() < options.livenessQuietThresholdMs) continue
-    if (Date.now() < nextProbeAt) continue
+    if (result instanceof Error) {
+      const failureReason: LivenessFailureReason = result.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+      return { error: result.message }
+    }
+    if (Date.now() - options.livenessState.lastDataAt < options.livenessQuietThresholdMs) continue
 
-    const probeSentAt = new Date()
-    const probeDeadlineAt = new Date(probeSentAt.getTime() + options.probeTimeoutMs)
-    nextProbeAt = probeSentAt.getTime() + options.livenessQuietThresholdMs
-    await emitSessionEvent(context, "agent_liveness_status", { status: "probing", probeSentAt: probeSentAt.toISOString(), probeDeadlineAt: probeDeadlineAt.toISOString() })
-    const beforeProbeVersion = options.dataVersion()
-    connection.prompt({ sessionId, prompt: [{ type: "text", text: PROBE_PROMPT }] }).catch(() => {})
+    const activeProbe = beginLivenessProbe(options.livenessState, options.probeTimeoutMs)
+    await emitLivenessStatusEvent(context, options.livenessState, "probing", { acpSessionId: sessionId, activeProbeVersion: activeProbe.probeVersion })
+    try {
+      await ensurePromptAcceptedOrPending(connection.prompt({ sessionId, prompt: [{ type: "text", text: PROBE_PROMPT }] }))
+    } catch (error) {
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_send_failed", activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+      const message = error instanceof Error ? error.message : String(error)
+      return { error: `Failed to send liveness probe: ${message}` }
+    }
     const probeResult = await Promise.race([
       promptPromise.then(() => "completed" as const),
-      options.waitForData(beforeProbeVersion),
+      options.waitForData(activeProbe.probeVersion),
       timeout(options.probeTimeoutMs),
       aborted(context.signal),
-      exitFailure,
+      exitFailure.catch((error) => error),
     ])
     if (probeResult === "completed") return "completed"
-    if (probeResult === "data" || options.dataVersion() !== beforeProbeVersion || Date.now() - options.lastDataAt() < options.livenessQuietThresholdMs) {
-      await emitSessionEvent(context, "agent_liveness_status", { status: "running", lastDataAt: new Date(options.lastDataAt()).toISOString() })
+    if (probeResult === "data" && probeWasSatisfied(options.livenessState)) {
+      await emitLivenessStatusEvent(context, options.livenessState, "running", { acpSessionId: sessionId, satisfiedProbeVersion: activeProbe.probeVersion })
+      clearLivenessProbe(options.livenessState)
       continue
     }
     if (probeResult === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
-    await emitSessionEvent(context, "agent_liveness_status", {
-      status: "quiet",
-      lastDataAt: new Date(options.lastDataAt()).toISOString(),
-      probeSentAt: probeSentAt.toISOString(),
-      probeDeadlineAt: probeDeadlineAt.toISOString(),
-      nextProbeAt: new Date(nextProbeAt).toISOString(),
-    })
+    if (probeResult instanceof Error) {
+      const failureReason: LivenessFailureReason = probeResult.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+      return { error: probeResult.message }
+    }
+    const probeState: LivenessProbeState = {
+      probeSentAt: options.livenessState.probeSentAt,
+      probeDeadlineAt: options.livenessState.probeDeadlineAt,
+      probeVersion: options.livenessState.probeVersion,
+      lastDataAt: options.livenessState.lastDataAt,
+      ...(options.livenessState.lastActivityType ? { lastActivityType: options.livenessState.lastActivityType } : {}),
+      dataVersion: options.livenessState.dataVersion,
+      postProbeActivity: hasPostProbeActivity(options.livenessState),
+    }
+    await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
+    return { error: `Session liveness probe timed out ${JSON.stringify(probeState)}` }
   }
+}
+
+async function ensurePromptAcceptedOrPending(promptPromise: Promise<unknown>) {
+  let settled = false
+  let rejected: unknown
+  void promptPromise.then(
+    () => { settled = true },
+    (error) => {
+      settled = true
+      rejected = error
+    },
+  )
+  await new Promise<void>((resolve) => queueMicrotask(resolve))
+  if (settled && rejected !== undefined) throw rejected
 }
 
 async function cancelAndReturn(connection: ClientSideConnection, sessionId: string, error: string) {

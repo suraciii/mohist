@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
-import type { Agent, Stream } from "@agentclientprotocol/sdk"
+import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { acpAgentAction, buildPromptWithMohistContext, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 import { AcpSessionManager, type SharedAcpConnection } from "../src/runtime/acp-connection.js"
+import { ServerConnection } from "../src/server/connection.js"
 
 afterEach(() => setAcpProcessFactoryForTest(null))
 
@@ -105,13 +106,13 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
-  it("ProbeTimesOutButPromptCompletesLater_LivenessMonitored_DoesNotFailSession", async () => {
+  it("ProbeTimesOutWithoutQualifyingActivity_LivenessMonitored_FailsSession", async () => {
     const fixture = createFixture("quiet-then-done")
 
     const result = await acpAgentAction(fixture.context({ prompt: "long silent task", livenessQuietThresholdMs: 30, probeTimeoutMs: 30, timeout: 2_000 }))
 
-    expect(result.status).toBe("success")
-    expect(JSON.parse(result.output ?? "{}").text).toContain("done-after-quiet-period")
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Session liveness probe timed out")
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
@@ -136,6 +137,176 @@ describe("mohist/acp-agent", () => {
     )
   })
 
+  it("ExistingSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "shared-session-1" } })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "long shared task",
+      session: "shared-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 80,
+      timeout: 1_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    expect(shared.agent.calls.filter((entry) => entry.event === "prompt").length).toBe(1)
+    expect(shared.agent.calls.some((entry) => entry.event === "thought")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "ensureWorkflowAgentSession")).toBe(true)
+    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession")).toBe(false)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_thought_chunk")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
+    expect(result.message ?? "").not.toContain("Session liveness probe timed out")
+    expect(JSON.parse(result.output ?? "{}").text).toBe("")
+  })
+
+  it("ResumedSharedSessionStreamsThoughtChunks_ProbeWindowCrossed_DoesNotTimeoutOrAppendThoughtText", async () => {
+    const shared = createSharedSessionFixture("thought-liveness", { sessionRecord: { acpSessionId: "server-session-1" } })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "long resumed task",
+      session: "shared-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 80,
+      timeout: 1_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "ensureWorkflowAgentSession")).toBe(true)
+    expect(shared.agent.calls.some((entry) => entry.event === "resumeSession" && entry.sessionId === "server-session-1")).toBe(true)
+    expect(shared.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
+    expect(shared.agent.calls.some((entry) => entry.event === "thought")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_thought_chunk")).toBe(true)
+    expect(shared.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { status?: string }).status === "failed")).toBe(false)
+    expect(result.message ?? "").not.toContain("Session liveness probe timed out")
+    expect(JSON.parse(result.output ?? "{}").text).toBe("")
+  })
+
+  it("RunningSessionReceivesToolActivityAfterProbe_LivenessRecovers_WithExplainableMetadata", async () => {
+    const fixture = createFixture("tool-liveness")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "long tool task",
+      session: "tool-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 80,
+      timeout: 1_000,
+    }))
+
+    expect(result.status).toBe("success")
+
+    const livenessEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+      .map((entry) => entry.payload as Record<string, unknown>)
+
+    const probing = livenessEvents.find((payload) => payload.status === "probing")
+    expect(probing).toBeTruthy()
+    expect(probing?.probeSentAt).toEqual(expect.any(String))
+    expect(probing?.probeDeadlineAt).toEqual(expect.any(String))
+    expect(probing?.lastDataAt).toEqual(expect.any(String))
+    expect(probing?.activeProbeVersion).toEqual(expect.any(Number))
+    expect(probing?.probeVersion).toEqual(probing?.activeProbeVersion)
+
+    const recovered = livenessEvents.find((payload) => payload.status === "running")
+    expect(recovered).toBeTruthy()
+    expect(recovered?.lastDataAt).toEqual(expect.any(String))
+    expect(["tool_call", "tool_call_update", "tool_result", "tool_result_update"]).toContain(recovered?.lastActivityType)
+    expect(recovered?.satisfiedProbeVersion).toBe(probing?.activeProbeVersion)
+
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "tool_call")).toBe(true)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "tool_call_update")).toBe(true)
+    expect(result.message ?? "").not.toContain("Session liveness probe timed out")
+  })
+
+  it("RunningSessionStaysQuietAfterProbe_LivenessTimeoutFails_WithProbeMetadata", async () => {
+    const fixture = createFixture("probe-timeout")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "quiet task",
+      session: "timeout-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 60,
+      timeout: 1_000,
+    }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Session liveness probe timed out")
+
+    const livenessEvents = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+      .map((entry) => entry.payload as Record<string, unknown>)
+
+    const probing = livenessEvents.find((payload) => payload.status === "probing")
+    const failed = livenessEvents.find((payload) => payload.status === "failed")
+
+    expect(probing).toBeTruthy()
+    expect(failed).toBeTruthy()
+    expect(failed?.failureReason).toBe("probe_timeout")
+    expect(failed?.probeSentAt).toBe(probing?.probeSentAt)
+    expect(failed?.probeDeadlineAt).toBe(probing?.probeDeadlineAt)
+    expect(failed?.activeProbeVersion).toBe(probing?.activeProbeVersion)
+    expect(failed?.probeVersion).toBe(probing?.activeProbeVersion)
+    expect(failed?.postProbeActivity).toBe(false)
+    expect(failed?.lastDataAt).toEqual(expect.any(String))
+    expect(failed?.lastActivityType).toEqual(expect.any(String))
+
+    const probeState = JSON.parse((result.message ?? "").slice((result.message ?? "").indexOf("{"))) as Record<string, unknown>
+    expect(probeState.probeSentAt).toBe(probing?.probeSentAt)
+    expect(probeState.probeDeadlineAt).toBe(probing?.probeDeadlineAt)
+    expect(probeState.probeVersion).toBe(probing?.activeProbeVersion)
+    expect(probeState.postProbeActivity).toBe(false)
+    expect(Number(probeState.dataVersion)).toBe(Number(probeState.probeVersion))
+  })
+
+  it("ProbePromptSendRejects_LivenessFailsAsProbeSendFailed_InsteadOfTimingOut", async () => {
+    const fixture = createFixture("basic")
+    const shared = createSharedSessionFixture("probe-send-failed")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "probe send fails",
+      session: "probe-send-failed-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 60,
+      timeout: 1_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Failed to send liveness probe: probe transport failed")
+    expect(result.message ?? "").not.toContain("Session liveness probe timed out")
+
+    const livenessEvents = shared.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+      .map((entry) => entry.payload as Record<string, unknown>)
+
+    const probing = livenessEvents.find((payload) => payload.status === "probing")
+    const failed = livenessEvents.find((payload) => payload.status === "failed")
+
+    expect(probing).toBeTruthy()
+    expect(failed).toBeTruthy()
+    expect(failed?.failureReason).toBe("probe_send_failed")
+    expect(failed?.activeProbeVersion).toBe(probing?.activeProbeVersion)
+    expect(failed?.probeSentAt).toBe(probing?.probeSentAt)
+    expect(failed?.probeDeadlineAt).toBe(probing?.probeDeadlineAt)
+  })
+
+  it("AbortSignalFiresDuringProbe_CancellationRemainsDistinctFromLivenessFailure", async () => {
+    const fixture = createFixture("abort-during-probe")
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 60)
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "cancel during probe",
+      session: "cancel-session",
+      livenessQuietThresholdMs: 20,
+      probeTimeoutMs: 200,
+      timeout: 1_000,
+    }, controller.signal))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toMatch(/stopped by user/i)
+    expect(fixture.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
+  })
+
   it("AbortSignalFires_PromptRunning_SendsSessionCancelBeforeCleanup", async () => {
     const fixture = createFixture("abort")
     const controller = new AbortController()
@@ -151,11 +322,17 @@ describe("mohist/acp-agent", () => {
 
 function createFixture(scenario: Scenario) {
   const agent = new FakeAcpAgent(scenario)
+  const serverConnection = new FakeServerConnection()
   setAcpProcessFactoryForTest(() => createFakeProcess(agent))
   return {
     agent,
-    context(withInput: Record<string, unknown>, signal = new AbortController().signal): ActionContext {
-      return baseContext(withInput, signal)
+    serverConnection,
+    context(withInput: Record<string, unknown>, signal = new AbortController().signal, overrides: Partial<ActionContext> = {}): ActionContext {
+      return {
+        ...baseContext(withInput, signal),
+        serverConnection: serverConnection as unknown as ServerConnection,
+        ...overrides,
+      }
     },
   }
 }
@@ -179,6 +356,13 @@ function createSharedFixture(scenario: Scenario) {
         serverConnection: server as never,
       }
     },
+  }
+}
+
+function contextWithOverrides(withInput: Record<string, unknown>, signal = new AbortController().signal, overrides: Partial<ActionContext> = {}): ActionContext {
+  return {
+    ...baseContext(withInput, signal),
+    ...overrides,
   }
 }
 
@@ -206,7 +390,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort"
+type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -251,6 +435,9 @@ class FakeAcpAgent {
         if (self.scenario === "liveness") return await self.runLivenessPrompt(params.sessionId)
         if (self.scenario === "quiet-then-done") return await self.runQuietThenDonePrompt(params.sessionId)
         if (self.scenario === "liveness-non-message") return await self.runNonMessageLivenessPrompt(params.sessionId)
+        if (self.scenario === "tool-liveness") return await self.runToolLivenessPrompt(params.sessionId)
+        if (self.scenario === "probe-timeout") return await self.runProbeTimeoutPrompt()
+        if (self.scenario === "abort-during-probe") return await self.runAbortDuringProbePrompt()
         if (self.scenario === "abort") return await new Promise(() => {})
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         else await self.emitBasicEvents(params.sessionId)
@@ -293,6 +480,26 @@ class FakeAcpAgent {
     return { stopReason: "end_turn" as const }
   }
 
+  private async runToolLivenessPrompt(sessionId: string) {
+    if (this.promptCount === 1) {
+      return await new Promise<{ stopReason: "end_turn" }>((resolve) => { this.initialPromptResolve = resolve })
+    }
+    await this.connection.sessionUpdate({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-probe-1", title: "Read file", kind: "read", status: "in_progress", rawInput: { path: "README.md" } } })
+    await this.connection.sessionUpdate({ sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-probe-1", title: "Read file", status: "completed", rawOutput: { text: "content" } } })
+    setTimeout(() => {
+      this.initialPromptResolve?.({ stopReason: "end_turn" })
+    }, 20)
+    return { stopReason: "end_turn" as const }
+  }
+
+  private async runProbeTimeoutPrompt() {
+    return await new Promise<{ stopReason: "end_turn" }>(() => {})
+  }
+
+  private async runAbortDuringProbePrompt() {
+    return await new Promise<{ stopReason: "end_turn" }>(() => {})
+  }
+
   private async emitBasicEvents(sessionId: string) {
     await this.connection.sessionUpdate(textUpdate(sessionId, "hello"))
     await this.connection.sessionUpdate({ sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Read file", kind: "read", status: "in_progress", rawInput: { path: "README.md" } } })
@@ -307,6 +514,129 @@ class FakeAcpAgent {
 
 function textUpdate(sessionId: string, text: string) {
   return { sessionId, update: { sessionUpdate: "agent_message_chunk" as const, content: { type: "text" as const, text } } }
+}
+
+function thoughtUpdate(sessionId: string, text: string) {
+  return { sessionId, update: { sessionUpdate: "agent_thought_chunk" as const, content: { type: "text" as const, text } } }
+}
+
+function createSharedSessionFixture(scenario: "thought-liveness" | "probe-send-failed", options?: { sessionRecord?: { acpSessionId: string } }) {
+  const agent = new FakeSharedAcpAgent(scenario)
+  const [clientStream, agentStream] = linkedStreams()
+  let activeSessionUpdateHandler: (notification: SessionNotification) => Promise<void> = async () => {}
+  let activePermissionHandler: (params: RequestPermissionRequest) => Promise<RequestPermissionResponse> = async () => ({ outcome: { outcome: "cancelled" } })
+  const clientConnection = new ClientSideConnection(() => ({
+    sessionUpdate: async (notification) => {
+      await activeSessionUpdateHandler(notification)
+    },
+    requestPermission: async (params) => await activePermissionHandler(params),
+  }), clientStream)
+  const agentConnection = new AgentSideConnection(() => agent.handler(), agentStream)
+  agent.bind(agentConnection)
+
+  const serverConnection = new FakeServerConnection()
+  const acpSessionManager = new AcpSessionManager()
+  acpSessionManager.set(acpSessionManager.key("workflow-1", "shared-session"), { sessionId: "shared-session-1", workDir: "D:/fake/work" })
+  serverConnection.nextEnsureWorkflowAgentSession = options?.sessionRecord ? { ...options.sessionRecord, workDir: "D:/fake/work" } : { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+  const connection = clientConnection
+  if (scenario === "probe-send-failed") {
+    const originalPrompt = clientConnection.prompt.bind(clientConnection)
+    connection.prompt = async (params: Parameters<ClientSideConnection["prompt"]>[0]) => {
+      const text = params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n")
+      if (text.includes("still alive")) throw new Error("probe transport failed")
+      return await originalPrompt(params)
+    }
+  }
+  const acpConnection: SharedAcpConnection = {
+    connection,
+    processPid: 4321,
+    setActiveHandlers(sessionUpdate, requestPermission) {
+      activeSessionUpdateHandler = sessionUpdate
+      activePermissionHandler = requestPermission
+    },
+    clearActiveHandlers() {
+      activeSessionUpdateHandler = async () => {}
+      activePermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
+    },
+    async shutdown() {},
+  }
+
+  return {
+    agent,
+    serverConnection,
+    context(): Partial<ActionContext> {
+      return {
+        acpConnection,
+        acpSessionManager,
+        serverConnection: serverConnection as unknown as ServerConnection,
+      }
+    },
+  }
+}
+
+class FakeServerConnection {
+  readonly calls: Array<{ event: string; type?: string; payload?: unknown; args?: unknown[] }> = []
+  nextEnsureWorkflowAgentSession: { acpSessionId?: string; workDir?: string } = { acpSessionId: "shared-session-1", workDir: "D:/fake/work" }
+
+  async ensureWorkflowAgentSession() {
+    this.calls.push({ event: "ensureWorkflowAgentSession" })
+    return this.nextEnsureWorkflowAgentSession
+  }
+
+  async attachWorkflowAgentSession(...args: unknown[]) {
+    this.calls.push({ event: "attachWorkflowAgentSession", args })
+  }
+
+  async workflowAgentSessionEvents(_projectId: string, _workflowRunId: string, _sessionName: string, payload: { events: Array<{ type: string; payload: unknown }> }) {
+    for (const event of payload.events) this.calls.push({ event: "workflowAgentSessionEvents", type: event.type, payload: event.payload })
+  }
+}
+
+class FakeSharedAcpAgent {
+  readonly calls: any[] = []
+  private connection!: AgentSideConnection
+
+  constructor(private readonly scenario: "thought-liveness" | "probe-send-failed") {}
+
+  bind(connection: AgentSideConnection) {
+    this.connection = connection
+  }
+
+  handler(): Agent {
+    const self = this
+    return {
+      async initialize() {
+        return { protocolVersion: PROTOCOL_VERSION, agentInfo: { name: "fake-shared-acp-agent", version: "0.1.0" }, agentCapabilities: {} }
+      },
+      async newSession() {
+        self.calls.push({ event: "newSession" })
+        return { sessionId: "shared-session-1" }
+      },
+        async resumeSession(params) {
+          self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd })
+          return {}
+        },
+      async prompt(params) {
+        self.calls.push({ event: "prompt", text: params.prompt.map((part) => part.type === "text" ? part.text : "").join("\n") })
+        if (self.scenario === "thought-liveness") {
+          for (let index = 0; index < 5; index += 1) {
+            await delay(20)
+            self.calls.push({ event: "thought", index })
+            await self.connection.sessionUpdate(thoughtUpdate(params.sessionId, `thinking-${index}`))
+          }
+        } else if (self.scenario === "probe-send-failed") {
+          await delay(80)
+        }
+        return { stopReason: "end_turn" }
+      },
+      async cancel() {},
+      async authenticate() { return {} },
+    }
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function createFakeProcess(agent: FakeAcpAgent): AcpProcessHandle {

@@ -2106,6 +2106,42 @@ describe('Terminal session events trigger refetch', () => {
       expect(result.current.isFinalizing).toBe(true)
     })
   })
+
+  it('liveness status running or failed triggers refetch and explainable transcript parts', async () => {
+    const initialTurns = [makeTurn()]
+
+    const { result } = renderHookWithQueryClient(() => useSessionTranscript({
+      issueNumber: 123,
+      sessionId: 'session-123',
+      acpSessionId: 'acp-123',
+      initialTurns,
+      isRunning: true,
+    }))
+
+    act(() => {
+      dispatchAgentEvent('agent_liveness_status', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        status: 'failed',
+        lastDataAt: '2024-01-01T00:00:02.000Z',
+        lastActivityType: 'agent_thought_chunk',
+        probeSentAt: '2024-01-01T00:00:01.000Z',
+        probeDeadlineAt: '2024-01-01T00:00:31.000Z',
+        activeProbeVersion: 4,
+        failureReason: 'probe_timeout',
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.isFinalizing).toBe(true)
+      const errorParts = result.current.turns.at(-1)?.assistant.filter(
+        (part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery',
+      )
+      expect(errorParts?.some((part) => part.message.includes('Liveness failed: probe_timeout'))).toBe(true)
+    })
+  })
 })
 
 describe('Running session shows only real active tools', () => {

@@ -907,6 +907,36 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
       }),
     )
 
+    unsubs.push(
+      onAgentEvent('agent_liveness_status', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        if (detail.acpSessionId !== acpSessionId) return
+
+        const timestamp = detail.probeSentAt ?? detail.lastDataAt ?? new Date().toISOString()
+        const message = detail.status === 'probing'
+          ? `Liveness probe sent. Waiting until ${detail.probeDeadlineAt ?? 'deadline unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
+          : detail.status === 'running'
+            ? `Liveness recovered after ${detail.lastActivityType ?? 'session'} activity.`
+            : `Liveness failed: ${detail.failureReason ?? 'unknown'}. Last activity: ${detail.lastActivityType ?? 'unknown'}.`
+
+        setTurns((prev) => {
+          const next = ensureLiveTurn(prev, timestamp)
+          const lastTurn = next[next.length - 1]
+          const newPart = createErrorPart(message, 'recovery', timestamp)
+          next[next.length - 1] = {
+            ...lastTurn,
+            assistant: [...lastTurn.assistant, newPart],
+          }
+          return next
+        })
+        markNewContentRef.current()
+
+        if (detail.status === 'running' || detail.status === 'failed') {
+          invalidateAndRefetch()
+        }
+      }),
+    )
+
     return () => {
       mountedRef.current = false
       if (streamingTimerRef.current !== null) {
