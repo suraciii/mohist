@@ -6,6 +6,28 @@ public static class WorkflowRoutes
 {
     public static WebApplication MapWorkflowTaskRoutes(this WebApplication app)
     {
+        app.MapPost("/api/workflows/{workflowRunId}/tasks", async (
+            string workflowRunId,
+            AddTaskRequestDto request,
+            IGrainFactory grains) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Id))
+                return ApiResults.BadRequest("Task id is required");
+            if (string.IsNullOrWhiteSpace(request.Title))
+                return ApiResults.BadRequest("Task title is required");
+
+            var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
+            var result = await workflow.AddTaskAsync(new RuntimeTaskInput(
+                request.Id,
+                request.Title,
+                request.Uses,
+                request.With,
+                request.Stage,
+                request.InvalidateChecks));
+
+            return ApiResults.Ok(new { result.WorkflowRunId, result.Stage, result.TaskId });
+        });
+
         app.MapPost("/api/workflow/{workflowRunId}/tasks", async (
             string workflowRunId,
             AddTasksRequestDto request,
@@ -29,6 +51,7 @@ public static class WorkflowRoutes
         return app;
     }
 
+    public sealed record AddTaskRequestDto(string? Id, string? Title, string? Uses, string? With, string? Stage, bool InvalidateChecks = false);
     public sealed record AddTasksRequestDto(IReadOnlyList<AddTasksRequestTaskDto>? Tasks);
     public sealed record AddTasksRequestTaskDto(string? Id, string? Title, string? Uses, string? With);
 }

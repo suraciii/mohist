@@ -508,6 +508,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
                 actions.Add(retryTask is not null
                     ? new(cr, "retry", retryTask)
                     : new(cr, "fail"));
+                if (retryTask is not null)
+                    break;
             }
         }
 

@@ -25,6 +25,32 @@ public static partial class WorkflowAgentSessionExtensions
                 session.IssueNumber = issueNumber.Value;
         }
 
+        public void StartNewWork(
+            string? runnerId,
+            string? workId,
+            string? workType,
+            string? stage,
+            string? title,
+            int? issueNumber,
+            DateTime now)
+        {
+            session.RunnerId = runnerId ?? session.RunnerId;
+            session.WorkId = workId;
+            session.WorkType = workType;
+            session.Stage = stage;
+            session.Title = title;
+            if (session.IssueNumber == 0 && issueNumber is > 0)
+                session.IssueNumber = issueNumber.Value;
+
+            session.Status = AgentSessionStatus.Created;
+            session.StartedAt = null;
+            session.CompletedAt = null;
+            session.FailureReason = null;
+            session.ExitCode = null;
+            session.LastDataAt = now;
+            session.LastHeartbeatAt = now;
+        }
+
         public bool AttachAgent(
             string agentSessionId,
             string? model,

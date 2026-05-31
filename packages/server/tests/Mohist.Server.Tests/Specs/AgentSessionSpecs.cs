@@ -171,6 +171,41 @@ public class AgentSessionSpecs
         Assert.Contains("liveness", ensured.FailureReason);
     }
 
+    [Fact]
+    public async Task EnsureWorkflowAgentSession_NamedTerminalSessionStartsNewWork()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            workId = work.WorkId,
+            workType = work.WorkType,
+            stage = work.Stage,
+            events = new[]
+            {
+                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+            }
+        });
+
+        var ensured = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id)
+            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+                project.Id,
+                issue.Number,
+                work.WorkflowRunId,
+                session.SessionName,
+                _runnerId,
+                "ai-re-review:1.1",
+                "task",
+                "check",
+                "AI re-review"));
+
+        Assert.Equal(session.Id, ensured.Id);
+        Assert.Equal("created", ensured.Status);
+        Assert.Equal("ai-re-review:1.1", ensured.WorkId);
+        Assert.Null(ensured.CompletedAt);
+        Assert.Null(ensured.FailureReason);
+    }
+
     [Fact(Skip = "Requires design decision: report-failed should close session, but current RunnerGrain.ReportAsync does not propagate to session")]
     public async Task RunnerReport_WhenAgentWorkFailsBeforeTelemetry_ClosesCreatedSession()
     {
@@ -257,7 +292,7 @@ public class AgentSessionSpecs
         return default!;
     }
 
-    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, WorkflowAgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null)
+    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, WorkflowAgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
         var projectName = $"session-grain-{name}-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -272,8 +307,9 @@ public class AgentSessionSpecs
             Stage: "Build",
             Title: issueTitle,
             Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
-        var grain = _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(project.Id, work.WorkflowRunId, work.WorkId));
-        var session = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, work.WorkId, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
+        sessionName ??= work.WorkId;
+        var grain = _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(project.Id, work.WorkflowRunId, sessionName));
+        var session = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
         if (start)
             await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
