@@ -64,25 +64,21 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   while (attempts < maxRetries) {
     attempts++
     const agentResult = await runConflictResolver(context, conflictResolver, conflicts, baseBranch, attempts)
+    if (agentResult.output) gitOutputs.push(agentResult.output)
     if (agentResult.status !== "success") {
       await git(context.workDir, ["rebase", "--abort"], context.signal)
-      return rebaseOutput(false, baseBranch, beforeSha, null, conflicts, attempts, result.combinedOutput, 1)
+      return rebaseOutput(false, baseBranch, beforeSha, null, conflicts, attempts, combinedGitOutput(gitOutputs), 1)
     }
 
-    await git(context.workDir, ["add", "."], context.signal)
-    const continued = await git(context.workDir, ["-c", "core.editor=true", "rebase", "--continue"], context.signal)
-    gitOutputs.push(continued.combinedOutput)
-    if (continued.success) {
+    const verified = await verifyRebaseComplete(context, baseBranch)
+    gitOutputs.push(verified.output)
+    if (verified.ok) {
       const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
       return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, conflicts.flat(), attempts, combinedGitOutput(gitOutputs))
     }
 
     conflicts = await conflictFiles(context)
-    if (conflicts.length === 0) {
-      const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
-      return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, allConflicts.flat(), attempts, result.combinedOutput)
-    }
-    allConflicts.push(conflicts)
+    if (conflicts.length > 0) allConflicts.push(conflicts)
   }
 
   await git(context.workDir, ["rebase", "--abort"], context.signal)
@@ -150,19 +146,29 @@ export function applyWorkflowAgentDefault(with_: JsonObject, variables: JsonObje
 function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: number): string {
   const fileList = conflicts.map((f) => `- ${f}`).join("\n")
   return [
-    `## Git Rebase Conflict Resolution (attempt ${attempt})`,
+    `## Complete Git Rebase Conflict Resolution (attempt ${attempt})`,
     "",
-    `A \`git rebase ${baseBranch}\` produced merge conflicts in the following files:`,
+    `A \`git rebase ${baseBranch}\` produced merge conflicts. You are now inside an in-progress rebase.`,
     "",
+    "Current conflict files:",
     fileList,
     "",
-    "Resolve every conflict marker in each file listed above. For each file:",
-    "1. Open the file and find all `<<<<<<<`, `=======`, and `>>>>>>>` markers.",
-    "2. Choose the correct resolution (typically keep incoming changes from the branch being rebased onto, unless the current branch has newer intentional changes).",
-    "3. Remove all conflict markers and leave clean, correct code.",
-    "4. Do NOT run `git add` or `git rebase --continue` — those will be handled automatically.",
+    "Resolution rules:",
+    "1. Preserve both sides. Never drop or overwrite either side's intentional changes.",
+    "2. Resolve every conflict marker. Search for `<<<<<<<`, `=======`, and `>>>>>>>` across the repository; no markers may remain.",
+    "3. Stage resolved files and continue the rebase yourself.",
+    "4. The rebase may have conflicts in multiple commits. Keep looping until the rebase is fully complete.",
+    "5. If verification fails because of your resolution, fix it before finishing.",
     "",
-    "After resolving all conflicts, verify the project still builds/tests pass if possible.",
+    "Steps - loop until complete:",
+    "1. Read each conflict file.",
+    "2. For each block, understand what the base branch changed and what the issue branch changed.",
+    "3. Merge both changes intelligently and remove all conflict markers.",
+    "4. Run `git add` for resolved files.",
+    "5. Run `GIT_EDITOR=true git rebase --continue`.",
+    "6. If more conflicts appear, go back to step 1. Do not stop after only one commit.",
+    "7. When rebase completes, verify there is no rebase in progress and no conflict markers remain.",
+    "8. Run targeted build/tests if practical.",
   ].join("\n")
 }
 
@@ -192,6 +198,29 @@ async function conflictFiles(context: ActionContext) {
   const status = await git(context.workDir, ["diff", "--name-only", "--diff-filter=U"], context.signal)
   if (!status.success || !status.stdout.trim()) return []
   return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
+}
+
+async function verifyRebaseComplete(context: ActionContext, baseBranch: string) {
+  const rebaseInProgress = await isRebaseInProgress(context)
+  const conflicts = await conflictFiles(context)
+  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+  const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal)
+  const mergeBase = base.success ? await git(context.workDir, ["merge-base", baseBranch, "HEAD"], context.signal) : null
+  const ok =
+    !rebaseInProgress &&
+    conflicts.length === 0 &&
+    head.success &&
+    base.success &&
+    mergeBase?.success === true &&
+    mergeBase.stdout.trim() === base.stdout.trim()
+  const output = [
+    rebaseInProgress ? "Rebase is still in progress." : "",
+    conflicts.length > 0 ? `Conflicts remain:\n${conflicts.join("\n")}` : "",
+    head.combinedOutput,
+    base.combinedOutput,
+    mergeBase?.combinedOutput ?? "",
+  ].filter(Boolean).join("\n")
+  return { ok, output }
 }
 
 async function commitPendingChanges(workDir: string, message: string, signal: AbortSignal) {

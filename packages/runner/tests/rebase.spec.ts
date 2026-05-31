@@ -94,14 +94,18 @@ describe("mohist/rebase", () => {
     expect(withInput.agent).toEqual({ type: "opencode", model: "openai/gpt-5.4" })
   })
 
-  it("ConflictResolverSucceedsButRebaseContinueFails_IncludesContinueOutput", async () => {
+  it("ConflictResolverCompletesFullRebase_VerifiesWithoutContinuingForAgent", async () => {
     const calls: string[] = []
+    let resolverRan = false
     setRebaseExistsCheckerForTest(() => false)
-    setRebaseConflictResolverForTest(async () => ({
-      status: "success",
-      message: "resolved",
-      output: "resolved markers",
-    }))
+    setRebaseConflictResolverForTest(async (resolverContext) => {
+      resolverRan = true
+      return {
+        status: "success",
+        message: "rebase completed",
+        output: `agent completed ${resolverContext.workId}`,
+      }
+    })
     setRebaseGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
@@ -112,15 +116,65 @@ describe("mohist/rebase", () => {
         case "status --porcelain":
           return ok("")
         case "rev-parse HEAD":
+          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase master":
+          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/acp-agent.ts")
+        case "diff --name-only --diff-filter=U":
+          return ok(resolverRan ? "" : "packages/runner/src/actions/acp-agent.ts\n")
+        case "rev-parse master":
+          return ok("base\n")
+        case "merge-base master HEAD":
+          return ok("base\n")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await rebaseAction(context({ maxConflictRetries: 1, conflictResolver: { with: {} } }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(calls).not.toContain("add .")
+    expect(calls).not.toContain("-c core.editor=true rebase --continue")
+    expect(output.output).toContain("Merge conflict in packages/runner/src/actions/acp-agent.ts")
+    expect(output.output).toContain("agent completed rebase.1-conflict-resolve-1")
+    expect(output).toMatchObject({
+      beforeHeadSha: "before",
+      afterHeadSha: "after",
+      rebased: true,
+      resolveAttempts: 1,
+    })
+  })
+
+  it("ConflictResolverReturnsSuccessButRebaseStillInProgress_FailsWithVerificationOutput", async () => {
+    const calls: string[] = []
+    let resolverRan = false
+    setRebaseExistsCheckerForTest((path) => resolverRan && path === "/fake/worktree/.git/rebase-merge")
+    setRebaseConflictResolverForTest(async () => {
+      resolverRan = true
+      return {
+        status: "success",
+        message: "partial",
+        output: "agent stopped before git rebase --continue",
+      }
+    })
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
           return ok("before\n")
         case "rebase master":
           return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/acp-agent.ts")
         case "diff --name-only --diff-filter=U":
-          return ok("packages/runner/src/actions/acp-agent.ts\n")
-        case "add .":
-          return ok("")
-        case "-c core.editor=true rebase --continue":
-          return fail("error: could not apply next-commit\nCONFLICT (content): Merge conflict in packages/runner/tests/acp-agent.spec.ts")
+          return ok(resolverRan ? "" : "packages/runner/src/actions/acp-agent.ts\n")
+        case "rev-parse master":
+          return ok("base\n")
+        case "merge-base master HEAD":
+          return ok("old-base\n")
         case "rebase --abort":
           return ok("aborted")
         default:
@@ -132,10 +186,10 @@ describe("mohist/rebase", () => {
     const output = JSON.parse(result.output ?? "{}")
 
     expect(result.status).toBe("failure")
-    expect(calls).toContain("-c core.editor=true rebase --continue")
-    expect(output.output).toContain("Merge conflict in packages/runner/src/actions/acp-agent.ts")
-    expect(output.output).toContain("error: could not apply next-commit")
-    expect(output.output).toContain("Merge conflict in packages/runner/tests/acp-agent.spec.ts")
+    expect(calls).not.toContain("-c core.editor=true rebase --continue")
+    expect(calls).toContain("rebase --abort")
+    expect(output.output).toContain("agent stopped before git rebase --continue")
+    expect(output.output).toContain("Rebase is still in progress.")
   })
 })
 
