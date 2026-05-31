@@ -1,6 +1,7 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Grains;
+using System.Text.Json;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -22,6 +23,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var (retried, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.2", retried.WorkId);
+        Assert.Null(SessionName(retried));
         Assert.Equal(r1, r2);
     }
 
@@ -44,6 +46,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var (retried, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.2", retried.WorkId);
+        Assert.Null(SessionName(retried));
         await ReportAsync(r2, retried.WorkId, "completed");
 
         var (task2, _) = await PollWorkAnyAsync();
@@ -99,6 +102,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var (retried, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.2", retried.WorkId);
+        Assert.Null(SessionName(retried));
         await ReportAsync(r2, retried.WorkId, "completed");
 
         var (checks, r3) = await PollWorkAnyAsync();
@@ -293,5 +297,16 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         var retryAction = status.AvailableActions.Find(a => a.Name == "retry");
         Assert.Null(retryAction);
+    }
+
+    private static string? SessionName(WorkDispatch dispatch)
+    {
+        if (string.IsNullOrWhiteSpace(dispatch.With))
+            return null;
+
+        using var document = JsonDocument.Parse(dispatch.With!);
+        return document.RootElement.TryGetProperty("session", out var session)
+            ? session.GetString()
+            : null;
     }
 }

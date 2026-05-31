@@ -486,8 +486,7 @@ namespace Mohist.Server.Migrations
                     b.HasIndex("WorkflowRunId", "SessionName")
                         .IsUnique();
 
-                    b.HasIndex("WorkflowRunId", "WorkId")
-                        .IsUnique();
+                    b.HasIndex("WorkflowRunId", "WorkId");
 
                     b.HasIndex("ProjectId", "IssueNumber", "CreatedAt");
 

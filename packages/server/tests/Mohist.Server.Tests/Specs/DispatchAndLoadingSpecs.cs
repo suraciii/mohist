@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
@@ -115,6 +116,69 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.Contains("expect", dynamicTask.With);
         Assert.Contains("contains", dynamicTask.With);
         Assert.Contains("src/FeatureFlags.cs", dynamicTask.With);
+    }
+
+    [Fact]
+    public async Task StageWithDynamicAgentVariables_LoadedDynamicTasksInheritStageAgent()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(
+                "build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [],
+                Variables: new Dictionary<string, JsonElement?>
+                {
+                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.4" })
+                })
+        ], Variables: new Dictionary<string, JsonElement?>
+        {
+            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
+        }));
+
+        var (load, r1) = await PollWorkAnyAsync();
+
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent", """{"prompt":"Implement feature"}""")
+            ]));
+
+        await ReportAsync(r1, load.WorkId, "completed");
+
+        var (dynamicTask, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("T-001.", dynamicTask.WorkId);
+        Assert.Contains("openai/gpt-5.4", dynamicTask.With);
+        Assert.DoesNotContain("kimi-for-coding/k2p6", dynamicTask.With);
+    }
+
+    [Fact]
+    public async Task StageWithAgentVariables_TaskWithoutAgentInheritsStageAgentAtDispatch()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(
+                "build",
+                [new("T-001", "Implement feature", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                {
+                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature")
+                })],
+                [],
+                Variables: new Dictionary<string, JsonElement?>
+                {
+                    ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "openai/gpt-5.4" })
+                })
+        ], Variables: new Dictionary<string, JsonElement?>
+        {
+            ["agent"] = JsonSerializer.SerializeToElement(new { type = "opencode", model = "kimi-for-coding/k2p6" })
+        }));
+
+        var (dynamicTask, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("T-001.", dynamicTask.WorkId);
+        Assert.Contains("Implement feature", dynamicTask.With);
+        Assert.Contains("openai/gpt-5.4", dynamicTask.With);
+        Assert.DoesNotContain("kimi-for-coding/k2p6", dynamicTask.With);
     }
 
     [Fact]

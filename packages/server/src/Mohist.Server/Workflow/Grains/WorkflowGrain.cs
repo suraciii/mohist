@@ -80,7 +80,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         _run.Start();
         if (!string.IsNullOrWhiteSpace(input?.Variables))
-            _variables = new WorkflowExecutionContext(input.Variables!, input?.StageVariables);
+            _variables = new WorkflowExecutionContext(
+                input.Variables!,
+                input?.StageVariables ?? (_profile is not null ? BuildStageVariablesFromDefinition(_profile.Definition) : null));
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         EmitStageChanged("started");
@@ -242,7 +244,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             if (string.IsNullOrWhiteSpace(t.Title))
                 throw new InvalidOperationException("Task title is required");
 
-            var with = ParseWith(t.With);
+            var with = ApplyStageAgentDefault(ParseWith(t.With), current.Id);
             tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, with));
         }
 
@@ -423,19 +425,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
-        var withStr = with is not null ? JsonSerializer.Serialize(with) : null;
-        var attempt = 1;
-        if (_run is not null && workType == "task")
+        var dispatchWith = with is not null
+            ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
+            : null;
+        var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
+        if (workType == "task")
         {
-            var current = _run.Stages.LastOrDefault(s => s.Id == stage);
-            if (current is not null)
-            {
-                var marker = $"{logicalId}.";
-                var lastTask = current.Tasks.LastOrDefault(t => t.Id.StartsWith(marker, StringComparison.Ordinal));
-                if (lastTask is not null && int.TryParse(lastTask.Id[marker.Length..], out var a))
-                    attempt = a;
-            }
+            dispatchWith = ApplyStageAgentDefault(dispatchWith, stage);
         }
+        var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
         var variables = _variables?.ToDispatchJson(new WorkflowDispatchContext(GrainKey, workId, workType, stage, title, attempt));
         var projectId = _variables?.String("project", "id");
         var issueId = _variables?.String("issue", "id");
@@ -455,6 +453,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId);
         _lastRunnerId = runnerId;
         return dispatch;
+    }
+
+    private static int TaskAttempt(string taskRunId)
+    {
+        var lastDot = taskRunId.LastIndexOf('.');
+        return lastDot >= 0 && int.TryParse(taskRunId[(lastDot + 1)..], out var attempt)
+            ? attempt
+            : 1;
     }
 
     private void ClearLease()
@@ -583,6 +589,36 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private static Dictionary<string, JsonElement?>? ParseWith(string? with) =>
         with is not null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(with) : null;
+
+    private static Dictionary<string, Dictionary<string, string>>? BuildStageVariablesFromDefinition(WorkflowDefinition definition)
+    {
+        var result = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var stage in definition.Stages)
+        {
+            if (stage.Variables is null || stage.Variables.Count == 0) continue;
+            result[stage.Stage] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["vars"] = JsonSerializer.Serialize(
+                    stage.Variables.ToDictionary(kv => kv.Key, kv => kv.Value.HasValue ? JsonSerializer.Deserialize<object?>(kv.Value.Value.GetRawText(), WorkflowVariableJson.Options) : null),
+                    WorkflowVariableJson.Options)
+            };
+        }
+        return result.Count == 0 ? null : result;
+    }
+
+    private Dictionary<string, JsonElement?>? ApplyStageAgentDefault(Dictionary<string, JsonElement?>? with, string stage)
+    {
+        if (with is not null && with.TryGetValue("agent", out var existingAgent) && existingAgent.HasValue)
+            return with;
+
+        var agent = _variables?.StageNestedSection(stage, "vars", "agent") ?? _variables?.NestedSection("vars", "agent");
+        if (!agent.HasValue)
+            return with;
+
+        with ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+        with["agent"] = agent.Value;
+        return with;
+    }
 
     private void EmitStageChanged(string action, string? reason = null)
     {

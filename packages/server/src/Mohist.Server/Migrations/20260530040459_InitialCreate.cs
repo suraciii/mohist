@@ -357,8 +357,7 @@ namespace Mohist.Server.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_WorkflowAgentSessions_WorkflowRunId_WorkId",
                 table: "WorkflowAgentSessions",
-                columns: new[] { "WorkflowRunId", "WorkId" },
-                unique: true);
+                columns: new[] { "WorkflowRunId", "WorkId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_WorkflowEvents_ProjectId_Id",

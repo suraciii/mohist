@@ -147,6 +147,30 @@ public class AgentSessionSpecs
         Assert.Contains("unregistered", grainSession.FailureReason);
     }
 
+    [Fact]
+    public async Task EnsureWorkflowAgentSession_TerminalSessionExists_KeepsTerminalSessionClosed()
+    {
+        var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-terminal");
+
+        await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).FailIfRunningAsync("Session liveness probe timed out");
+
+        var ensured = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id)
+            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+                project.Id,
+                work.Issue!.IssueNumber,
+                work.WorkflowRunId,
+                session.SessionName,
+                _runnerId,
+                work.WorkId,
+                work.WorkType,
+                work.Stage,
+                work.Title));
+
+        Assert.Equal(session.Id, ensured.Id);
+        Assert.Equal("failed", ensured.Status);
+        Assert.Contains("liveness", ensured.FailureReason);
+    }
+
     [Fact(Skip = "Requires design decision: report-failed should close session, but current RunnerGrain.ReportAsync does not propagate to session")]
     public async Task RunnerReport_WhenAgentWorkFailsBeforeTelemetry_ClosesCreatedSession()
     {
@@ -268,7 +292,7 @@ public class AgentSessionSpecs
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
     private sealed record WorkflowAgentSessionSummaryDto(string Id, string Status);
     private sealed record WorkflowAgentSessionTranscript(string Id, JsonElement Turns);
-    private sealed record WorkflowAgentSessionInfoDto(string SessionId, string IssueTitle);
+    private sealed record WorkflowAgentSessionInfoDto(string SessionId, string IssueTitle, string Status, string? AgentSessionId, string? FailureReason);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     private sealed record ActivitySlotUsageDto(int Active, int Max);

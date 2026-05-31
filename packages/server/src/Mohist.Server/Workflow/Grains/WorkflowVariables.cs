@@ -161,6 +161,48 @@ public sealed record WorkflowExecutionContext(
         };
     }
 
+    public JsonElement? Section(string section)
+    {
+        using var document = JsonDocument.Parse(Json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty(section, out var sectionValue))
+            return null;
+
+        return sectionValue.Clone();
+    }
+
+    public JsonElement? NestedSection(string section, string property)
+    {
+        var found = Section(section);
+        if (!found.HasValue
+            || found.Value.ValueKind != JsonValueKind.Object
+            || !found.Value.TryGetProperty(property, out var propertyValue))
+            return null;
+
+        return propertyValue.Clone();
+    }
+
+    public JsonElement? StageSection(string stage, string section)
+    {
+        if (StageVariables is null
+            || !StageVariables.TryGetValue(stage, out var sections)
+            || !sections.TryGetValue(section, out var value))
+            return null;
+
+        return JsonSerializer.Deserialize<JsonElement>(value).Clone();
+    }
+
+    public JsonElement? StageNestedSection(string stage, string section, string property)
+    {
+        var stageSection = StageSection(stage, section);
+        if (!stageSection.HasValue
+            || stageSection.Value.ValueKind != JsonValueKind.Object
+            || !stageSection.Value.TryGetProperty(property, out var propertyValue))
+            return null;
+
+        return propertyValue.Clone();
+    }
+
     private static Dictionary<string, JsonElement?> ParseObject(string json)
     {
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);

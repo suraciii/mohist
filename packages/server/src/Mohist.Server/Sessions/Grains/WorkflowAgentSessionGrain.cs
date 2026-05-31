@@ -37,34 +37,37 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         if (_session is null)
         {
             var existing = await LoadByWorkflowAndSessionAsync(command.WorkflowRunId, command.SessionName);
-            if (existing is null)
-            {
-                _session = WorkflowAgentSession.Create(
-                    SessionId,
-                    command.ProjectId,
-                    command.IssueNumber ?? 0,
-                    command.WorkflowRunId,
-                    command.SessionName,
-                    command.RunnerId,
-                    command.WorkId,
-                    command.WorkType,
-                    command.Stage,
-                    command.Title);
-            }
-            else
+            if (existing is not null)
             {
                 _session = existing;
-                _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+                if (!_session.IsTerminal)
+                    _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
             }
+            else
+                _session = CreateSession(command);
         }
         else
         {
-            _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+            if (!_session.IsTerminal)
+                _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
         return ToInfo(_session);
     }
+
+    private WorkflowAgentSession CreateSession(EnsureWorkflowAgentSessionCommand command) =>
+        WorkflowAgentSession.Create(
+            SessionId,
+            command.ProjectId,
+            command.IssueNumber ?? 0,
+            command.WorkflowRunId,
+            command.SessionName,
+            command.RunnerId,
+            command.WorkId,
+            command.WorkType,
+            command.Stage,
+            command.Title);
 
     public async Task<WorkflowAgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
     {
