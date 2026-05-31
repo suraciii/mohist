@@ -38,6 +38,36 @@ public class ProjectCliSpecs
     }
 
     [Fact]
+    public async Task Use_ByName_PersistsActiveProjectInCliState()
+    {
+        var files = new FakeFileSystem();
+        var http = new RecordingHttpHandler();
+        http.EnqueueJson(HttpStatusCode.OK, """
+            {
+              "success": true,
+              "data": { "id": "proj_456", "name": "mohist" }
+            }
+            """);
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient(http) { BaseAddress = new Uri("http://localhost:3456") },
+            ["use", "mohist"],
+            output,
+            error,
+            files,
+            new NoopCommandExecutor());
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(HttpMethod.Post, http.Requests.Single().Method);
+        Assert.Equal("/api/projects/mohist/use", http.Requests.Single().RequestUri!.PathAndQuery);
+        Assert.Contains("\"activeProjectId\": \"proj_456\"", files.SingleFileContents);
+        Assert.Contains("Active project: mohist (proj_456)", output.ToString());
+        Assert.Equal("", error.ToString());
+    }
+
+    [Fact]
     public async Task IssueList_UsesPersistedActiveProjectWhenProjectIdIsOmitted()
     {
         var files = new FakeFileSystem();

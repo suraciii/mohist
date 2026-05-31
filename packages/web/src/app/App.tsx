@@ -32,7 +32,7 @@ function AppContent() {
   }, [projects, setProjects])
 
   useEffect(() => {
-    if (projects && projects.length > 0 && !projectId) {
+    if (projects && projects.length > 0 && (!projectId || !projects.some((project) => project.id === projectId))) {
       setProjectId(projects[0].id)
     }
   }, [projects, projectId, setProjectId])
