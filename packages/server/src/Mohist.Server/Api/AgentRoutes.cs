@@ -12,10 +12,14 @@ public static class AgentRoutes
     {
         var group = app.MapGroup("/api/agent");
 
-        group.MapGet("/status", async (string projectId, IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
+        group.MapGet("/status", async (string? projectId, IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
         {
-            var registry = grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId));
-            var runnerIds = await registry.ListRunnerIdsAsync();
+            if (string.IsNullOrWhiteSpace(projectId))
+            {
+                return ApiResults.BadRequest("No active project");
+            }
+
+            var runnerIds = await ListAvailableRunnerIdsAsync(grains, projectId);
             var activeAgents = await projection.ListActiveAgentsAsync(projectId);
             var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
 
@@ -29,7 +33,7 @@ public static class AgentRoutes
 
         group.MapGet("/activity", async (string projectId, int? limit, WorkflowAgentSessionQueryService sessions, IGrainFactory grains, WorkflowProjectionService projection, CancellationToken ct) =>
         {
-            var runnerIds = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnerIdsAsync();
+            var runnerIds = await ListAvailableRunnerIdsAsync(grains, projectId);
             return ApiResults.Ok(await sessions.GetActivityAsync(projectId, limit, runnerIds: runnerIds, ct: ct));
         });
 
@@ -40,6 +44,13 @@ public static class AgentRoutes
     {
         var cfg = await config.GetConfigAsync();
         return cfg.TryGetValue("maxConcurrentAgents", out var value) && value is int n ? n : 3;
+    }
+
+    private static async Task<IReadOnlyList<string>> ListAvailableRunnerIdsAsync(IGrainFactory grains, string projectId)
+    {
+        var projectRunnerIds = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnerIdsAsync();
+        var globalRunnerIds = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnerIdsAsync();
+        return projectRunnerIds.Concat(globalRunnerIds).Distinct(StringComparer.Ordinal).ToArray();
     }
 }
 

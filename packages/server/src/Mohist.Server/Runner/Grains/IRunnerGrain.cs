@@ -19,7 +19,7 @@ public record RunnerInfo(
     string RunnerId,
     string[] Capabilities,
     string Hostname,
-    string ProjectId,
+    string? ProjectId,
     string[]? CoderModels = null);
 
 [GenerateSerializer]

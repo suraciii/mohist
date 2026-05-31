@@ -1,8 +1,8 @@
-import { request } from '../../../shared/api/client'
+import { request, withProject } from '../../../shared/api/client'
 import type { AgentActivity, AgentSessionInfo, AgentStatus } from '../model/types'
 
-export function getAgentStatus() {
-  return request<AgentStatus>('/agent/status')
+export function getAgentStatus(projectId?: string | null) {
+  return request<AgentStatus>(withProject('/agent/status', projectId))
 }
 
 export function getAgentSessions(params?: { status?: string; limit?: number; projectId?: string | null }) {

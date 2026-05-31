@@ -88,7 +88,10 @@ export class WorkspaceManager {
   private async ensureFreshWorktree(projectPath: string, worktree: string, branch: string, baseBranch: string, marker: IssueWorkspaceMarker, signal: AbortSignal) {
     if (exists(worktree) && !await hasSameMarker(worktree, marker)) {
       const removed = await runCommand("git", ["worktree", "remove", "--force", worktree], projectPath, signal)
-      if (removed.exitCode !== 0) await deleteDirectory(worktree)
+      if (removed.exitCode !== 0) {
+        await deleteDirectory(worktree)
+        await pruneWorktrees(projectPath, signal)
+      }
     }
 
     if (!exists(worktree)) {
@@ -146,8 +149,41 @@ async function ensureBranchAvailableForFreshWorktree(projectPath: string, branch
   const branchExists = await runCommand("git", ["rev-parse", "--verify", branch], projectPath, signal).then((result) => result.exitCode === 0)
   if (!branchExists) return
 
+  for (const worktree of await worktreesUsingBranch(projectPath, branch, signal)) {
+    const removed = await runCommand("git", ["worktree", "remove", "--force", worktree], projectPath, signal)
+    if (removed.exitCode !== 0) await deleteDirectory(worktree)
+  }
+  await pruneWorktrees(projectPath, signal)
+
   const deleted = await runCommand("git", ["branch", "-D", branch], projectPath, signal)
   if (deleted.exitCode !== 0) throw new Error(`git branch -D ${branch} failed: ${deleted.stderr || deleted.stdout}`)
+}
+
+async function pruneWorktrees(projectPath: string, signal: AbortSignal) {
+  await runCommand("git", ["worktree", "prune"], projectPath, signal)
+}
+
+async function worktreesUsingBranch(projectPath: string, branch: string, signal: AbortSignal) {
+  const result = await runCommand("git", ["worktree", "list", "--porcelain"], projectPath, signal)
+  if (result.exitCode !== 0) return []
+
+  const worktrees: string[] = []
+  let current: string | null = null
+  const branchRef = `refs/heads/${branch}`
+
+  for (const line of result.stdout.split(/\r?\n/)) {
+    if (line.startsWith("worktree ")) {
+      current = line.slice("worktree ".length)
+      continue
+    }
+
+    if (current && line === `branch ${branchRef}`) {
+      worktrees.push(current)
+      current = null
+    }
+  }
+
+  return worktrees
 }
 
 function slug(value: string) {

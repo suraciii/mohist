@@ -48,6 +48,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
+            siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
             siloBuilder.Services.AddHostedService<DbSchemaInitializer>();

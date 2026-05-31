@@ -20,7 +20,21 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
-  const json: ApiResponse<T> = await res.json()
+  const text = await res.text()
+  let json: ApiResponse<T> | null = null
+
+  if (text.trim()) {
+    try {
+      json = JSON.parse(text) as ApiResponse<T>
+    } catch {
+      throw new ApiError(`Invalid JSON response from ${path}`, res.status)
+    }
+  }
+
+  if (!json) {
+    throw new ApiError(`Empty response from ${path}`, res.status)
+  }
+
   if (!json.success) {
     throw new ApiError(
       json.error ?? `Request failed: ${res.status}`,

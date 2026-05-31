@@ -201,10 +201,10 @@ internal sealed class SourceCodeUpdater
             "-o",
             publishDir,
         };
-        var (publish, _, publishErr) = await _commandExecutor.ExecuteAsync("dotnet", publishArgs, root);
+        var (publish, publishOut, publishErr) = await _commandExecutor.ExecuteAsync("dotnet", publishArgs, root);
         if (publish != 0)
         {
-            if (!string.IsNullOrWhiteSpace(publishErr)) _err.WriteLine(publishErr);
+            WriteCommandFailureOutput(publishOut, publishErr);
             _err.WriteLine("CLI publish failed. Aborting update.");
             return publish;
         }
@@ -251,10 +251,10 @@ internal sealed class SourceCodeUpdater
             return 0;
         }
 
-        var (build, _, buildErr) = await _commandExecutor.ExecuteAsync("dotnet", ["build", "Mohist.sln"], root);
+        var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("dotnet", ["build", "Mohist.sln"], root);
         if (build != 0)
         {
-            if (!string.IsNullOrWhiteSpace(buildErr)) _err.WriteLine(buildErr);
+            WriteCommandFailureOutput(buildOut, buildErr);
             _err.WriteLine("Build failed. Aborting update.");
             return build;
         }
@@ -294,10 +294,10 @@ internal sealed class SourceCodeUpdater
             return 0;
         }
 
-        var (build, _, buildErr) = await _commandExecutor.ExecuteAsync("npm", ["run", "build", "-w", "packages/runner"], root);
+        var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("npm", ["run", "build", "-w", "packages/runner"], root);
         if (build != 0)
         {
-            if (!string.IsNullOrWhiteSpace(buildErr)) _err.WriteLine(buildErr);
+            WriteCommandFailureOutput(buildOut, buildErr);
             _err.WriteLine("Build failed. Aborting update.");
             return build;
         }
@@ -350,6 +350,14 @@ internal sealed class SourceCodeUpdater
         if (OperatingSystem.IsMacOS()) return "osx-x64";
         if (OperatingSystem.IsWindows()) return "win-x64";
         return "linux-x64";
+    }
+
+    private void WriteCommandFailureOutput(string stdout, string stderr)
+    {
+        if (!string.IsNullOrWhiteSpace(stdout))
+            _err.WriteLine(stdout.TrimEnd());
+        if (!string.IsNullOrWhiteSpace(stderr))
+            _err.WriteLine(stderr.TrimEnd());
     }
 
     private async Task<bool> WaitForServerReadyAsync(TimeSpan timeout)

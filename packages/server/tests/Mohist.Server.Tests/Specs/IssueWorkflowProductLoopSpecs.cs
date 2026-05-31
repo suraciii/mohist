@@ -113,6 +113,46 @@ public class IssueWorkflowProductLoopSpecs
     }
 
     [Fact]
+    public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
+    {
+        var projectName = $"global-runner-{Guid.NewGuid():N}";
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-global-runner", baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        var runnerId = $"global-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            using var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                await Task.Delay(20);
+                continue;
+            }
+
+            response.EnsureSuccessStatusCode();
+            var work = await response.Content.ReadFromJsonAsync<WorkDispatchDto>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                ?? throw new InvalidOperationException("Empty work dispatch");
+            if (work.ProjectId != project.Id || work.IssueNumber != issue.Number)
+            {
+                await _client.PostOkAsync(
+                    $"/api/runner/{runnerId}/report",
+                    new { workId = work.WorkId, status = work.WorkType == "checks" ? "pass" : "completed", projectId = work.ProjectId });
+                continue;
+            }
+
+            Assert.Equal(project.Id, work.ProjectId);
+            Assert.Equal(issue.Number, work.IssueNumber);
+            Assert.Equal("plan", work.Stage);
+            return;
+        }
+
+        Assert.Fail("Global runner did not claim project backlog work");
+    }
+
+    [Fact]
     public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"yaml-{Guid.NewGuid():N}", path = "/tmp/mohist-yaml", baseBranch = "main" });

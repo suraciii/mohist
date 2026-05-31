@@ -54,6 +54,7 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowProjectionService>();
         services.AddScoped<WorkflowQueryService>();
         services.AddHostedService<WorkflowBacklogRecoveryService>();
+        services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<ConfigService>();
         var runnerRoot = ResolveRunnerRoot(configuration);

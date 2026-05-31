@@ -124,7 +124,8 @@ public static partial class WorkflowRunExtensions
 
             var input = new TaskDefinition(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
             var newTask = TaskRun.MakeTask(stage.Tasks, input);
-            stage.Tasks.Add(newTask);
+            var failedTaskIndex = stage.Tasks.IndexOf(failedTask);
+            stage.Tasks.Insert(failedTaskIndex + 1, newTask);
             stage.Failure = null;
             stage.Status = StageRunStatus.Running;
         }

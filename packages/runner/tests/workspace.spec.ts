@@ -30,6 +30,34 @@ describe("WorkspaceManager", () => {
     const marker = JSON.parse(await readFile(join(second.path, ".mohist", "workspace.json"), "utf8"))
     expect(marker).toMatchObject({ issueId: "issue-new", issueNumber: 9, workflowRunId: "wr-new" })
   })
+
+  it("NewIssueReusingNumber_RemovesStaleBranchWorktreeBeforeCreatingFreshWorktree", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mohist-workspace-"))
+    const repo = join(root, "repo")
+    await git(root, "init", repo)
+    await git(repo, "config", "user.email", "test@example.com")
+    await git(repo, "config", "user.name", "Test User")
+    await writeFile(join(repo, "README.md"), "base\n")
+    await git(repo, "add", ".")
+    await git(repo, "commit", "-m", "base")
+
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+    const signal = new AbortController().signal
+
+    const first = await manager.ensure(work("wr-old", "issue-old", repo), signal)
+    await writeFile(join(first.path, ".mohist", "workspace.json"), JSON.stringify({
+      issueId: "other-issue",
+      issueNumber: 9,
+      workflowRunId: "other-run",
+    }, null, 2))
+
+    const second = await manager.ensure(work("wr-new", "issue-new", repo), signal)
+
+    expect(second.path).toBe(first.path)
+    const marker = JSON.parse(await readFile(join(second.path, ".mohist", "workspace.json"), "utf8"))
+    expect(marker).toMatchObject({ issueId: "issue-new", issueNumber: 9, workflowRunId: "wr-new" })
+  })
 })
 
 function work(workflowRunId: string, issueId: string, projectPath: string) {

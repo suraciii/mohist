@@ -28,6 +28,7 @@ public class BacklogFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
+            siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
             siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
         });
@@ -79,6 +80,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
+            siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
             siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
             siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
         });

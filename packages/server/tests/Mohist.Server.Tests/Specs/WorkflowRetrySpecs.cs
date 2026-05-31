@@ -26,6 +26,31 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task TaskFailsBeforeLaterTasks_UserRetriesWorkflow_NewAttemptRunsBeforeLaterTasks()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks:
+            [
+                new("task-1", "Task 1", "spec/task"),
+                new("task-2", "Task 2", "spec/task")
+            ],
+            checks: []));
+
+        var (task1, r1) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-1.1", task1.WorkId);
+        await ReportAsync(r1, task1.WorkId, "failed", "flaky");
+
+        await workflow.RetryAsync();
+
+        var (retried, r2) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-1.2", retried.WorkId);
+        await ReportAsync(r2, retried.WorkId, "completed");
+
+        var (task2, _) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-2.1", task2.WorkId);
+    }
+
+    [Fact]
     public async Task TaskFails_UserRetriesWorkflow_PreviousAttemptStaysFailed()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
@@ -42,6 +67,24 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var task1 = buildStage.Tasks.Find(t => t.Id == "task-1.1");
         Assert.NotNull(task1);
         Assert.Equal("Failed", task1.Status);
+    }
+
+    [Fact]
+    public async Task TaskFails_UserRetriesWorkflow_StatusNoLongerShowsActiveFailure()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "failed", "flaky");
+
+        await workflow.RetryAsync();
+
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
+        Assert.Null(status.Failure);
+        var buildStage = Assert.Single(status.Stages, s => s.Stage == "build");
+        Assert.Null(buildStage.Failure);
     }
 
     [Fact]

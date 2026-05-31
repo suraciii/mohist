@@ -8,19 +8,22 @@ public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
-    private string _projectId = string.Empty;
+    private string? _projectId;
     private readonly HashSet<string> _assignedWorkflows = [];
     private readonly Dictionary<string, string> _workToWorkflow = new();
     private readonly Dictionary<string, WorkDispatch> _workById = new();
+    private readonly Dictionary<string, string> _workToProject = new();
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
+    private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly ILogger<RunnerGrain> _log;
 
-    private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
 
-    public RunnerGrain(ILogger<RunnerGrain> log)
+    public RunnerGrain(IWorkflowBacklogDirectory backlogs, ILogger<RunnerGrain> log)
     {
+        _backlogs = backlogs;
         _log = log;
     }
 
@@ -41,16 +44,16 @@ public class RunnerGrain : Grain, IRunnerGrain
     public async Task RegisterAsync(RunnerInfo info)
     {
         _info = info;
-        _projectId = info.ProjectId;
+        _projectId = string.IsNullOrWhiteSpace(info.ProjectId) ? null : info.ProjectId;
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(_projectId));
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.RegisterAsync(info);
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
             HeartbeatCheckInterval,
             HeartbeatCheckInterval);
-        _log.LogInformation("Runner {Id} registered from {Host}", info.RunnerId, info.Hostname);
+        _log.LogInformation("Runner {Id} registered from {Host} for {Scope}", info.RunnerId, info.Hostname, _projectId ?? "all projects");
     }
 
     public async Task UnregisterAsync()
@@ -60,12 +63,14 @@ public class RunnerGrain : Grain, IRunnerGrain
         var workflows = _assignedWorkflows.ToList();
         var workMappings = _workToWorkflow.ToList();
         var agentWorkMappings = workMappings.Where(kv => IsAgentWork(kv.Key)).ToList();
+        var workProjects = new Dictionary<string, string>(_workToProject, StringComparer.Ordinal);
         _status = RunnerStatus.Offline;
         _info = null;
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
         _workById.Clear();
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(_projectId));
+        _workToProject.Clear();
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
 
         foreach (var wfId in workflows)
@@ -77,8 +82,9 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         foreach (var (workId, workflowRunId) in agentWorkMappings)
         {
-var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(_projectId, workflowRunId, workId));
-                await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
+            if (!workProjects.TryGetValue(workId, out var projectId)) continue;
+            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, workId));
+            await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
         }
     }
 
@@ -106,22 +112,27 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
             {
                 _workToWorkflow[work.WorkId] = wfId;
                 _workById[work.WorkId] = work;
+                TrackWorkProject(work);
                 return work;
             }
         }
 
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(GrainKey.WorkflowBacklog(_projectId));
-        var claimedId = await backlog.ClaimAsync(RunnerId);
-        if (claimedId is not null)
+        foreach (var projectId in BacklogProjectIds())
         {
-            _assignedWorkflows.Add(claimedId);
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(claimedId);
-            var work = await workflow.GetWorkAsync(RunnerId);
-            if (work is not null)
+            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(GrainKey.WorkflowBacklog(projectId));
+            var claimedId = await backlog.ClaimAsync(RunnerId);
+            if (claimedId is not null)
             {
-                _workToWorkflow[work.WorkId] = claimedId;
-                _workById[work.WorkId] = work;
-                return work;
+                _assignedWorkflows.Add(claimedId);
+                var workflow = GrainFactory.GetGrain<IWorkflowGrain>(claimedId);
+                var work = await workflow.GetWorkAsync(RunnerId);
+                if (work is not null)
+                {
+                    _workToWorkflow[work.WorkId] = claimedId;
+                    _workById[work.WorkId] = work;
+                    TrackWorkProject(work, projectId);
+                    return work;
+                }
             }
         }
 
@@ -143,6 +154,7 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
         if (!_workToWorkflow.Remove(workId, out var wfId))
             return null;
         _workById.Remove(workId);
+        _workToProject.Remove(workId);
 
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
         await workflow.ReportResultAsync(RunnerId, workId, result);
@@ -159,6 +171,7 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
                 {
                     _workToWorkflow.Remove(key);
                     _workById.Remove(key);
+                    _workToProject.Remove(key);
                 }
             _log.LogInformation("Runner {Id} released terminal workflow {WorkflowId} (status={Status})", RunnerId, wfId, status);
         }
@@ -191,6 +204,7 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
             {
                 _workToWorkflow.Remove(key);
                 _workById.Remove(key);
+                _workToProject.Remove(key);
             }
         }
         else
@@ -198,6 +212,7 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
             _assignedWorkflows.Clear();
             _workToWorkflow.Clear();
             _workById.Clear();
+            _workToProject.Clear();
         }
 
         _log.LogInformation("Runner {Id} released workflow {WorkflowId}", RunnerId, workflowRunId ?? "*");
@@ -221,11 +236,13 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
         var timedOutWorkflows = _assignedWorkflows.ToList();
         var timedOutWork = _workToWorkflow.ToList();
         var timedOutAgentWork = timedOutWork.Where(kv => IsAgentWork(kv.Key)).ToList();
+        var workProjects = new Dictionary<string, string>(_workToProject, StringComparer.Ordinal);
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
         _workById.Clear();
+        _workToProject.Clear();
         _status = RunnerStatus.Offline;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(_projectId));
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
 
         foreach (var wfId in timedOutWorkflows)
@@ -237,7 +254,8 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
 
         foreach (var (workId, workflowRunId) in timedOutAgentWork)
         {
-            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(_projectId, workflowRunId, workId));
+            if (!workProjects.TryGetValue(workId, out var projectId)) continue;
+            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, workId));
             await session.FailIfRunningAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
     }
@@ -245,5 +263,22 @@ var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.Workflo
     private bool IsAgentWork(string workId)
     {
         return _workById.TryGetValue(workId, out var work) && work.Uses == "mohist/acp-agent";
+    }
+
+    private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;
+
+    private IReadOnlyList<string> BacklogProjectIds()
+    {
+        if (!string.IsNullOrWhiteSpace(_projectId))
+            return [_projectId];
+
+        return _backlogs.ListProjects();
+    }
+
+    private void TrackWorkProject(WorkDispatch work, string? fallbackProjectId = null)
+    {
+        var projectId = work.Issue?.ProjectId ?? fallbackProjectId ?? _projectId;
+        if (!string.IsNullOrWhiteSpace(projectId))
+            _workToProject[work.WorkId] = projectId;
     }
 }
