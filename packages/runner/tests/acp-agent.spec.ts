@@ -105,6 +105,16 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
+  it("ProbeTimesOutButPromptCompletesLater_LivenessMonitored_DoesNotFailSession", async () => {
+    const fixture = createFixture("quiet-then-done")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "long silent task", livenessQuietThresholdMs: 30, probeTimeoutMs: 30, timeout: 2_000 }))
+
+    expect(result.status).toBe("success")
+    expect(JSON.parse(result.output ?? "{}").text).toContain("done-after-quiet-period")
+    expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
+  })
+
   it("ThoughtAndToolUpdatesArrive_LivenessMonitored_DoNotProbeWhileAgentIsActive", async () => {
     const fixture = createFixture("liveness-non-message")
 
@@ -196,7 +206,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "liveness-non-message" | "abort"
+type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -239,6 +249,7 @@ class FakeAcpAgent {
           self.calls.push({ event: "permissionResponse", ...response })
         }
         if (self.scenario === "liveness") return await self.runLivenessPrompt(params.sessionId)
+        if (self.scenario === "quiet-then-done") return await self.runQuietThenDonePrompt(params.sessionId)
         if (self.scenario === "liveness-non-message") return await self.runNonMessageLivenessPrompt(params.sessionId)
         if (self.scenario === "abort") return await new Promise(() => {})
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
@@ -261,6 +272,14 @@ class FakeAcpAgent {
         await this.connection.sessionUpdate(textUpdate(sessionId, "done-after-probe"))
         this.initialPromptResolve?.({ stopReason: "end_turn" })
       }, 20)
+    return { stopReason: "end_turn" as const }
+  }
+
+  private async runQuietThenDonePrompt(sessionId: string) {
+    if (this.promptCount > 1) return { stopReason: "end_turn" as const }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 120))
+    await this.connection.sessionUpdate(textUpdate(sessionId, "done-after-quiet-period"))
     return { stopReason: "end_turn" as const }
   }
 

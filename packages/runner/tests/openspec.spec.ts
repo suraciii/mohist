@@ -35,9 +35,32 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWith.prompt).toContain("Implement this OpenSpec task: Implement workflow recovery")
     expect(loadedWith.prompt).toContain("runner can claim recovered work")
   })
+
+  it("OpenSpecTaskWithoutAgentDefault_LoadsTaskWithWorkflowAgentConfig", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const tasksPath = join(workDir, "tasks.json")
+    await writeFile(tasksPath, JSON.stringify({
+      tasks: [
+        {
+          id: "T-001",
+          title: "Implement workflow recovery",
+        },
+      ],
+    }))
+
+    const addTasks = vi.fn()
+    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks, {
+      vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
+    }))
+    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(loadedWith.agent).toEqual({ type: "opencode", model: "openai/gpt-5.4" })
+  })
 })
 
-function context(workDir: string, withInput: Record<string, unknown>, addTasks: ServerConnection["addTasks"]): ActionContext {
+function context(workDir: string, withInput: Record<string, unknown>, addTasks: ServerConnection["addTasks"], variables: Record<string, unknown> = {}): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "load-build",
@@ -46,7 +69,7 @@ function context(workDir: string, withInput: Record<string, unknown>, addTasks: 
     title: "Load build tasks",
     uses: "mohist/openspec-tasks",
     with: withInput as never,
-    variables: {},
+    variables: variables as never,
     workDir,
     signal: new AbortController().signal,
     serverConnection: { addTasks } as ServerConnection,

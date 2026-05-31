@@ -528,23 +528,29 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
   const startedAt = Date.now()
   const promptPromise = connection.prompt({ sessionId, prompt: [{ type: "text", text: prompt }] })
   const exitFailure = options.exitFailure ?? new Promise<never>(() => {})
+  let nextProbeAt = 0
 
   while (true) {
-    const timeoutRemaining = startedAt + options.timeoutMs - Date.now()
+    const now = Date.now()
+    const timeoutRemaining = startedAt + options.timeoutMs - now
     if (timeoutRemaining <= 0) return await cancelAndReturn(connection, sessionId, `Timed out after ${options.timeoutMs / 1000}s`)
-    const quietRemaining = Math.max(0, options.lastDataAt() + options.livenessQuietThresholdMs - Date.now())
+    const quietRemaining = Math.max(0, options.lastDataAt() + options.livenessQuietThresholdMs - now)
+    const probeCooldownRemaining = Math.max(0, nextProbeAt - now)
+    const waitMs = quietRemaining > 0 ? quietRemaining : probeCooldownRemaining
     const result = await Promise.race([
       promptPromise.then(() => "completed" as const),
-      timeout(Math.min(timeoutRemaining, Math.max(quietRemaining, 1))),
+      timeout(Math.min(timeoutRemaining, Math.max(waitMs, 1))),
       aborted(context.signal),
       exitFailure,
     ])
     if (result === "completed") return "completed"
     if (result === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
     if (Date.now() - options.lastDataAt() < options.livenessQuietThresholdMs) continue
+    if (Date.now() < nextProbeAt) continue
 
     const probeSentAt = new Date()
     const probeDeadlineAt = new Date(probeSentAt.getTime() + options.probeTimeoutMs)
+    nextProbeAt = probeSentAt.getTime() + options.livenessQuietThresholdMs
     await emitSessionEvent(context, "agent_liveness_status", { status: "probing", probeSentAt: probeSentAt.toISOString(), probeDeadlineAt: probeDeadlineAt.toISOString() })
     const beforeProbeVersion = options.dataVersion()
     connection.prompt({ sessionId, prompt: [{ type: "text", text: PROBE_PROMPT }] }).catch(() => {})
@@ -556,12 +562,18 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       exitFailure,
     ])
     if (probeResult === "completed") return "completed"
-    if (probeResult === "data") {
+    if (probeResult === "data" || options.dataVersion() !== beforeProbeVersion || Date.now() - options.lastDataAt() < options.livenessQuietThresholdMs) {
       await emitSessionEvent(context, "agent_liveness_status", { status: "running", lastDataAt: new Date(options.lastDataAt()).toISOString() })
       continue
     }
     if (probeResult === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
-    return { error: "Session liveness probe timed out" }
+    await emitSessionEvent(context, "agent_liveness_status", {
+      status: "quiet",
+      lastDataAt: new Date(options.lastDataAt()).toISOString(),
+      probeSentAt: probeSentAt.toISOString(),
+      probeDeadlineAt: probeDeadlineAt.toISOString(),
+      nextProbeAt: new Date(nextProbeAt).toISOString(),
+    })
   }
 }
 
