@@ -4,6 +4,7 @@ using Mohist.Server.Issue.Queries;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;
@@ -47,11 +48,14 @@ public class WorkflowProjectionService
         if (!string.IsNullOrWhiteSpace(projectId)) query = query.Where(s => s.ProjectId == projectId);
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+        var leases = await LoadLeasesAsync(db, sessions.Select(s => s.WorkflowRunId).Distinct(StringComparer.Ordinal).ToArray(), ct);
         var domainSessions = sessions.Select(ToDomain).ToList();
         var result = new List<ActiveAgentDto>();
 
         foreach (var session in domainSessions)
         {
+            if (!IsLeaseOwnedActiveSession(session, leases)) continue;
+
             var status = await _workflowReader.GetStatusAsync(session.WorkflowRunId);
             var pending = status?.PendingWork;
             if (pending is null || pending.WorkId != session.WorkId) continue;
@@ -196,6 +200,28 @@ public class WorkflowProjectionService
         return DateTime.TryParse(start, out var s) && DateTime.TryParse(end, out var e)
             ? Math.Max(0, (long)(e - s).TotalMilliseconds)
             : null;
+    }
+
+    private static async Task<Dictionary<string, WorkLease?>> LoadLeasesAsync(MohistDbContext db, string[] workflowIds, CancellationToken ct)
+    {
+        if (workflowIds.Length == 0) return [];
+
+        var rows = await db.WorkflowLeases.AsNoTracking()
+            .Where(row => workflowIds.Contains(row.WorkflowRunId))
+            .ToListAsync(ct);
+        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseStore.Deserialize(row.StateJson), StringComparer.Ordinal);
+    }
+
+    private static bool IsLeaseOwnedActiveSession(WorkflowAgentSession session, IReadOnlyDictionary<string, WorkLease?> leases)
+    {
+        if (session.CompletedAt is not null || session.Status is not (AgentSessionStatus.Created or AgentSessionStatus.Running or AgentSessionStatus.Probing))
+            return false;
+
+        if (!leases.TryGetValue(session.WorkflowRunId, out var lease) || lease is null)
+            return true;
+
+        return string.Equals(session.RunnerId, lease.RunnerId, StringComparison.Ordinal)
+            && string.Equals(session.WorkId, lease.WorkId, StringComparison.Ordinal);
     }
 }
 

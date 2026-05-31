@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -14,9 +13,12 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Workflow.Storage;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;
+using Orleans;
+using System.Text.Json;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -25,10 +27,12 @@ public class WorkflowGrainFixture : IAsyncLifetime
     public InProcessTestCluster Cluster { get; private set; } = null!;
     public IGrainFactory Grains => Cluster.Client;
     public IEventBus EventBus => _sharedEventBus;
+    public RecordingEventStore EventStore => _sharedEventStore;
     public string ConnectionString => _keeper.ConnectionString;
 
     private readonly InMemoryEventBus _sharedEventBus = new(
         Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
+    private readonly RecordingEventStore _sharedEventStore = new();
     private SqliteConnection _keeper = null!;
 
     public Task InitializeAsync()
@@ -50,7 +54,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
             siloBuilder.Services.AddSingleton<IEventBus>(_ => _sharedEventBus);
-            siloBuilder.Services.AddSingleton<IEventStore, NoopEventStore>();
+            siloBuilder.Services.AddSingleton<IEventStore>(_ => _sharedEventStore);
             siloBuilder.Services.AddHostedService<DbSchemaInitializer>();
         });
         Cluster = builder.Build();
@@ -103,6 +107,8 @@ public abstract class WorkflowGrainSpecs
 
     protected IGrainFactory Grains => _fixture.Grains;
 
+    protected RecordingEventStore EventStore => _fixture.EventStore;
+
     protected WorkflowQueryService GetQueryService()
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
@@ -150,6 +156,55 @@ public abstract class WorkflowGrainSpecs
 
     protected static WorkflowStartInput TestInput() =>
         new(Variables: """{"project":{"id":"test-project"}}""");
+
+    protected async Task SeedLeaseAsync(string workflowId, WorkLease lease)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowLeases.FindAsync(workflowId);
+        var json = JsonSerializer.Serialize(lease, WorkflowStorageJson.Options);
+
+        if (row is null)
+        {
+            db.WorkflowLeases.Add(new WorkflowLeaseRow
+            {
+                WorkflowRunId = workflowId,
+                StateJson = json
+            });
+        }
+        else
+        {
+            row.StateJson = json;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    protected async Task DeactivateWorkflowAsync(string workflowId)
+    {
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.DeactivateForTestAsync();
+
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var activations = await management.GetDetailedGrainStatistics();
+            if (!activations.Any(stat => stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(workflowId, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail($"Workflow grain '{workflowId}' did not deactivate in time.");
+    }
 
     protected async Task ClearBacklogAsync()
     {

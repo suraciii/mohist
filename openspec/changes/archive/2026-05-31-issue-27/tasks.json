@@ -1,0 +1,154 @@
+{
+  "project": "mohist",
+  "description": "Preserve active workflow leases across grain activation and recovery so workflow work items keep a single durable runner owner.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Restore leases on activation",
+      "spec": "specs/workflow-engine/spec.md#requirement-active-workflow-leases-survive-grain-activation",
+      "description": "Update workflow grain activation so a persisted active WorkflowLease is restored as authoritative in-memory ownership state instead of being cleared. Ensure restored lease state includes the runner owner and work item identity needed by later dispatch checks.",
+      "acceptanceCriteria": [
+        "OnActivateAsync preserves a loaded active WorkflowLease in the grain's active lease field.",
+        "A restored lease initializes any derived owner fields from the same runner and work item values.",
+        "Activation with an incomplete persisted lease leaves the workflow recovery-blocked or non-dispatchable instead of silently available."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowGrain activation preserves persisted active leases.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Treat WorkflowLease as the source of truth; do not use agent sessions to prove active ownership."
+    },
+    {
+      "id": "T-002",
+      "title": "Block duplicate dispatch",
+      "spec": "specs/workflow-engine/spec.md#requirement-workflow-dispatch-is-blocked-by-valid-active-leases",
+      "description": "Gate GetWorkAsync and related assignment helpers on the restored or current active lease before creating any new assignment. A valid lease owned by another runner must make the workflow non-dispatchable, and same-owner polling must not create a duplicate attempt.",
+      "acceptanceCriteria": [
+        "GetWorkAsync refuses to dispatch a workflow work item to a different runner while a valid active lease exists.",
+        "GetWorkAsync does not overwrite the existing WorkflowLease for a different polling runner.",
+        "Same-owner polling does not create a second active assignment or duplicate start attempt."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow dispatch refuses duplicate ownership while a valid active lease exists.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The grain remains the final correctness boundary even if backlog selection also skips leased workflows."
+    },
+    {
+      "id": "T-003",
+      "title": "Recover stale leases explicitly",
+      "spec": "specs/workflow-engine/spec.md#requirement-stale-workflow-leases-are-reconciled-before-redispatch",
+      "description": "Route stale or offline lease ownership through the existing runner unregister or heartbeat-timeout recovery path before making work available again. The transition must release or mark the prior lease stale, update workflow/session state, and requeue only after the abandonment or timeout is durable.",
+      "acceptanceCriteria": [
+        "An offline or timed-out lease owner is abandoned through the same recovery path used by runner unregister or heartbeat timeout.",
+        "Another runner cannot receive the leased work item until prior ownership is released or marked stale with durable evidence.",
+        "If liveness cannot be determined, the workflow remains non-dispatchable and exposes a blocked recovery state."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Stale lease recovery uses explicit abandonment or timeout semantics before redispatch.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Do not add an ad hoc activation cleanup that deletes leases without normal recovery evidence."
+    },
+    {
+      "id": "T-004",
+      "title": "Order lease and start events",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-work-item-start-events-require-explicit-lease-ownership",
+      "description": "Make work-start emission lease-first so workflow_task_started is recorded only after durable lease ownership exists for the same runner and work item. Ensure a different runner can produce a later start event only after a durable abandonment, expiration, interruption, failure, retry, or handoff event.",
+      "acceptanceCriteria": [
+        "A workflow_task_started event is emitted only after the matching WorkflowLease is persisted.",
+        "The start event payload matches the durable lease workflow run id, work item id, and runner id.",
+        "A second start event for a different runner requires an intervening durable ownership-transition event."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow event history reflects causal lease ownership before work starts.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Keep public event/API shapes unchanged unless existing models already support surfacing a recovery state."
+    },
+    {
+      "id": "T-005",
+      "title": "Recover project backlog identity",
+      "spec": "specs/workflow-run/spec.md#requirement-workflow-recovery-resolves-durable-project-identity",
+      "description": "Update WorkflowBacklogRecoveryService to resolve project id from indexed metadata, metadata annotations, persisted workflow variables, or another authoritative workflow binding. Recovery must avoid registering actively leased workflows as dispatchable backlog claims and must not silently fall back to the default backlog when identity is missing.",
+      "acceptanceCriteria": [
+        "Recovery registers a workflow in the project backlog from workflow variables when metadata project identity is empty.",
+        "Recovery does not register projectless workflows into the default backlog unless an authoritative default project identity exists.",
+        "Recovery skips or preserves valid active leases instead of creating dispatch opportunities for already leased work.",
+        "Missing project identity records an explicit recovery diagnostic or equivalent observable blocked state."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Backlog recovery restores project-scoped workflows without default backlog pollution or active-lease claims.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Use workflow variables as the required durable fallback for old rows with empty metadata annotations."
+    },
+    {
+      "id": "T-006",
+      "title": "Reconcile active owner reads",
+      "spec": "specs/workflow-agent/spec.md#requirement-active-agent-ownership-agrees-with-workflow-leases",
+      "description": "Update agent activity, status, and session read-model paths so running workflow ownership agrees with the active WorkflowLease. When durable lease state and session state disagree, report the lease owner after a durable handoff or surface a recovery inconsistency instead of presenting both runners as active.",
+      "acceptanceCriteria": [
+        "/api/agent/activity reports a running workflow work item with the same runner id and work item id as the active WorkflowLease.",
+        "After explicit ownership transition, stale prior-owner sessions are not reported as the active owner.",
+        "A lease/session mismatch is reconciled or surfaced as an inconsistency, never as two valid active executors."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Agent activity and status reads agree with durable workflow lease ownership.",
+      "dependsOn": ["T-003", "T-004"],
+      "passes": false,
+      "notes": "Lease ownership is authoritative; sessions remain telemetry/read models."
+    },
+    {
+      "id": "T-007",
+      "title": "Cover lease recovery regressions",
+      "spec": "specs/workflow-engine/spec.md#requirement-active-workflow-leases-survive-grain-activation",
+      "description": "Add backend regression tests that exercise the lease preservation and duplicate-dispatch invariants through product-level grain, runner, recovery, and API paths. Tests should prove the task-start event stream, backlog recovery, leases, sessions, and activity/status reads remain consistent across activation and recovery.",
+      "acceptanceCriteria": [
+        "Tests cover grain reactivation with an existing persisted lease blocking another runner.",
+        "Tests cover valid active leases preventing replacement leases and duplicate workflow_task_started events.",
+        "Tests cover same-owner polling without a duplicate start event.",
+        "Tests cover stale lease recovery before redispatch with a durable transition event.",
+        "Tests cover backlog recovery using workflow variables for project identity and avoiding the default backlog.",
+        "Tests cover agent activity/status behavior when session and lease ownership would otherwise disagree."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Regression tests for lease activation, dispatch, stale recovery, backlog recovery, events, and owner read consistency.",
+      "dependsOn": ["T-004", "T-005", "T-006"],
+      "passes": false,
+      "notes": "Prefer spec/integration tests through WorkflowGrain, runner polling, recovery services, and API read paths rather than private methods."
+    },
+    {
+      "id": "T-008",
+      "title": "Run backend verification",
+      "spec": "specs/workflow-engine/spec.md#requirement-active-workflow-leases-survive-grain-activation; specs/workflow-engine/spec.md#requirement-workflow-dispatch-is-blocked-by-valid-active-leases; specs/workflow-engine/spec.md#requirement-stale-workflow-leases-are-reconciled-before-redispatch; specs/workflow-run/spec.md#requirement-workflow-recovery-resolves-durable-project-identity; specs/workflow-agent/spec.md#requirement-active-agent-ownership-agrees-with-workflow-leases; specs/pipeline-session-events/spec.md#requirement-work-item-start-events-require-explicit-lease-ownership",
+      "description": "Run the relevant server test suite and any targeted backend checks needed to verify the completed lease recovery change. Capture failures as follow-up implementation work rather than marking the change complete with broken tests.",
+      "acceptanceCriteria": [
+        "Relevant Mohist.Server tests pass, including the new regression coverage.",
+        "No public API request or response shape changes are introduced unintentionally.",
+        "Any remaining recovery diagnostics or blocked-state behavior is documented in test names or assertions."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Verified backend test results for issue 27.",
+      "dependsOn": ["T-007"],
+      "passes": false,
+      "notes": "Use the repository's standard backend test commands, such as npm test or targeted dotnet test under packages/server when appropriate."
+    }
+  ]
+}

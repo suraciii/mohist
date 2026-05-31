@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 
@@ -219,5 +220,68 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 
         var status = await workflow.GetRunStatusAsync();
         Assert.Equal("Running", status);
+    }
+
+    [Fact]
+    public async Task OfflinePersistedLease_IsRecoveredThroughTimeoutAbandonment_BeforeRedispatch()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(checks: []));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.UnregisterAsync();
+
+        await DeactivateWorkflowAsync(_workflowId!);
+
+        var nextRunnerId = await RegisterRunnerAsync();
+        var recovered = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
+
+        var redispatched = await recovered.GetWorkAsync(nextRunnerId);
+        Assert.NotNull(redispatched);
+        Assert.Equal(task.WorkId, redispatched.WorkId);
+        Assert.Equal(nextRunnerId, await recovered.GetAssignedRunnerIdAsync());
+
+        var events = (await EventStore.ListWorkflowEventsAsync(_workflowId!)).ToList();
+        var abandoned = events.Single(e => e.Type == "workflow_work_abandoned");
+        var started = events.Where(e => e.Type == "workflow_task_started").ToList();
+
+        Assert.Equal(runnerId, abandoned.RunnerId);
+        Assert.Equal(task.WorkId, abandoned.TaskId);
+        Assert.Equal(2, started.Count);
+        Assert.Equal(runnerId, started[0].RunnerId);
+        Assert.Equal(nextRunnerId, started[1].RunnerId);
+        Assert.Equal(task.WorkId, started[0].TaskId);
+        Assert.Equal(task.WorkId, started[1].TaskId);
+        Assert.True(events.IndexOf(abandoned) > events.IndexOf(started[0]));
+        Assert.True(events.IndexOf(abandoned) < events.IndexOf(started[1]));
+    }
+
+    [Fact]
+    public async Task RegisteredButUnavailableLeaseOwner_RemainsRecoveryBlocked()
+    {
+        var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(checks: []));
+        var workflowId = _workflowId!;
+
+        await SeedLeaseAsync(workflowId, new WorkLease(
+            WorkId: "task-1.1",
+            WorkType: "task",
+            Stage: "build",
+            LogicalId: "task-1",
+            Title: "Task 1",
+            RunnerId: "runner-blocked"));
+
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject("test-project"));
+        await registry.RegisterAsync(new RunnerInfo("runner-blocked", ["spec/*"], "test-host", "test-project"));
+
+        await DeactivateWorkflowAsync(workflowId);
+
+        var reactivated = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        Assert.Null(await reactivated.GetWorkAsync("runner-other"));
+        Assert.Equal("runner-blocked", await reactivated.GetAssignedRunnerIdAsync());
+        Assert.Equal("task-1.1", await reactivated.GetAssignedWorkIdAsync());
+
+        var events = await EventStore.ListWorkflowEventsAsync(workflowId);
+        Assert.DoesNotContain(events, e => e.Type == "workflow_work_abandoned");
+        Assert.DoesNotContain(events, e => e.Type == "workflow_task_started");
     }
 }
