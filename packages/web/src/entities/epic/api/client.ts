@@ -2,43 +2,38 @@ import { request, withProject } from '../../../shared/api/client'
 import type { Epic, EpicDetail, EpicWithProgress } from '../model/types'
 
 export function getEpics(params?: { projectId?: string }) {
-  const search = new URLSearchParams()
-  if (params?.projectId) search.set('projectId', params.projectId)
-  const qs = search.toString()
-  return request<EpicWithProgress[]>(`/epics${qs ? `?${qs}` : ''}`)
+  return request<EpicWithProgress[]>('/epics', withProject(undefined, params?.projectId))
 }
 
 export function getEpic(id: string, params?: { projectId?: string }) {
-  const search = new URLSearchParams()
-  if (params?.projectId) search.set('projectId', params.projectId)
-  const qs = search.toString()
-  return request<EpicDetail>(`/epics/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`)
+  return request<EpicDetail>(`/epics/${encodeURIComponent(id)}`, withProject(undefined, params?.projectId))
 }
 
 export function createEpic(data: { title: string; description: string; priority: string; projectId?: string }) {
-  return request<Epic>('/epics', {
+  const { projectId, ...body } = data
+  return request<Epic>('/epics', withProject({
     method: 'POST',
-    body: JSON.stringify(data),
-  })
+    body: JSON.stringify(body),
+  }, projectId))
 }
 
 export function addEpicIssue(epicId: string, issueId: string, projectId?: string | null) {
-  return request<{ epicId: string; issueId: string }>(withProject(`/epics/${encodeURIComponent(epicId)}/issues`, projectId), {
+  return request<{ epicId: string; issueId: string }>(`/epics/${encodeURIComponent(epicId)}/issues`, withProject({
     method: 'POST',
     body: JSON.stringify({ issueId }),
-  })
+  }, projectId))
 }
 
 export function removeEpicIssue(epicId: string, issueId: string, projectId?: string | null) {
-  return request<{ epicId: string; issueId: string }>(withProject(`/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`, projectId), {
+  return request<{ epicId: string; issueId: string }>(`/epics/${encodeURIComponent(epicId)}/issues/${encodeURIComponent(issueId)}`, withProject({
     method: 'DELETE',
-  })
+  }, projectId))
 }
 
 export function markEpicDone(id: string, projectId?: string | null) {
-  return request<Epic>(withProject(`/epics/${encodeURIComponent(id)}/done`, projectId), { method: 'POST' })
+  return request<Epic>(`/epics/${encodeURIComponent(id)}/done`, withProject({ method: 'POST' }, projectId))
 }
 
 export function closeEpic(id: string, projectId?: string | null) {
-  return request<Epic>(withProject(`/epics/${encodeURIComponent(id)}/close`, projectId), { method: 'POST' })
+  return request<Epic>(`/epics/${encodeURIComponent(id)}/close`, withProject({ method: 'POST' }, projectId))
 }

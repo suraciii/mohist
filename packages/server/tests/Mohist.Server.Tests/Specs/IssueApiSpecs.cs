@@ -40,6 +40,45 @@ public class IssueApiSpecs
     }
 
     [Fact]
+    public async Task CreateIssue_WhenProjectHeaderProvided_UsesHeaderProjectContext()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-header-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/issues")
+        {
+            Content = JsonContent.Create(new { title = "Header scoped issue" }),
+        };
+        request.Headers.Add("X-Mohist-Project-Id", project.Id);
+
+        using var response = await _client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var issue = await response.ReadDataAsync<IssueDto>();
+
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+
+        Assert.Equal(issue.Id, detail.Id);
+    }
+
+    [Fact]
+    public async Task CreateEpic_WhenProjectHeaderProvided_UsesHeaderProjectContext()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-header-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/epics")
+        {
+            Content = JsonContent.Create(new { title = "Header scoped epic", description = "Runtime model", priority = "p2" }),
+        };
+        request.Headers.Add("X-Mohist-Project-Id", project.Id);
+
+        using var response = await _client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var epic = await response.ReadDataAsync<EpicDto>();
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+
+        Assert.NotNull(detail);
+    }
+
+    [Fact]
     public async Task ListIssues_WithAllAcrossMultipleProjects_ReturnsIssues()
     {
         var firstProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-a-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });

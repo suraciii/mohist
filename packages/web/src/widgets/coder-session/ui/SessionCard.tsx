@@ -43,7 +43,7 @@ export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
 
   return (
     <Link
-      to={`/issue/${card.issueNumber}`}
+      to={`/issues/${card.issueNumber}`}
       className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
     >
       <div className="p-3">
@@ -145,7 +145,7 @@ export function WaitingCard({ card }: WaitingCardProps) {
 
   return (
     <Link
-      to={`/issue/${card.issueNumber}`}
+      to={`/issues/${card.issueNumber}`}
       className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
     >
       <div className="p-3">
@@ -209,7 +209,7 @@ export function RecentCard({ card }: RecentCardProps) {
 
   return (
     <Link
-      to={`/issue/${card.issueNumber}`}
+      to={`/issues/${card.issueNumber}`}
       className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
     >
       <div className="p-3">

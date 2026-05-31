@@ -92,7 +92,7 @@ export function ArchivedPage() {
               return (
                 <a
                   key={issue.id}
-                  href={`/issue/${issue.number}`}
+                  href={`/issues/${issue.number}`}
                   className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors p-4"
                 >
                   <div className="flex items-start justify-between gap-3">

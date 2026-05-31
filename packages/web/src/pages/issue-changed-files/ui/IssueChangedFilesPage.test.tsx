@@ -150,7 +150,7 @@ function setupDefaultMocks() {
   })
 }
 
-function renderPage(initialRoute = '/issue/123/files') {
+function renderPage(initialRoute = '/issues/123/files') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -159,8 +159,8 @@ function renderPage(initialRoute = '/issue/123/files') {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
         <Routes>
-          <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
-          <Route path="/issue/:number" element={<div>Issue Detail Page</div>} />
+          <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+          <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -547,20 +547,20 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('renders the same content via direct route as via navigation', () => {
-      renderPage('/issue/123/files')
+      renderPage('/issues/123/files')
       expect(screen.getByText('#123')).toBeTruthy()
       expect(screen.getByText('Test Issue')).toBeTruthy()
     })
 
     it('renders files page when issue number is valid and diff is available', () => {
-      renderPage('/issue/123/files')
+      renderPage('/issues/123/files')
       expect(screen.getByText('main')).toBeTruthy()
       expect(screen.getByText('mo/issue-123')).toBeTruthy()
       expect(screen.getByText('files changed')).toBeTruthy()
     })
 
     it('does not leave React root blank on direct load', () => {
-      const { container } = renderPage('/issue/123/files')
+      const { container } = renderPage('/issues/123/files')
       const root = container.querySelector('#root') || container.firstChild
       expect(root?.textContent).not.toBe('')
     })
@@ -573,10 +573,10 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       })
       const { container } = render(
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={['/issue/123/files']}>
+          <MemoryRouter initialEntries={['/issues/123/files']}>
             <Routes>
-              <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
-              <Route path="/issue/:number" element={<div>Issue Detail Page</div>} />
+              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+              <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
             </Routes>
           </MemoryRouter>
         </QueryClientProvider>
@@ -586,7 +586,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
     })
 
     it('renders issue header and diff metadata on fresh route entry', () => {
-      renderPage('/issue/123/files')
+      renderPage('/issues/123/files')
       expect(screen.getByText('#123')).toBeTruthy()
       expect(screen.getByText('main')).toBeTruthy()
       expect(screen.getAllByText('+6').length).toBeGreaterThan(0)
@@ -638,7 +638,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       const backLink = screen.getByText('View issue detail')
       expect(backLink).toBeTruthy()
       fireEvent.click(backLink)
-      expect(mockUseNavigate).toHaveBeenCalledWith('/issue/123')
+      expect(mockUseNavigate).toHaveBeenCalledWith('/issues/123')
     })
 
     it('renders error state for invalid issue number', () => {
@@ -647,9 +647,9 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       })
       render(
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={['/issue/invalid/files']}>
+          <MemoryRouter initialEntries={['/issues/invalid/files']}>
             <Routes>
-              <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
+              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
             </Routes>
           </MemoryRouter>
         </QueryClientProvider>
@@ -839,7 +839,7 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       })
 
       mockRouteParams = { number: '123' }
-      const { rerender } = renderPage('/issue/123/files')
+      const { rerender } = renderPage('/issues/123/files')
 
       fireEvent.click(screen.getByText('package-lock.json'))
       await waitFor(() => {
@@ -868,10 +868,10 @@ ${Array.from({ length: 350 }, (_, i) => (i % 2 === 0 ? `-line ${i}` : `+line ${i
       mockRouteParams = { number: '124' }
       rerender(
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-          <MemoryRouter initialEntries={['/issue/123/files']}>
+          <MemoryRouter initialEntries={['/issues/123/files']}>
             <Routes>
-              <Route path="/issue/:number/files" element={<IssueChangedFilesPage />} />
-              <Route path="/issue/:number" element={<div>Issue Detail Page</div>} />
+              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+              <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
             </Routes>
           </MemoryRouter>
         </QueryClientProvider>

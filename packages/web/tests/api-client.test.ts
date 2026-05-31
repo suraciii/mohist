@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, request } from '../src/shared/api/client'
+import { ApiError, request, withProject } from '../src/shared/api/client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -42,5 +42,19 @@ describe('api client', () => {
       message: 'Invalid JSON response from /opencode/models',
       status: 500,
     })
+  })
+
+  it('passes project context through a header without dropping existing headers', async () => {
+    const init = withProject({
+      method: 'POST',
+      headers: { 'X-Existing': 'keep' },
+      body: JSON.stringify({ title: 'Header scoped issue' }),
+    }, 'project-1')
+
+    const headers = new Headers(init?.headers)
+
+    expect(headers.get('X-Mohist-Project-Id')).toBe('project-1')
+    expect(headers.get('X-Existing')).toBe('keep')
+    expect(init?.body).toBe(JSON.stringify({ title: 'Header scoped issue' }))
   })
 })

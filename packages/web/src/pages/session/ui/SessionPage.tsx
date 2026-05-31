@@ -101,7 +101,7 @@ function SessionNotFound({ issueNumber }: { issueNumber: number }) {
       <div className="text-center space-y-3">
         <div className="text-gray-400 text-lg">Session not found</div>
         <Link
-          to={`/issue/${issueNumber}`}
+          to={`/issues/${issueNumber}`}
           className="text-sm text-blue-600 hover:text-blue-800 underline"
         >
           Back to issue #{issueNumber}
@@ -126,7 +126,7 @@ function SessionApiErrorState({ issueNumber }: { issueNumber: number }) {
         <div className="text-red-400 text-lg">Failed to load session</div>
         <p className="text-gray-500 text-sm">An error occurred while fetching session data.</p>
         <Link
-          to={`/issue/${issueNumber}`}
+          to={`/issues/${issueNumber}`}
           className="text-sm text-blue-600 hover:text-blue-800 underline"
         >
           Back to issue #{issueNumber}
@@ -154,7 +154,7 @@ function SessionEmptyState({ issueNumber }: { issueNumber: number }) {
         <div className="text-gray-400 text-lg">No activity recorded for this session</div>
         <p className="text-gray-500 text-sm">This session has no recorded transcript data.</p>
         <Link
-          to={`/issue/${issueNumber}`}
+          to={`/issues/${issueNumber}`}
           className="text-sm text-blue-600 hover:text-blue-800 underline"
         >
           Back to issue #{issueNumber}
@@ -219,7 +219,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
     <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
       <div className="flex items-center gap-2 text-sm mb-2">
         <Link
-          to={`/issue/${issueNumber}`}
+          to={`/issues/${issueNumber}`}
           className="flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">

@@ -44,7 +44,7 @@ public static class ApiTestClient
         return await ReadDataAsync<T>(response);
     }
 
-    private static async Task<T> ReadDataAsync<T>(HttpResponseMessage response)
+    public static async Task<T> ReadDataAsync<T>(this HttpResponseMessage response)
     {
         var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<T>>(JsonOptions);
         if (envelope is null)

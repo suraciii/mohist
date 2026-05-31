@@ -13,7 +13,7 @@ export function updateConfig(key: string, value: number) {
 }
 
 export function getOpencodeModels(projectId?: string | null) {
-  return request<{ models: string[] }>(withProject('/opencode/models', projectId))
+  return request<{ models: string[] }>('/opencode/models', withProject(undefined, projectId))
 }
 
 export function getOpencodeModel() {

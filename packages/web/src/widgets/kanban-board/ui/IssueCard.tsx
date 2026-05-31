@@ -154,7 +154,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
 
   return (
     <Link
-      to={`/issue/${issue.number}`}
+      to={`/issues/${issue.number}`}
       className="block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden"
       style={{ borderLeftColor: getStripColor(issue.labels) }}
     >

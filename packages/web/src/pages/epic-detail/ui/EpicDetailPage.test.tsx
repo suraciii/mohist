@@ -79,7 +79,7 @@ function renderPage() {
           <Routes>
             <Route path="/epic/:id" element={<EpicDetailPage />} />
             <Route path="/epics" element={<div>Epics</div>} />
-            <Route path="/issue/:number" element={<div>Issue</div>} />
+            <Route path="/issues/:number" element={<div>Issue</div>} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>

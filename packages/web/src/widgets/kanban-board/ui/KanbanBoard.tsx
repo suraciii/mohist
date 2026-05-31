@@ -284,7 +284,7 @@ function NeedsAttentionSummary({
         {items.map((item) => (
           <a
             key={item.issueId}
-            href={`/issue/${item.issueNumber}`}
+            href={`/issues/${item.issueNumber}`}
             className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow-md transition-shadow border border-amber-200"
           >
             <span className="font-mono text-amber-600">#{item.issueNumber}</span>

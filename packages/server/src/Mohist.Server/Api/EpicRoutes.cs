@@ -18,10 +18,10 @@ public static class EpicRoutes
             return ApiResults.Ok(await queryService.ListAsync(pid));
         });
 
-        epics.MapPost("/", async (EpicCreateRequest req, IGrainFactory grains) =>
+        epics.MapPost("/", async (EpicCreateRequest req, string? projectId, IGrainFactory grains) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title)) return ApiResults.BadRequest("title is required");
-            var pid = req.ProjectId;
+            var pid = projectId ?? req.ProjectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
 
             var tempId = $"epic_{Guid.NewGuid():N}";
