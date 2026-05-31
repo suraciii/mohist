@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Mohist.Server</RootNamespace>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Orleans.Sdk" />
+    <PackageReference Include="Microsoft.Orleans.Server" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Issue/WorkflowProfiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Workflow/Prompts/*.prompt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="BuildWebAssets" BeforeTargets="Build" Condition="'$(SkipWebBuild)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Command="npm install" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Command="npm run build -w packages/web" />
+  </Target>
+
+  <Target Name="CopyWebAssetsToOutput" AfterTargets="BuildWebAssets" BeforeTargets="Build">
+    <ItemGroup>
+      <WebDistFiles Include="$(MSBuildProjectDirectory)/../../../web/dist/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebDistFiles)" DestinationFiles="@(WebDistFiles->'$(OutDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyWebAssetsToPublish" AfterTargets="Publish">
+    <ItemGroup>
+      <WebDistFiles Include="$(MSBuildProjectDirectory)/../../../web/dist/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WebDistFiles)" DestinationFiles="@(WebDistFiles->'$(PublishDir)wwwroot/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

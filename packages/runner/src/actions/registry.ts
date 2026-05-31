@@ -1,0 +1,184 @@
+import { join } from "node:path"
+import { randomUUID } from "node:crypto"
+import type { ActionContext, ActionResult } from "../core/types.js"
+import { arrayInput, numberInput, stringInput } from "../core/json.js"
+import { deleteFile, exists, readText, runCommand, writeText } from "../system/process.js"
+import { acpAgentAction } from "./acp-agent.js"
+import { resolveActionPath } from "./expectations.js"
+import { archiveChangeAction, openspecSyncAction, openspecTasksAction } from "./openspec.js"
+import { rebaseAction, rebaseStatusAction } from "./rebase.js"
+import { git } from "./git.js"
+
+export type ActionHandler = (context: ActionContext) => Promise<ActionResult>
+
+export class ActionRegistry {
+  private readonly actions = new Map<string, ActionHandler>()
+
+  register(uses: string, handler: ActionHandler) {
+    this.actions.set(uses.toLowerCase(), handler)
+  }
+
+  resolve(uses?: string | null) {
+    if (!uses) return undefined
+    return this.actions.get(uses.toLowerCase())
+  }
+}
+
+export function createDefaultRegistry() {
+  const registry = new ActionRegistry()
+  registry.register("core/process", processAction)
+  registry.register("core/script", scriptAction)
+  registry.register("core/artifact-exists", artifactExistsAction)
+  registry.register("core/marker", markerAction)
+  registry.register("mohist/acp-agent", acpAgentAction)
+  registry.register("mohist/openspec-tasks", openspecTasksAction)
+  registry.register("mohist/openspec-sync", openspecSyncAction)
+  registry.register("mohist/archive-change", archiveChangeAction)
+  registry.register("mohist/rebase", rebaseAction)
+  registry.register("mohist/rebase-status", rebaseStatusAction)
+  registry.register("mohist/merge-ready", mergeReadyAction)
+  registry.register("mohist/merge", mergeAction)
+  return registry
+}
+
+async function processAction(context: ActionContext): Promise<ActionResult> {
+  const command = context.uses === "core/process" ? stringInput(context.with, "command") : context.uses
+  if (!command) return { status: "failure", message: "Process action requires command" }
+  const result = await runCommand(command, arrayInput(context.with, "args").map(String), context.workDir, context.signal)
+  return result.exitCode === 0
+    ? { status: "success", message: "Process completed", output: result.stdout.trim(), exitCode: result.exitCode }
+    : { status: "failure", message: result.stderr.trim() || `Process exited with code ${result.exitCode}`, output: result.stdout.trim(), exitCode: result.exitCode }
+}
+
+async function scriptAction(context: ActionContext): Promise<ActionResult> {
+  const run = stringInput(context.with, "run")
+  if (!run?.trim()) return { status: "failure", message: "Script action requires 'run'" }
+  const shell = stringInput(context.with, "shell") || (process.platform === "win32" ? "pwsh" : "bash")
+  const file = join(context.workDir, `_${randomUUID().replace(/-/g, "")}${process.platform === "win32" ? ".ps1" : ".sh"}`)
+  await writeText(file, run)
+  try {
+    const timeoutMs = numberInput(context.with, "timeout")
+    const signal = timeoutMs ? timeoutSignal(context.signal, timeoutMs) : context.signal
+    const result = await runCommand(shell, [file], context.workDir, signal)
+    return {
+      status: result.exitCode === 0 ? "success" : "failure",
+      message: result.exitCode === 0 ? "Script completed" : `Script failed: ${firstLine(run)}`,
+      output: JSON.stringify({ kind: "script", run, shell, exitCode: result.exitCode, stdout: trim(result.stdout), stderr: trim(result.stderr) }),
+      exitCode: result.exitCode,
+    }
+  } finally {
+    await deleteFile(file)
+  }
+}
+
+async function artifactExistsAction(context: ActionContext): Promise<ActionResult> {
+  const path = resolveActionPath(context, stringInput(context.with, "path"))
+  if (!path) return { status: "failure", message: "Artifact check requires 'path'" }
+  const found = exists(path)
+  const output = JSON.stringify({ kind: "artifact-exists", path, exists: found })
+  return found ? { status: "success", message: `Artifact exists: ${path}`, output } : { status: "failure", message: `Artifact missing: ${path}`, output }
+}
+
+async function markerAction(context: ActionContext): Promise<ActionResult> {
+  const path = resolveActionPath(context, stringInput(context.with, "path"))
+  const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
+  if (!path || !expect) return { status: "failure", message: "Marker check requires 'path' and 'expect'" }
+  if (!exists(path)) return { status: "failure", message: `Marker file missing: ${path}` }
+  const found = (await readText(path)).includes(expect)
+  const output = JSON.stringify({ kind: "marker", path, marker: expect, found })
+  return found ? { status: "success", message: `Marker found in ${path}`, output } : { status: "failure", message: `Marker missing in ${path}`, output }
+}
+
+async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {
+  const baseBranch = stringInput(context.with, "baseBranch") ?? stringAt(context.variables, ["project", "defaultBranch"]) ?? stringAt(context.variables, ["project", "baseBranch"]) ?? "main"
+  const base = await git(context.workDir, ["rev-parse", baseBranch], context.signal)
+  if (!base.success) return mergeReadyResult(false, baseBranch, null, null, null, `Could not resolve base branch '${baseBranch}'`, base.exitCode)
+  const head = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
+  if (!head.success) return mergeReadyResult(false, baseBranch, base.stdout.trim(), null, null, "Could not resolve HEAD", head.exitCode)
+  const mergeBase = await git(context.workDir, ["merge-base", baseBranch, "HEAD"], context.signal)
+  const mergeTree = await git(context.workDir, ["merge-tree", "--write-tree", baseBranch, "HEAD"], context.signal)
+  return mergeTree.success
+    ? mergeReadyResult(true, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBase.success ? mergeBase.stdout.trim() : null, null, mergeTree.exitCode)
+    : mergeReadyResult(false, baseBranch, base.stdout.trim(), head.stdout.trim(), mergeBase.success ? mergeBase.stdout.trim() : null, mergeTree.combinedOutput, mergeTree.exitCode)
+}
+
+async function mergeAction(context: ActionContext): Promise<ActionResult> {
+  const source = stringInput(context.with, "source") ?? "HEAD"
+  const target = stringInput(context.with, "target")
+  const strategy = stringInput(context.with, "strategy") ?? "squash"
+  const message = stringInput(context.with, "message") ?? "Mohist merge"
+  const mergeWorkDir = stringAt(context.variables, ["project", "path"]) ?? context.workDir
+
+  const sourceCommit = await commitPendingSourceChanges(context.workDir, message, context.signal)
+  if (!sourceCommit.success) return mergeFailure(source, target, strategy, sourceCommit.combinedOutput, sourceCommit.exitCode)
+
+  if (target?.trim()) {
+    const checkout = await git(mergeWorkDir, ["checkout", target], context.signal)
+    if (!checkout.success) return mergeFailure(source, target, strategy, checkout.combinedOutput, checkout.exitCode)
+  }
+
+  const result = strategy.toLowerCase() === "squash"
+    ? await squashMerge(mergeWorkDir, source, message, context.signal)
+    : await git(mergeWorkDir, ["merge", source], context.signal)
+  const head = result.success ? await git(mergeWorkDir, ["rev-parse", "HEAD"], context.signal) : null
+  const output = JSON.stringify({ kind: "merge", source, target, strategy, workDir: mergeWorkDir, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: result.combinedOutput })
+  return result.success ? { status: "success", message: "Merge completed", output, exitCode: result.exitCode } : { status: "failure", message: result.combinedOutput, output, exitCode: result.exitCode }
+}
+
+function mergeReadyResult(canMerge: boolean, baseBranch: string, baseSha: string | null, headSha: string | null, mergeBaseSha: string | null, error: string | null, exitCode: number | null): ActionResult {
+  const output = JSON.stringify({ kind: "merge-ready", targetBranch: baseBranch, baseSha: baseSha ?? "", candidateHeadSha: headSha ?? "", mergeBaseSha: mergeBaseSha ?? "", canMerge, conflictFiles: [], checkedAt: new Date().toISOString(), error })
+  return canMerge ? { status: "success", message: "Merge ready", output, exitCode } : { status: "failure", message: error ?? "Merge is not ready", output, exitCode }
+}
+
+async function commitPendingSourceChanges(workDir: string, message: string, signal: AbortSignal) {
+  const status = await git(workDir, ["status", "--porcelain"], signal)
+  if (!status.success || !status.stdout.trim()) return status.success ? { ...status, combinedOutput: "" } : status
+  const add = await git(workDir, ["add", "."], signal)
+  if (!add.success) return add
+  return await git(workDir, ["commit", "-m", `${message} integration`], signal)
+}
+
+async function squashMerge(workDir: string, source: string, message: string, signal: AbortSignal) {
+  const merge = await git(workDir, ["merge", "--squash", source], signal)
+  if (!merge.success) return merge
+  return await git(workDir, ["commit", "-m", message], signal)
+}
+
+function mergeFailure(source: string, target: string | undefined, strategy: string, outputText: string, exitCode: number): ActionResult {
+  return { status: "failure", message: outputText, output: JSON.stringify({ kind: "merge", source, target, strategy, commit: null, output: outputText }), exitCode }
+}
+
+function firstLine(value: string) {
+  return value.replace(/\r\n/g, "\n").trim().split("\n")[0]
+}
+
+function trim(value: string) {
+  return value.length <= 20_000 ? value : value.slice(0, 20_000)
+}
+
+function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
+  const controller = new AbortController()
+  const abort = () => controller.abort(parent.reason)
+  if (parent.aborted) {
+    abort()
+  } else {
+    const onAbort = () => {
+      clearTimeout(timer)
+      abort()
+    }
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`Timed out after ${timeoutMs / 1000}s`))
+      parent.removeEventListener("abort", onAbort)
+    }, timeoutMs)
+    parent.addEventListener("abort", onAbort, { once: true })
+  }
+  return controller.signal
+}
+
+function stringAt(value: unknown, path: string[]) {
+  const found = path.reduce<unknown>((current, part) => {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
+    return (current as Record<string, unknown>)[part]
+  }, value)
+  return typeof found === "string" ? found : undefined
+}

@@ -1,0 +1,412 @@
+import { useState, useCallback } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button } from '@/shared/ui/components/button'
+import { Textarea } from '@/shared/ui/components/textarea'
+import { Card, CardContent } from '@/shared/ui/components/card'
+import { approveIssue, rejectIssue } from '../../../entities/issue'
+import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
+import type { ReviewOutput } from './ReviewSummary'
+import { FullReportModal } from './ReviewReportModal'
+import { useLiveTask } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
+
+function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
+  if (!result) return 'UNKNOWN'
+  const upper = result.toUpperCase()
+  if (upper === 'PASS') return 'PASS'
+  if (upper === 'FAIL') return 'FAIL'
+  return 'UNKNOWN'
+}
+
+function buildIssueSummary(review: ReviewOutput): string {
+  const failDims = (review.dimensions ?? []).filter(
+    (d) => d.status.toUpperCase() === 'FAIL',
+  )
+
+  if (failDims.length > 0) {
+    const parts = failDims.map((dim) => {
+      const issues = dim.issues && dim.issues.length > 0
+        ? dim.issues.map((i) => `- ${i}`).join('\n')
+        : '- Issues identified in this dimension'
+      return `### ${dim.name}\n${issues}`
+    })
+    return `Please fix the following issues:\n\n${parts.join('\n\n')}`
+  }
+
+  if (review.reviewReport) {
+    const fixMatch = review.reviewReport.match(
+      /^## Fix Suggestions\s*\n([\s\S]*?)(?=^## |\s*$)/m,
+    )
+    if (fixMatch && fixMatch[1]?.trim()) {
+      return `Please fix the following issues:\n\n${fixMatch[1].trim()}`
+    }
+    return `Please fix the following issues:\n\n${review.reviewReport}`
+  }
+
+  return 'The review found issues that need to be addressed. Please review and fix all problems.'
+}
+
+function buildInstructionMessage(
+  instructions: string,
+  review: ReviewOutput,
+): string {
+  const failDims = (review.dimensions ?? []).filter(
+    (d) => d.status.toUpperCase() === 'FAIL',
+  )
+
+  let message = instructions
+
+  if (failDims.length > 0) {
+    const parts = failDims.map((dim) => {
+      const issues = dim.issues && dim.issues.length > 0
+        ? dim.issues.map((i) => `- ${i}`).join('\n')
+        : ''
+      return issues ? `### ${dim.name}\n${issues}` : ''
+    }).filter(Boolean)
+    if (parts.length > 0) {
+      message += `\n\n---\n\nReference — issues found:\n\n${parts.join('\n\n')}`
+    }
+  }
+
+  return message
+}
+
+interface ReviewApprovalPanelProps {
+  output?: Record<string, unknown>
+  issueNumber: number
+  onViewFiles: () => void
+  rebaseResult: {
+    type: 'success' | 'info' | 'error'
+    message: string
+    conflicts?: string[]
+  } | null
+  onRebase: () => void
+  rebasePending: boolean
+}
+
+export function ReviewApprovalPanel({
+  output,
+  issueNumber,
+  onViewFiles,
+  rebaseResult,
+  onRebase,
+  rebasePending,
+}: ReviewApprovalPanelProps) {
+  const review = parseReviewOutput(output)
+  const classified = classifyResult(review.result)
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  const { rebaseConflict } = useLiveTask()
+
+  const [reportModalOpen, setReportModalOpen] = useState(false)
+  const [instructionsExpanded, setInstructionsExpanded] = useState(false)
+  const [instructionsText, setInstructionsText] = useState('')
+  const [notesExpanded, setNotesExpanded] = useState(false)
+  const [notesText, setNotesText] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const approveMutation = useMutation({
+    mutationFn: () => approveIssue(issueNumber, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+    },
+  })
+
+  const sendBackMutation = useMutation({
+    mutationFn: (message: string) => rejectIssue(issueNumber, { message }, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
+    },
+    onError: (err: Error) => {
+      setActionError(err.message)
+    },
+  })
+
+  const handleSendBackForFixes = useCallback(() => {
+    setActionError(null)
+    const message = buildIssueSummary(review)
+    sendBackMutation.mutate(message)
+  }, [review, sendBackMutation])
+
+  const handleSendWithInstructions = useCallback(() => {
+    if (!instructionsText.trim()) return
+    setActionError(null)
+    const message = buildInstructionMessage(instructionsText.trim(), review)
+    sendBackMutation.mutate(message, {
+      onSuccess: () => {
+        setInstructionsText('')
+        setInstructionsExpanded(false)
+      },
+    })
+  }, [instructionsText, review, sendBackMutation])
+
+  const handleSendBackWithNotes = useCallback(() => {
+    if (!notesText.trim()) return
+    setActionError(null)
+    sendBackMutation.mutate(notesText.trim(), {
+      onSuccess: () => {
+        setNotesText('')
+        setNotesExpanded(false)
+      },
+    })
+  }, [notesText, sendBackMutation])
+
+  const handleApproveAnyway = useCallback(() => {
+    setActionError(null)
+    approveMutation.mutate()
+  }, [approveMutation])
+
+  const isSending = sendBackMutation.isPending
+
+  return (
+    <div>
+      {reportModalOpen && (
+        <FullReportModal
+          review={review}
+          classified={classified}
+          onClose={() => setReportModalOpen(false)}
+        />
+      )}
+
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          <ReviewSummary output={output} />
+
+        {rebaseResult && (
+          <div
+            className={`rounded-md px-3 py-2 text-xs ${
+              rebaseResult.type === 'success'
+                ? 'bg-green-50 text-green-700'
+                : rebaseResult.type === 'info'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-red-50 text-red-600'
+            }`}
+          >
+            {rebaseResult.message}
+            {rebaseResult.conflicts && rebaseResult.conflicts.length > 0 && (
+              <ul className="mt-1 ml-3 list-disc">
+                {rebaseResult.conflicts.map((f) => (
+                  <li key={f} className="font-mono text-xs">
+                    {f}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving' && (
+          <div className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
+            <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Agent is resolving conflicts...
+          </div>
+        )}
+
+        {rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'failed' && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            Conflict resolution failed{rebaseConflict.error ? `: ${rebaseConflict.error}` : ''}
+          </div>
+        )}
+
+        <div className="pt-2 border-t border-gray-100">
+          <Button
+            variant="outline"
+            onClick={onRebase}
+            disabled={rebasePending || (rebaseConflict?.issueNumber === issueNumber && rebaseConflict.status === 'resolving')}
+            className="w-full px-3 py-2 text-sm font-medium disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2 h-auto"
+          >
+            {rebasePending && (
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {rebasePending ? 'Rebasing...' : 'Rebase onto master'}
+          </Button>
+        </div>
+
+        {actionError && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
+            {actionError}
+          </div>
+        )}
+
+        {classified === 'PASS' && (
+          <div className="space-y-3">
+            <Button
+              variant="default"
+              onClick={() => {
+                setActionError(null)
+                approveMutation.mutate()
+              }}
+              disabled={approveMutation.isPending}
+              className="w-full bg-green-600 hover:bg-green-700 px-4 py-2.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
+            >
+              {approveMutation.isPending ? 'Approving...' : 'Approve & Continue'}
+            </Button>
+            <div className="flex items-center gap-4">
+              <Button
+                variant="link"
+                onClick={() => setReportModalOpen(true)}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                View Report &rarr;
+              </Button>
+              <Button
+                variant="link"
+                onClick={onViewFiles}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                View Files &rarr;
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {classified === 'FAIL' && (
+          <div className="space-y-3">
+            <Button
+              variant="destructive"
+              onClick={handleSendBackForFixes}
+              disabled={isSending}
+              className="w-full px-4 py-2.5 text-sm font-medium disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2 h-auto"
+            >
+              {isSending && (
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              )}
+              {isSending ? 'Sending back...' : 'Send back for fixes'}
+            </Button>
+
+            <div>
+              <Button
+                variant="link"
+                onClick={() => setInstructionsExpanded(!instructionsExpanded)}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                {instructionsExpanded ? '▾' : '▸'} Add instructions...
+              </Button>
+              {instructionsExpanded && (
+                <div className="mt-2 space-y-2">
+                  <Textarea
+                    value={instructionsText}
+                    onChange={(e) => setInstructionsText(e.target.value)}
+                    placeholder="Add your instructions for the fix..."
+                    rows={3}
+                  />
+                  <Button
+                    variant="default"
+                    onClick={handleSendWithInstructions}
+                    disabled={!instructionsText.trim() || isSending}
+                    className="px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
+                  >
+                    {isSending ? 'Sending back...' : 'Send with instructions'}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <Button
+              variant="outline"
+              onClick={handleApproveAnyway}
+              disabled={approveMutation.isPending}
+              className="w-full px-4 py-2 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
+            >
+              {approveMutation.isPending ? 'Approving...' : 'Approve anyway'}
+            </Button>
+
+            <div className="flex items-center gap-4 pt-1">
+              <Button
+                variant="link"
+                onClick={() => setReportModalOpen(true)}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                View Report &rarr;
+              </Button>
+              <Button
+                variant="link"
+                onClick={onViewFiles}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                View Files &rarr;
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {classified === 'UNKNOWN' && (
+          <div className="space-y-3">
+            <Button
+              variant="default"
+              onClick={() => {
+                setActionError(null)
+                approveMutation.mutate()
+              }}
+              disabled={approveMutation.isPending}
+              className="w-full px-4 py-2.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
+            >
+              {approveMutation.isPending ? 'Approving...' : 'Approve & Continue'}
+            </Button>
+
+            <div>
+              <Button
+                variant="link"
+                onClick={() => setNotesExpanded(!notesExpanded)}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                {notesExpanded ? '▾' : '▸'} Send back with notes...
+              </Button>
+              {notesExpanded && (
+                <div className="mt-2 space-y-2">
+                  <Textarea
+                    value={notesText}
+                    onChange={(e) => setNotesText(e.target.value)}
+                    placeholder="Describe what needs to be changed..."
+                    rows={3}
+                  />
+                  <Button
+                    variant="default"
+                    onClick={handleSendBackWithNotes}
+                    disabled={!notesText.trim() || isSending}
+                    className="px-3 py-1.5 text-sm font-medium disabled:opacity-50 transition-colors h-auto"
+                  >
+                    {isSending ? 'Sending back...' : 'Send back'}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4 pt-1">
+              <Button
+                variant="link"
+                onClick={() => setReportModalOpen(true)}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                View Report &rarr;
+              </Button>
+              <Button
+                variant="link"
+                onClick={onViewFiles}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors h-auto p-0"
+              >
+                View Files &rarr;
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  </div>
+  )
+}

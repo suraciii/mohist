@@ -1,0 +1,56 @@
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Issue.Domain;
+using Mohist.Server.Infrastructure.Persistence.Issue;
+using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Storage;
+using Mohist.Server.Project.Queries;
+using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Persistence.Db.Entities;
+using Mohist.Server.Tests.Support;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs;
+
+[Collection("MohistIntegration")]
+public class IssueQueryServiceSpecs
+{
+    private readonly MohistIntegrationFixture _fixture;
+
+    public IssueQueryServiceSpecs(MohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task ListAsync_ReadsIssueStateWithoutCallingIssueGrain()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = "proj-1", Name = "Project One", Path = "/tmp/project" };
+        var issue = new Issue.Domain.Issue
+        {
+            Id = "issue_1",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Query me",
+            Labels = ["bug"],
+            Priority = "p1",
+        };
+        issue.Status = Issue.Domain.IssueStatus.Todo;
+        db.IssueStates.Add(new IssueStateRow
+        {
+            Key = $"{project.Id}:1",
+            StateJson = IssueStore.Serialize(issue),
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+
+        var list = await service.ListAsync(project.Id, project, stage: "todo", label: "bug");
+
+        var item = Assert.Single(list);
+        Assert.Equal("Query me", item.Title);
+        Assert.Equal("todo", item.Status);
+        Assert.Equal("Project One", item.ProjectName);
+    }
+}

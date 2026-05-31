@@ -1,0 +1,250 @@
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Grains;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs;
+
+public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
+{
+    public DispatchAndLoadingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task NoRunnerAtStart_RegisterLater_AssignAndRun()
+    {
+        var workflow = await CreateWorkflowAsync();
+        await workflow.StartAsync(SingleStage(), TestInput());
+
+        _runnerId = await RegisterRunnerAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
+        await runner.AssignWorkflowAsync(_workflowId!);
+
+        var (task, rId) = await PollWorkAnyAsync();
+        Assert.StartsWith("task-1.", task.WorkId);
+
+        await ReportAsync(rId, task.WorkId, "completed");
+        var (check, checkRunnerId) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+    }
+
+    [Fact]
+    public async Task PausedBeforeRunner_StillPaused()
+    {
+        var workflow = await CreateWorkflowAsync();
+        await workflow.StartAsync(SingleStage(), TestInput());
+
+        await workflow.PauseAsync("paused before capacity");
+        _runnerId = await RegisterRunnerAsync();
+        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
+        await runner.AssignWorkflowAsync(_workflowId!);
+
+        Assert.Null(await runner.PollAsync());
+        Assert.True(await runner.IsAvailableAsync());
+    }
+
+    [Fact]
+    public async Task StageWithDynamicTasks_LoadTaskCompletes_DynamicTasksRunBeforeChecks()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [new("check-1", "Check 1", "spec/check")])
+        ]));
+
+        var (load, r1) = await PollWorkAnyAsync();
+        Assert.StartsWith("load-tasks.", load.WorkId);
+        Assert.Equal("task", load.WorkType);
+        Assert.Equal("build", load.Stage);
+        Assert.Equal("spec/load", load.Uses);
+
+        var addResult = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task", """{"value":"one"}"""),
+                new AddTasksBatchItem("dynamic-2", "Dynamic 2", "spec/task")
+            ]));
+        Assert.Equal(2, addResult.AddedCount);
+
+        await ReportAsync(r1, load.WorkId, "completed");
+
+        var (dynamic1, r2) = await PollWorkAnyAsync();
+        Assert.StartsWith("dynamic-1.", dynamic1.WorkId);
+        Assert.Equal("spec/task", dynamic1.Uses);
+        Assert.Contains("one", dynamic1.With);
+        await ReportAsync(r2, dynamic1.WorkId, "completed");
+
+        var (dynamic2, r3) = await PollWorkAnyAsync();
+        Assert.StartsWith("dynamic-2.", dynamic2.WorkId);
+        await ReportAsync(r3, dynamic2.WorkId, "completed");
+
+        var (check, r4) = await PollWorkAnyAsync();
+        Assert.StartsWith("checks-", check.WorkId);
+        await ReportChecksPassAsync(r4, check, "check-1");
+
+        var runner = Grains.GetGrain<IRunnerGrain>(r4);
+        Assert.True(await runner.IsAvailableAsync());
+    }
+
+    [Fact]
+    public async Task StageWithDynamicTasks_TaskWithContract_DispatchPreservesWithContract()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [])
+        ]));
+
+        var (load, r1) = await PollWorkAnyAsync();
+
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("T-001", "Implement feature", "mohist/acp-agent",
+                    """{"prompt":"Add the feature flag service.\n- service is registered","expect":{"files":[{"path":"src/FeatureFlags.cs"}],"markers":[{"path":"openspec/changes/issue-1/tasks.json","contains":"\"passes\": true"}]}}""")
+            ]));
+
+        await ReportAsync(r1, load.WorkId, "completed");
+
+        var (dynamicTask, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("T-001.", dynamicTask.WorkId);
+        Assert.Equal("mohist/acp-agent", dynamicTask.Uses);
+        Assert.NotNull(dynamicTask.With);
+        Assert.Contains("Add the feature flag service.", dynamicTask.With);
+        Assert.Contains("service is registered", dynamicTask.With);
+        Assert.Contains("expect", dynamicTask.With);
+        Assert.Contains("contains", dynamicTask.With);
+        Assert.Contains("src/FeatureFlags.cs", dynamicTask.With);
+    }
+
+    [Fact]
+    public async Task StageWithStaticAndDynamicTasks_LoadTaskThenDynamicThenStaticBeforeChecks()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(
+                "build",
+                [new("load-tasks", "Load tasks", "spec/load"), new("static-1", "Static 1", "spec/task")],
+                [new("check-1", "Check 1", "spec/check")])
+        ]));
+
+        var (load, r1) = await PollWorkAnyAsync();
+
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task")
+            ]));
+
+        await ReportAsync(r1, load.WorkId, "completed");
+
+        var (dynamicTask, r2) = await PollWorkAnyAsync();
+        Assert.StartsWith("dynamic-1.", dynamicTask.WorkId);
+        await ReportAsync(r2, dynamicTask.WorkId, "completed");
+
+        var (staticTask, r3) = await PollWorkAnyAsync();
+        Assert.StartsWith("static-1.", staticTask.WorkId);
+        await ReportAsync(r3, staticTask.WorkId, "completed");
+
+        var (check, r4) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(r4, check, "check-1");
+    }
+
+    [Fact]
+    public async Task RunningWorkflow_CanAcceptRuntimeTaskBeforeChecks()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, task.WorkId, "completed");
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("runtime-1", "Runtime 1", "spec/runtime", """{"value":"one"}"""));
+
+        var (runtimeTask, runtimeRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("runtime-1.", runtimeTask.WorkId);
+        Assert.Equal("spec/runtime", runtimeTask.Uses);
+        Assert.Contains("one", runtimeTask.With);
+
+        await ReportAsync(runtimeRunnerId, runtimeTask.WorkId, "completed");
+        var (check, checkRunnerId) = await PollWorkAnyAsync();
+        Assert.Equal("checks", check.WorkType);
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+    }
+
+    [Fact]
+    public async Task RuntimeTaskWithInvalidateChecks_ReopensStageChecks()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: [new("check-1", "Check 1", "spec/check")],
+            requiresApproval: true));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, task.WorkId, "completed");
+        var (check, checkRunnerId) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(checkRunnerId, check, "check-1");
+        var awaiting = await GetQueryService().GetStatusAsync(_workflowId!);
+        Assert.Equal("AwaitingApproval", awaiting!.Status);
+        Assert.Equal("Passed", awaiting.Stages[0].Checks[0].Status);
+
+        await workflow.AddTaskAsync(new RuntimeTaskInput("rebase", "Rebase", "mohist/rebase", InvalidateChecks: true));
+
+        var afterAdd = await GetQueryService().GetStatusAsync(_workflowId!);
+        Assert.Equal("Running", afterAdd!.Status);
+        Assert.Equal("Pending", afterAdd.Stages[0].Checks[0].Status);
+
+        var (rebase, rebaseRunnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("rebase.", rebase.WorkId);
+        await ReportAsync(rebaseRunnerId, rebase.WorkId, "completed");
+
+        var (rerunCheck, rerunCheckRunnerId) = await PollWorkAnyAsync();
+        Assert.Equal("checks", rerunCheck.WorkType);
+        await ReportChecksPassAsync(rerunCheckRunnerId, rerunCheck, "check-1");
+    }
+
+    [Fact]
+    public async Task FailedTask_FailsWorkflow()
+    {
+        await StartWorkflowAsync(SingleStage(
+            tasks: [new("rebase", "Rebase", "mohist/rebase")],
+            checks: [new("check-1", "Check 1", "spec/check")]));
+
+        var (rebase, runnerId) = await PollWorkAnyAsync();
+        await ReportAsync(runnerId, rebase.WorkId, new WorkDispatchResult("failed", "rebase failed", Output: """
+        {
+          "kind": "rebase",
+          "status": "failed",
+          "baseBranch": "main",
+          "rebased": false,
+          "conflicts": [],
+          "resolveAttempts": 0
+        }
+        """));
+
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
+        Assert.Equal("Failed", status);
+    }
+
+    [Fact]
+    public async Task LoadTaskFails_WorkflowFails()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [new("check-1", "Check 1", "spec/check")])
+        ]));
+
+        var (load, runnerId) = await PollWorkAnyAsync();
+        Assert.StartsWith("load-tasks.", load.WorkId);
+
+        await ReportAsync(runnerId, load.WorkId, "failed", "loader failed");
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.True(await runner.IsAvailableAsync());
+
+        var status = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).GetRunStatusAsync();
+        Assert.Equal("Failed", status);
+    }
+}

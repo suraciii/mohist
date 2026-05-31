@@ -3,14 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/web",
+    "packages/runner"
   ],
   "scripts": {
-    "build": "npm run build -w packages/cli",
-    "test": "npm run test -w packages/cli",
-    "lint": "npm run lint -w packages/cli",
-    "typecheck": "npm run typecheck -w packages/cli",
-    "dev": "npm run build && concurrently -n server,web -c blue,green \"npm run start:server -w packages/cli\" \"npm run dev:web -w packages/cli\""
+    "build": "dotnet build Mohist.sln",
+    "test": "dotnet test Mohist.sln",
+    "build:web": "npm run build -w packages/web",
+    "build:runner": "npm run build -w packages/runner",
+    "dev:runner": "npm run dev -w packages/runner",
+    "dev:web": "npm run dev -w packages/web",
+    "dev:server": "dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "install:cli": "dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

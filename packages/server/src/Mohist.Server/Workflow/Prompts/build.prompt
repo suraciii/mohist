@@ -1,0 +1,45 @@
+<artifact id="build-task">
+
+<task>
+Complete exactly one implementation task from `tasks.json`.
+Deliver the smallest focused code change that satisfies the task acceptance criteria.
+</task>
+
+<dependencies>
+Read the context files before implementing:
+- `${{ openspecChangeDir }}/proposal.md`
+- `${{ openspecChangeDir }}/design.md`
+- `${{ openspecChangeDir }}/tasks.json`
+- relevant specs under `${{ openspecChangeDir }}/specs/`
+</dependencies>
+
+<instruction>
+Follow the selected task description and acceptance criteria.
+
+If the task references a spec requirement:
+1. Read the referenced spec file.
+2. Locate the requirement section.
+3. Ensure every WHEN/THEN scenario in that requirement passes.
+4. Treat acceptance criteria as supplementary checks.
+
+If the task has no spec reference, treat its acceptance criteria as the complete verification list.
+</instruction>
+
+<implementation_policy>
+- Make minimal, focused changes.
+- Follow repository conventions.
+- Avoid unrelated refactors.
+- Preserve existing behavior unless the task explicitly changes it.
+</implementation_policy>
+
+<verification>
+Run typecheck, tests, or focused verification appropriate for the changed area.
+All acceptance criteria must pass before reporting completion.
+</verification>
+
+<completion>
+When done, stage and commit your changes.
+The commit message should start with the task ID.
+</completion>
+
+</artifact>

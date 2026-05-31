@@ -17,13 +17,10 @@
 git clone https://github.com/owner/mohist.git
 cd mohist
 
-# 工作目录
-cd packages/cli
-
 # 安装依赖
 npm install
 
-# 构建（含 backend + web UI）
+# 构建（含 Web UI + .NET Server）
 npm run build
 ```
 
@@ -42,20 +39,10 @@ npm run build
 3. **运行测试**
    ```bash
    npm test
-   npm run test:web      # Web UI 测试
+   npm --prefix packages/web run test:run      # Web UI 测试
    ```
 
-4. **代码检查**
-   ```bash
-   npm run lint
-   ```
-
-5. **类型检查**
-   ```bash
-   npm run typecheck
-   ```
-
-6. **提交**
+4. **提交**
    ```bash
    git add .
    git commit -m "feat: add your feature"
@@ -69,42 +56,17 @@ npm run build
 ## 项目结构
 
 ```
-packages/cli/
-├── bin/                        # CLI 入口
-│   ├── mo                      # 主 CLI
-│   └── mo-server               # 服务入口
-├── src/
-│   ├── agent-runtime/          # Agent 运行时管理
-│   ├── agent-skills/           # Skill 调度
-│   ├── agents/                 # Agent 提示词和配置
-│   │   └── prompts/            # 阶段 prompt (plan/build/check/explore 等)
-│   │       └── artifacts/      # 产物模板
-│   ├── api/                    # HTTP API 路由
-│   ├── artifacts/              # 产物读写
-│   ├── cli/                    # CLI 命令实现
-│   ├── config/                 # 配置管理
-│   ├── db/                     # SQLite 数据层
-│   ├── git/                    # Git 操作 (worktree/diff/merge)
-│   ├── openspec/               # OpenSpec 集成
-│   ├── project/                # 项目管理
-│   ├── server/                 # HTTP Server + 状态管理
-│   ├── services/               # 业务逻辑层
-│   ├── tools/                  # 工具函数
-│   ├── types/                  # TypeScript 类型定义
-│   ├── util/                   # 通用工具
-│   ├── utils/                  # 工具函数
-│   └── workflow/               # 工作流引擎 (Plan/Build/Check/Integrate runners)
-├── web/                        # Web UI (React + Vite + Tailwind)
-│   ├── src/
-│   │   ├── components/         # 页面组件
-│   │   ├── hooks/              # React hooks (含 useSSE)
-│   │   ├── lib/                # API 客户端、类型、工具
-│   │   └── context/            # React context (ProjectContext 等)
-│   └── package.json
-├── tests/                      # 后端测试
-├── package.json
-├── tsconfig.json
-└── vitest.config.ts
+packages/server/
+├── src/Mohist.Server/          # ASP.NET Core + Orleans backend
+└── tests/Mohist.Server.Tests/  # 后端 spec/集成测试
+
+packages/runner/
+├── src/                        # TypeScript runner runtime
+└── package.json                # standalone runner package
+
+packages/web/
+├── src/                        # React Web UI
+└── tests/                      # Web UI tests
 ```
 
 ## 代码风格
@@ -142,13 +104,13 @@ describe('MyComponent', () => {
 ### Web UI 测试
 
 ```bash
-npm run test:web
+npm --prefix packages/web run test:run
 ```
 
 ### 阶段状态专项测试
 
 ```bash
-npm run test:stage-state
+dotnet test Mohist.sln --filter "Stage"
 ```
 
 ## Commit 规范
