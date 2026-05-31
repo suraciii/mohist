@@ -2,8 +2,8 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { rebaseAction } from "../src/actions/rebase.js"
-import type { ActionContext } from "../src/core/types.js"
+import { applyWorkflowAgentDefaultForTest, rebaseAction } from "../src/actions/rebase.js"
+import type { ActionContext, JsonObject } from "../src/core/types.js"
 import { runCommand } from "../src/system/process.js"
 
 describe("mohist/rebase", () => {
@@ -27,6 +27,16 @@ describe("mohist/rebase", () => {
     expect(status.stdout.trim()).toBe("")
     const log = await git(root, "log", "--oneline", "--max-count=1")
     expect(log.stdout).toContain("Prepare rebase onto master")
+  })
+
+  it("ConflictResolverWithoutAgentConfig_InheritsWorkflowAgentConfig", () => {
+    const withInput: JsonObject = { description: "resolve" }
+
+    applyWorkflowAgentDefaultForTest(withInput, {
+      vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
+    })
+
+    expect(withInput.agent).toEqual({ type: "opencode", model: "openai/gpt-5.4" })
   })
 })
 

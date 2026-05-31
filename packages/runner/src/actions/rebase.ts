@@ -101,6 +101,7 @@ async function runConflictResolver(
     prompt: buildConflictPrompt(conflicts, baseBranch, attempt),
     ...objectInput(conflictResolver, "with"),
   }
+  applyWorkflowAgentDefaultForTest(resolverWith, context.variables)
 
   const resolverContext: ActionContext = {
     ...context,
@@ -111,6 +112,14 @@ async function runConflictResolver(
   }
 
   return acpAgentAction(resolverContext)
+}
+
+export function applyWorkflowAgentDefaultForTest(with_: JsonObject, variables: JsonObject) {
+  if (objectInput(with_, "agent")) return
+
+  const vars = objectInput(variables, "vars")
+  const agent = objectInput(vars, "agent") ?? objectInput(variables, "agent")
+  if (agent) with_.agent = agent
 }
 
 function buildConflictPrompt(conflicts: string[], baseBranch: string, attempt: number): string {
