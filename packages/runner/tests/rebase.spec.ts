@@ -1,38 +1,52 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { describe, expect, it } from "vitest"
-import { applyWorkflowAgentDefaultForTest, rebaseAction } from "../src/actions/rebase.js"
+import { afterEach, describe, expect, it } from "vitest"
+import { applyWorkflowAgentDefault, rebaseAction, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
-import { runCommand } from "../src/system/process.js"
+
+afterEach(() => setRebaseGitRunnerForTest(null))
 
 describe("mohist/rebase", () => {
   it("DirtyWorktreeBeforeRebase_CommitsPendingChangesThenRebases", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mohist-rebase-"))
-    await git(root, "init")
-    await git(root, "config", "user.email", "test@example.com")
-    await git(root, "config", "user.name", "Test User")
-    await writeFile(join(root, "README.md"), "base\n")
-    await git(root, "add", ".")
-    await git(root, "commit", "-m", "base")
-    await git(root, "branch", "-M", "master")
-    await git(root, "checkout", "-b", "issue")
-    await writeFile(join(root, "feature.txt"), "issue change\n")
+    const calls: string[] = []
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "status --porcelain":
+          return ok(" M packages/runner/src/actions/acp-agent.ts\n")
+        case "add .":
+          return ok("")
+        case "commit -m Prepare rebase onto master":
+          return ok("[issue abc123] Prepare rebase onto master")
+        case "rev-parse HEAD":
+          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
 
-    const result = await rebaseAction(context(root))
+    const result = await rebaseAction(context())
 
     expect(result.status).toBe("success")
-    expect(await readFile(join(root, "feature.txt"), "utf8")).toBe("issue change\n")
-    const status = await git(root, "status", "--porcelain")
-    expect(status.stdout.trim()).toBe("")
-    const log = await git(root, "log", "--oneline", "--max-count=1")
-    expect(log.stdout).toContain("Prepare rebase onto master")
+    expect(calls).toEqual([
+      "status --porcelain",
+      "add .",
+      "commit -m Prepare rebase onto master",
+      "rev-parse HEAD",
+      "rebase master",
+      "rev-parse HEAD",
+    ])
+    expect(JSON.parse(result.output ?? "{}")).toMatchObject({
+      beforeHeadSha: "before",
+      afterHeadSha: "after",
+      rebased: true,
+    })
   })
 
   it("ConflictResolverWithoutAgentConfig_InheritsWorkflowAgentConfig", () => {
     const withInput: JsonObject = { description: "resolve" }
 
-    applyWorkflowAgentDefaultForTest(withInput, {
+    applyWorkflowAgentDefault(withInput, {
       vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
     })
 
@@ -40,7 +54,7 @@ describe("mohist/rebase", () => {
   })
 })
 
-function context(workDir: string): ActionContext {
+function context(): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "rebase.1",
@@ -50,13 +64,15 @@ function context(workDir: string): ActionContext {
     uses: "mohist/rebase",
     with: { baseBranch: "master" },
     variables: {},
-    workDir,
+    workDir: "/fake/worktree",
     signal: new AbortController().signal,
   }
 }
 
-async function git(cwd: string, ...args: string[]) {
-  const result = await runCommand("git", args, cwd, new AbortController().signal)
-  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout)
-  return result
+function ok(stdout: string) {
+  return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
+}
+
+function fail(stderr: string) {
+  return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
 }
