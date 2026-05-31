@@ -1,9 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -109,6 +115,116 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
+    public async Task AgentStatus_WhenLeaseOwnerDiffers_DoesNotCountStaleSessionAsActive()
+    {
+        var runnerId = $"runtime-lease-runner-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"runtime-lease-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lease-owned status", body = "status read consistency", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var workflowRunId = $"wf-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var staleRunnerId = $"stale-runner-{Guid.NewGuid():N}";
+
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 2 });
+
+        try
+        {
+            await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
+            {
+                db.WorkflowAgentSessions.Add(new WorkflowAgentSessionRow
+                {
+                    Id = $"session-{Guid.NewGuid():N}",
+                    ProjectId = project.Id,
+                    IssueNumber = issue.Number,
+                    WorkflowRunId = workflowRunId,
+                    SessionName = workId,
+                    WorkId = workId,
+                    WorkType = "task",
+                    Stage = "Build",
+                    Title = "Lease-owned status",
+                    RunnerId = staleRunnerId,
+                    Status = "running",
+                    CreatedAt = DateTime.UtcNow,
+                    StartedAt = DateTime.UtcNow
+                });
+
+                db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow
+                {
+                    WorkflowRunId = workflowRunId,
+                    StateJson = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                });
+
+                await db.SaveChangesAsync();
+            }
+
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+
+            var runner = Assert.Single(status.Runners, r => r.Id == runnerId);
+            Assert.Equal(0, runner.Active);
+            Assert.False(status.Running);
+            Assert.Equal(0, status.Capacity.Active);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task AgentStatus_WhenLeaseOwnerDiffers_DoesNotReportStaleRunnerAsActiveOwner()
+    {
+        var runnerId = $"runtime-status-owner-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"runtime-owner-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lease-owned status runner", body = "status owner consistency", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var workflowRunId = $"wf-{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        var staleRunnerId = $"stale-runner-{Guid.NewGuid():N}";
+
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 2 });
+
+        try
+        {
+            await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
+            {
+                db.WorkflowAgentSessions.Add(new WorkflowAgentSessionRow
+                {
+                    Id = $"session-{Guid.NewGuid():N}",
+                    ProjectId = project.Id,
+                    IssueNumber = issue.Number,
+                    WorkflowRunId = workflowRunId,
+                    SessionName = workId,
+                    WorkId = workId,
+                    WorkType = "task",
+                    Stage = "Build",
+                    Title = "Lease-owned status runner",
+                    RunnerId = staleRunnerId,
+                    Status = "running",
+                    CreatedAt = DateTime.UtcNow,
+                    StartedAt = DateTime.UtcNow
+                });
+
+                db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow
+                {
+                    WorkflowRunId = workflowRunId,
+                    StateJson = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status runner", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                });
+
+                await db.SaveChangesAsync();
+            }
+
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+
+            Assert.DoesNotContain(status.Runners, r => r.Id == staleRunnerId && r.Active > 0);
+            var leaseOwner = Assert.Single(status.Runners, r => r.Id == runnerId);
+            Assert.Equal(0, leaseOwner.Active);
+            Assert.False(status.Running);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task AgentStatus_WhenProjectIdMissing_ReturnsJsonError()
     {
         using var response = await _fixture.Client.GetAsync("/api/agent/status");
@@ -132,5 +248,6 @@ public class RuntimeEntrySpecs
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record IssueDto(int Number, string Title);
     private sealed record ApiErrorDto(bool Success, string? Error);
 }

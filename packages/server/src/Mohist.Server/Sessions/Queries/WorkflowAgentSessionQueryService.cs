@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Sessions.Queries;
 
@@ -56,6 +58,7 @@ public class WorkflowAgentSessionQueryService
         if (!string.IsNullOrWhiteSpace(status) && AgentSessionStatusNames.TryParse(status, out var s))
             query = query.Where(x => x.Status == AgentSessionStatusNames.ToName(s));
         var rows = await query.OrderByDescending(s => s.CreatedAt).Take(limit).ToListAsync(ct);
+        rows = await ReconcileActiveSessionsAsync(db, rows, ct);
         var issueTitles = await LoadIssueTitlesAsync(db, projectId, rows.Select(r => r.IssueNumber), ct);
         return rows.Select(s => new WorkflowAgentSessionInfoDto(
             s.IssueNumber,
@@ -163,6 +166,7 @@ public class WorkflowAgentSessionQueryService
             .OrderByDescending(s => s.CreatedAt)
             .Take(take)
             .ToListAsync(ct);
+        sessions = await ReconcileActiveSessionsAsync(db, sessions, ct);
 
         var sessionIds = sessions.Select(s => s.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
@@ -331,4 +335,57 @@ public class WorkflowAgentSessionQueryService
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId,
         e.SessionName, e.AgentSessionId, e.WorkId, e.WorkType, e.Stage,
         e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"));
+
+    private static async Task<List<WorkflowAgentSessionRow>> ReconcileActiveSessionsAsync(
+        MohistDbContext db,
+        List<WorkflowAgentSessionRow> sessions,
+        CancellationToken ct)
+    {
+        if (sessions.Count == 0) return sessions;
+
+        var activeRows = sessions
+            .Where(IsActiveSession)
+            .ToList();
+        if (activeRows.Count == 0) return sessions;
+
+        var workflowIds = activeRows
+            .Select(s => s.WorkflowRunId)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var leases = await LoadLeasesAsync(db, workflowIds, ct);
+        if (leases.Count == 0) return sessions;
+
+        var allowedSessionIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var activeSession in activeRows)
+        {
+            if (!leases.TryGetValue(activeSession.WorkflowRunId, out var lease) || lease is null)
+            {
+                allowedSessionIds.Add(activeSession.Id);
+                continue;
+            }
+
+            if (MatchesLease(activeSession, lease))
+                allowedSessionIds.Add(activeSession.Id);
+        }
+
+        return sessions
+            .Where(s => !IsActiveSession(s) || allowedSessionIds.Contains(s.Id))
+            .ToList();
+    }
+
+    private static async Task<Dictionary<string, WorkLease?>> LoadLeasesAsync(MohistDbContext db, string[] workflowIds, CancellationToken ct)
+    {
+        var rows = await db.WorkflowLeases.AsNoTracking()
+            .Where(row => workflowIds.Contains(row.WorkflowRunId))
+            .ToListAsync(ct);
+        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseStore.Deserialize(row.StateJson), StringComparer.Ordinal);
+    }
+
+    private static bool MatchesLease(WorkflowAgentSessionRow session, WorkLease lease) =>
+        string.Equals(session.RunnerId, lease.RunnerId, StringComparison.Ordinal)
+        && string.Equals(session.WorkId, lease.WorkId, StringComparison.Ordinal);
+
+    private static bool IsActiveSession(WorkflowAgentSessionRow session) =>
+        session.CompletedAt is null
+        && session.Status is "created" or "running" or "probing";
 }
