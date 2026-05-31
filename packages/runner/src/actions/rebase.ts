@@ -8,16 +8,26 @@ import { git as defaultGit } from "./git.js"
 const DEFAULT_MAX_CONFLICT_RETRIES = 3
 
 type GitRunner = typeof defaultGit
+type ExistsChecker = typeof exists
 let git: GitRunner = defaultGit
+let pathExists: ExistsChecker = exists
 
 export function setRebaseGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
+}
+
+export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
+  pathExists = checker ?? exists
 }
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
   const maxRetries = numberInput(context.with, "maxConflictRetries") ?? DEFAULT_MAX_CONFLICT_RETRIES
   const conflictResolver = objectInput(context.with, "conflictResolver")
+  const abortResult = await abortRebaseIfInProgress(context)
+  if (!abortResult.success) {
+    return rebaseOutput(false, baseBranch, null, null, [], 0, abortResult.combinedOutput, abortResult.exitCode)
+  }
   const sourceCommit = await commitPendingChanges(context.workDir, `Prepare rebase onto ${baseBranch}`, context.signal)
   if (!sourceCommit.success) {
     return rebaseOutput(false, baseBranch, null, null, [], 0, sourceCommit.combinedOutput, sourceCommit.exitCode)
@@ -186,13 +196,23 @@ async function commitPendingChanges(workDir: string, message: string, signal: Ab
   return await git(workDir, ["commit", "-m", message], signal)
 }
 
+async function abortRebaseIfInProgress(context: ActionContext) {
+  const inProgress = await isRebaseInProgress(context)
+  if (!inProgress) return okGitResult()
+  return await git(context.workDir, ["rebase", "--abort"], context.signal)
+}
+
 async function isRebaseInProgress(context: ActionContext) {
   const merge = await git(context.workDir, ["rev-parse", "--git-path", "rebase-merge"], context.signal)
-  if (merge.success && exists(resolveGitPath(context.workDir, merge.stdout.trim()))) return true
+  if (merge.success && pathExists(resolveGitPath(context.workDir, merge.stdout.trim()))) return true
   const apply = await git(context.workDir, ["rev-parse", "--git-path", "rebase-apply"], context.signal)
-  return apply.success && exists(resolveGitPath(context.workDir, apply.stdout.trim()))
+  return apply.success && pathExists(resolveGitPath(context.workDir, apply.stdout.trim()))
 }
 
 function resolveGitPath(workDir: string, path: string) {
   return path.match(/^[A-Za-z]:[\\/]|^\//) ? path : join(workDir, path)
+}
+
+function okGitResult() {
+  return { success: true, stdout: "", stderr: "", exitCode: 0, combinedOutput: "" }
 }

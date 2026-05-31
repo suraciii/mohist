@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { applyWorkflowAgentDefault, rebaseAction, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
+import { applyWorkflowAgentDefault, rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
-afterEach(() => setRebaseGitRunnerForTest(null))
+afterEach(() => {
+  setRebaseGitRunnerForTest(null)
+  setRebaseExistsCheckerForTest(null)
+})
 
 describe("mohist/rebase", () => {
   it("DirtyWorktreeBeforeRebase_CommitsPendingChangesThenRebases", async () => {
     const calls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
     setRebaseGitRunnerForTest(async (_workDir, args) => {
       calls.push(args.join(" "))
       switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
         case "status --porcelain":
           return ok(" M packages/runner/src/actions/acp-agent.ts\n")
         case "add .":
@@ -29,6 +37,8 @@ describe("mohist/rebase", () => {
 
     expect(result.status).toBe("success")
     expect(calls).toEqual([
+      "rev-parse --git-path rebase-merge",
+      "rev-parse --git-path rebase-apply",
       "status --porcelain",
       "add .",
       "commit -m Prepare rebase onto master",
@@ -43,6 +53,36 @@ describe("mohist/rebase", () => {
     })
   })
 
+  it("StaleRebaseStateBeforeRebase_AbortsBeforeStartingFreshRebase", async () => {
+    const calls: string[] = []
+    setRebaseExistsCheckerForTest((path) => path === "/fake/worktree/.git/rebase-merge")
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "rebase --abort":
+          return ok("aborted")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
+          return ok(calls.filter((call) => call === "rev-parse HEAD").length === 1 ? "before\n" : "after\n")
+        case "rebase master":
+          return ok("Successfully rebased")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await rebaseAction(context())
+
+    expect(result.status).toBe("success")
+    expect(calls).toContain("rebase --abort")
+    expect(calls.indexOf("rebase --abort")).toBeLessThan(calls.indexOf("rebase master"))
+  })
+
   it("ConflictResolverWithoutAgentConfig_InheritsWorkflowAgentConfig", () => {
     const withInput: JsonObject = { description: "resolve" }
 
@@ -54,7 +94,7 @@ describe("mohist/rebase", () => {
   })
 })
 
-function context(): ActionContext {
+function context(variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "rebase.1",
@@ -63,7 +103,7 @@ function context(): ActionContext {
     title: "Rebase onto master",
     uses: "mohist/rebase",
     with: { baseBranch: "master" },
-    variables: {},
+    variables,
     workDir: "/fake/worktree",
     signal: new AbortController().signal,
   }
