@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { AgentSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, Stream } from "@agentclientprotocol/sdk"
-import { acpAgentAction, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
+import { acpAgentAction, buildPromptWithMohistContext, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 
 afterEach(() => setAcpProcessFactoryForTest(null))
@@ -31,6 +31,24 @@ describe("mohist/acp-agent", () => {
     expect(prompt).toContain("Implement this task: Build task")
     expect(prompt).toContain("Requeue runnable workflows on server startup.")
     expect(prompt).toContain("runner can claim recovered work")
+  })
+
+  it("IssueVariablesPresent_ActionPrependsIssueContextToPrompt", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "create the proposal" }))
+
+    expect(result.status).toBe("success")
+    const prompt = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(prompt).toContain("## Mohist Issue Context")
+    expect(prompt).toContain("Number: 7")
+    expect(prompt).toContain("Title: Document update smoke validation note")
+    expect(prompt).toContain("Body:\nAdd a short note that records the expected local post-update smoke validation path.")
+    expect(prompt).toContain("## Task Prompt\n\ncreate the proposal")
+  })
+
+  it("IssueVariablesMissing_PromptContextBuilderLeavesPromptUnchanged", () => {
+    expect(buildPromptWithMohistContext({ variables: {}, issueNumber: null }, "plain prompt")).toBe("plain prompt")
   })
 
   it("ModelConfigured_AcpSessionStarts_SetsSessionConfigModelBeforePrompt", async () => {
@@ -113,7 +131,14 @@ function createFixture(scenario: Scenario) {
         title: "Build task",
         uses: "mohist/acp-agent",
         with: withInput as never,
-        variables: { project: { path: "D:/fake/work" } } as never,
+        variables: {
+          project: { path: "D:/fake/work" },
+          issue: {
+            number: 7,
+            title: "Document update smoke validation note",
+            body: "Add a short note that records the expected local post-update smoke validation path.",
+          },
+        } as never,
         workDir: "D:/fake/work",
         signal,
         projectId: "project-1",
