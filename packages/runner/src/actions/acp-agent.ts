@@ -32,6 +32,7 @@ function getAcpProcessFactory() {
 }
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
+const DEFAULT_SESSION_START_TIMEOUT_MS = 30 * 1000
 const DEFAULT_LIVENESS_QUIET_THRESHOLD_MS = 5 * 60 * 1000
 const DEFAULT_PROBE_TIMEOUT_MS = 30 * 1000
 const MAX_AGENT_TEXT_LENGTH = 2 * 1024 * 1024
@@ -117,6 +118,7 @@ function createAcpSessionUpdateHandler(options: {
 interface AgentConfig {
   model?: string
   timeoutMs?: number
+  sessionStartTimeoutMs?: number
   livenessQuietThresholdMs?: number
   probeTimeoutMs?: number
 }
@@ -286,6 +288,7 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
     return {
       model: stringInput(agent as JsonObject, "model") ?? undefined,
       timeoutMs: numberInput(agent as JsonObject, "timeout") ?? undefined,
+      sessionStartTimeoutMs: numberInput(agent as JsonObject, "sessionStartTimeout") ?? undefined,
       livenessQuietThresholdMs: numberInput(agent as JsonObject, "livenessQuietThresholdMs") ?? undefined,
       probeTimeoutMs: numberInput(agent as JsonObject, "probeTimeoutMs") ?? undefined,
     }
@@ -293,6 +296,7 @@ function resolveAgentConfig(with_?: JsonObject | null): AgentConfig | undefined 
   return {
     model: stringInput(with_, "model") ?? undefined,
     timeoutMs: numberInput(with_, "timeout") ?? undefined,
+    sessionStartTimeoutMs: numberInput(with_, "sessionStartTimeout") ?? undefined,
     livenessQuietThresholdMs: numberInput(with_, "livenessQuietThresholdMs") ?? undefined,
     probeTimeoutMs: numberInput(with_, "probeTimeoutMs") ?? undefined,
   }
@@ -331,6 +335,16 @@ async function runAcpWorkflowAgentSession(context: ActionContext, prompt: string
   const sessionName = sessionNameFromContext(context)
   const manager = context.acpSessionManager
   const projectId = context.projectId
+
+  if (sessionName && context.serverConnection && projectId) {
+    await context.serverConnection.ensureWorkflowAgentSession(projectId, context.workflowRunId, sessionName, {
+      workId: context.workId,
+      workType: context.workType,
+      stage: context.stage,
+      title: context.title,
+      issueNumber: context.issueNumber,
+    }, context.signal)
+  }
 
   if (sessionName && manager && context.serverConnection && projectId) {
     const key = manager.key(context.workflowRunId, sessionName)
@@ -428,6 +442,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   const connection = acp.connection
   const agentConfig = resolveAgentConfig(context.with)
   const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
+  const sessionStartTimeoutMs = agentConfig?.sessionStartTimeoutMs ?? numberInput(context.with, "sessionStartTimeout") ?? DEFAULT_SESSION_START_TIMEOUT_MS
   let agentText = ""
   let agentTextTruncated = false
   const liveness = createSessionLivenessState()
@@ -464,7 +479,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   try {
     const resumeResult = await Promise.race([
       connection.resumeSession({ sessionId: acpSessionId, cwd: workDir, mcpServers: [] }),
-      timeout(timeoutMs),
+      timeout(sessionStartTimeoutMs),
     ])
     if (resumeResult === "timeout") throw new Error("Timed out during ACP resumeSession")
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "resume_session" }))
@@ -512,6 +527,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   const connection = acp.connection
   const agentConfig = resolveAgentConfig(context.with)
   const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
+  const sessionStartTimeoutMs = agentConfig?.sessionStartTimeoutMs ?? numberInput(context.with, "sessionStartTimeout") ?? DEFAULT_SESSION_START_TIMEOUT_MS
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
@@ -549,7 +565,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   try {
     const session = await Promise.race([
       connection.newSession({ cwd: context.workDir, mcpServers: [] }),
-      timeout(timeoutMs),
+      timeout(sessionStartTimeoutMs),
     ])
     if (session === "timeout") throw new Error("Timed out during ACP newSession")
     sessionId = session.sessionId

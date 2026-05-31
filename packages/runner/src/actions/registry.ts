@@ -84,9 +84,23 @@ async function markerAction(context: ActionContext): Promise<ActionResult> {
   const expect = stringInput(context.with, "expect") ?? stringInput(context.with, "contains")
   if (!path || !expect) return { status: "failure", message: "Marker check requires 'path' and 'expect'" }
   if (!exists(path)) return { status: "failure", message: `Marker file missing: ${path}` }
-  const found = (await readText(path)).includes(expect)
+  const content = await readText(path)
+  const found = matchesMarker(content, expect)
   const output = JSON.stringify({ kind: "marker", path, marker: expect, found })
   return found ? { status: "success", message: `Marker found in ${path}`, output } : { status: "failure", message: `Marker missing in ${path}`, output }
+}
+
+function matchesMarker(content: string, expect: string) {
+  if (isPromiseVerdict(expect)) {
+    const verdicts = [...content.matchAll(/<promise>\s*(PASS|FAIL)\s*<\/promise>/g)].map((match) => `<promise>${match[1]}</promise>`)
+    return verdicts.length === 1 && verdicts[0] === expect
+  }
+
+  return content.includes(expect)
+}
+
+function isPromiseVerdict(value: string) {
+  return /^<promise>\s*(PASS|FAIL)\s*<\/promise>$/.test(value)
 }
 
 async function mergeReadyAction(context: ActionContext): Promise<ActionResult> {

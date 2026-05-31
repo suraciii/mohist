@@ -97,6 +97,7 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
   const initResult = await Promise.race([
     connection.initialize({ protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "mohist-runner", version: "0.1.0" } }),
     spawnFailure,
+    timeout(30_000, "Timed out during shared ACP initialize"),
   ])
   initialized = true
 
@@ -124,6 +125,14 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
           try { proc.kill("SIGKILL") } catch {}
         }, 5_000).unref?.()
       }
+      await exitFailure.catch(() => {})
     },
   }
+}
+
+function timeout(ms: number, message: string): Promise<never> {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    timer.unref?.()
+  })
 }
