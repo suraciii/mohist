@@ -48,12 +48,12 @@ internal static class ProjectCommands
     private static Command BuildShow(MohistCliApi api)
     {
         var cmd = new Command("show", "Show project details");
-        var nameArg = new Argument<string>("name") { Description = "Project name" };
-        cmd.Arguments.Add(nameArg);
+        var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
+        cmd.Arguments.Add(identifierArg);
         cmd.SetAction(ctx =>
         {
-            var name = ctx.GetValue(nameArg);
-            return api.PrintGetAsync($"/api/projects/{MohistCliCommands.Escape(name!)}");
+            var identifier = ctx.GetValue(identifierArg);
+            return api.PrintGetAsync($"/api/projects/{MohistCliCommands.Escape(identifier!)}");
         });
         return cmd;
     }
@@ -61,12 +61,12 @@ internal static class ProjectCommands
     private static Command BuildUse(MohistCliApi api)
     {
         var cmd = new Command("use", "Set active project");
-        var nameArg = new Argument<string>("name") { Description = "Project name" };
-        cmd.Arguments.Add(nameArg);
+        var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
+        cmd.Arguments.Add(identifierArg);
         cmd.SetAction(ctx =>
         {
-            var name = ctx.GetValue(nameArg);
-            return api.PrintPostAsync($"/api/projects/{MohistCliCommands.Escape(name!)}/use", new { });
+            var identifier = ctx.GetValue(identifierArg);
+            return api.UseProjectAsync(identifier!);
         });
         return cmd;
     }
@@ -76,12 +76,12 @@ internal static class ProjectCommands
         var cmd = new Command("delete", "Delete a project");
         cmd.Aliases.Add("remove");
         cmd.Aliases.Add("rm");
-        var nameArg = new Argument<string>("name") { Description = "Project name" };
-        cmd.Arguments.Add(nameArg);
+        var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
+        cmd.Arguments.Add(identifierArg);
         cmd.SetAction(ctx =>
         {
-            var name = ctx.GetValue(nameArg);
-            return api.PrintDeleteAsync($"/api/projects/{MohistCliCommands.Escape(name!)}");
+            var identifier = ctx.GetValue(identifierArg);
+            return api.PrintDeleteAsync($"/api/projects/{MohistCliCommands.Escape(identifier!)}");
         });
         return cmd;
     }

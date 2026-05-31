@@ -624,6 +624,29 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       expect(summary).toBeNull()
     })
 
+    it('does not render an integrating badge on completed issue cards', () => {
+      const doneIntegratedIssue = makeIssue({
+        number: 43,
+        title: 'Completed integrated issue',
+        status: IssueStatus.Done,
+        health: IssueHealth.Done,
+        workflowStage: WorkflowStage.Integrate,
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[doneIntegratedIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getAllByText('Completed integrated issue').length).toBeGreaterThan(0)
+      expect(screen.queryByTestId('integration-badge')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Integrating/i)).not.toBeInTheDocument()
+    })
+
     it('renders generic blocked overlay for blocked done issue', () => {
       const doneUnmergedIssue = makeIssue({
         number: 44,

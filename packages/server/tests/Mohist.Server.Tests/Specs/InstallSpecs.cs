@@ -59,8 +59,10 @@ public class InstallSpecs
         Assert.Equal(0, exitCode);
         var unitContent = files.Read("/units/mohist-runner.service");
         Assert.Contains("Description=Mohist Runner", unitContent);
-        Assert.Contains("ExecStart=npm run start -w packages/runner", unitContent);
+        Assert.Contains("ExecStart=node packages/runner/dist/cli.js", unitContent);
         Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", unitContent);
+        Assert.Contains("Environment=\"PATH=", unitContent);
+        Assert.Contains("/.opencode/bin", unitContent);
         Assert.Contains("Environment=\"RUNNER_ROOT=/runner\"", unitContent);
     }
 
@@ -123,6 +125,8 @@ public class InstallSpecs
             _files[Path.GetFullPath(path)] = contents;
             return Task.CompletedTask;
         }
+
+        public Task<string> ReadAllTextAsync(string path) => Task.FromResult(Read(path));
 
         public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
 

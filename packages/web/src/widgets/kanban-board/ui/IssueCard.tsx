@@ -21,7 +21,7 @@ interface Props {
 type BadgeType = 'conflict' | 'attention' | 'approval' | 'running' | 'waiting' | 'drift' | null
 
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
-  if (issue.workflowStage === WorkflowStage.Integrate) {
+  if (issue.workflowStage === WorkflowStage.Integrate && issue.status !== IssueStatus.Done) {
     if (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) {
       return 'attention'
     }
@@ -97,7 +97,7 @@ function StatusBadge({
 
 function IntegrationBadge({ blockedReason }: { blockedReason?: string | null }) {
   return (
-    <Badge variant="secondary" className="text-xs text-blue-600 bg-blue-50">
+    <Badge variant="secondary" className="text-xs text-blue-600 bg-blue-50" data-testid="integration-badge">
       <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse mr-1" />
       {blockedReason ? 'Integration Failed' : 'Integrating'}
     </Badge>
@@ -183,7 +183,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             )}
           </div>
           <div className="flex items-center gap-1">
-            {issue.workflowStage === WorkflowStage.Integrate && (
+            {issue.workflowStage === WorkflowStage.Integrate && issue.status !== IssueStatus.Done && (
               <IntegrationBadge blockedReason={issue.blockedReason} />
             )}
             {badge && badge !== 'attention' && badge !== 'running' && (

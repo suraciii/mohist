@@ -375,6 +375,8 @@ public class UpdateSpecs
             return Task.CompletedTask;
         }
 
+        public Task<string> ReadAllTextAsync(string path) => Task.FromResult(Read(path));
+
         public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
 
         public void Delete(string path) => _files.Remove(Path.GetFullPath(path));

@@ -56,6 +56,8 @@ internal static class MohistCliCommands
         var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor);
         var services = new ServiceCollection();
         services.AddSingleton(api);
+        services.AddSingleton(output);
+        services.AddSingleton(error);
         services.AddSingleton(fileSystem);
         services.AddSingleton(commandExecutor);
         services.AddSingleton<SystemdServiceInstaller>();

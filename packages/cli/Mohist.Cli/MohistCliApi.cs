@@ -58,6 +58,87 @@ internal sealed class MohistCliApi
         return await PrintResponseAsync(await _http.SendAsync(request));
     }
 
+    public async Task<JsonNode?> GetDataAsync(string path)
+    {
+        using var response = await _http.GetAsync(path);
+        return await ReadSuccessDataAsync(response);
+    }
+
+    public async Task<JsonNode?> PostDataAsync(string path, object body)
+    {
+        using var response = await _http.PostAsJsonAsync(path, body, JsonOptions);
+        return await ReadSuccessDataAsync(response);
+    }
+
+    public async Task<int> UseProjectAsync(string identifier)
+    {
+        try
+        {
+            var data = await PostDataAsync($"/api/projects/{Uri.EscapeDataString(identifier)}/use", new { });
+            var id = data?["id"]?.GetValue<string>();
+            var name = data?["name"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                _err.WriteLine("Project response did not include an id");
+                return 1;
+            }
+
+            var state = new JsonObject
+            {
+                ["activeProjectId"] = id,
+            };
+            await _fileSystem.WriteAllTextAsync(ProjectStatePath, state.ToJsonString(JsonOptions));
+            _out.WriteLine($"Active project: {name ?? id} ({id})");
+            return 0;
+        }
+        catch (ApiResponseException ex)
+        {
+            _err.WriteLine(ex.Code is null ? ex.Message : $"{ex.Message} ({ex.Code})");
+            return ex.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+        }
+    }
+
+    public async Task<string?> ResolveProjectIdAsync(string? explicitProjectId)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitProjectId))
+            return explicitProjectId;
+
+        if (!_fileSystem.Exists(ProjectStatePath))
+            return null;
+
+        try
+        {
+            var json = await _fileSystem.ReadAllTextAsync(ProjectStatePath);
+            var state = JsonNode.Parse(json);
+            return state?["activeProjectId"]?.GetValue<string>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string ProjectStatePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".mohist",
+        "cli-state.json");
+
+    private async Task<JsonNode?> ReadSuccessDataAsync(HttpResponseMessage response)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream);
+        if (node is null)
+            throw new ApiResponseException(response.StatusCode, response.ReasonPhrase ?? "Request failed");
+
+        var success = node["success"]?.GetValue<bool>() ?? response.IsSuccessStatusCode;
+        if (success)
+            return node["data"];
+
+        var error = node["error"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Request failed";
+        var code = node["code"]?.GetValue<string>();
+        throw new ApiResponseException(response.StatusCode, error, code);
+    }
+
     private async Task<int> PrintResponseAsync(HttpResponseMessage response)
     {
         await using var stream = await response.Content.ReadAsStreamAsync();
@@ -80,5 +161,17 @@ internal sealed class MohistCliApi
         var code = node["code"]?.GetValue<string>();
         _err.WriteLine(code is null ? error : $"{error} ({code})");
         return response.StatusCode == HttpStatusCode.NotFound ? 4 : 1;
+    }
+
+    private sealed class ApiResponseException : Exception
+    {
+        public ApiResponseException(HttpStatusCode statusCode, string message, string? code = null) : base(message)
+        {
+            StatusCode = statusCode;
+            Code = code;
+        }
+
+        public HttpStatusCode StatusCode { get; }
+        public string? Code { get; }
     }
 }

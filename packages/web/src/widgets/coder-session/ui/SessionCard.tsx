@@ -30,6 +30,7 @@ const STAGE_COLORS: Record<string, string> = {
   plan: 'bg-blue-100 text-blue-700',
   review: 'bg-teal-100 text-teal-700',
   check: 'bg-orange-100 text-orange-700',
+  integrate: 'bg-slate-100 text-slate-700',
 }
 
 interface ActiveSessionCardProps {
@@ -206,6 +207,8 @@ interface RecentCardProps {
 
 export function RecentCard({ card }: RecentCardProps) {
   const isFailed = card.status === 'failed'
+  const stageColor = STAGE_COLORS[card.issueStage.toLowerCase()] ?? 'bg-gray-100 text-gray-700'
+  const workTitle = card.title ?? card.taskDescription ?? card.currentWorkTitle
 
   return (
     <Link
@@ -219,6 +222,9 @@ export function RecentCard({ card }: RecentCardProps) {
               {isFailed ? '\u2717' : '\u2713'}
             </span>
             <span className="text-xs font-mono text-gray-400">#{card.issueNumber}</span>
+            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${stageColor}`}>
+              {card.issueStage}
+            </span>
           </div>
           {card.completedAt && (
             <span className="text-[10px] text-gray-400">
@@ -239,6 +245,21 @@ export function RecentCard({ card }: RecentCardProps) {
         >
           {card.issueTitle}
         </h3>
+
+        {workTitle && (
+          <p
+            className="mt-1 text-xs text-gray-500"
+            style={{
+              display: '-webkit-box',
+              WebkitLineClamp: 1,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+            title={workTitle}
+          >
+            {workTitle}
+          </p>
+        )}
 
         {isFailed && (
           <span className="inline-flex items-center mt-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-red-100 text-red-700">

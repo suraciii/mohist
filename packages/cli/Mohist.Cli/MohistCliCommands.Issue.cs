@@ -61,14 +61,20 @@ internal static class IssueCommands
             var priority = ctx.GetValue(priorityOpt);
             var all = ctx.GetValue(allOpt);
             var archived = ctx.GetValue(archivedOpt);
-            var query = MohistCliCommands.Query(
-                ProjectId: projectId,
-                Stage: stage,
-                Label: labels is { Length: > 0 } ? string.Join(",", labels) : null,
-                Priority: priority,
-                Archived: archived ? true : null,
-                All: all ? true : null);
-            return api.PrintGetAsync("/api/issues" + query);
+            return ListAsync();
+
+            async Task<int> ListAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var query = MohistCliCommands.Query(
+                    ProjectId: resolvedProjectId,
+                    Stage: stage,
+                    Label: labels is { Length: > 0 } ? string.Join(",", labels) : null,
+                    Priority: priority,
+                    Archived: archived ? true : null,
+                    All: all ? true : null);
+                return await api.PrintGetAsync("/api/issues" + query);
+            }
         });
         return cmd;
     }
@@ -99,16 +105,22 @@ internal static class IssueCommands
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
             var workflowProfile = ctx.GetValue(workflowProfileOpt);
-            return api.PrintPostAsync("/api/issues", new
+            return CreateAsync();
+
+            async Task<int> CreateAsync()
             {
-                title,
-                body = body ?? "",
-                labels = labels ?? [],
-                priority = priority ?? "p2",
-                projectId,
-                model,
-                workflowProfileId = workflowProfile,
-            });
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintPostAsync("/api/issues", new
+                {
+                    title,
+                    body = body ?? "",
+                    labels = labels ?? [],
+                    priority = priority ?? "p2",
+                    projectId = resolvedProjectId,
+                    model,
+                    workflowProfileId = workflowProfile,
+                });
+            }
         });
         return cmd;
     }
@@ -124,7 +136,13 @@ internal static class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintGetAsync($"/api/issues/{MohistCliCommands.Escape(number!)}{MohistCliCommands.ProjectQuery(projectId)}");
+            return GetAsync();
+
+            async Task<int> GetAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintGetAsync($"/api/issues/{MohistCliCommands.Escape(number!)}{MohistCliCommands.ProjectQuery(resolvedProjectId)}");
+            }
         });
         return cmd;
     }
@@ -155,15 +173,21 @@ internal static class IssueCommands
             var priority = ctx.GetValue(priorityOpt);
             var projectId = ctx.GetValue(projectIdOpt);
             var model = ctx.GetValue(modelOpt);
-            var query = MohistCliCommands.ProjectQuery(projectId);
-            return api.PrintPatchAsync($"/api/issues/{MohistCliCommands.Escape(number!)}{query}", new
+            return UpdateAsync();
+
+            async Task<int> UpdateAsync()
             {
-                title,
-                body,
-                labels,
-                priority,
-                model,
-            });
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                var query = MohistCliCommands.ProjectQuery(resolvedProjectId);
+                return await api.PrintPatchAsync($"/api/issues/{MohistCliCommands.Escape(number!)}{query}", new
+                {
+                    title,
+                    body,
+                    labels,
+                    priority,
+                    model,
+                });
+            }
         });
         return cmd;
     }
@@ -179,9 +203,15 @@ internal static class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintPostAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/{name}{MohistCliCommands.ProjectQuery(projectId)}",
-                new { });
+            return ActAsync();
+
+            async Task<int> ActAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintPostAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/{name}{MohistCliCommands.ProjectQuery(resolvedProjectId)}",
+                    new { });
+            }
         });
         return cmd;
     }
@@ -200,9 +230,15 @@ internal static class IssueCommands
             var number = ctx.GetValue(numberArg);
             var reason = ctx.GetValue(reasonOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintPostAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/reject{MohistCliCommands.ProjectQuery(projectId)}",
-                new { reason });
+            return RejectAsync();
+
+            async Task<int> RejectAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintPostAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/reject{MohistCliCommands.ProjectQuery(resolvedProjectId)}",
+                    new { reason });
+            }
         });
         return cmd;
     }
@@ -221,9 +257,15 @@ internal static class IssueCommands
             var number = ctx.GetValue(numberArg);
             var baseBranch = ctx.GetValue(baseBranchOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintPostAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/rebase{MohistCliCommands.ProjectQuery(projectId)}",
-                new { baseBranch });
+            return RebaseAsync();
+
+            async Task<int> RebaseAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintPostAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/rebase{MohistCliCommands.ProjectQuery(resolvedProjectId)}",
+                    new { baseBranch });
+            }
         });
         return cmd;
     }
@@ -246,12 +288,18 @@ internal static class IssueCommands
         {
             var allCompleted = ctx.GetValue(allCompletedOpt);
             var projectId = ctx.GetValue(projectIdOpt);
-            if (allCompleted)
-                return api.PrintPostAsync("/api/issues/archive-completed" + MohistCliCommands.ProjectQuery(projectId), new { });
             var number = ctx.GetValue(numberArg);
-            return api.PrintPostAsync(
-                $"/api/issues/{Uri.EscapeDataString(number!)}/archive{MohistCliCommands.ProjectQuery(projectId)}",
-                new { });
+            return ArchiveAsync();
+
+            async Task<int> ArchiveAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                if (allCompleted)
+                    return await api.PrintPostAsync("/api/issues/archive-completed" + MohistCliCommands.ProjectQuery(resolvedProjectId), new { });
+                return await api.PrintPostAsync(
+                    $"/api/issues/{Uri.EscapeDataString(number!)}/archive{MohistCliCommands.ProjectQuery(resolvedProjectId)}",
+                    new { });
+            }
         });
         return cmd;
     }
@@ -267,8 +315,14 @@ internal static class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintGetAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/{name}{MohistCliCommands.ProjectQuery(projectId)}");
+            return GetAsync();
+
+            async Task<int> GetAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintGetAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/{name}{MohistCliCommands.ProjectQuery(resolvedProjectId)}");
+            }
         });
         return cmd;
     }
@@ -285,8 +339,14 @@ internal static class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintGetAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/coder-sessions{MohistCliCommands.ProjectQuery(projectId)}");
+            return SessionsAsync();
+
+            async Task<int> SessionsAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintGetAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/coder-sessions{MohistCliCommands.ProjectQuery(resolvedProjectId)}");
+            }
         });
         return cmd;
     }
@@ -304,8 +364,14 @@ internal static class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintGetAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/workflow/status{MohistCliCommands.ProjectQuery(projectId)}");
+            return StatusAsync();
+
+            async Task<int> StatusAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintGetAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/workflow/status{MohistCliCommands.ProjectQuery(resolvedProjectId)}");
+            }
         });
 
         var timelineCmd = new Command("timeline", "Show workflow timeline");
@@ -315,8 +381,14 @@ internal static class IssueCommands
         {
             var number = ctx.GetValue(numberArg);
             var projectId = ctx.GetValue(projectIdOpt);
-            return api.PrintGetAsync(
-                $"/api/issues/{MohistCliCommands.Escape(number!)}/workflow/timeline{MohistCliCommands.ProjectQuery(projectId)}");
+            return TimelineAsync();
+
+            async Task<int> TimelineAsync()
+            {
+                var resolvedProjectId = await api.ResolveProjectIdAsync(projectId);
+                return await api.PrintGetAsync(
+                    $"/api/issues/{MohistCliCommands.Escape(number!)}/workflow/timeline{MohistCliCommands.ProjectQuery(resolvedProjectId)}");
+            }
         });
 
         workflow.Subcommands.Add(statusCmd);
