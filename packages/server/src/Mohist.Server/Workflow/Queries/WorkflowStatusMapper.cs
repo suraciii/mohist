@@ -40,16 +40,17 @@ public static class WorkflowStatusMapper
             ? new PendingWorkView(lease.WorkId, lease.WorkType, lease.Stage, lease.Title, null)
             : null;
 
-        var failure = run.Failure is not null
+        var effectiveFailure = run.Failure ?? CurrentStageFailure(run);
+        var failure = effectiveFailure is not null
             ? new FailureStatusView(
-                run.Failure.Reason.ToString(),
-                run.Failure.Stage,
-                run.Failure.TaskId,
-                run.Failure.CheckName,
-                run.Failure.Message)
+                effectiveFailure.Reason.ToString(),
+                effectiveFailure.Stage,
+                effectiveFailure.TaskId,
+                effectiveFailure.CheckName,
+                effectiveFailure.Message)
             : null;
 
-        var actions = BuildAvailableActions(run);
+        var actions = BuildAvailableActions(run, effectiveFailure);
 
         return new WorkflowStatusView(
             run.Id,
@@ -86,7 +87,7 @@ public static class WorkflowStatusMapper
             .ToList();
     }
 
-    public static List<AvailableActionView> BuildAvailableActions(WorkflowRun run)
+    public static List<AvailableActionView> BuildAvailableActions(WorkflowRun run, FailureDetails? failureOverride = null)
     {
         var actions = new List<AvailableActionView>();
 
@@ -96,9 +97,9 @@ public static class WorkflowStatusMapper
             actions.Add(new AvailableActionView("reject", "Reject", null));
         }
 
-        if (run.Status == WorkflowRunStatus.Failed && run.Failure is not null)
+        var failure = failureOverride ?? run.Failure;
+        if (run.Status == WorkflowRunStatus.Failed && failure is not null)
         {
-            var failure = run.Failure;
             if (failure.Reason is FailureReason.TaskFailed && failure.TaskId is not null)
             {
                 actions.Add(new AvailableActionView("retry", "Retry failed task", failure.TaskId));
@@ -113,4 +114,7 @@ public static class WorkflowStatusMapper
 
         return actions;
     }
+
+    private static FailureDetails? CurrentStageFailure(WorkflowRun run)
+        => run.Stages.FirstOrDefault(s => s.Id == run.CurrentStageId)?.Failure;
 }
