@@ -89,6 +89,8 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
 
             if (run.StartedAt is null) return false;
 
+            if (run.Status == WorkflowRunStatus.Paused) return false;
+
             if (IsTerminal(run)) return true;
 
             if (run.CurrentStageId is null) return false;
