@@ -210,8 +210,8 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
+      notifyData()
       if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-        notifyData()
         if (!agentTextTruncated) {
           agentText += String(update.content.text)
           if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
@@ -276,8 +276,8 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
+      notifyData()
       if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-        notifyData()
         if (!agentTextTruncated) {
           agentText += String(update.content.text)
           if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
@@ -362,8 +362,8 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
+      notifyData()
       if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
-        notifyData()
         if (!agentTextTruncated) {
           agentText += String(update.content.text)
           if (agentText.length > MAX_AGENT_TEXT_LENGTH) {
