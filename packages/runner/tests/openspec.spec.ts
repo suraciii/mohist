@@ -1,9 +1,10 @@
 import { mkdtemp, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { openspecTasksAction } from "../src/actions/openspec.js"
 import type { ActionContext } from "../src/core/types.js"
+import type { ServerConnection } from "../src/server/connection.js"
 
 describe("mohist/openspec-tasks", () => {
   it("OpenSpecTaskWithoutExplicitPrompt_LoadsExecutableAcpTaskWithPrompt", async () => {
@@ -21,17 +22,22 @@ describe("mohist/openspec-tasks", () => {
       ],
     }))
 
-    const result = await openspecTasksAction(context(workDir, { path: tasksPath }))
+    const addTasks = vi.fn()
+    const result = await openspecTasksAction(context(workDir, { path: tasksPath }, addTasks))
     const output = JSON.parse(result.output ?? "{}")
+    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
 
-    expect(result.status).toBe("loaded")
-    expect(output.tasks[0].uses).toBe("mohist/acp-agent")
-    expect(output.tasks[0].with.prompt).toContain("Implement this OpenSpec task: Implement workflow recovery")
-    expect(output.tasks[0].with.prompt).toContain("runner can claim recovered work")
+    expect(result.status).toBe("success")
+    expect(output.loaded).toBe(1)
+    expect(addTasks).toHaveBeenCalledWith("workflow-1", expect.any(Array))
+    expect(loadedTasks[0].uses).toBe("mohist/acp-agent")
+    expect(loadedWith.prompt).toContain("Implement this OpenSpec task: Implement workflow recovery")
+    expect(loadedWith.prompt).toContain("runner can claim recovered work")
   })
 })
 
-function context(workDir: string, withInput: Record<string, unknown>): ActionContext {
+function context(workDir: string, withInput: Record<string, unknown>, addTasks: ServerConnection["addTasks"]): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "load-build",
@@ -43,5 +49,6 @@ function context(workDir: string, withInput: Record<string, unknown>): ActionCon
     variables: {},
     workDir,
     signal: new AbortController().signal,
+    serverConnection: { addTasks } as ServerConnection,
   }
 }
