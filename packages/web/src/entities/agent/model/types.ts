@@ -21,7 +21,7 @@ export interface AgentStatus {
   runnerAvailable?: boolean
   embeddedRunnerEnabled?: boolean
   runnerMessage?: string | null
-  runners?: Array<{ id: string; kind?: string | null }>
+  runners?: Array<{ id: string; kind?: string | null; active?: number; max?: number }>
   capacity: {
     active: number
     max: number

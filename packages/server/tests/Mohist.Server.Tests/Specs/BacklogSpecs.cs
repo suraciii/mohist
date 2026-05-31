@@ -60,11 +60,11 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
     private IGrainFactory Grains => _fixture.Grains;
 
-    private async Task<string> RegisterRunnerAsync()
+    private async Task<string> RegisterRunnerAsync(int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project"));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project", MaxWorkflowSlots: maxWorkflowSlots));
         return runnerId;
     }
 

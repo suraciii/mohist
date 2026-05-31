@@ -34,7 +34,7 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 2 });
 
             var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
 
@@ -43,8 +43,10 @@ public class RuntimeEntrySpecs
             Assert.False(status.EmbeddedRunnerEnabled);
             Assert.Null(status.RunnerMessage);
             Assert.Equal(0, status.Capacity.Active);
-            Assert.True(status.Capacity.Max > 0);
-            Assert.Contains(status.Runners, r => r.Id == "runtime-test-runner");
+            Assert.True(status.Capacity.Max >= 2);
+            var runner = Assert.Single(status.Runners, r => r.Id == "runtime-test-runner");
+            Assert.Equal(0, runner.Active);
+            Assert.Equal(2, runner.Max);
         }
         finally
         {
@@ -78,11 +80,13 @@ public class RuntimeEntrySpecs
     [Fact]
     public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
-        var status = AgentStatusResponse.Create([], [], 3);
+        var status = AgentStatusResponse.Create([], []);
 
         Assert.False(status.Running);
         Assert.False(status.RunnerAvailable);
         Assert.False(status.EmbeddedRunnerEnabled);
+        Assert.Equal(0, status.Capacity.Active);
+        Assert.Equal(0, status.Capacity.Max);
         Assert.Equal("No runner is connected. Start the Mohist runner process.", status.RunnerMessage);
     }
 
@@ -108,7 +112,7 @@ public class RuntimeEntrySpecs
 
     private sealed record AgentStatusDto(bool Running, bool RunnerAvailable, bool EmbeddedRunnerEnabled, string? RunnerMessage, RunnerDto[] Runners, AgentCapacityDto Capacity);
     private sealed record AgentCapacityDto(int Active, int Max);
-    private sealed record RunnerDto(string Id, string? Kind = null);
+    private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record ApiErrorDto(bool Success, string? Error);
 }

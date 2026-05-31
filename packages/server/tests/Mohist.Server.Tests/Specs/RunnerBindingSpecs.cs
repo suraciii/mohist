@@ -9,7 +9,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     public RunnerBindingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
     [Fact]
-    public async Task OneRunner_TwoWorkflows_BothGetWork()
+    public async Task CapacityOneRunner_WithInFlightWork_DoesNotGetSecondWorkflow()
     {
         var runnerId = await RegisterRunnerAsync("shared-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -29,8 +29,34 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("wf-1", work1.WorkflowRunId);
 
         var work2 = await runner.PollAsync();
+        Assert.Null(work2);
+    }
+
+    [Fact]
+    public async Task CapacityTwoRunner_TwoWorkflows_BothGetInFlightWork()
+    {
+        var runnerId = await RegisterRunnerAsync("shared-runner-capacity-2", maxWorkflowSlots: 2);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        _workflowId = "wf-capacity-1";
+        var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-1");
+        await runner.AssignWorkflowAsync("wf-capacity-1");
+        await wf1.StartAsync(SingleStage(checks: []), TestInput());
+
+        _workflowId = "wf-capacity-2";
+        var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-2");
+        await runner.AssignWorkflowAsync("wf-capacity-2");
+        await wf2.StartAsync(SingleStage(checks: []), TestInput());
+
+        var work1 = await runner.PollAsync();
+        Assert.NotNull(work1);
+        Assert.Equal("wf-capacity-1", work1.WorkflowRunId);
+
+        var work2 = await runner.PollAsync();
         Assert.NotNull(work2);
-        Assert.Equal("wf-2", work2.WorkflowRunId);
+        Assert.Equal("wf-capacity-2", work2.WorkflowRunId);
+
+        Assert.Null(await runner.PollAsync());
     }
 
     [Fact]
