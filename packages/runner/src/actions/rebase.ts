@@ -3,9 +3,16 @@ import { exists } from "../system/process.js"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { numberInput, objectInput, stringInput } from "../core/json.js"
 import { acpAgentAction } from "./acp-agent.js"
-import { git } from "./git.js"
+import { git as defaultGit } from "./git.js"
 
 const DEFAULT_MAX_CONFLICT_RETRIES = 3
+
+type GitRunner = typeof defaultGit
+let git: GitRunner = defaultGit
+
+export function setRebaseGitRunnerForTest(runner: GitRunner | null) {
+  git = runner ?? defaultGit
+}
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
   const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
@@ -101,7 +108,7 @@ async function runConflictResolver(
     prompt: buildConflictPrompt(conflicts, baseBranch, attempt),
     ...objectInput(conflictResolver, "with"),
   }
-  applyWorkflowAgentDefaultForTest(resolverWith, context.variables)
+  applyWorkflowAgentDefault(resolverWith, context.variables)
 
   const resolverContext: ActionContext = {
     ...context,
@@ -114,7 +121,7 @@ async function runConflictResolver(
   return acpAgentAction(resolverContext)
 }
 
-export function applyWorkflowAgentDefaultForTest(with_: JsonObject, variables: JsonObject) {
+export function applyWorkflowAgentDefault(with_: JsonObject, variables: JsonObject) {
   if (objectInput(with_, "agent")) return
 
   const vars = objectInput(variables, "vars")
