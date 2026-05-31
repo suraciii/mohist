@@ -25,11 +25,11 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
         await r2.AssignWorkflowAsync(_workflowId!);
 
-        var (redispatched, rr2) = await PollWorkAnyAsync();
+        var (redispatched, rr2) = await PollWorkAsync(r2Id);
         Assert.Equal("task", redispatched.WorkType);
         await ReportAsync(rr2, redispatched.WorkId, "completed");
 
-        var (checks, rr3) = await PollWorkAnyAsync();
+        var (checks, rr3) = await PollWorkAsync(r2Id);
         await ReportChecksPassAsync(rr3, checks, "check-1");
 
         var finalStatus = await workflow.GetRunStatusAsync();
@@ -55,7 +55,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
         await r2.AssignWorkflowAsync(_workflowId!);
 
-        var (redispatched, rr2) = await PollWorkAnyAsync();
+        var (redispatched, rr2) = await PollWorkAsync(r2Id);
         Assert.Equal("checks", redispatched.WorkType);
         await ReportChecksPassAsync(rr2, redispatched, "check-1");
 

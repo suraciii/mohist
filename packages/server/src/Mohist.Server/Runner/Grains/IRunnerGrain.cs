@@ -14,13 +14,22 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task ReleaseAsync(string? workflowRunId = null);
 }
 
+public static class RunnerCapacity
+{
+    public const int DefaultMaxWorkflowSlots = 1;
+
+    public static int Normalize(int? maxWorkflowSlots) =>
+        maxWorkflowSlots is > 0 ? maxWorkflowSlots.Value : DefaultMaxWorkflowSlots;
+}
+
 [GenerateSerializer]
 public record RunnerInfo(
     string RunnerId,
     string[] Capabilities,
     string Hostname,
     string? ProjectId,
-    string[]? CoderModels = null);
+    string[]? CoderModels = null,
+    int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots);
 
 [GenerateSerializer]
 public record WorkDispatch(

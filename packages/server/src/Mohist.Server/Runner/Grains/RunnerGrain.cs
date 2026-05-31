@@ -43,17 +43,17 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task RegisterAsync(RunnerInfo info)
     {
-        _info = info;
+        _info = info with { MaxWorkflowSlots = RunnerCapacity.Normalize(info.MaxWorkflowSlots) };
         _projectId = string.IsNullOrWhiteSpace(info.ProjectId) ? null : info.ProjectId;
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
-        await registry.RegisterAsync(info);
+        await registry.RegisterAsync(_info);
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
             HeartbeatCheckInterval,
             HeartbeatCheckInterval);
-        _log.LogInformation("Runner {Id} registered from {Host} for {Scope}", info.RunnerId, info.Hostname, _projectId ?? "all projects");
+        _log.LogInformation("Runner {Id} registered from {Host} for {Scope} with {Slots} workflow slots", info.RunnerId, info.Hostname, _projectId ?? "all projects", _info.MaxWorkflowSlots);
     }
 
     public async Task UnregisterAsync()
@@ -104,6 +104,9 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         _lastHeartbeat = DateTime.UtcNow;
 
+        if (_workToWorkflow.Count >= MaxWorkflowSlots)
+            return null;
+
         foreach (var wfId in _assignedWorkflows)
         {
             var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
@@ -138,6 +141,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         return null;
     }
+
+    private int MaxWorkflowSlots => RunnerCapacity.Normalize(_info?.MaxWorkflowSlots);
 
     public Task<WorkDispatch?> PeekAsync()
     {

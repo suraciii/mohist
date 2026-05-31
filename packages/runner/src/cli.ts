@@ -11,6 +11,7 @@ await new RunnerHost({
   runnerId: env("RUNNER_ID") ?? env("RunnerId") ?? `runner-${process.env.COMPUTERNAME ?? process.env.HOSTNAME ?? process.pid}`,
   projectId: env("PROJECT_ID") ?? env("ProjectId"),
   runnerRoot: env("RUNNER_ROOT") ?? env("RunnerRoot") ?? defaultRunnerRoot(),
+  maxConcurrentWorkflows: positiveNumberEnv("MAX_CONCURRENT_WORKFLOWS") ?? positiveNumberEnv("MaxConcurrentWorkflows") ?? 1,
   pollIntervalMs: numberEnv("POLL_INTERVAL_MS") ?? 1000,
   heartbeatIntervalMs: numberEnv("HEARTBEAT_INTERVAL_MS") ?? 15_000,
 }).run(controller.signal)
@@ -24,4 +25,9 @@ function numberEnv(name: string) {
   if (!value) return undefined
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function positiveNumberEnv(name: string) {
+  const parsed = numberEnv(name)
+  return parsed !== undefined && parsed > 0 ? Math.floor(parsed) : undefined
 }

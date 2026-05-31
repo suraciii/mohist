@@ -1,4 +1,4 @@
-import type { RunnerOptions, WorkItemResult } from "../core/types.js"
+import type { RunnerOptions } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
 import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { createDefaultRegistry } from "../actions/registry.js"
@@ -15,19 +15,18 @@ export interface ReportResult {
 
 export class RunnerHost {
   private readonly connection: ServerConnection
-  private readonly executor: WorkExecutor
-  private readonly sessionManager = new AcpSessionManager()
   private readonly signalR: RunnerSignalRClient
-  private acpConnection: SharedAcpConnection | null = null
+  private readonly workspace: WorkspaceManager
+  private readonly maxConcurrentWorkflows: number
 
   constructor(private readonly options: RunnerOptions) {
+    this.maxConcurrentWorkflows = Math.max(1, Math.floor(options.maxConcurrentWorkflows))
     this.connection = new ServerConnection(options)
-    const workspace = new WorkspaceManager(options.runnerRoot)
-    this.executor = new WorkExecutor(createDefaultRegistry(), workspace, this.connection, this.sessionManager, null)
+    this.workspace = new WorkspaceManager(options.runnerRoot)
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
-      (issueNumber) => workspace.getExistingWorkDir(issueNumber),
+      (issueNumber) => this.workspace.getExistingWorkDir(issueNumber),
     )
   }
 
@@ -41,15 +40,7 @@ export class RunnerHost {
       }
       const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
       try {
-        while (!signal.aborted) {
-          const work = await this.connection.poll(signal)
-          if (!work) {
-            await delay(this.options.pollIntervalMs, signal)
-            continue
-          }
-          await this.ensureAcpConnection(work, signal)
-          const report = await this.connection.report(work, await this.executor.execute(work, signal), signal)
-        }
+        await this.runWorkerPool(signal)
       } catch (error) {
         if (signal.aborted) break
         console.error(`runner connection lost; reconnecting in ${this.options.pollIntervalMs}ms`, error)
@@ -61,6 +52,43 @@ export class RunnerHost {
     }
   }
 
+  private async runWorkerPool(signal: AbortSignal) {
+    const inFlight = new Map<string, Promise<void>>()
+
+    while (!signal.aborted) {
+      while (!signal.aborted && inFlight.size < this.maxConcurrentWorkflows) {
+        const work = await this.connection.poll(signal)
+        if (!work) break
+
+        const key = `${work.workflowRunId}:${work.workId}`
+        const run = this.executeAndReport(work, signal)
+          .catch((error) => {
+            console.error(`work ${work.workId} failed before report:`, error)
+          })
+          .finally(() => {
+            inFlight.delete(key)
+          })
+        inFlight.set(key, run)
+      }
+
+      if (inFlight.size === 0) {
+        await delay(this.options.pollIntervalMs, signal)
+        continue
+      }
+
+      if (inFlight.size >= this.maxConcurrentWorkflows) {
+        await Promise.race(inFlight.values())
+      } else {
+        await Promise.race([
+          delay(this.options.pollIntervalMs, signal),
+          ...inFlight.values(),
+        ])
+      }
+    }
+
+    await Promise.allSettled(inFlight.values())
+  }
+
   private async shutdownConnection() {
     const cleanup = new AbortController()
     const timeout = setTimeout(() => cleanup.abort(), 5_000)
@@ -69,23 +97,28 @@ export class RunnerHost {
       await Promise.allSettled([
         this.connection.disconnect(cleanup.signal),
         this.signalR.stop(),
-        this.acpConnection?.shutdown() ?? Promise.resolve(),
       ])
     } finally {
       clearTimeout(timeout)
-      this.acpConnection = null
-      this.executor.updateAcpConnection(null)
     }
   }
 
-  private async ensureAcpConnection(work: WorkItem, signal: AbortSignal) {
-    if (this.acpConnection) return
+  private async executeAndReport(work: WorkItem, signal: AbortSignal) {
+    const sessionManager = new AcpSessionManager()
+    let acpConnection: SharedAcpConnection | null = null
+    const executor = new WorkExecutor(createDefaultRegistry(), this.workspace, this.connection, sessionManager, null)
     try {
       const workspacePath = typeof work.variables?.workspace === "object" && work.variables.workspace !== null ? (work.variables.workspace as Record<string, unknown>).path : undefined
-      this.acpConnection = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
-      this.executor.updateAcpConnection(this.acpConnection)
+      acpConnection = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
+      executor.updateAcpConnection(acpConnection)
     } catch (error) {
       console.error("failed to start shared ACP connection:", error)
+    }
+    try {
+      const result = await executor.execute(work, signal)
+      await this.connection.report(work, result, signal)
+    } finally {
+      await acpConnection?.shutdown()
     }
   }
 
@@ -93,7 +126,12 @@ export class RunnerHost {
     while (!signal.aborted) {
       try {
         const coderModels = await discoverOpencodeModels(signal)
-        await this.connection.connect({ capabilities: [], projectId: this.options.projectId, coderModels }, signal)
+        await this.connection.connect({
+          capabilities: [],
+          projectId: this.options.projectId,
+          coderModels,
+          maxWorkflowSlots: this.maxConcurrentWorkflows,
+        }, signal)
         return
       } catch (error) {
         console.error(`runner registration failed; retrying in ${this.options.pollIntervalMs}ms`, error)

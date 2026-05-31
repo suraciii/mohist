@@ -15,7 +15,12 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
     public Task RegisterAsync(RunnerInfo info)
     {
         _runners[info.RunnerId] = info;
-        _log.LogInformation("Runner {Id} registered with [{Caps}] and {ModelCount} coder models", info.RunnerId, string.Join(", ", info.Capabilities), info.CoderModels?.Length ?? 0);
+        _log.LogInformation(
+            "Runner {Id} registered with [{Caps}], {ModelCount} coder models, and {Slots} workflow slots",
+            info.RunnerId,
+            string.Join(", ", info.Capabilities),
+            info.CoderModels?.Length ?? 0,
+            info.MaxWorkflowSlots);
         return Task.CompletedTask;
     }
 
@@ -28,6 +33,11 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
     public Task<IReadOnlyList<string>> ListRunnerIdsAsync()
     {
         return Task.FromResult<IReadOnlyList<string>>(_runners.Keys.ToList());
+    }
+
+    public Task<IReadOnlyList<RunnerInfo>> ListRunnersAsync()
+    {
+        return Task.FromResult<IReadOnlyList<RunnerInfo>>(_runners.Values.ToList());
     }
 
     public Task<IReadOnlyList<string>> ListCoderModelsAsync()

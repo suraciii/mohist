@@ -8,6 +8,8 @@ import { acpArgs, acpCommand } from "./acp-command.js"
 export interface SharedAcpConnection {
   readonly connection: ClientSideConnection
   readonly processPid: number | null
+  setActiveHandlers(sessionUpdate: SessionUpdateHandler, permission: PermissionHandler): void
+  clearActiveHandlers(): void
   shutdown(): Promise<void>
 }
 
@@ -44,19 +46,6 @@ export class AcpSessionManager {
 type SessionUpdateHandler = (notification: SessionNotification) => Promise<void>
 type PermissionHandler = (params: RequestPermissionRequest) => Promise<RequestPermissionResponse>
 
-let activeSessionUpdateHandler: SessionUpdateHandler = async () => {}
-let activePermissionHandler: PermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
-
-export function setActiveHandlers(sessionUpdate: SessionUpdateHandler, permission: PermissionHandler) {
-  activeSessionUpdateHandler = sessionUpdate
-  activePermissionHandler = permission
-}
-
-export function clearActiveHandlers() {
-  activeSessionUpdateHandler = async () => {}
-  activePermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
-}
-
 export async function createSharedAcpConnection(workDir: string): Promise<SharedAcpConnection> {
   const command = acpCommand()
   const args = acpArgs()
@@ -89,6 +78,8 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
   })
   proc.stdin?.on("error", () => {})
   proc.stdout?.on("error", () => {})
+  let activeSessionUpdateHandler: SessionUpdateHandler = async () => {}
+  let activePermissionHandler: PermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
 
   const connection = new ClientSideConnection(
     () => ({
@@ -113,6 +104,14 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
   return {
     connection,
     processPid: proc.pid ?? null,
+    setActiveHandlers(sessionUpdate: SessionUpdateHandler, permission: PermissionHandler) {
+      activeSessionUpdateHandler = sessionUpdate
+      activePermissionHandler = permission
+    },
+    clearActiveHandlers() {
+      activeSessionUpdateHandler = async () => {}
+      activePermissionHandler = async () => ({ outcome: { outcome: "cancelled" } })
+    },
     async shutdown() {
       await Promise.allSettled([
         stream.readable.cancel().catch(() => {}),

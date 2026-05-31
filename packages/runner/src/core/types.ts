@@ -65,6 +65,7 @@ export interface RunnerOptions {
   runnerId: string
   projectId?: string
   runnerRoot: string
+  maxConcurrentWorkflows: number
   pollIntervalMs: number
   heartbeatIntervalMs: number
 }
@@ -74,4 +75,5 @@ export interface RunnerRegistration {
   projectId?: string
   hostname?: string
   coderModels?: string[]
+  maxWorkflowSlots?: number
 }

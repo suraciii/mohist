@@ -7,7 +7,6 @@ import { numberInput, objectInput, stringInput } from "../core/json.js"
 import { killProcess, runCommand, sanitizedEnvironment } from "../system/process.js"
 import { verifyExpectations } from "./expectations.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../runtime/acp-connection.js"
-import { setActiveHandlers, clearActiveHandlers } from "../runtime/acp-connection.js"
 import { acpArgs, acpCommand } from "../runtime/acp-command.js"
 
 export interface AcpProcessHandle {
@@ -207,7 +206,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     dataWaiters.clear()
   }
 
-  setActiveHandlers(
+  acp.setActiveHandlers(
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
@@ -249,7 +248,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
     const message = error instanceof Error ? error.message : String(error)
     return { text: agentText, success: false, error: message, acpSessionId: entry.sessionId, exitCode: 1 }
   } finally {
-    clearActiveHandlers()
+    acp.clearActiveHandlers()
   }
 }
 
@@ -273,7 +272,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     dataWaiters.clear()
   }
 
-  setActiveHandlers(
+  acp.setActiveHandlers(
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
@@ -334,7 +333,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     const message = error instanceof Error ? error.message : String(error)
     return { text: agentText, success: false, error: message, acpSessionId, exitCode: 1 }
   } finally {
-    clearActiveHandlers()
+    acp.clearActiveHandlers()
   }
 }
 
@@ -359,7 +358,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     dataWaiters.clear()
   }
 
-  setActiveHandlers(
+  acp.setActiveHandlers(
     async (notification: SessionNotification) => {
       const update = notification.update
       const type = update.sessionUpdate
@@ -422,7 +421,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     const message = error instanceof Error ? error.message : String(error)
     return { text: agentText, success: false, error: message, exitCode: 1 }
   } finally {
-    clearActiveHandlers()
+    acp.clearActiveHandlers()
   }
 }
 

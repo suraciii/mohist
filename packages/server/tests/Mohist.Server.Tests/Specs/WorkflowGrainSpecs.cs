@@ -112,11 +112,11 @@ public abstract class WorkflowGrainSpecs
         return new WorkflowQueryService(factory);
     }
 
-    protected async Task<string> RegisterRunnerAsync(string? runnerId = null)
+    protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project"));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project", MaxWorkflowSlots: maxWorkflowSlots));
         return runnerId;
     }
 
@@ -159,17 +159,22 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()
     {
+        return await PollWorkAsync(_runnerId!);
+    }
+
+    protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
+    {
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
+            var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
             var work = await runner.PollAsync();
             if (work is not null)
-                return (work, _runnerId!);
+                return (work, runnerId);
 
             await Task.Delay(20);
         }
 
-        Assert.Fail($"Runner '{_runnerId}' has no work for workflow '{_workflowId}'");
+        Assert.Fail($"Runner '{runnerId}' has no work for workflow '{_workflowId}'");
         return default;
     }
 

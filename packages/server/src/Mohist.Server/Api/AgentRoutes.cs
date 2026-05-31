@@ -1,7 +1,6 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Queries;
-using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Workflow.Projection;
 
 namespace Mohist.Server.Api;
@@ -12,18 +11,17 @@ public static class AgentRoutes
     {
         var group = app.MapGroup("/api/agent");
 
-        group.MapGet("/status", async (string? projectId, IGrainFactory grains, WorkflowProjectionService projection, ConfigService config, IConfiguration configuration) =>
+        group.MapGet("/status", async (string? projectId, IGrainFactory grains, WorkflowProjectionService projection) =>
         {
             if (string.IsNullOrWhiteSpace(projectId))
             {
                 return ApiResults.BadRequest("No active project");
             }
 
-            var runnerIds = await ListAvailableRunnerIdsAsync(grains, projectId);
+            var runners = await ListAvailableRunnersAsync(grains, projectId);
             var activeAgents = await projection.ListActiveAgentsAsync(projectId);
-            var maxConcurrentAgents = await MaxConcurrentAgentsAsync(config);
 
-            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runnerIds, maxConcurrentAgents));
+            return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners));
         });
 
         group.MapGet("/sessions", async (string projectId, string? status, int? limit, WorkflowAgentSessionQueryService sessions) =>
@@ -33,24 +31,22 @@ public static class AgentRoutes
 
         group.MapGet("/activity", async (string projectId, int? limit, WorkflowAgentSessionQueryService sessions, IGrainFactory grains, WorkflowProjectionService projection, CancellationToken ct) =>
         {
-            var runnerIds = await ListAvailableRunnerIdsAsync(grains, projectId);
+            var runnerIds = (await ListAvailableRunnersAsync(grains, projectId)).Select(r => r.RunnerId).ToArray();
             return ApiResults.Ok(await sessions.GetActivityAsync(projectId, limit, runnerIds: runnerIds, ct: ct));
         });
 
         return app;
     }
 
-    private static async Task<int> MaxConcurrentAgentsAsync(ConfigService config)
+    private static async Task<IReadOnlyList<RunnerInfo>> ListAvailableRunnersAsync(IGrainFactory grains, string projectId)
     {
-        var cfg = await config.GetConfigAsync();
-        return cfg.TryGetValue("maxConcurrentAgents", out var value) && value is int n ? n : 3;
-    }
-
-    private static async Task<IReadOnlyList<string>> ListAvailableRunnerIdsAsync(IGrainFactory grains, string projectId)
-    {
-        var projectRunnerIds = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnerIdsAsync();
-        var globalRunnerIds = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnerIdsAsync();
-        return projectRunnerIds.Concat(globalRunnerIds).Distinct(StringComparer.Ordinal).ToArray();
+        var projectRunners = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnersAsync();
+        var globalRunners = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnersAsync();
+        return projectRunners
+            .Concat(globalRunners)
+            .GroupBy(r => r.RunnerId, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .ToArray();
     }
 }
 
@@ -65,21 +61,32 @@ public sealed record AgentStatusResponse(
     string? RunnerMessage,
     IReadOnlyList<RunnerStatusResponse> Runners)
 {
-    public static AgentStatusResponse Create(IReadOnlyList<ActiveAgentDto> activeAgents, IReadOnlyList<string> runnerIds, int maxConcurrentAgents)
+    public static AgentStatusResponse Create(IReadOnlyList<ActiveAgentDto> activeAgents, IReadOnlyList<RunnerInfo> runners)
     {
-        var runnerAvailable = runnerIds.Count > 0;
+        var runnerAvailable = runners.Count > 0;
+        var activeSlotsByRunner = activeAgents
+            .GroupBy(a => a.RunnerId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        var runnerResponses = runners
+            .Select(r =>
+            {
+                var maxSlots = RunnerCapacity.Normalize(r.MaxWorkflowSlots);
+                activeSlotsByRunner.TryGetValue(r.RunnerId, out var activeSlots);
+                return new RunnerStatusResponse(r.RunnerId, "external", activeSlots, maxSlots);
+            })
+            .ToArray();
         return new AgentStatusResponse(
             Running: activeAgents.Count > 0,
             IssueId: activeAgents.FirstOrDefault()?.IssueId,
             IssueNumber: activeAgents.FirstOrDefault()?.IssueNumber,
             ActiveAgents: activeAgents,
-            Capacity: new AgentCapacityResponse(activeAgents.Count, maxConcurrentAgents),
+            Capacity: new AgentCapacityResponse(runnerResponses.Sum(r => r.Active), runnerResponses.Sum(r => r.Max)),
             RunnerAvailable: runnerAvailable,
             EmbeddedRunnerEnabled: false,
             RunnerMessage: runnerAvailable ? null : "No runner is connected. Start the Mohist runner process.",
-            Runners: runnerIds.Select(id => new RunnerStatusResponse(id, "external")).ToArray());
+            Runners: runnerResponses);
     }
 }
 
 public sealed record AgentCapacityResponse(int Active, int Max);
-public sealed record RunnerStatusResponse(string Id, string Kind);
+public sealed record RunnerStatusResponse(string Id, string Kind, int Active, int Max);

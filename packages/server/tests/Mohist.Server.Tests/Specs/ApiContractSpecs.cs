@@ -73,6 +73,38 @@ public class ApiContractSpecs
     }
 
     [Fact]
+    public async Task AgentStatus_ReportsRegisteredRunnerWorkflowSlots()
+    {
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = $"slots-{Guid.NewGuid():N}", path = "/tmp/project", baseBranch = "main" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+        var runnerId = $"slot-runner-{Guid.NewGuid():N}";
+
+        try
+        {
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+            {
+                capabilities = Array.Empty<string>(),
+                hostname = "test-host",
+                projectId,
+                maxWorkflowSlots = 4,
+            });
+
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={projectId}");
+
+            Assert.Equal(0, status.Capacity.Active);
+            Assert.Equal(4, status.Capacity.Max);
+            var runner = Assert.Single(status.Runners, r => r.Id == runnerId);
+            Assert.Equal(0, runner.Active);
+            Assert.Equal(4, runner.Max);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task ProjectApi_ResolvesProjectByNameOrId_AndUseReturnsProject()
     {
         var projectName = $"project-resolve-{Guid.NewGuid():N}";
@@ -160,4 +192,7 @@ public class ApiContractSpecs
 
     private sealed record OpencodeModelsDto(string[] Models);
     private sealed record ProjectDto(string Id, string Name);
+    private sealed record AgentStatusDto(AgentCapacityDto Capacity, RunnerDto[] Runners);
+    private sealed record AgentCapacityDto(int Active, int Max);
+    private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
 }
