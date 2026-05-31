@@ -59,7 +59,22 @@ export class WorkExecutor {
       }
     }))
 
-    return { status: results.every((result) => result.status === "pass") ? "pass" : "fail", output: JSON.stringify(results) }
+    const verdict = results.every((result) => result.status === "pass") ? "pass" : "fail"
+    const output = JSON.stringify(results)
+    if (verdict === "fail") {
+      const failedChecks = results.filter((r) => r.status === "fail")
+      const checkDetails = failedChecks.map((c) => {
+        const isMarkerCheck = checks.find((ch) => ch.name === c.name)?.uses === "core/marker"
+        if (isMarkerCheck) {
+          const checkConfig = checks.find((ch) => ch.name === c.name)
+          const expectedMarker = checkConfig?.with?.expect ?? checkConfig?.with?.contains ?? "PASS"
+          return `${c.name}: expected verdict marker '${expectedMarker}' but it was not found in the artifact`
+        }
+        return `${c.name}: ${c.message}`
+      }).join("; ")
+      return { status: "fail", message: `Check verdict failure: ${checkDetails}`, output }
+    }
+    return { status: "pass", output }
   }
 
   private async variables(work: WorkItem, signal: AbortSignal): Promise<JsonObject> {
