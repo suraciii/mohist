@@ -11,6 +11,10 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   const baseBranch = stringInput(context.with, "baseBranch") ?? "main"
   const maxRetries = numberInput(context.with, "maxConflictRetries") ?? DEFAULT_MAX_CONFLICT_RETRIES
   const conflictResolver = objectInput(context.with, "conflictResolver")
+  const sourceCommit = await commitPendingChanges(context.workDir, `Prepare rebase onto ${baseBranch}`, context.signal)
+  if (!sourceCommit.success) {
+    return rebaseOutput(false, baseBranch, null, null, [], 0, sourceCommit.combinedOutput, sourceCommit.exitCode)
+  }
   const before = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
   const beforeSha = before.success ? before.stdout.trim() : null
 
@@ -154,6 +158,16 @@ async function conflictFiles(context: ActionContext) {
   const status = await git(context.workDir, ["diff", "--name-only", "--diff-filter=U"], context.signal)
   if (!status.success || !status.stdout.trim()) return []
   return [...new Set(status.stdout.split("\n").map((line) => line.trim()).filter(Boolean))]
+}
+
+async function commitPendingChanges(workDir: string, message: string, signal: AbortSignal) {
+  const status = await git(workDir, ["status", "--porcelain"], signal)
+  if (!status.success || !status.stdout.trim()) return status.success ? { ...status, combinedOutput: "" } : status
+
+  const add = await git(workDir, ["add", "."], signal)
+  if (!add.success) return add
+
+  return await git(workDir, ["commit", "-m", message], signal)
 }
 
 async function isRebaseInProgress(context: ActionContext) {
