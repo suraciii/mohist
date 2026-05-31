@@ -31,6 +31,7 @@ public static partial class WorkflowRunExtensions
                 current.ApprovalStatus!.RequestedAt,
                 DateTimeOffset.UtcNow.ToString("O"));
             current.Failure = new FailureDetails(FailureReason.ApprovalRejected, current.Id, Message: reason);
+            run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
             run.Status = WorkflowRunStatus.Failed;
         }
