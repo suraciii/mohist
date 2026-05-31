@@ -14,15 +14,15 @@ public class EventBusSpecs
     }
 
     [Fact]
-    public void Emit_WithSubscriber_ReceivesEvent()
+    public async Task Emit_WithSubscriber_ReceivesEvent()
     {
-        var received = new List<object>();
-        _bus.On("test", data => received.Add(data));
+        var received = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _bus.On("test", data => received.SetResult(data));
 
         _bus.Emit("test", new { msg = "hello" });
 
-        Assert.Single(received);
-        Assert.Equal("{\"msg\":\"hello\"}", System.Text.Json.JsonSerializer.Serialize(received[0]));
+        var data = await received.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        Assert.Equal("{\"msg\":\"hello\"}", System.Text.Json.JsonSerializer.Serialize(data));
     }
 
     [Fact]
@@ -32,43 +32,79 @@ public class EventBusSpecs
     }
 
     [Fact]
-    public void Off_RemovesSubscriber()
+    public async Task Off_RemovesSubscriber()
     {
         var count = 0;
-        Action<object> handler = _ => count++;
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Action<object> handler = _ =>
+        {
+            Interlocked.Increment(ref count);
+            first.TrySetResult();
+        };
         _bus.On("counter", handler);
         _bus.Emit("counter", new { });
+        await first.Task.WaitAsync(TimeSpan.FromSeconds(1));
         _bus.Off("counter", handler);
         _bus.Emit("counter", new { });
+        await Task.Delay(50);
 
         Assert.Equal(1, count);
     }
 
     [Fact]
-    public void Emit_MultipleSubscribers_AllReceive()
+    public async Task Emit_MultipleSubscribers_AllReceive()
     {
         var a = 0;
         var b = 0;
-        _bus.On("multi", _ => a++);
-        _bus.On("multi", _ => b++);
+        var aReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var bReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _bus.On("multi", _ =>
+        {
+            Interlocked.Increment(ref a);
+            aReceived.SetResult();
+        });
+        _bus.On("multi", _ =>
+        {
+            Interlocked.Increment(ref b);
+            bReceived.SetResult();
+        });
 
         _bus.Emit("multi", new { });
 
+        await Task.WhenAll(aReceived.Task, bReceived.Task).WaitAsync(TimeSpan.FromSeconds(1));
         Assert.Equal(1, a);
         Assert.Equal(1, b);
     }
 
     [Fact]
-    public void Emit_DifferentEventTypes_Isolated()
+    public async Task Emit_DifferentEventTypes_Isolated()
     {
         var receivedA = false;
         var receivedB = false;
-        _bus.On("A", _ => receivedA = true);
+        var aReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _bus.On("A", _ =>
+        {
+            receivedA = true;
+            aReceived.SetResult();
+        });
         _bus.On("B", _ => receivedB = true);
 
         _bus.Emit("A", new { });
 
+        await aReceived.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        await Task.Delay(50);
         Assert.True(receivedA);
         Assert.False(receivedB);
+    }
+
+    [Fact]
+    public void Emit_SlowSubscriber_DoesNotBlockCaller()
+    {
+        var release = new ManualResetEventSlim(false);
+        _bus.On("slow", _ => release.Wait());
+
+        _bus.Emit("slow", new { });
+
+        release.Set();
     }
 }

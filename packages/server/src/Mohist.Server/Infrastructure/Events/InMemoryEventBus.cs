@@ -43,14 +43,17 @@ public class InMemoryEventBus : IEventBus
             }
             foreach (var handler in snapshot)
             {
-                try
+                _ = Task.Run(() =>
                 {
-                    handler(data);
-                }
-                catch (Exception ex)
-                {
-                    _log.LogWarning(ex, "Event handler failed for {Event}", eventName);
-                }
+                    try
+                    {
+                        handler(data);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.LogWarning(ex, "Event handler failed for {Event}", eventName);
+                    }
+                });
             }
         }
     }
