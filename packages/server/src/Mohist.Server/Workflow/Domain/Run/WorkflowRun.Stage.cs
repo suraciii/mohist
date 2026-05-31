@@ -78,7 +78,7 @@ public static partial class WorkflowRunExtensions
         private StageCheck CurrentCheck()
             => stage.Checks.FirstOrDefault(c => c.Status == StageCheckStatus.Pending)!;
 
-        private bool IsComplete()
+        public bool HasNoPendingTasksAndPassedChecks()
         {
             if (!stage.Initialized) return false;
             var hasPendingTask = stage.Tasks.Any(t => t.Status is not (TaskRunStatus.Completed or TaskRunStatus.Failed));
@@ -88,7 +88,7 @@ public static partial class WorkflowRunExtensions
 
         private void TryRequestApproval()
         {
-            if (stage.RequiresApproval && stage.ApprovalStatus is null && stage.IsComplete())
+            if (stage.RequiresApproval && stage.ApprovalStatus is null && stage.HasNoPendingTasksAndPassedChecks())
             {
                 stage.ApprovalStatus = new ApprovalStatus(null, DateTimeOffset.UtcNow.ToString("O"), null);
                 stage.Status = StageRunStatus.AwaitingApproval;
@@ -104,7 +104,7 @@ public static partial class WorkflowRunExtensions
                 stage.Status = StageRunStatus.AwaitingApproval;
                 return;
             }
-            if (stage.IsComplete())
+            if (stage.HasNoPendingTasksAndPassedChecks())
             {
                 if (stage.RequiresApproval && stage.ApprovalStatus is not { Result: "approved" })
                 {

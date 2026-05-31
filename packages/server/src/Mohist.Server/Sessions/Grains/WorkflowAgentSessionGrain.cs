@@ -54,24 +54,12 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             else
             {
                 _session = existing;
-                _session.RunnerId ??= command.RunnerId;
-                _session.WorkId ??= command.WorkId;
-                _session.WorkType ??= command.WorkType;
-                _session.Stage ??= command.Stage;
-                _session.Title ??= command.Title;
-                if (_session.IssueNumber == 0 && command.IssueNumber is > 0)
-                    _session.IssueNumber = command.IssueNumber.Value;
+                _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
             }
         }
         else
         {
-            _session.RunnerId ??= command.RunnerId;
-            _session.WorkId ??= command.WorkId;
-            _session.WorkType ??= command.WorkType;
-            _session.Stage ??= command.Stage;
-            _session.Title ??= command.Title;
-            if (_session.IssueNumber == 0 && command.IssueNumber is > 0)
-                _session.IssueNumber = command.IssueNumber.Value;
+            _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
@@ -81,15 +69,10 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
     public async Task<WorkflowAgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
     {
         var session = await GetOrCreateAsync();
-        if (session.IsTerminal) return ToInfo(session);
 
         var now = DateTime.UtcNow;
-        session.AgentSessionId = command.AgentSessionId;
-        session.Model = command.Model ?? session.Model;
-        session.WorkDir = command.WorkDir ?? session.WorkDir;
-        session.ChangeDir = command.ChangeDir ?? session.ChangeDir;
-        session.ProcessPid = command.ProcessPid ?? session.ProcessPid;
-        session.Start(command.Model, now);
+        if (!session.AttachAgent(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now))
+            return ToInfo(session);
 
         await _stateStore.SaveAsync(SessionId, session);
         EmitStarted(session);
@@ -154,8 +137,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             });
         }
 
-        if (session.Status == AgentSessionStatus.Created)
-            session.MarkActive("running", now);
+        session.EnsureActive(now);
 
         var isTerminal = session.IsTerminal;
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
