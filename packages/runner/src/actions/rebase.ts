@@ -9,8 +9,10 @@ const DEFAULT_MAX_CONFLICT_RETRIES = 3
 
 type GitRunner = typeof defaultGit
 type ExistsChecker = typeof exists
+type ConflictResolverRunner = typeof acpAgentAction
 let git: GitRunner = defaultGit
 let pathExists: ExistsChecker = exists
+let conflictResolverRunner: ConflictResolverRunner = acpAgentAction
 
 export function setRebaseGitRunnerForTest(runner: GitRunner | null) {
   git = runner ?? defaultGit
@@ -18,6 +20,10 @@ export function setRebaseGitRunnerForTest(runner: GitRunner | null) {
 
 export function setRebaseExistsCheckerForTest(checker: ExistsChecker | null) {
   pathExists = checker ?? exists
+}
+
+export function setRebaseConflictResolverForTest(runner: ConflictResolverRunner | null) {
+  conflictResolverRunner = runner ?? acpAgentAction
 }
 
 export async function rebaseAction(context: ActionContext): Promise<ActionResult> {
@@ -52,6 +58,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   }
 
   const allConflicts: string[][] = [conflicts]
+  const gitOutputs: string[] = [result.combinedOutput]
   let attempts = 0
 
   while (attempts < maxRetries) {
@@ -64,9 +71,10 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
 
     await git(context.workDir, ["add", "."], context.signal)
     const continued = await git(context.workDir, ["-c", "core.editor=true", "rebase", "--continue"], context.signal)
+    gitOutputs.push(continued.combinedOutput)
     if (continued.success) {
       const after = await git(context.workDir, ["rev-parse", "HEAD"], context.signal)
-      return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, conflicts.flat(), attempts, result.combinedOutput)
+      return rebaseOutput(true, baseBranch, beforeSha, after.success ? after.stdout.trim() : null, conflicts.flat(), attempts, combinedGitOutput(gitOutputs))
     }
 
     conflicts = await conflictFiles(context)
@@ -78,7 +86,7 @@ export async function rebaseAction(context: ActionContext): Promise<ActionResult
   }
 
   await git(context.workDir, ["rebase", "--abort"], context.signal)
-  return rebaseOutput(false, baseBranch, beforeSha, null, allConflicts.flat(), attempts, result.combinedOutput, 1)
+  return rebaseOutput(false, baseBranch, beforeSha, null, allConflicts.flat(), attempts, combinedGitOutput(gitOutputs), 1)
 }
 
 function rebaseOutput(
@@ -128,7 +136,7 @@ async function runConflictResolver(
     with: resolverWith,
   }
 
-  return acpAgentAction(resolverContext)
+  return conflictResolverRunner(resolverContext)
 }
 
 export function applyWorkflowAgentDefault(with_: JsonObject, variables: JsonObject) {
@@ -215,4 +223,8 @@ function resolveGitPath(workDir: string, path: string) {
 
 function okGitResult() {
   return { success: true, stdout: "", stderr: "", exitCode: 0, combinedOutput: "" }
+}
+
+function combinedGitOutput(outputs: string[]) {
+  return outputs.map((output) => output.trim()).filter(Boolean).join("\n\n")
 }
