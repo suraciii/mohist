@@ -90,7 +90,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Status).HasMaxLength(64).IsRequired().HasConversion<string>();
             entity.Property(e => e.Model).HasMaxLength(256);
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
-            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId }).IsUnique();
+            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId });
             entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName }).IsUnique();
             entity.HasIndex(e => e.AgentSessionId);
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });

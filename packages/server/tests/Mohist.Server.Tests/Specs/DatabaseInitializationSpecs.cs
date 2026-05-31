@@ -23,6 +23,7 @@ public class DatabaseInitializationSpecs
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessionEvents"));
         Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_SessionName"));
+        Assert.False(await IndexIsUniqueAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_WorkId"));
         Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessionEvents_SessionId_Sequence"));
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
@@ -121,5 +122,19 @@ public class DatabaseInitializationSpecs
             """;
         command.Parameters.AddWithValue("$name", name);
         return await command.ExecuteScalarAsync() is not null;
+    }
+
+    private static async Task<bool> IndexIsUniqueAsync(SqliteConnection connection, string name)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT [unique]
+            FROM pragma_index_list('WorkflowAgentSessions')
+            WHERE name = $name
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$name", name);
+        var value = await command.ExecuteScalarAsync();
+        return value is long unique && unique == 1;
     }
 }

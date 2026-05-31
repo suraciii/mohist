@@ -1,6 +1,7 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Grains;
+using System.Text.Json;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -64,6 +65,11 @@ public class RunnerGrain : Grain, IRunnerGrain
         var workMappings = _workToWorkflow.ToList();
         var agentWorkMappings = workMappings.Where(kv => IsAgentWork(kv.Key)).ToList();
         var workProjects = new Dictionary<string, string>(_workToProject, StringComparer.Ordinal);
+        var agentSessions = agentWorkMappings.Select(kv =>
+        {
+            var sessionName = _workById.TryGetValue(kv.Key, out var work) ? AgentSessionName(work) : kv.Key;
+            return (WorkId: kv.Key, WorkflowRunId: kv.Value, SessionName: sessionName);
+        }).ToList();
         _status = RunnerStatus.Offline;
         _info = null;
         _assignedWorkflows.Clear();
@@ -80,10 +86,10 @@ public class RunnerGrain : Grain, IRunnerGrain
             await workflowGrain.AbandonCurrentWorkAsync(RunnerId, $"Runner {RunnerId} unregistered");
         }
 
-        foreach (var (workId, workflowRunId) in agentWorkMappings)
+        foreach (var (workId, workflowRunId, sessionName) in agentSessions)
         {
             if (!workProjects.TryGetValue(workId, out var projectId)) continue;
-            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, workId));
+            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
             await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
         }
     }
@@ -242,6 +248,11 @@ public class RunnerGrain : Grain, IRunnerGrain
         var timedOutWork = _workToWorkflow.ToList();
         var timedOutAgentWork = timedOutWork.Where(kv => IsAgentWork(kv.Key)).ToList();
         var workProjects = new Dictionary<string, string>(_workToProject, StringComparer.Ordinal);
+        var timedOutAgentSessions = timedOutAgentWork.Select(kv =>
+        {
+            var sessionName = _workById.TryGetValue(kv.Key, out var work) ? AgentSessionName(work) : kv.Key;
+            return (WorkId: kv.Key, WorkflowRunId: kv.Value, SessionName: sessionName);
+        }).ToList();
         _assignedWorkflows.Clear();
         _workToWorkflow.Clear();
         _workById.Clear();
@@ -257,10 +268,10 @@ public class RunnerGrain : Grain, IRunnerGrain
             await workflowGrain.AbandonCurrentWorkAsync(RunnerId, $"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
 
-        foreach (var (workId, workflowRunId) in timedOutAgentWork)
+        foreach (var (workId, workflowRunId, sessionName) in timedOutAgentSessions)
         {
             if (!workProjects.TryGetValue(workId, out var projectId)) continue;
-            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, workId));
+            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
             await session.FailIfRunningAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
         }
     }
@@ -268,6 +279,26 @@ public class RunnerGrain : Grain, IRunnerGrain
     private bool IsAgentWork(string workId)
     {
         return _workById.TryGetValue(workId, out var work) && work.Uses == "mohist/acp-agent";
+    }
+
+    private static string AgentSessionName(WorkDispatch work)
+    {
+        if (string.IsNullOrWhiteSpace(work.With)) return work.WorkId;
+
+        try
+        {
+            using var document = JsonDocument.Parse(work.With);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("session", out var session)
+                && session.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(session.GetString()))
+                return session.GetString()!;
+        }
+        catch (JsonException)
+        {
+        }
+
+        return work.WorkId;
     }
 
     private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;
