@@ -69,6 +69,11 @@ function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject, va
   addValue(merged, task, "requireMarkers")
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
+  if (!objectInput(merged, "agent")) {
+    const vars = objectInput(variables, "vars")
+    const agent = objectInput(vars, "agent") ?? objectInput(variables, "agent")
+    if (agent) merged.agent = agent
+  }
   if (!stringInput(merged, "prompt")?.trim()) {
     merged.prompt = buildOpenSpecTaskPrompt(title, task, variables)
   }

@@ -111,6 +111,9 @@ stages:
         uses: mohist/openspec-tasks
         with:
           path: ${{ openspecChangeDir }}/tasks.json
+          task:
+            with:
+              agent: ${{ vars.agent }}
     checks:
       - name: health
         title: Health
