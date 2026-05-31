@@ -34,6 +34,7 @@ export const AGENT_DETAIL_EVENTS: AgentEventName[] = [
   'plan_session_update',
   'plan_round_complete',
   'coder_recovery_status',
+  'agent_liveness_status',
   'coder_session_started',
   'coder_session_completed',
   'coder_session_failed',

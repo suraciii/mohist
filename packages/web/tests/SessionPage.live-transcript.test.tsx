@@ -269,6 +269,40 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
   })
 
+  it('appends liveness probe and recovery parts for live liveness events', async () => {
+    const { result } = renderLiveTranscript()
+    act(() => {
+      dispatchAgentEvent('agent_liveness_status', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        status: 'probing',
+        lastDataAt: '2024-01-01T00:00:00.000Z',
+        lastActivityType: 'agent_thought_chunk',
+        probeSentAt: '2024-01-01T00:00:01.000Z',
+        probeDeadlineAt: '2024-01-01T00:00:31.000Z',
+        activeProbeVersion: 4,
+      })
+      dispatchAgentEvent('agent_liveness_status', {
+        issueId: '123',
+        projectId: 'project-1',
+        executionId: 'exec-123',
+        acpSessionId: 'acp-123',
+        status: 'running',
+        lastDataAt: '2024-01-01T00:00:02.000Z',
+        lastActivityType: 'tool_result',
+        satisfiedProbeVersion: 4,
+      })
+    })
+    await waitFor(() => {
+      const recoveryParts = result.current.turns.at(-1)?.assistant.filter((part): part is ErrorPart => part.type === 'error' && part.kind === 'recovery')
+      expect(recoveryParts).toHaveLength(2)
+      expect(recoveryParts?.[0].message).toContain('Liveness probe sent')
+      expect(recoveryParts?.[1].message).toContain('Liveness recovered')
+    })
+  })
+
   it('tool start and completion update same tool part without duplication', async () => {
     const { result } = renderLiveTranscript()
     act(() => {

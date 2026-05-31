@@ -71,6 +71,7 @@ export type AgentDetailEventMap = {
   plan_session_update: PlanSessionUpdateEvent
   plan_round_complete: PlanRoundCompleteEvent
   coder_recovery_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
+  agent_liveness_status: { issueId: string; projectId: string; executionId: string; acpSessionId: string; sessionName?: string; workId?: string; workType?: string; stage?: string | null; status: 'probing' | 'running' | 'failed'; lastDataAt: string; lastActivityType?: string; probeSentAt?: string; probeDeadlineAt?: string; probeVersion?: number; dataVersion?: number; postProbeActivity?: boolean; activeProbeVersion?: number; satisfiedProbeVersion?: number; failureReason?: string }
   coder_session_started: { issueId: string; projectId: string; coderSessionId: string; acpSessionId: string; executionId?: string; model?: string; coderType?: string; stage?: string; taskDescription?: string; title?: string | null }
   coder_session_completed: { issueId: string; projectId: string; coderSessionId: string; status: 'completed' | 'failed'; duration: number }
   coder_session_failed: { issueId: string; projectId: string; coderSessionId: string; reason?: string }

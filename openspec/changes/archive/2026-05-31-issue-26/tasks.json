@@ -1,0 +1,156 @@
+{
+  "project": "mohist",
+  "description": "Count all qualifying ACP session activity for liveness probes and expose explainable probe state.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Centralize ACP liveness activity classification",
+      "spec": "specs/agent-runtime/spec.md#requirement-req-ar-001-session-liveness-probing",
+      "description": "Implement one shared ACP runner helper that classifies qualifying liveness activity independently from task output accumulation. The helper should explicitly count assistant message chunks, thought chunks, tool calls/updates/results, message growth, and successful protocol responses that prove the session is alive.",
+      "acceptanceCriteria": [
+        "Shared helper is used as the single source of truth for ACP liveness activity classification.",
+        "Qualifying activity includes agent_message_chunk, agent_thought_chunk, tool_call, tool_call_update, tool result/update notifications, message growth, and successful protocol responses where represented by the current ACP client.",
+        "The helper returns enough evidence for later metadata, including an activity type label when available.",
+        "Assistant answer text accumulation remains separate from the liveness activity helper."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Shared liveness activity classifier in packages/runner/src/actions/acp-agent.ts or a nearby runner helper.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep the qualifying set explicit rather than treating every internal event as activity."
+    },
+    {
+      "id": "T-002",
+      "title": "Track probe correlation and last qualifying activity",
+      "spec": "specs/agent-runtime/spec.md#requirement-req-ar-001-session-liveness-probing",
+      "description": "Extend ACP session liveness state so probe decisions use a monotonic activity version in addition to timestamps. Record probe sent time, probe deadline, last qualifying activity time, last activity type, and whether any qualifying activity arrived after the active probe version.",
+      "acceptanceCriteria": [
+        "When a session enters probing, probeSentAt, probeDeadlineAt, and the active probe version are recorded.",
+        "Each qualifying activity updates lastDataAt, last qualifying activity type, and the monotonic activity version.",
+        "A probing session returns to running only when qualifying activity arrives after the active probe version and before the deadline.",
+        "Probe timeout failures include enough in-memory state to explain whether post-probe activity was missing."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated ACP liveness monitor state and probe timeout decision logic.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Prefer deterministic version ordering over timestamp-only comparisons near deadline boundaries."
+    },
+    {
+      "id": "T-003",
+      "title": "Apply unified liveness handling to all ACP paths",
+      "spec": "specs/agent-runtime/spec.md#requirement-req-ar-001-session-liveness-probing",
+      "description": "Route shared, resumed, new, and ephemeral ACP session notification handling through the shared liveness classifier before output-specific branches. Preserve the existing final task output contract so only assistant answer text is accumulated when that is the current behavior.",
+      "acceptanceCriteria": [
+        "Shared, resumed, new, and ephemeral ACP paths call the same liveness activity handling for qualifying notifications or protocol responses.",
+        "agent_thought_chunk activity updates lastDataAt and can satisfy an active probe without being appended to task output text.",
+        "tool_call, tool_call_update, and tool result activity updates lastDataAt and can satisfy an active probe without changing runner capacity or concurrency behavior.",
+        "Existing assistant message output accumulation still works for task results."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Unified liveness handling integrated into every ACP execution path in packages/runner/src/actions/acp-agent.ts.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "The production regression was in the shared-session path, so verify that path explicitly while implementing."
+    },
+    {
+      "id": "T-004",
+      "title": "Emit explainable liveness lifecycle metadata",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-req-pse-001-session-liveness-status-is-emitted-to-live-clients",
+      "description": "Emit generic session liveness status metadata when sessions enter probing, recover to running, or fail due to liveness-related causes. Payloads should expose probe sent/deadline times, last qualifying activity, activity type, failure reason, and the probe correlation state without using recovery-specific event semantics.",
+      "acceptanceCriteria": [
+        "A probing transition emits session identifiers, status probing, lastDataAt, probeSentAt, probeDeadlineAt, and active probe version or equivalent correlation state.",
+        "A probing session that receives qualifying activity emits status running with updated lastDataAt and last qualifying activity type/timestamp when available.",
+        "Probe timeout, probe send failure, protocol disconnect, and unexpected process exit failures emit status failed with failureReason and probe metadata when available.",
+        "Liveness status events do not reuse recovery-specific semantics such as coder_recovery_status."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner session lifecycle event payloads or metadata updates containing liveness probe state.",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Keep payload additions compatible with existing consumers."
+    },
+    {
+      "id": "T-005",
+      "title": "Cover thought-only shared ACP liveness regression",
+      "spec": "specs/agent-runtime/spec.md#requirement-req-ar-001-session-liveness-probing",
+      "description": "Add regression tests for a long-running shared ACP session that repeatedly emits thought chunks without assistant message chunks across the previous quiet/probe window. The session must continue running or recover from probing and must not fail with Session liveness probe timed out while thought activity continues.",
+      "acceptanceCriteria": [
+        "Test exercises the shared ACP session path rather than only ephemeral execution.",
+        "Repeated agent_thought_chunk notifications update liveness without appending thought content to final task output unless that was already expected behavior.",
+        "The simulated session does not return a Session liveness probe timed out failure while thought chunks continue within the quiet threshold or probe window.",
+        "Test timing is deterministic using controlled timers or shortened thresholds to avoid flakiness."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Runner regression test covering thought-only shared ACP activity.",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "This directly covers the observed production failure mode from issue #7."
+    },
+    {
+      "id": "T-006",
+      "title": "Cover tool activity and liveness event metadata",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-req-pse-001-session-liveness-status-is-emitted-to-live-clients",
+      "description": "Add targeted tests for tool activity satisfying liveness and for emitted liveness lifecycle metadata during probing, recovery, and timeout failure. Verify that timeout metadata explains missing post-probe activity and that cancellation remains distinct from liveness failure.",
+      "acceptanceCriteria": [
+        "tool_call, tool_call_update, or tool result updates are verified as qualifying liveness activity where the existing test harness can represent them cleanly.",
+        "Probing status events include probeSentAt, probeDeadlineAt, lastDataAt, and probe correlation state.",
+        "Recovery status events include updated lastDataAt and the last qualifying activity type/timestamp when available.",
+        "Failure status events for probe timeout include failureReason and probe metadata that shows no qualifying activity arrived after the active probe version.",
+        "Cancellation is tested or preserved as a distinct cancelled outcome, not a liveness failure."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Runner tests for tool liveness activity and explainable liveness lifecycle metadata.",
+      "dependsOn": [
+        "T-004",
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "If tool result event names vary in fixtures, assert the currently supported ACP names and document any unsupported aliases in test comments."
+    },
+    {
+      "id": "T-007",
+      "title": "Run runner verification for ACP liveness change",
+      "spec": "specs/agent-runtime/spec.md#requirement-req-ar-001-session-liveness-probing",
+      "description": "Execute the relevant runner test suite and any focused build/typecheck command needed to verify the ACP liveness implementation. Fix failures that are directly caused by this change and record any unrelated pre-existing failures separately.",
+      "acceptanceCriteria": [
+        "Focused runner ACP liveness tests pass.",
+        "Relevant runner build or typecheck command passes, or any failure is documented as unrelated to this change with evidence.",
+        "tasks.json remains valid JSON and all task dependencies point only to lower-priority tasks.",
+        "No acceptance criterion from REQ-AR-001 or REQ-PSE-001 is left without an implementation or test path."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Verification results for runner tests/build and final task graph consistency.",
+      "dependsOn": [
+        "T-005",
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Use the smallest relevant verification first, then broader checks if the repository scripts make them practical."
+    }
+  ]
+}

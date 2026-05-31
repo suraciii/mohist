@@ -40,6 +40,12 @@ export interface RecoveryStatus {
   reason?: string
 }
 
+function mapLivenessToRecoveryStatus(status: AgentDetailEventMap['agent_liveness_status']['status']): RecoveryStatus['status'] {
+  if (status === 'probing') return 'recovering'
+  if (status === 'running') return 'recovered'
+  return 'failed'
+}
+
 const BASE_PLAN_STEPS: Array<{ roundType: string; roundLabel: string }> = [
   { roundType: 'proposal', roundLabel: 'Proposal' },
   { roundType: 'specs', roundLabel: 'Specs' },
@@ -671,6 +677,42 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
             next[next.length - 1] = lastRound
             return next
           })
+        }
+      }),
+    )
+
+    unsubs.push(
+      onAgentEvent('agent_liveness_status', (detail) => {
+        if (detail.issueId !== issueId || !mountedRef.current) return
+        const status = mapLivenessToRecoveryStatus(detail.status)
+        const attempt = detail.activeProbeVersion ?? detail.satisfiedProbeVersion ?? detail.probeVersion ?? 1
+        const reason = detail.failureReason
+          ?? (detail.status === 'probing'
+            ? `Probe sent; waiting for activity before ${detail.probeDeadlineAt ?? 'deadline unknown'}`
+            : detail.lastActivityType)
+
+        setRecoveryStatus({
+          status,
+          attempt,
+          reason,
+        })
+
+        setRoundsRef.current((prev) => {
+          if (prev.length === 0) return prev
+          const next = [...prev]
+          const lastRound = { ...next[next.length - 1] }
+          lastRound.recoveryEvents = [...lastRound.recoveryEvents, {
+            status,
+            attempt,
+            reason,
+            timestamp: Date.now(),
+          }]
+          next[next.length - 1] = lastRound
+          return next
+        })
+
+        if (detail.status === 'running' || detail.status === 'failed') {
+          setRecoveryStatus(null)
         }
       }),
     )
