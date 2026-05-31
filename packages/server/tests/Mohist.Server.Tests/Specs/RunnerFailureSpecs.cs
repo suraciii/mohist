@@ -181,8 +181,6 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         var (checks, _) = await PollWorkAnyAsync();
         await workflow.AbandonCurrentWorkAsync(r1, "timeout");
 
-        await workflow.RetryAsync();
-
         var r2Id = await RegisterRunnerAsync();
         _runnerId = r2Id;
         var r2 = Grains.GetGrain<IRunnerGrain>(r2Id);
