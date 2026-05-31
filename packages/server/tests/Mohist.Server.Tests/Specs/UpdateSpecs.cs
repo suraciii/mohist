@@ -174,6 +174,66 @@ public class UpdateSpecs
 
         Assert.Equal(1, exitCode);
         Assert.Contains("Mohist readiness checks did not pass", stderr.ToString());
+        Assert.Contains("Last readiness error: GET / returned 500 InternalServerError", stderr.ToString());
+    }
+
+    [Fact]
+    public async Task UpdateServer_ReadinessChecksAssetHeadersWithoutReadingBundleBody()
+    {
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var readiness = new SequenceHttpHandler(
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+            new ResponseSpec(HttpStatusCode.OK, Content: new NeverCompletingContent()));
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            new StringWriter(),
+            installer,
+            commands,
+            new HttpClient(readiness)
+            {
+                BaseAddress = new Uri("http://localhost:3456"),
+            },
+            TimeSpan.FromSeconds(1));
+
+        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(["/api/health", "/", "/assets/app.js"], readiness.Paths);
+    }
+
+    [Fact]
+    public void SourceCodeUpdater_DefaultsServerReadinessToIpv4Loopback()
+    {
+        var previous = Environment.GetEnvironmentVariable("MOHIST_SERVER_URL");
+        try
+        {
+            Environment.SetEnvironmentVariable("MOHIST_SERVER_URL", null);
+            var files = new FakeFileSystem();
+            var commands = new FakeCommandExecutor();
+            var installer = new SystemdServiceInstaller(
+                new StringWriter(),
+                new StringWriter(),
+                files,
+                commands);
+            var updater = new SourceCodeUpdater(
+                new StringWriter(),
+                new StringWriter(),
+                installer,
+                commands);
+
+            Assert.Equal(new Uri("http://127.0.0.1:3456"), updater.ServerBaseAddress);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MOHIST_SERVER_URL", previous);
+        }
     }
 
     [Fact]
@@ -370,7 +430,7 @@ public class UpdateSpecs
         Assert.Contains("Dry run: would execute:", output);
         Assert.DoesNotContain("git pull", output);
         Assert.Contains("dotnet build Mohist.sln", output);
-        Assert.Contains("wait for /api/health, /, and referenced /assets/* readiness checks", output);
+        Assert.Contains("wait for /api/health, /, and referenced /assets/* response headers readiness checks", output);
     }
 
     private sealed class FakeFileSystem : IFileSystem
@@ -457,12 +517,34 @@ public class UpdateSpecs
                 if (response.ContentType is not null)
                     message.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(response.ContentType);
             }
+            else if (response.Content is not null)
+            {
+                message.Content = response.Content;
+                if (response.ContentType is not null)
+                    message.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(response.ContentType);
+            }
 
             return Task.FromResult(message);
         }
     }
 
-    private sealed record ResponseSpec(HttpStatusCode StatusCode, string? Body = null, string? ContentType = null);
+    private sealed record ResponseSpec(
+        HttpStatusCode StatusCode,
+        string? Body = null,
+        string? ContentType = null,
+        HttpContent? Content = null);
+
+    private sealed class NeverCompletingContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            => Task.Delay(Timeout.InfiniteTimeSpan);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 1024 * 1024;
+            return true;
+        }
+    }
 
     private static ResponseSpec?[] ExpandStatusResponses(HttpStatusCode?[] statuses)
     {
