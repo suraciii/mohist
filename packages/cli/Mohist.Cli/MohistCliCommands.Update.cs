@@ -112,11 +112,13 @@ internal sealed class SourceCodeUpdater
         _commandExecutor = commandExecutor;
         _http = http ?? new HttpClient
         {
-            BaseAddress = new Uri(Environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
+            BaseAddress = new Uri(Environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://127.0.0.1:3456"),
             Timeout = TimeSpan.FromSeconds(5),
         };
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
     }
+
+    internal Uri? ServerBaseAddress => _http.BaseAddress;
 
     public async Task<int> UpdateAllAsync(string? repoRoot, bool dryRun, string? cliPath = null)
     {
@@ -250,7 +252,7 @@ internal sealed class SourceCodeUpdater
             _out.WriteLine("Dry run: would execute:");
             _out.WriteLine($"  cd {root} && dotnet build Mohist.sln");
             _out.WriteLine("  systemctl --user restart mohist.service (if installed)");
-            _out.WriteLine("  wait for /api/health, /, and referenced /assets/* readiness checks");
+            _out.WriteLine("  wait for /api/health, /, and referenced /assets/* response headers readiness checks");
             return 0;
         }
 
@@ -273,9 +275,11 @@ internal sealed class SourceCodeUpdater
 
         _out.WriteLine("Server service restarted.");
         var ready = await WaitForServerReadyAsync(_serverReadyTimeout);
-        if (!ready)
+        if (!ready.Ready)
         {
             _err.WriteLine($"Server service restarted, but Mohist readiness checks did not pass within {(int)_serverReadyTimeout.TotalSeconds} seconds.");
+            if (!string.IsNullOrWhiteSpace(ready.LastFailure))
+                _err.WriteLine($"Last readiness error: {ready.LastFailure}");
             return 1;
         }
 
@@ -363,22 +367,25 @@ internal sealed class SourceCodeUpdater
             _err.WriteLine(stderr.TrimEnd());
     }
 
-    private async Task<bool> WaitForServerReadyAsync(TimeSpan timeout)
+    private async Task<ServerReadinessResult> WaitForServerReadyAsync(TimeSpan timeout)
     {
+        string? lastFailure = null;
         using var cts = new CancellationTokenSource(timeout);
         while (!cts.IsCancellationRequested)
         {
             try
             {
-                if (await CheckServerReadyOnceAsync(cts.Token))
-                    return true;
+                lastFailure = await CheckServerReadyOnceAsync(cts.Token);
+                if (lastFailure is null)
+                    return new ServerReadinessResult(true, null);
             }
             catch (OperationCanceledException) when (cts.IsCancellationRequested)
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                lastFailure = FormatReadinessException(ex);
                 // The service can be active before Kestrel starts accepting requests.
             }
 
@@ -392,30 +399,43 @@ internal sealed class SourceCodeUpdater
             }
         }
 
-        return false;
+        return new ServerReadinessResult(false, lastFailure);
     }
 
-    private async Task<bool> CheckServerReadyOnceAsync(CancellationToken ct)
+    private async Task<string?> CheckServerReadyOnceAsync(CancellationToken ct)
     {
-        using var health = await _http.GetAsync("/api/health", ct);
+        using var health = await _http.GetAsync("/api/health", HttpCompletionOption.ResponseHeadersRead, ct);
         if (!health.IsSuccessStatusCode)
-            return false;
+            return FormatReadinessStatus("/api/health", health.StatusCode);
 
-        using var index = await _http.GetAsync("/", ct);
+        using var index = await _http.GetAsync("/", HttpCompletionOption.ResponseHeadersRead, ct);
         if (!index.IsSuccessStatusCode)
-            return false;
+            return FormatReadinessStatus("/", index.StatusCode);
 
         var contentType = index.Content.Headers.ContentType?.MediaType;
         if (!string.Equals(contentType, "text/html", StringComparison.OrdinalIgnoreCase))
-            return false;
+            return $"GET / returned content type {contentType ?? "unknown"}, expected text/html";
 
         var html = await index.Content.ReadAsStringAsync(ct);
         var assetPath = FindFirstAssetPath(html);
         if (assetPath is null)
-            return false;
+            return "GET / did not reference a /assets/* bundle";
 
-        using var asset = await _http.GetAsync(assetPath, ct);
-        return asset.StatusCode == HttpStatusCode.OK;
+        using var asset = await _http.GetAsync(assetPath, HttpCompletionOption.ResponseHeadersRead, ct);
+        return asset.StatusCode == HttpStatusCode.OK ? null : FormatReadinessStatus(assetPath, asset.StatusCode);
+    }
+
+    private sealed record ServerReadinessResult(bool Ready, string? LastFailure);
+
+    private static string FormatReadinessStatus(string path, HttpStatusCode statusCode)
+        => $"GET {path} returned {(int)statusCode} {statusCode}";
+
+    private static string FormatReadinessException(Exception ex)
+    {
+        var message = ex.InnerException is null
+            ? ex.Message
+            : $"{ex.Message} ({ex.InnerException.Message})";
+        return $"{ex.GetType().Name}: {message}";
     }
 
     private static string? FindFirstAssetPath(string html)
