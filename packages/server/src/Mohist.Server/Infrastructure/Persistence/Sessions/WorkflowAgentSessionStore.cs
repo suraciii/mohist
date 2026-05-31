@@ -57,13 +57,32 @@ public class WorkflowAgentSessionStore : IStateStore<WorkflowAgentSession>
         }
     }
 
-    private static WorkflowAgentSession ToDomain(WorkflowAgentSessionRow r) => WorkflowAgentSession.Restore(
-        r.Id, r.ProjectId, r.IssueNumber, r.WorkflowRunId, r.SessionName,
-        r.WorkId, r.WorkType, r.Stage, r.Title, r.RunnerId, r.AgentSessionId,
-        AgentSessionStatusNames.Parse(r.Status), r.Model,
-        r.WorkDir, r.ChangeDir, r.ProcessPid,
-        r.CreatedAt, r.StartedAt, r.LastDataAt, r.LastHeartbeatAt,
-        r.CompletedAt, r.FailureReason, r.ExitCode);
+    private static WorkflowAgentSession ToDomain(WorkflowAgentSessionRow r) => new()
+    {
+        Id = r.Id,
+        ProjectId = r.ProjectId,
+        IssueNumber = r.IssueNumber,
+        WorkflowRunId = r.WorkflowRunId,
+        SessionName = r.SessionName,
+        WorkId = r.WorkId,
+        WorkType = r.WorkType,
+        Stage = r.Stage,
+        Title = r.Title,
+        RunnerId = r.RunnerId,
+        AgentSessionId = r.AgentSessionId,
+        Status = AgentSessionStatusNames.Parse(r.Status),
+        Model = r.Model,
+        WorkDir = r.WorkDir,
+        ChangeDir = r.ChangeDir,
+        ProcessPid = r.ProcessPid,
+        CreatedAt = r.CreatedAt,
+        StartedAt = r.StartedAt,
+        LastDataAt = r.LastDataAt,
+        LastHeartbeatAt = r.LastHeartbeatAt,
+        CompletedAt = r.CompletedAt,
+        FailureReason = r.FailureReason,
+        ExitCode = r.ExitCode,
+    };
 
     private static WorkflowAgentSessionRow ToRow(WorkflowAgentSession s) => new()
     {
