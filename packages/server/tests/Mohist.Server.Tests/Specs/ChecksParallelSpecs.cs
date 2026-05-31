@@ -181,6 +181,43 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task MultipleChecks_FailedCheckWithRetry_DoesNotFailLaterChecksBeforeRepairRuns()
+    {
+        await StartWorkflowAsync(MultiCheckStage(
+            checks: [
+                new("review", "Review", "spec/review",
+                    OnFailure: new CheckFailureAction(new CheckFailureRetry(2, new TaskDefinition("re-review", "Re-review", "spec/review-agent")))),
+                new("merge-ready", "Merge Ready", "spec/merge-ready")
+            ]));
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+
+        var (checks, r2) = await PollWorkAnyAsync();
+        await ReportChecksAsync(r2, checks,
+            ("review", "fail", "review still has blocking findings"),
+            ("merge-ready", "fail", "merge conflict"));
+
+        var (repair, r3) = await PollWorkAnyAsync();
+        Assert.Equal("task", repair.WorkType);
+        Assert.StartsWith("re-review:", repair.WorkId);
+
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
+        Assert.Null(status.Failure);
+
+        await ReportAsync(r3, repair.WorkId, "completed");
+
+        var (recheck, _) = await PollWorkAnyAsync();
+        Assert.Equal("checks", recheck.WorkType);
+
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(recheck.With!);
+        Assert.True(parsed.TryGetProperty("checks", out var checksArr));
+        Assert.Equal(2, checksArr.GetArrayLength());
+    }
+
+    [Fact]
     public async Task MultipleChecks_FailedCheckWithRetry_RetryActionTargetsCorrectCheck()
     {
         var workflow = await StartWorkflowAsync(MultiCheckStage(

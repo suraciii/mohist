@@ -40,7 +40,9 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             if (existing is not null)
             {
                 _session = existing;
-                if (!_session.IsTerminal)
+                if (_session.IsTerminal && command.SessionName != command.WorkId)
+                    _session.StartNewWork(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
+                else if (!_session.IsTerminal)
                     _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
             }
             else
@@ -48,7 +50,9 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         }
         else
         {
-            if (!_session.IsTerminal)
+            if (_session.IsTerminal && command.SessionName != command.WorkId)
+                _session.StartNewWork(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
+            else if (!_session.IsTerminal)
                 _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
