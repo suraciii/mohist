@@ -156,6 +156,29 @@ public class MohistDefaultWorkflowProfileSpecs
     }
 
     [Fact]
+    public void DefaultPrompts_DefineWorkflowArtifactBoundaryForReviewAndAutoFix()
+    {
+        var files = new FakePromptFileStore("/prompts");
+        files.Add("review.prompt", """
+            Mohist workflow artifacts under `${{ openspecChangeDir }}/` are review context and evidence, not product deliverables by themselves.
+            Do not fail solely because `${{ openspecChangeDir }}/proposal.md`, `design.md`, `tasks.json`, `self-review.md`, `review.md`, or delta specs exist.
+            """);
+        files.Add("auto-fix.prompt", """
+            Do NOT remove Mohist workflow artifacts under `${{ openspecChangeDir }}/`.
+            Workflow artifacts under `${{ openspecChangeDir }}/` are planning/review context, not product deliverables to delete during auto-fix.
+            """);
+
+        var loader = new FilePromptLoader("/prompts", files);
+        var prompts = loader.LoadAll();
+
+        Assert.Contains("workflow artifacts", prompts["review"], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not product deliverables", prompts["review"], StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("${{ openspecChangeDir }}/proposal.md", prompts["review"], StringComparison.Ordinal);
+        Assert.Contains("do not remove mohist workflow artifacts", prompts["auto-fix"].ToLowerInvariant());
+        Assert.Contains("${{ openspecChangeDir }}/", prompts["auto-fix"], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WorkflowYamlParser_ParsesRetryTasksAndWithObjects()
     {
         var definition = MohistWorkflow.ParseYaml("""
@@ -198,4 +221,25 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
         Assert.Equal(2, reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry?.Limit);
     }
+}
+
+internal sealed class FakePromptFileStore : IPromptFileStore
+{
+    private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
+
+    public FakePromptFileStore(string root)
+    {
+        Root = root;
+    }
+
+    public string Root { get; }
+
+    public void Add(string name, string content) => _files[Path.Combine(Root, name)] = content;
+
+    public bool DirectoryExists(string path) => path == Root;
+
+    public IEnumerable<string> EnumeratePromptFiles(string path) =>
+        path == Root ? _files.Keys.Where(k => k.EndsWith(".prompt", StringComparison.Ordinal)).Order() : [];
+
+    public string ReadAllText(string path) => _files[path];
 }
