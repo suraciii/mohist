@@ -54,7 +54,7 @@ interface AcpSessionResult {
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
-  const prompt = stringInput(context.with, "prompt") ?? buildFallbackPrompt(context)
+  const prompt = buildPromptWithMohistContext(context, stringInput(context.with, "prompt") ?? buildFallbackPrompt(context))
   if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
 
   const result = await runAcpWorkflowAgentSession(context, prompt)
@@ -69,6 +69,33 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
     output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: agentConfig?.model, text: result.text, error: result.error, expectation: verification }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
   }
+}
+
+export function buildPromptWithMohistContext(context: Pick<ActionContext, "variables" | "issueNumber">, prompt?: string) {
+  if (!prompt) return prompt
+
+  const issue = objectInput(context.variables, "issue")
+  const title = promptContextField(issue, "title")
+  const body = promptContextField(issue, "body")
+  const number = promptContextField(issue, "number") ?? (context.issueNumber != null ? String(context.issueNumber) : undefined)
+  if (!number && !title?.trim() && !body?.trim()) return prompt
+
+  return [
+    "## Mohist Issue Context",
+    "This is the exact issue being implemented. Keep all artifacts and code changes aligned to this issue; do not substitute a different change.",
+    number ? `Number: ${number}` : "",
+    title?.trim() ? `Title: ${title.trim()}` : "",
+    body?.trim() ? `Body:\n${body.trim()}` : "",
+    "## Task Prompt",
+    prompt,
+  ].filter(Boolean).join("\n\n")
+}
+
+function promptContextField(value: JsonObject | undefined, key: string) {
+  const found = value?.[key]
+  if (typeof found === "string") return found
+  if (typeof found === "number" || typeof found === "boolean") return String(found)
+  return undefined
 }
 
 async function restoreAgentToolNoise(context: ActionContext) {
