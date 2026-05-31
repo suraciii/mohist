@@ -172,14 +172,15 @@ stages:
           expect: PASS
         retryLimit: 2
         retryTask:
-          id: fix-review-findings
-          title: Fix review findings
+          id: ai-re-review
+          title: AI re-review
           uses: mohist/acp-agent
           with:
             session: check
-            prompt: |
-              Read ${{ openspecChangeDir }}/review.md and fix the blocking findings.
-              Keep changes focused on review failures and preserve existing passing behavior.
+            prompt: ${{ prompts.review }}
+            expect:
+              files:
+                - path: ${{ openspecChangeDir }}/review.md
             agent: ${{ vars.agent }}
       - name: merge-ready
         title: Merge ready

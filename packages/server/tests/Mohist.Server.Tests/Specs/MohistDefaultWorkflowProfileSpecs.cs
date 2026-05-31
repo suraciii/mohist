@@ -218,8 +218,13 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
+        Assert.Contains("id: ai-re-review", yaml);
+        Assert.Contains("prompt: ${{ prompts.review }}", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
-        Assert.Equal(2, reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry?.Limit);
+        var reviewRetry = reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry;
+        Assert.Equal(2, reviewRetry?.Limit);
+        Assert.Equal("ai-re-review", reviewRetry?.Task.Id);
+        Assert.Contains("\"path\":\"${{ openspecChangeDir }}/review.md\"", JsonSerializer.Serialize(reviewRetry?.Task.With));
     }
 }
 
