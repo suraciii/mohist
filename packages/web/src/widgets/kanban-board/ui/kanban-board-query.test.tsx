@@ -644,7 +644,30 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
 
       expect(screen.getAllByText('Completed integrated issue').length).toBeGreaterThan(0)
       expect(screen.queryByTestId('integration-badge')).not.toBeInTheDocument()
+      expect(screen.getAllByTestId('workflow-stage-badge').map((el) => el.textContent)).toContain('Done')
       expect(screen.queryByText(/Integrating/i)).not.toBeInTheDocument()
+    })
+
+    it('renders the current workflow stage on active issue cards', () => {
+      const buildIssue = makeIssue({
+        number: 45,
+        title: 'Build stage issue',
+        status: IssueStatus.InProgress,
+        health: IssueHealth.Active,
+        workflowStage: WorkflowStage.Build,
+      })
+      const queryClient = new QueryClient()
+
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <KanbanBoard issues={[buildIssue]} agentStatus={mockAgentStatus} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      )
+
+      expect(screen.getAllByText('Build stage issue').length).toBeGreaterThan(0)
+      expect(screen.getAllByTestId('workflow-stage-badge').map((el) => el.textContent)).toContain('Build')
     })
 
     it('renders generic blocked overlay for blocked done issue', () => {

@@ -20,6 +20,14 @@ interface Props {
 
 type BadgeType = 'conflict' | 'attention' | 'approval' | 'running' | 'waiting' | 'drift' | null
 
+const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
+  [WorkflowStage.Plan]: 'Plan',
+  [WorkflowStage.Build]: 'Build',
+  [WorkflowStage.Check]: 'Check',
+  [WorkflowStage.Integrate]: 'Integrate',
+  [WorkflowStage.Done]: 'Done',
+}
+
 function getBadgeType(issue: Issue, isAgentRunning: boolean): BadgeType {
   if (issue.workflowStage === WorkflowStage.Integrate && issue.status !== IssueStatus.Done) {
     if (issue.health === IssueHealth.Blocked || issue.health === IssueHealth.Interrupted) {
@@ -104,6 +112,21 @@ function IntegrationBadge({ blockedReason }: { blockedReason?: string | null }) 
   )
 }
 
+function WorkflowStageBadge({ issue }: { issue: Issue }) {
+  const stage = issue.status === IssueStatus.Done ? WorkflowStage.Done : issue.workflowStage
+  if (!stage) return null
+
+  const className = issue.status === IssueStatus.Done
+    ? 'text-xs text-green-700 bg-green-50'
+    : 'text-xs text-muted-foreground bg-muted'
+
+  return (
+    <Badge variant="secondary" className={className} data-testid="workflow-stage-badge">
+      {WORKFLOW_STAGE_LABELS[stage]}
+    </Badge>
+  )
+}
+
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
@@ -183,6 +206,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
             )}
           </div>
           <div className="flex items-center gap-1">
+            <WorkflowStageBadge issue={issue} />
             {issue.workflowStage === WorkflowStage.Integrate && issue.status !== IssueStatus.Done && (
               <IntegrationBadge blockedReason={issue.blockedReason} />
             )}
