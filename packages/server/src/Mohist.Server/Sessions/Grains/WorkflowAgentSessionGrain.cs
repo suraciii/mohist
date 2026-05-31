@@ -197,13 +197,32 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.WorkflowAgentSessions.AsNoTracking()
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName);
-        return row is null ? null : WorkflowAgentSession.Restore(
-            row.Id, row.ProjectId, row.IssueNumber, row.WorkflowRunId, row.SessionName,
-            row.WorkId, row.WorkType, row.Stage, row.Title, row.RunnerId, row.AgentSessionId,
-            AgentSessionStatusNames.Parse(row.Status), row.Model,
-            row.WorkDir, row.ChangeDir, row.ProcessPid,
-            row.CreatedAt, row.StartedAt, row.LastDataAt, row.LastHeartbeatAt,
-            row.CompletedAt, row.FailureReason, row.ExitCode);
+        return row is null ? null : new WorkflowAgentSession
+        {
+            Id = row.Id,
+            ProjectId = row.ProjectId,
+            IssueNumber = row.IssueNumber,
+            WorkflowRunId = row.WorkflowRunId,
+            SessionName = row.SessionName,
+            WorkId = row.WorkId,
+            WorkType = row.WorkType,
+            Stage = row.Stage,
+            Title = row.Title,
+            RunnerId = row.RunnerId,
+            AgentSessionId = row.AgentSessionId,
+            Status = AgentSessionStatusNames.Parse(row.Status),
+            Model = row.Model,
+            WorkDir = row.WorkDir,
+            ChangeDir = row.ChangeDir,
+            ProcessPid = row.ProcessPid,
+            CreatedAt = row.CreatedAt,
+            StartedAt = row.StartedAt,
+            LastDataAt = row.LastDataAt,
+            LastHeartbeatAt = row.LastHeartbeatAt,
+            CompletedAt = row.CompletedAt,
+            FailureReason = row.FailureReason,
+            ExitCode = row.ExitCode,
+        };
     }
 
     private async Task<WorkflowAgentSession> GetOrCreateAsync()

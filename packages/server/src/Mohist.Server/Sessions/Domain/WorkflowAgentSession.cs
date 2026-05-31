@@ -26,60 +26,6 @@ public sealed class WorkflowAgentSession
     public string? FailureReason { get; internal set; }
     public int? ExitCode { get; internal set; }
 
-    private WorkflowAgentSession()
-    {
-    }
-
-    private WorkflowAgentSession(
-        string id,
-        string projectId,
-        int issueNumber,
-        string workflowRunId,
-        string sessionName,
-        string? workId,
-        string? workType,
-        string? stage,
-        string? title,
-        string? runnerId,
-        string? agentSessionId,
-        AgentSessionStatus status,
-        string? model,
-        string? workDir,
-        string? changeDir,
-        int? processPid,
-        DateTime createdAt,
-        DateTime? startedAt,
-        DateTime? lastDataAt,
-        DateTime? lastHeartbeatAt,
-        DateTime? completedAt,
-        string? failureReason,
-        int? exitCode)
-    {
-        Id = id;
-        ProjectId = projectId;
-        IssueNumber = issueNumber;
-        WorkflowRunId = workflowRunId;
-        SessionName = sessionName;
-        WorkId = workId;
-        WorkType = workType;
-        Stage = stage;
-        Title = title;
-        RunnerId = runnerId;
-        AgentSessionId = agentSessionId;
-        Status = status;
-        Model = model;
-        WorkDir = workDir;
-        ChangeDir = changeDir;
-        ProcessPid = processPid;
-        CreatedAt = createdAt;
-        StartedAt = startedAt;
-        LastDataAt = lastDataAt;
-        LastHeartbeatAt = lastHeartbeatAt;
-        CompletedAt = completedAt;
-        FailureReason = failureReason;
-        ExitCode = exitCode;
-    }
-
     public static WorkflowAgentSession Create(
         string id,
         string projectId,
@@ -91,43 +37,19 @@ public sealed class WorkflowAgentSession
         string? workType = null,
         string? stage = null,
         string? title = null,
-        DateTime? now = null) =>
-        new(id, projectId, issueNumber, workflowRunId, sessionName,
-            workId, workType, stage, title,
-            runnerId, null,
-            AgentSessionStatus.Created, null,
-            null, null, null,
-            now ?? DateTime.UtcNow, null, null, null, null, null, null);
-
-    public static WorkflowAgentSession Restore(
-        string id,
-        string projectId,
-        int issueNumber,
-        string workflowRunId,
-        string sessionName,
-        string? workId,
-        string? workType,
-        string? stage,
-        string? title,
-        string? runnerId,
-        string? agentSessionId,
-        AgentSessionStatus status,
-        string? model,
-        string? workDir,
-        string? changeDir,
-        int? processPid,
-        DateTime createdAt,
-        DateTime? startedAt,
-        DateTime? lastDataAt,
-        DateTime? lastHeartbeatAt,
-        DateTime? completedAt,
-        string? failureReason,
-        int? exitCode) =>
-        new(id, projectId, issueNumber, workflowRunId, sessionName,
-            workId, workType, stage, title,
-            runnerId, agentSessionId,
-            status, model,
-            workDir, changeDir, processPid,
-            createdAt, startedAt, lastDataAt, lastHeartbeatAt,
-            completedAt, failureReason, exitCode);
+        DateTime? now = null) => new()
+    {
+        Id = id,
+        ProjectId = projectId,
+        IssueNumber = issueNumber,
+        WorkflowRunId = workflowRunId,
+        SessionName = sessionName,
+        WorkId = workId,
+        WorkType = workType,
+        Stage = stage,
+        Title = title,
+        RunnerId = runnerId,
+        Status = AgentSessionStatus.Created,
+        CreatedAt = now ?? DateTime.UtcNow,
+    };
 }
