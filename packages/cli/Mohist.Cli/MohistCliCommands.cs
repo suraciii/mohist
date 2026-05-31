@@ -16,6 +16,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(RunnerCommands.Build(api, provider));
         root.Subcommands.Add(InstallCommands.Build(provider));
         root.Subcommands.Add(UpdateCommands.Build(provider));
+        root.Subcommands.Add(BuildUseCommand(api));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(ConfigProvidersCommands.BuildConfig(api));
@@ -102,6 +103,19 @@ internal static class MohistCliCommands
     {
         var cmd = new Command("logs", "Show recent logs");
         cmd.SetAction((ParseResult _) => api.PrintGetAsync("/api/logs/tail"));
+        return cmd;
+    }
+
+    private static Command BuildUseCommand(MohistCliApi api)
+    {
+        var cmd = new Command("use", "Set active project");
+        var identifierArg = new Argument<string>("project") { Description = "Project name or ID" };
+        cmd.Arguments.Add(identifierArg);
+        cmd.SetAction(ctx =>
+        {
+            var identifier = ctx.GetValue(identifierArg);
+            return api.UseProjectAsync(identifier!);
+        });
         return cmd;
     }
 }

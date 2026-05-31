@@ -11,7 +11,7 @@ export function ProjectGuard() {
   const [showCreateProject, setShowCreateProject] = useState(false)
 
   useEffect(() => {
-    if (!projectId && projects && projects.length > 0) {
+    if (projects && projects.length > 0 && (!projectId || !projects.some((project) => project.id === projectId))) {
       setProjectId(projects[0].id)
     }
   }, [projectId, projects, setProjectId])
