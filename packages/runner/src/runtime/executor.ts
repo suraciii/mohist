@@ -18,7 +18,7 @@ export class WorkExecutor {
     private readonly fallbackWorkDir = process.cwd(),
   ) {}
 
-  updateAcpConnection(acp: SharedAcpConnection) {
+  updateAcpConnection(acp: SharedAcpConnection | null) {
     this.acpConnection = acp
   }
 

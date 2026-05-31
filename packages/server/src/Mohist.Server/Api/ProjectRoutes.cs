@@ -15,9 +15,9 @@ public static class ProjectRoutes
             return ApiResults.Ok(projects);
         });
 
-        group.MapGet("/{id}", async (string id, ProjectQueryService projectsQuery) =>
+        group.MapGet("/{identifier}", async (string identifier, ProjectQueryService projectsQuery) =>
         {
-            var project = await projectsQuery.GetByIdAsync(id);
+            var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
@@ -42,6 +42,12 @@ public static class ProjectRoutes
             }
         });
 
+        group.MapPost("/{identifier}/use", async (string identifier, ProjectQueryService projectsQuery) =>
+        {
+            var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
+            return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
+        });
+
         group.MapPatch("/{id}", async (string id, UpdateProjectRequest req, IGrainFactory grains) =>
         {
             var projectGrain = grains.GetGrain<IProjectGrain>(id);
@@ -49,9 +55,13 @@ public static class ProjectRoutes
             return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapDelete("/{id}", async (string id, IGrainFactory grains) =>
+        group.MapDelete("/{identifier}", async (string identifier, IGrainFactory grains, ProjectQueryService projectsQuery) =>
         {
-            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
+            if (project is null)
+                return ApiResults.NotFound("Project not found");
+
+            var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             await projectGrain.DeleteAsync();
             return ApiResults.Ok();
         });

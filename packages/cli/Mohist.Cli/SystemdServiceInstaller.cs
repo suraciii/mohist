@@ -47,6 +47,7 @@ internal sealed class SystemdServiceInstaller
         var environment = new Dictionary<string, string>
         {
             ["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456",
+            ["PATH"] = BuildServicePath(),
         };
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
             environment["RUNNER_ROOT"] = options.RunnerRoot;
@@ -55,7 +56,7 @@ internal sealed class SystemdServiceInstaller
             Name: RunnerUnit,
             Description: "Mohist Runner",
             WorkingDirectory: repoRoot,
-            ExecStart: "npm run start -w packages/runner",
+            ExecStart: "node packages/runner/dist/cli.js",
             Environment: environment);
 
         return await InstallAsync(unit, options);
@@ -272,6 +273,20 @@ internal sealed class SystemdServiceInstaller
 
     private static string NormalizePath(string value) => value.Replace('\\', '/');
 
+    private static string BuildServicePath()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var entries = new[]
+        {
+            Path.Combine(home, ".opencode", "bin"),
+            Path.Combine(home, ".local", "bin"),
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        };
+        return string.Join(':', entries.Select(NormalizePath));
+    }
+
     private static string ShellQuote(string value)
     {
         if (value.Length == 0) return "''";
@@ -284,6 +299,7 @@ internal sealed class SystemdServiceInstaller
 internal interface IFileSystem
 {
     Task WriteAllTextAsync(string path, string contents);
+    Task<string> ReadAllTextAsync(string path);
     bool Exists(string path);
     void Delete(string path);
 }
@@ -303,6 +319,8 @@ internal sealed class RealFileSystem : IFileSystem
             Directory.CreateDirectory(directory);
         await File.WriteAllTextAsync(path, contents, Encoding.UTF8);
     }
+
+    public Task<string> ReadAllTextAsync(string path) => File.ReadAllTextAsync(path, Encoding.UTF8);
 
     public bool Exists(string path) => File.Exists(path);
 

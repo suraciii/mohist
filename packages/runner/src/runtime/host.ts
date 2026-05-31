@@ -56,10 +56,25 @@ export class RunnerHost {
         await delay(this.options.pollIntervalMs, signal)
       } finally {
         clearInterval(heartbeat)
-        if (!signal.aborted) {
-          await this.connection.disconnect(signal).catch((error) => console.error(error))
-        }
+        await this.shutdownConnection()
       }
+    }
+  }
+
+  private async shutdownConnection() {
+    const cleanup = new AbortController()
+    const timeout = setTimeout(() => cleanup.abort(), 5_000)
+    timeout.unref?.()
+    try {
+      await Promise.allSettled([
+        this.connection.disconnect(cleanup.signal),
+        this.signalR.stop(),
+        this.acpConnection?.shutdown() ?? Promise.resolve(),
+      ])
+    } finally {
+      clearTimeout(timeout)
+      this.acpConnection = null
+      this.executor.updateAcpConnection(null)
     }
   }
 

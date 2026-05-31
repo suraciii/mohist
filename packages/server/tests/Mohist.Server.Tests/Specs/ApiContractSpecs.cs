@@ -73,6 +73,25 @@ public class ApiContractSpecs
     }
 
     [Fact]
+    public async Task ProjectApi_ResolvesProjectByNameOrId_AndUseReturnsProject()
+    {
+        var projectName = $"project-resolve-{Guid.NewGuid():N}";
+        var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName, path = "/tmp/project", baseBranch = "main" });
+        var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
+
+        var byName = await _fixture.Client.GetDataAsync<ProjectDto>($"/api/projects/{projectName}");
+        var byId = await _fixture.Client.GetDataAsync<ProjectDto>($"/api/projects/{projectId}");
+        var useByName = await _fixture.Client.PostDataAsync<ProjectDto>($"/api/projects/{projectName}/use", new { });
+        var useById = await _fixture.Client.PostDataAsync<ProjectDto>($"/api/projects/{projectId}/use", new { });
+
+        Assert.Equal(projectId, byName.Id);
+        Assert.Equal(projectName, byId.Name);
+        Assert.Equal(projectId, useByName.Id);
+        Assert.Equal(projectName, useById.Name);
+    }
+
+    [Fact]
     public async Task OpencodeModels_WhenProjectIdMissing_ReturnsGlobalRunnerModels()
     {
         var runnerId = $"global-model-runner-{Guid.NewGuid():N}";
@@ -140,4 +159,5 @@ public class ApiContractSpecs
     }
 
     private sealed record OpencodeModelsDto(string[] Models);
+    private sealed record ProjectDto(string Id, string Name);
 }

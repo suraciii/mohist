@@ -36,6 +36,13 @@ public class ProjectQueryService
         return entry is null ? null : ToInfo(entry);
     }
 
+    public async Task<ProjectInfo?> ResolveByIdOrNameAsync(string identifier)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FirstOrDefaultAsync(p => p.Id == identifier || p.Name == identifier);
+        return entry is null ? null : ToInfo(entry);
+    }
+
     public async Task<bool> ExistsAsync(string name)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
