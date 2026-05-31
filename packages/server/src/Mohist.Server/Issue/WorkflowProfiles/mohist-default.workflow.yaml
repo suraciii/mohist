@@ -82,7 +82,7 @@ stages:
         uses: core/marker
         with:
           path: ${{ openspecChangeDir }}/self-review.md
-          expect: PASS
+          expect: <promise>PASS</promise>
         retryLimit: 1
         retryTask:
           id: fix-plan-review
@@ -163,7 +163,7 @@ stages:
         uses: core/marker
         with:
           path: ${{ openspecChangeDir }}/review.md
-          expect: PASS
+          expect: <promise>PASS</promise>
         retryLimit: 2
         retryTask:
           id: fix-review-findings
