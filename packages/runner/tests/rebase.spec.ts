@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { applyWorkflowAgentDefault, rebaseAction, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
+import { applyWorkflowAgentDefault, rebaseAction, setRebaseConflictResolverForTest, setRebaseExistsCheckerForTest, setRebaseGitRunnerForTest } from "../src/actions/rebase.js"
 import type { ActionContext, JsonObject } from "../src/core/types.js"
 
 afterEach(() => {
   setRebaseGitRunnerForTest(null)
   setRebaseExistsCheckerForTest(null)
+  setRebaseConflictResolverForTest(null)
 })
 
 describe("mohist/rebase", () => {
@@ -92,9 +93,53 @@ describe("mohist/rebase", () => {
 
     expect(withInput.agent).toEqual({ type: "opencode", model: "openai/gpt-5.4" })
   })
+
+  it("ConflictResolverSucceedsButRebaseContinueFails_IncludesContinueOutput", async () => {
+    const calls: string[] = []
+    setRebaseExistsCheckerForTest(() => false)
+    setRebaseConflictResolverForTest(async () => ({
+      status: "success",
+      message: "resolved",
+      output: "resolved markers",
+    }))
+    setRebaseGitRunnerForTest(async (_workDir, args) => {
+      calls.push(args.join(" "))
+      switch (args.join(" ")) {
+        case "rev-parse --git-path rebase-merge":
+          return ok("/fake/worktree/.git/rebase-merge\n")
+        case "rev-parse --git-path rebase-apply":
+          return ok("/fake/worktree/.git/rebase-apply\n")
+        case "status --porcelain":
+          return ok("")
+        case "rev-parse HEAD":
+          return ok("before\n")
+        case "rebase master":
+          return fail("CONFLICT (content): Merge conflict in packages/runner/src/actions/acp-agent.ts")
+        case "diff --name-only --diff-filter=U":
+          return ok("packages/runner/src/actions/acp-agent.ts\n")
+        case "add .":
+          return ok("")
+        case "-c core.editor=true rebase --continue":
+          return fail("error: could not apply next-commit\nCONFLICT (content): Merge conflict in packages/runner/tests/acp-agent.spec.ts")
+        case "rebase --abort":
+          return ok("aborted")
+        default:
+          return fail(`unexpected git call: ${args.join(" ")}`)
+      }
+    })
+
+    const result = await rebaseAction(context({ maxConflictRetries: 1, conflictResolver: { with: {} } }))
+    const output = JSON.parse(result.output ?? "{}")
+
+    expect(result.status).toBe("failure")
+    expect(calls).toContain("-c core.editor=true rebase --continue")
+    expect(output.output).toContain("Merge conflict in packages/runner/src/actions/acp-agent.ts")
+    expect(output.output).toContain("error: could not apply next-commit")
+    expect(output.output).toContain("Merge conflict in packages/runner/tests/acp-agent.spec.ts")
+  })
 })
 
-function context(variables: JsonObject = {}): ActionContext {
+function context(withOverrides: JsonObject = {}, variables: JsonObject = {}): ActionContext {
   return {
     workflowRunId: "workflow-1",
     workId: "rebase.1",
@@ -102,7 +147,7 @@ function context(variables: JsonObject = {}): ActionContext {
     stage: "check",
     title: "Rebase onto master",
     uses: "mohist/rebase",
-    with: { baseBranch: "master" },
+    with: { baseBranch: "master", ...withOverrides },
     variables,
     workDir: "/fake/worktree",
     signal: new AbortController().signal,
