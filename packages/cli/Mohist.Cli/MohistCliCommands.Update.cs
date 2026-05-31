@@ -1,5 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Net;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Mohist.Cli;
@@ -248,6 +250,7 @@ internal sealed class SourceCodeUpdater
             _out.WriteLine("Dry run: would execute:");
             _out.WriteLine($"  cd {root} && dotnet build Mohist.sln");
             _out.WriteLine("  systemctl --user restart mohist.service (if installed)");
+            _out.WriteLine("  wait for /api/health, /, and referenced /assets/* readiness checks");
             return 0;
         }
 
@@ -272,7 +275,7 @@ internal sealed class SourceCodeUpdater
         var ready = await WaitForServerReadyAsync(_serverReadyTimeout);
         if (!ready)
         {
-            _err.WriteLine($"Server service restarted, but /api/health did not become ready within {(int)_serverReadyTimeout.TotalSeconds} seconds.");
+            _err.WriteLine($"Server service restarted, but Mohist readiness checks did not pass within {(int)_serverReadyTimeout.TotalSeconds} seconds.");
             return 1;
         }
 
@@ -367,8 +370,7 @@ internal sealed class SourceCodeUpdater
         {
             try
             {
-                using var response = await _http.GetAsync("/api/health", cts.Token);
-                if (response.IsSuccessStatusCode)
+                if (await CheckServerReadyOnceAsync(cts.Token))
                     return true;
             }
             catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -391,5 +393,37 @@ internal sealed class SourceCodeUpdater
         }
 
         return false;
+    }
+
+    private async Task<bool> CheckServerReadyOnceAsync(CancellationToken ct)
+    {
+        using var health = await _http.GetAsync("/api/health", ct);
+        if (!health.IsSuccessStatusCode)
+            return false;
+
+        using var index = await _http.GetAsync("/", ct);
+        if (!index.IsSuccessStatusCode)
+            return false;
+
+        var contentType = index.Content.Headers.ContentType?.MediaType;
+        if (!string.Equals(contentType, "text/html", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var html = await index.Content.ReadAsStringAsync(ct);
+        var assetPath = FindFirstAssetPath(html);
+        if (assetPath is null)
+            return false;
+
+        using var asset = await _http.GetAsync(assetPath, ct);
+        return asset.StatusCode == HttpStatusCode.OK;
+    }
+
+    private static string? FindFirstAssetPath(string html)
+    {
+        var match = Regex.Match(
+            html,
+            """(?:src|href)=["'](?<path>/assets/[^"']+)["']""",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        return match.Success ? match.Groups["path"].Value : null;
     }
 }

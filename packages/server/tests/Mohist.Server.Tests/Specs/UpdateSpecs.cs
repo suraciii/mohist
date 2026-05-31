@@ -112,11 +112,15 @@ public class UpdateSpecs
     }
 
     [Fact]
-    public async Task UpdateServer_WaitsForHealthAfterRestart()
+    public async Task UpdateServer_WaitsForReadinessAfterRestart()
     {
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
-        var health = new SequenceHttpHandler(null, HttpStatusCode.OK);
+        var readiness = new SequenceHttpHandler(
+            null,
+            new ResponseSpec(HttpStatusCode.OK),
+            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+            new ResponseSpec(HttpStatusCode.OK));
         var stdout = new StringWriter();
         var installer = new SystemdServiceInstaller(
             stdout,
@@ -128,7 +132,7 @@ public class UpdateSpecs
             new StringWriter(),
             installer,
             commands,
-            new HttpClient(health)
+            new HttpClient(readiness)
             {
                 BaseAddress = new Uri("http://localhost:3456"),
             },
@@ -137,12 +141,13 @@ public class UpdateSpecs
         var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(2, health.Requests);
+        Assert.Equal(4, readiness.Requests);
+        Assert.Equal(["/api/health", "/api/health", "/", "/assets/app.js"], readiness.Paths);
         Assert.Contains("Server is ready.", stdout.ToString());
     }
 
     [Fact]
-    public async Task UpdateServer_WhenHealthDoesNotBecomeReady_ReturnsFailure()
+    public async Task UpdateServer_WhenReadinessDoesNotBecomeReady_ReturnsFailure()
     {
         var files = new FakeFileSystem();
         var commands = new FakeCommandExecutor();
@@ -157,7 +162,9 @@ public class UpdateSpecs
             stderr,
             installer,
             commands,
-            new HttpClient(new SequenceHttpHandler(HttpStatusCode.ServiceUnavailable))
+            new HttpClient(new SequenceHttpHandler(
+                new ResponseSpec(HttpStatusCode.OK),
+                new ResponseSpec(HttpStatusCode.InternalServerError)))
             {
                 BaseAddress = new Uri("http://localhost:3456"),
             },
@@ -166,7 +173,7 @@ public class UpdateSpecs
         var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("/api/health did not become ready", stderr.ToString());
+        Assert.Contains("Mohist readiness checks did not pass", stderr.ToString());
     }
 
     [Fact]
@@ -363,6 +370,7 @@ public class UpdateSpecs
         Assert.Contains("Dry run: would execute:", output);
         Assert.DoesNotContain("git pull", output);
         Assert.Contains("dotnet build Mohist.sln", output);
+        Assert.Contains("wait for /api/health, /, and referenced /assets/* readiness checks", output);
     }
 
     private sealed class FakeFileSystem : IFileSystem
@@ -416,26 +424,71 @@ public class UpdateSpecs
 
     private sealed class SequenceHttpHandler : HttpMessageHandler
     {
-        private readonly HttpStatusCode?[] _statuses;
+        private readonly ResponseSpec?[] _responses;
 
         public int Requests { get; private set; }
+        public List<string> Paths { get; } = new();
 
         public SequenceHttpHandler(params HttpStatusCode?[] statuses)
+            : this(ExpandStatusResponses(statuses))
         {
-            _statuses = statuses.Length == 0 ? [HttpStatusCode.OK] : statuses;
+        }
+
+        public SequenceHttpHandler(params ResponseSpec?[] responses)
+        {
+            _responses = responses.Length == 0 ? [new ResponseSpec(HttpStatusCode.OK)] : responses;
         }
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            var index = Math.Min(Requests, _statuses.Length - 1);
+            Paths.Add(request.RequestUri?.PathAndQuery ?? "");
+            var index = Math.Min(Requests, _responses.Length - 1);
             Requests++;
-            var status = _statuses[index];
-            if (status is null)
+            var response = _responses[index];
+            if (response is null)
                 throw new HttpRequestException("server not ready");
 
-            return Task.FromResult(new HttpResponseMessage(status.Value));
+            var message = new HttpResponseMessage(response.StatusCode);
+            if (response.Body is not null)
+            {
+                message.Content = new StringContent(response.Body);
+                if (response.ContentType is not null)
+                    message.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(response.ContentType);
+            }
+
+            return Task.FromResult(message);
         }
+    }
+
+    private sealed record ResponseSpec(HttpStatusCode StatusCode, string? Body = null, string? ContentType = null);
+
+    private static ResponseSpec?[] ExpandStatusResponses(HttpStatusCode?[] statuses)
+    {
+        if (statuses.Length == 0)
+            statuses = [HttpStatusCode.OK];
+
+        var expanded = new List<ResponseSpec?>();
+        foreach (var response in statuses)
+        {
+            if (response is null)
+            {
+                expanded.Add(null);
+                continue;
+            }
+
+            if (response.Value == HttpStatusCode.OK)
+            {
+                expanded.Add(new ResponseSpec(HttpStatusCode.OK));
+                expanded.Add(new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"));
+                expanded.Add(new ResponseSpec(HttpStatusCode.OK));
+                continue;
+            }
+
+            expanded.Add(new ResponseSpec(response.Value));
+        }
+
+        return expanded.ToArray();
     }
 }

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
@@ -115,6 +116,8 @@ public class IssueWorkflowProductLoopSpecs
     [Fact]
     public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
     {
+        await ClearKnownBacklogsAsync();
+
         var projectName = $"global-runner-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-global-runner", baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
@@ -150,6 +153,17 @@ public class IssueWorkflowProductLoopSpecs
         }
 
         Assert.Fail("Global runner did not claim project backlog work");
+    }
+
+    private async Task ClearKnownBacklogsAsync()
+    {
+        var directory = _fixture.Services.GetRequiredService<IWorkflowBacklogDirectory>();
+        foreach (var projectId in directory.ListProjects())
+        {
+            var backlog = _fixture.Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
+            while (await backlog.ClaimAsync($"cleanup-{Guid.NewGuid():N}") is { } workflowId)
+                await backlog.ReleaseAsync(workflowId);
+        }
     }
 
     [Fact]
