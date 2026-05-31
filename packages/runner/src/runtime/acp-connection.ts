@@ -76,6 +76,7 @@ export async function createSharedAcpConnection(workDir: string): Promise<Shared
       if (initialized && code !== 0) reject(new Error(`[PROCESS_EXIT] opencode acp exited unexpectedly (exit code: ${code ?? "signal"})`))
     })
   })
+  exitFailure.catch(() => {})
   proc.stdin?.on("error", () => {})
   proc.stdout?.on("error", () => {})
   let activeSessionUpdateHandler: SessionUpdateHandler = async () => {}

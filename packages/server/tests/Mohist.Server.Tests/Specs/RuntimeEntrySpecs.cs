@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using Mohist.Server.Api;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -75,6 +77,22 @@ public class RuntimeEntrySpecs
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
+    }
+
+    [Fact]
+    public async Task AgentStatus_WhenRunnerRegisteredButOffline_DoesNotReportAvailableCapacity()
+    {
+        var projectName = $"runtime-offline-runner-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var runnerId = $"runtime-offline-runner-{Guid.NewGuid():N}";
+
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(project.Id));
+        await registry.RegisterAsync(new RunnerInfo(runnerId, [], "test-host", project.Id, MaxWorkflowSlots: 4));
+
+        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+
+        Assert.DoesNotContain(status.Runners, r => r.Id == runnerId);
+        Assert.DoesNotContain(status.Runners, r => r.Max == 4 && r.Id == runnerId);
     }
 
     [Fact]

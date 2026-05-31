@@ -42,11 +42,19 @@ public static class AgentRoutes
     {
         var projectRunners = await grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId)).ListRunnersAsync();
         var globalRunners = await grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).ListRunnersAsync();
-        return projectRunners
+        var candidates = projectRunners
             .Concat(globalRunners)
             .GroupBy(r => r.RunnerId, StringComparer.Ordinal)
             .Select(g => g.First())
             .ToArray();
+        var available = new List<RunnerInfo>();
+        foreach (var runner in candidates)
+        {
+            var grain = grains.GetGrain<IRunnerGrain>(runner.RunnerId);
+            if (await grain.IsAvailableAsync())
+                available.Add(runner);
+        }
+        return available;
     }
 }
 
