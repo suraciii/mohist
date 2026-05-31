@@ -221,6 +221,78 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
         Assert.Equal(2, reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry?.Limit);
     }
+
+    [Fact]
+    public void WorkflowYamlParser_TaskWithNeutralArtifactMarker_ParsesSuccessfully()
+    {
+        var definition = MohistWorkflow.ParseYaml("""
+        stages:
+          - stage: build
+            tasks:
+              - id: doc-task
+                title: Document task
+                uses: mohist/acp-agent
+                with:
+                  prompt: Write docs
+                  expect:
+                    files:
+                      - path: docs/readme.md
+                    markers:
+                      - path: docs/readme.md
+                        contains: "## Getting Started"
+            checks: []
+        """);
+
+        var task = definition.Stages.Single().Tasks.Single();
+        Assert.Equal("doc-task", task.Id);
+    }
+
+    [Theory]
+    [InlineData("PASS")]
+    [InlineData("FAIL")]
+    [InlineData("<promise>PASS</promise>")]
+    [InlineData("<promise>FAIL</promise>")]
+    public void WorkflowYamlParser_TaskWithVerdictMarkerInExpect_ThrowsSchemaDiagnostic(string marker)
+    {
+        var yaml = $"""
+        stages:
+          - stage: build
+            tasks:
+              - id: bad-task
+                title: Bad task
+                uses: mohist/acp-agent
+                with:
+                  prompt: Do work
+                  expect:
+                    files:
+                      - path: result.md
+                    markers:
+                      - path: result.md
+                        contains: {marker}
+            checks: []
+        """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => MohistWorkflow.ParseYaml(yaml));
+        Assert.Contains("verdict marker", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("check definition", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bad-task", ex.Message);
+    }
+
+    [Fact]
+    public void DefaultWorkflowDefinition_HasNoTaskVerdictMarkers()
+    {
+        var definition = MohistWorkflow.Definition;
+
+        foreach (var stage in definition.Stages)
+        {
+            foreach (var task in stage.Tasks)
+            {
+                var withJson = JsonSerializer.Serialize(task.With);
+                Assert.DoesNotContain("\"PASS\"", withJson);
+                Assert.DoesNotContain("\"FAIL\"", withJson);
+            }
+        }
+    }
 }
 
 internal sealed class FakePromptFileStore : IPromptFileStore

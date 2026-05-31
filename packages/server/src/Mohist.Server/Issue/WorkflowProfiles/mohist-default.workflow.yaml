@@ -56,9 +56,6 @@ stages:
           expect:
             files:
               - path: ${{ openspecChangeDir }}/self-review.md
-            markers:
-              - path: ${{ openspecChangeDir }}/self-review.md
-                contains: PASS
     checks:
       - name: proposal-complete
         title: Proposal complete
