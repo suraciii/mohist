@@ -80,7 +80,42 @@ public static class WorkflowYamlSerializer
         if (string.IsNullOrWhiteSpace(title))
             throw new InvalidOperationException($"Workflow task {id} requires title");
 
-        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(OptionalMap(map, "with")));
+        var withMap = OptionalMap(map, "with");
+        if (withMap is not null)
+            ValidateTaskExpectations(id, withMap);
+
+        return new TaskDefinition(id, title, NullIfEmpty(String(map, "uses")), JsonElementMap(withMap));
+    }
+
+    private static void ValidateTaskExpectations(string taskId, Dictionary<string, object?> withMap)
+    {
+        var expect = OptionalMap(withMap, "expect");
+        if (expect is null) return;
+
+        var markers = List(expect, "markers");
+        foreach (var marker in markers)
+        {
+            var markerMap = Normalize(marker) as Dictionary<string, object?>;
+            if (markerMap is null) continue;
+
+            var contains = String(markerMap, "contains");
+            if (IsVerdictMarker(contains))
+                throw new InvalidOperationException(
+                    $"Workflow task '{taskId}' configures a verdict marker ({contains}) as an artifact expectation. " +
+                    "Move verdict marker requirements into a check definition.");
+        }
+    }
+
+    private static bool IsVerdictMarker(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var normalized = value.Trim().ToUpperInvariant();
+        return normalized is "PASS" or "FAIL" ||
+               normalized.Contains("<PROMISE>PASS</PROMISE>", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("<PROMISE>FAIL</PROMISE>", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("PASS", StringComparison.OrdinalIgnoreCase) &&
+               (normalized.Contains("<PROMISE>", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains("</PROMISE>", StringComparison.OrdinalIgnoreCase));
     }
 
     private static CheckDefinition ToCheck(object? value)
