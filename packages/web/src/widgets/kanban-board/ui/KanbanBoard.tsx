@@ -3,6 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Link } from 'react-router-dom'
+import { AlertTriangleIcon, SearchIcon, XIcon } from 'lucide-react'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, type Issue } from '../../../entities/issue'
 import { useRunnerSummary } from '../../../entities/runner/api/queries'
@@ -25,6 +26,7 @@ import { useLabels } from '../../../entities/issue'
 import { useProject } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { deriveAttentionItems } from '../model/homepage-attention'
+import { getStageColors } from '../model/stage-colors'
 
 interface Props {
   issues: Issue[]
@@ -33,11 +35,151 @@ interface Props {
 }
 
 const ALL_PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
+const SORT_OPTIONS: { value: SortMode; label: string }[] = [
+  { value: 'priority', label: 'Priority' },
+  { value: 'number', label: '#' },
+  { value: 'updated', label: 'Updated' },
+]
 
 function withProjectSearch(path: string, projectId?: string | null) {
   if (!projectId) return path
   const separator = path.includes('?') ? '&' : '?'
   return `${path}${separator}projectId=${encodeURIComponent(projectId)}`
+}
+
+function PriorityChips({
+  active,
+  onToggle,
+  onClear,
+  showLabel = false,
+}: {
+  active: string[]
+  onToggle: (p: string) => void
+  onClear: () => void
+  showLabel?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {showLabel && (
+        <span className="text-[11px] text-muted-foreground font-medium mr-1">
+          Priority:
+        </span>
+      )}
+      {ALL_PRIORITIES.map((p) => {
+        const style = getPriorityStyle(p)
+        const isActive = active.includes(p)
+        return (
+          <Button
+            key={p}
+            variant="ghost"
+            size="xs"
+            onClick={() => onToggle(p)}
+            data-testid={`priority-chip-${p}`}
+            data-active={isActive}
+            className={`h-6 rounded-full px-2 text-[11px] font-semibold ${
+              isActive ? 'ring-2 ring-offset-1' : 'hover:opacity-80'
+            }`}
+            style={{
+              backgroundColor: style.bg,
+              color: style.text,
+              ...(isActive ? { boxShadow: `0 0 0 1px ${style.text}` } : {}),
+            }}
+          >
+            {p.toUpperCase()}
+          </Button>
+        )
+      })}
+      {active.length > 0 && (
+        <Button
+          variant="link"
+          size="xs"
+          onClick={onClear}
+          className="h-auto p-0 ml-1 text-muted-foreground/70 hover:text-muted-foreground"
+        >
+          Clear
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function LabelTrigger({
+  selectedCount,
+  onClick,
+}: {
+  selectedCount: number
+  onClick: () => void
+}) {
+  if (selectedCount > 0) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onClick}
+        data-testid="label-chip"
+        data-active={true}
+        className="h-7 rounded-full px-2.5 text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-100"
+      >
+        <span>Labels:</span>
+        <span className="ml-1 rounded-full bg-blue-600 text-white px-1.5 text-[10px]">
+          {selectedCount}
+        </span>
+      </Button>
+    )
+  }
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={onClick}
+      data-testid="label-chip"
+      className="h-7 rounded-full px-2.5 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80"
+    >
+      <span>Labels:</span>
+    </Button>
+  )
+}
+
+function SortToggle({
+  sort,
+  onChange,
+  showLabel = false,
+}: {
+  sort: SortMode
+  onChange: (s: SortMode) => void
+  showLabel?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-0.5 ml-auto">
+      {showLabel && (
+        <span className="text-[11px] text-muted-foreground/70 font-medium mr-1">
+          Sort:
+        </span>
+      )}
+      {!showLabel && (
+        <span className="text-[11px] text-muted-foreground/70 font-medium mr-1">
+          Sort
+        </span>
+      )}
+      {SORT_OPTIONS.map((opt) => (
+        <Button
+          key={opt.value}
+          variant="ghost"
+          size="xs"
+          onClick={() => onChange(opt.value)}
+          data-testid={`sort-${opt.value}`}
+          data-active={sort === opt.value}
+          className={`h-6 rounded px-2 text-[11px] ${
+            sort === opt.value
+              ? 'bg-blue-100 text-blue-700 font-medium hover:bg-blue-100'
+              : 'text-muted-foreground/70 hover:text-foreground hover:bg-muted'
+          }`}
+        >
+          {opt.label}
+        </Button>
+      ))}
+    </div>
+  )
 }
 
 function FilterBar({
@@ -58,7 +200,7 @@ function FilterBar({
 
   const filteredLabels = useMemo(() => {
     if (!labelSearch.trim()) return allLabels
-    const q = labelSearch.toLowerCase()
+    const q = labelSearch.trim().toLowerCase()
     return allLabels.filter((l) => l.toLowerCase().includes(q))
   }, [allLabels, labelSearch])
 
@@ -82,199 +224,171 @@ function FilterBar({
     [state, onChange],
   )
 
+  const hasActiveFilters = state.priorities.length > 0 || state.labels.length > 0
   const activeFilterCount = state.priorities.length + state.labels.length
 
-  const renderPriorityControls = () => (
-    <div className="flex items-center gap-1.5">
-      <span className="text-xs text-muted-foreground font-medium">Priority:</span>
-      <div className="flex flex-wrap gap-1">
-        {ALL_PRIORITIES.map((p) => {
-          const style = getPriorityStyle(p)
-          const active = state.priorities.includes(p)
-          return (
-            <Button
-              key={p}
-              variant="ghost"
-              size="xs"
-              onClick={() => togglePriority(p)}
-              className={`rounded-full ${
-                active ? 'ring-1 ring-offset-1' : 'hover:opacity-80'
-              }`}
-              style={{
-                backgroundColor: style.bg,
-                color: style.text,
-                ...(active ? { ringColor: style.text } : {}),
-              }}
-            >
-              {p.toUpperCase()}
-            </Button>
-          )
-        })}
-        {state.priorities.length > 0 && (
-          <Button
-            variant="link"
-            size="xs"
-            onClick={() => onChange({ ...state, priorities: [] })}
-            className="ml-1 h-auto p-0 text-muted-foreground/70 hover:text-muted-foreground"
-          >
-            Clear
-          </Button>
-        )}
-      </div>
-    </div>
-  )
-
-  const renderLabelControl = () => {
-    if (allLabels.length === 0) return null
-
-    return (
-      <Popover>
-        <PopoverTrigger className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors">
-            <span className="text-xs text-muted-foreground font-medium">Labels:</span>
-            {state.labels.length > 0 ? (
-              <span className="bg-blue-100 text-blue-700 rounded-full px-1.5 py-0.5">{state.labels.length}</span>
-            ) : (
-              <span className="text-muted-foreground/70">All</span>
-            )}
-            <svg className="h-3 w-3 text-muted-foreground/70" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-        </PopoverTrigger>
-        <PopoverContent className="origin-top-right w-72">
-          <div className="p-2 border-b">
-            <Input
-              type="text"
-              placeholder="Search labels..."
-              className="text-xs"
-              value={labelSearch}
-              onChange={(e) => setLabelSearch(e.target.value)}
-            />
-          </div>
-          <div className="max-h-64 overflow-y-auto p-2">
-            {filteredLabels.length === 0 ? (
-              <div className="py-4 text-center text-xs text-muted-foreground/70">No labels found</div>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {filteredLabels.map((label) => {
-                  const active = state.labels.includes(label)
-                  return (
-                    <Button
-                      key={label}
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => toggleLabel(label)}
-                      className={`rounded-full ${
-                        active
-                          ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                      }`}
-                    >
-                      {label}
-                    </Button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-          {state.labels.length > 0 && (
-            <div className="border-t p-2">
-              <Button
-                variant="link"
-                size="xs"
-                onClick={() => onChange({ ...state, labels: [] })}
-                className="h-auto p-0 text-muted-foreground/70 hover:text-muted-foreground"
-              >
-                Clear all labels
-              </Button>
+  const labelPopover = (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <LabelTrigger
+            selectedCount={state.labels.length}
+            onClick={() => undefined}
+          />
+        }
+      />
+      <PopoverContent className="origin-top-right w-72 p-0" align="start">
+        <div className="p-2 border-b">
+          <Input
+            type="text"
+            placeholder="Search labels..."
+            className="text-xs h-7"
+            value={labelSearch}
+            onChange={(e) => setLabelSearch(e.target.value)}
+            data-testid="label-search"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto p-2">
+          {filteredLabels.length === 0 ? (
+            <div className="py-4 text-center text-xs text-muted-foreground/70">
+              No labels found
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {filteredLabels.map((label) => {
+                const active = state.labels.includes(label)
+                return (
+                  <Button
+                    key={label}
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => toggleLabel(label)}
+                    data-testid={`label-option-${label}`}
+                    data-active={active}
+                    className={`rounded-full ${
+                      active
+                        ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    }`}
+                  >
+                    {label}
+                  </Button>
+                )
+              })}
             </div>
           )}
-        </PopoverContent>
-      </Popover>
-    )
-  }
-
-  const renderSearchInput = () => (
-    <Input
-      type="text"
-      value={state.search}
-      onChange={(e) => onChange({ ...state, search: e.target.value })}
-      placeholder="Search titles..."
-      className="text-xs"
-    />
+        </div>
+        {state.labels.length > 0 && (
+          <div className="border-t p-2 flex justify-end">
+            <Button
+              variant="link"
+              size="xs"
+              onClick={() => onChange({ ...state, labels: [] })}
+              className="h-auto p-0 text-muted-foreground/70 hover:text-muted-foreground"
+            >
+              Clear all labels
+            </Button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 
   return (
     <div className="bg-background border-b">
-      <div className="hidden md:flex flex-wrap items-center gap-3 px-4 py-2">
-        {renderPriorityControls()}
-        {renderLabelControl()}
-        <div className="flex-1 min-w-[160px] max-w-xs">
-          {renderSearchInput()}
+      {/* Desktop: single compact row */}
+      <div className="hidden md:flex flex-wrap items-center gap-2 px-4 py-2">
+        <PriorityChips
+          active={state.priorities}
+          onToggle={togglePriority}
+          onClear={() => onChange({ ...state, priorities: [] })}
+        />
+        {allLabels.length > 0 && labelPopover}
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
+          <Input
+            type="text"
+            value={state.search}
+            onChange={(e) => onChange({ ...state, search: e.target.value })}
+            placeholder="Search titles..."
+            data-testid="search-input"
+            className="h-7 text-xs pl-7 pr-7"
+          />
+          {state.search && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...state, search: '' })}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground/60 hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <XIcon className="size-3" />
+            </button>
+          )}
         </div>
+        <SortToggle sort={sort} onChange={onSortChange} />
       </div>
 
+      {/* Mobile: search + filter toggle */}
       <div className="md:hidden px-3 py-2 space-y-2">
         <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            {renderSearchInput()}
+          <div className="relative min-w-0 flex-1">
+            <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
+            <Input
+              type="text"
+              value={state.search}
+              onChange={(e) => onChange({ ...state, search: e.target.value })}
+              placeholder="Search titles..."
+              data-testid="search-input"
+              className="h-8 text-xs pl-7"
+            />
           </div>
           <Button
             variant="outline"
             size="sm"
             data-testid="mobile-filter-toggle"
             onClick={() => setMobileFiltersOpen((open) => !open)}
+            className="h-8"
           >
             Filters{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
           </Button>
         </div>
 
         {mobileFiltersOpen && (
-          <div data-testid="mobile-filter-panel" className="space-y-2 rounded-md border bg-muted p-2">
-            <div className="flex flex-wrap items-center gap-2">
-              {renderPriorityControls()}
-              {renderLabelControl()}
+          <div
+            data-testid="mobile-filter-panel"
+            className="space-y-2 rounded-md border bg-muted p-2"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <PriorityChips
+                active={state.priorities}
+                onToggle={togglePriority}
+                onClear={() => onChange({ ...state, priorities: [] })}
+                showLabel
+              />
             </div>
-            <div className="flex items-center gap-1.5 border-t pt-2">
-              <span className="text-xs text-muted-foreground font-medium">Sort:</span>
-              <SortSwitcher sort={sort} onChange={onSortChange} />
+            {allLabels.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {labelPopover}
+                {hasActiveFilters && (
+                  <Button
+                    variant="link"
+                    size="xs"
+                    onClick={() =>
+                      onChange({ ...state, priorities: [], labels: [] })
+                    }
+                    className="h-auto p-0 text-muted-foreground/70"
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-1 border-t pt-2">
+              <SortToggle sort={sort} onChange={onSortChange} showLabel />
             </div>
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function SortSwitcher({
-  sort,
-  onChange,
-}: {
-  sort: SortMode
-  onChange: (s: SortMode) => void
-}) {
-  const options: { value: SortMode; label: string }[] = [
-    { value: 'priority', label: 'Priority' },
-    { value: 'number', label: '#' },
-    { value: 'updated', label: 'Updated' },
-  ]
-
-  return (
-    <div className="flex items-center gap-0.5">
-      {options.map((opt) => (
-        <Button
-          key={opt.value}
-          variant="ghost"
-          size="xs"
-          onClick={() => onChange(opt.value)}
-          className={`rounded ${
-            sort === opt.value
-              ? 'bg-blue-100 text-blue-700 font-medium'
-              : 'text-muted-foreground/70 hover:text-muted-foreground hover:bg-muted'
-          }`}
-        >
-          {opt.label}
-        </Button>
-      ))}
     </div>
   )
 }
@@ -289,22 +403,48 @@ function NeedsAttentionSummary({
   if (items.length === 0) return null
 
   return (
-    <div className="px-4 py-2 bg-amber-50 border-b border-amber-100">
-      <div className="text-xs font-semibold text-amber-700 mb-1.5">Needs attention</div>
-      <div className="flex flex-wrap gap-2">
-        {items.map((item) => (
-          <a
-            key={item.issueId}
-            href={withProjectSearch(`/issues/${item.issueNumber}`, projectId)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow-md transition-shadow border border-amber-200"
-          >
-            <span className="font-mono text-amber-600">#{item.issueNumber}</span>
-            <span className="font-medium text-amber-700">{item.label}</span>
-            {item.detail && (
-              <span className="text-muted-foreground max-w-[200px] truncate">{item.detail}</span>
-            )}
-          </a>
-        ))}
+    <div
+      data-testid="needs-attention-summary"
+      className="relative bg-amber-50 bg-gradient-to-r from-amber-50 to-amber-50/40 border-b border-amber-200"
+    >
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />
+      <div className="px-4 sm:px-6 py-2.5 flex items-start gap-3">
+        <div className="flex items-center gap-1.5 pt-0.5">
+          <span className="inline-flex items-center justify-center size-5 rounded-full bg-amber-500 text-white">
+            <AlertTriangleIcon className="size-3" />
+          </span>
+          <span className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+            Needs attention
+          </span>
+          <span className="text-xs text-amber-700/80 font-medium">
+            ({items.length})
+          </span>
+        </div>
+        <div className="flex-1 flex flex-wrap gap-1.5 min-w-0">
+          {items.slice(0, 6).map((item) => (
+            <a
+              key={item.issueId}
+              href={withProjectSearch(`/issues/${item.issueNumber}`, projectId)}
+              data-testid={`attention-link-${item.issueNumber}`}
+              className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs shadow-sm hover:shadow border border-amber-200 transition-shadow"
+            >
+              <span className="font-mono font-semibold text-amber-700">
+                #{item.issueNumber}
+              </span>
+              <span className="font-medium text-amber-900">{item.label}</span>
+              {item.detail && (
+                <span className="text-muted-foreground max-w-[160px] truncate hidden sm:inline">
+                  {item.detail}
+                </span>
+              )}
+            </a>
+          ))}
+          {items.length > 6 && (
+            <span className="text-xs text-amber-700 self-center font-medium">
+              +{items.length - 6} more
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -391,7 +531,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
   )
 
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)]">
+    <div className="flex flex-col h-[calc(100vh-3rem)]">
       <RunnerUnavailableBanner agentStatus={agentStatus} />
       <NeedsAttentionSummary items={attentionItems} />
       <FilterBar
@@ -404,34 +544,42 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
 
       <div className="md:hidden flex flex-col flex-1">
         <div className="flex overflow-x-auto snap-x snap-mandatory border-b bg-background px-2 shrink-0">
-          {displayedColumns.map((col) => (
-            <Button
-              key={col.key}
-              variant="ghost"
-              onClick={() => setSelectedStage(col.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap snap-start transition-colors min-h-[44px] border-b-2 rounded-none ${
-                col.key === selectedStage
-                  ? 'text-blue-600 border-blue-600'
-                  : 'text-muted-foreground border-transparent hover:text-foreground/80'
-              }`}
-            >
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  col.key === selectedStage ? 'bg-blue-500' : 'bg-muted'
+          {displayedColumns.map((col) => {
+            const colors = getStageColors(col.key)
+            const active = col.key === selectedStage
+            return (
+              <Button
+                key={col.key}
+                variant="ghost"
+                onClick={() => setSelectedStage(col.key)}
+                data-testid={`mobile-stage-tab-${col.key}`}
+                data-active={active}
+                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap snap-start transition-colors min-h-[44px] border-b-2 rounded-none ${
+                  active
+                    ? `${colors.labelClass}`
+                    : 'text-muted-foreground border-transparent hover:text-foreground/80'
                 }`}
-              />
-              {col.label}
-              <span
-                className={`text-xs rounded-full px-1.5 py-0.5 ${
-                  col.key === selectedStage
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'bg-muted text-muted-foreground/70'
-                }`}
+                style={
+                  active
+                    ? { borderBottomColor: colors.accent, color: colors.accent }
+                    : undefined
+                }
               >
-                {col.issues.length}
-              </span>
-            </Button>
-          ))}
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: active ? colors.accent : '#d1d5db' }}
+                />
+                {col.label}
+                <span
+                  className={`text-xs rounded-full px-1.5 py-0.5 ${
+                    active ? 'bg-muted text-foreground/80' : 'bg-muted text-muted-foreground/70'
+                  }`}
+                >
+                  {col.issues.length}
+                </span>
+              </Button>
+            )
+          })}
         </div>
 
         {selectedStage === IssueStatus.Cancelled && closedCount > 0 && !showClosed && (
@@ -464,6 +612,7 @@ export function KanbanBoard({ issues, agentStatus, archivedCount = 0 }: Props) {
           <StageColumn
             key={col.key}
             label={col.label}
+            status={col.key}
             issues={col.issues}
             agentStatus={agentStatus}
             isDone={col.key === IssueStatus.Done}
