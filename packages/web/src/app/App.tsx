@@ -4,6 +4,8 @@ import { useProjects } from '../entities/project'
 import { LiveTaskProvider } from './providers/LiveTaskProvider'
 import { ProjectProvider, useProject } from '../entities/project'
 import { Header } from '../widgets/app-shell'
+import { AppSidebar } from '../widgets/app-shell/ui/AppSidebar'
+import { SidebarProvider, SidebarInset } from '@/shared/ui/components/sidebar'
 import { IssueDetailPage } from '../pages/issue-detail/ui/IssueDetailPage'
 import { IssueChangedFilesPage } from '../pages/issue-changed-files/ui/IssueChangedFilesPage'
 import { SessionPage } from '../pages/session/ui/SessionPage'
@@ -38,35 +40,38 @@ function AppContent() {
   }, [projects, projectId, setProjectId])
 
   return (
-    <LiveTaskProvider>
-    <div className="min-h-screen bg-gray-50 flex flex-col pb-14 md:pb-0">
-      <Toaster />
-      <Header onCreateIssue={() => setCreateIssueOpen(true)} />
-      <MobileBottomNav />
-      <Routes>
-        <Route element={<ProjectGuard />}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/issue/:number" element={<NavigateToIssues />} />
-          <Route path="/issue/:number/files" element={<NavigateToIssues />} />
-          <Route path="/issue/:number/session/:sessionId" element={<NavigateToIssues />} />
-          <Route path="/issue/:number/workflow/sessions/:sessionName" element={<NavigateToIssues />} />
-          <Route path="/issues/:number" element={<IssueDetailPage />} />
-          <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-          <Route path="/issues/:number/session/:sessionId" element={<SessionPage />} />
-          <Route path="/issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
-          <Route path="/activity" element={<ActivityPage />} />
-          <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
-          <Route path="/settings/:section" element={<SettingsPage />} />
-          <Route path="/logs" element={<LogsPage />} />
-          <Route path="/archived" element={<ArchivedPage />} />
-          <Route path="/epics" element={<EpicListPage />} />
-          <Route path="/epic/:id" element={<EpicDetailPage />} />
-        </Route>
-      </Routes>
-      {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
+    <SidebarProvider className="h-svh">
+      <AppSidebar onCreateIssue={() => setCreateIssueOpen(true)} />
+      <SidebarInset>
+        <Header onCreateIssue={() => setCreateIssueOpen(true)} />
+        <div className="flex-1 min-h-0 flex flex-col pb-14 md:pb-0">
+          <Routes>
+            <Route element={<ProjectGuard />}>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/issue/:number" element={<NavigateToIssues />} />
+              <Route path="/issue/:number/files" element={<NavigateToIssues />} />
+              <Route path="/issue/:number/session/:sessionId" element={<NavigateToIssues />} />
+              <Route path="/issue/:number/workflow/sessions/:sessionName" element={<NavigateToIssues />} />
+              <Route path="/issues/:number" element={<IssueDetailPage />} />
+              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
+              <Route path="/issues/:number/session/:sessionId" element={<SessionPage />} />
+              <Route path="/issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
+              <Route path="/activity" element={<ActivityPage />} />
+              <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
+              <Route path="/settings/:section" element={<SettingsPage />} />
+              <Route path="/logs" element={<LogsPage />} />
+              <Route path="/archived" element={<ArchivedPage />} />
+              <Route path="/epics" element={<EpicListPage />} />
+              <Route path="/epic/:id" element={<EpicDetailPage />} />
+            </Route>
+          </Routes>
+          {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
+        </div>
+        <MobileBottomNav />
+      </SidebarInset>
       <CreateIssueDialog open={createIssueOpen} onClose={() => setCreateIssueOpen(false)} />
-    </div>
-    </LiveTaskProvider>
+      <Toaster />
+    </SidebarProvider>
   )
 }
 
@@ -78,9 +83,11 @@ function NavigateToIssues() {
 export default function App() {
   return (
     <ProjectProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
+      <LiveTaskProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </LiveTaskProvider>
     </ProjectProvider>
   )
 }
