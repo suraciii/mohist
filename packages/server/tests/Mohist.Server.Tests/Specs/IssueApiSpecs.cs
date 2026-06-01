@@ -142,22 +142,28 @@ public class IssueApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
-    [Fact(Skip = "API not yet implemented: /api/log-level, /api/agent-runtime, /api/opencode/runtime, /api/system/info")]
-    public async Task GivenUserUpdatesRuntimePreferences_WhenDashboardLoadsSystemSettings_ThenCurrentValuesAreReturned()
+    [Fact]
+    public async Task SystemInfo_ReturnsTypedRuntimePayload()
     {
-        await _client.PutAsJsonOkAsync("/api/log-level", new { level = "DEBUG" });
-        await _client.PutAsJsonOkAsync("/api/agent-runtime", new { timeout = 900, maxConcurrent = 5 });
-
-        var logLevel = await _client.GetDataAsync<LogLevelDto>("/api/log-level");
-        var runtime = await _client.GetDataAsync<AgentRuntimeDto>("/api/agent-runtime");
-        var opencodeRuntime = await _client.GetDataAsync<OpencodeRuntimeDto>("/api/opencode/runtime");
         var system = await _client.GetDataAsync<SystemInfoDto>("/api/system/info");
 
-        Assert.Equal("DEBUG", logLevel.Level);
-        Assert.Equal(900, runtime.Timeout);
-        Assert.Equal(5, runtime.MaxConcurrent);
-        Assert.Equal("local-opencode", opencodeRuntime.Mode);
-        Assert.Equal("running", system.Server.Status);
+        Assert.NotNull(system.Running);
+        Assert.NotNull(system.Source);
+        Assert.NotNull(system.Install);
+        Assert.NotNull(system.Update);
+        Assert.NotNull(system.Services);
+        Assert.NotNull(system.Paths);
+        Assert.False(string.IsNullOrWhiteSpace(system.Running.StartedAt));
+        Assert.False(string.IsNullOrWhiteSpace(system.Install.Mode));
+    }
+
+    [Fact]
+    public async Task SystemUpdateStatus_WhenNoJobExists_ReturnsIdleEnvelope()
+    {
+        var status = await _client.GetDataAsync<SystemUpdateStatusEnvelopeDto>("/api/system/update/status");
+
+        Assert.False(status.HasJob);
+        Assert.Null(status.Job);
     }
 
     [Fact]
@@ -200,12 +206,22 @@ public class IssueApiSpecs
     private sealed record PrerequisiteDto(int Number, bool Completed);
     private sealed record StartEligibilityDto(bool Startable);
     private sealed record PrimaryEpicDto(string Id, string Title);
-    private sealed record LogLevelDto(string Level);
-    private sealed record AgentRuntimeDto(int Timeout, int MaxConcurrent);
     private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStatus);
-    private sealed record OpencodeRuntimeDto(string Mode, string Command, string? Model);
-    private sealed record SystemInfoDto(ServerInfoDto Server);
-    private sealed record ServerInfoDto(string Status);
+    private sealed record SystemInfoDto(
+        RunningInfoDto Running,
+        SourceInfoDto Source,
+        InstallInfoDto Install,
+        UpdateInfoDto Update,
+        ServicesInfoDto Services,
+        PathsInfoDto Paths);
+    private sealed record RunningInfoDto(string? Version, string? GitHash, string StartedAt);
+    private sealed record SourceInfoDto(string? Path, string? Branch, string? Head, bool Dirty);
+    private sealed record InstallInfoDto(string Mode, string? ServiceManager, string? ServerUnit, string? RunnerUnit, string? Reason);
+    private sealed record UpdateInfoDto(string Status, bool Available, string? Reason);
+    private sealed record ServicesInfoDto(string? Server, string? Runner);
+    private sealed record PathsInfoDto(string? Db, string? Config, string? Logs, string? Opencode);
+    private sealed record SystemUpdateStatusEnvelopeDto(bool HasJob, SystemUpdateStatusDto? Job);
+    private sealed record SystemUpdateStatusDto(string JobId, string Status, string Stage);
     private sealed record EpicDto(string Id);
     private sealed record EpicDetailDto(LinkedIssueDto[] LinkedIssues);
     private sealed record LinkedIssueDto(string Id);

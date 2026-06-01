@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useLogLevel, useSetLogLevel, useSystemInfo, useRebuildSystem } from '../../../entities/settings'
+import { useState, useEffect } from 'react'
+import { useLogLevel, useSetLogLevel, useSystemInfo, useSystemUpdate, useSystemUpdateStatus } from '../../../entities/settings'
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
 
 const LOG_LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const
 const DEFAULT_LOG_LEVEL = 'INFO'
 
-function StatusBadge({ running }: { running: boolean }) {
+function StatusBadge({ status }: { status: string | null | undefined }) {
+  const running = status === 'active' || status === 'running'
   if (running) {
     return (
       <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700">
@@ -40,22 +41,6 @@ function RefreshIcon({ className }: { className?: string }) {
   )
 }
 
-function CheckCircleIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
-function ExclamationIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9.75a.75.75 0 01.75.75v.5a.75.75 0 01-1.5 0v-.5a.75.75 0 01.75-.75z" clipRule="evenodd" />
-    </svg>
-  )
-}
-
 function SpinnerIcon({ className }: { className?: string }) {
   return (
     <svg className={`animate-spin ${className || ''}`} viewBox="0 0 20 20" fill="none">
@@ -74,35 +59,34 @@ async function checkHealth(): Promise<boolean> {
   }
 }
 
+function shortHash(value: string | null | undefined) {
+  if (!value) return 'unknown'
+  return value.slice(0, 8)
+}
+
+function formatValue(value: string | null | undefined) {
+  return value && value.length > 0 ? value : '—'
+}
+
+function formatTimestamp(value: string | null | undefined) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+}
+
 export function SystemSettingsSection() {
   const { data: logLevelData, isLoading: logLevelLoading } = useLogLevel()
   const setLogLevel = useSetLogLevel()
-  const { data: systemInfo, isLoading: infoLoading, isError: infoError, refetch: refetchInfo } = useSystemInfo()
-  const rebuildSystem = useRebuildSystem()
+  const { data: systemInfo, isLoading: infoLoading, isError: infoError, error: infoErrorValue, refetch: refetchInfo } = useSystemInfo()
+  const systemUpdate = useSystemUpdate()
+  const [trackingUpdate, setTrackingUpdate] = useState(false)
+  const { data: updateStatusEnvelope, refetch: refetchUpdateStatus } = useSystemUpdateStatus(true)
+  const [reconnectState, setReconnectState] = useState<string | null>(null)
+  const updateStatus = updateStatusEnvelope?.job ?? null
 
   const [currentLevel, setCurrentLevel] = useState(DEFAULT_LOG_LEVEL)
   const [saving, setSaving] = useState(false)
   const [logError, setLogError] = useState<string | null>(null)
-
-  const [reconnectState, setReconnectState] = useState<'idle' | 'rebuilding' | 'restarting' | 'reconnecting'>('idle')
-  const [countdown, setCountdown] = useState(60)
-  const countdownRef = useRef<number | null>(null)
-  const healthCheckRef = useRef<number | null>(null)
-
-  const clearTimers = useCallback(() => {
-    if (countdownRef.current !== null) {
-      clearInterval(countdownRef.current)
-      countdownRef.current = null
-    }
-    if (healthCheckRef.current !== null) {
-      clearInterval(healthCheckRef.current)
-      healthCheckRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => clearTimers()
-  }, [clearTimers])
 
   useEffect(() => {
     if (logLevelData?.level) {
@@ -126,91 +110,69 @@ export function SystemSettingsSection() {
     }
   }
 
-  const handleRebuild = useCallback(async () => {
-    if (reconnectState !== 'idle') return
-    setReconnectState('rebuilding')
-
-    try {
-      await rebuildSystem.mutateAsync()
-    } catch {
-      setReconnectState('idle')
+  useEffect(() => {
+    if (updateStatus?.status === 'succeeded') {
+      setTrackingUpdate(false)
+      setReconnectState(null)
+      refetchInfo()
       return
     }
 
-    setReconnectState('restarting')
-    setCountdown(60)
+    if (updateStatus?.status === 'failed') {
+      setTrackingUpdate(false)
+      setReconnectState(null)
+      refetchInfo()
+      return
+    }
 
-    countdownRef.current = window.setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          if (countdownRef.current !== null) {
-            clearInterval(countdownRef.current)
-            countdownRef.current = null
-          }
-          return 0
+    if (updateStatus?.status === 'waiting-for-reconnect') {
+      setReconnectState('Waiting for reconnect')
+      let cancelled = false
+      const poll = window.setInterval(async () => {
+        const ok = await checkHealth()
+        if (!cancelled && ok) {
+          setReconnectState('Refreshing runtime info')
+          await refetchInfo()
+          await refetchUpdateStatus()
         }
-        return c - 1
-      })
-    }, 1000)
+      }, 2000)
 
-    healthCheckRef.current = window.setInterval(async () => {
-      const ok = await checkHealth()
-      if (ok) {
-        clearTimers()
-        setReconnectState('idle')
-        refetchInfo()
+      return () => {
+        cancelled = true
+        clearInterval(poll)
       }
-    }, 5000)
-  }, [reconnectState, rebuildSystem, clearTimers, refetchInfo])
+    }
+  }, [updateStatus?.status, refetchInfo, refetchUpdateStatus])
 
-  const serverRunning = !infoError && systemInfo?.server?.status === 'running'
+  useEffect(() => {
+    if (!updateStatus || !systemInfo) return
+    if (updateStatus.status === 'waiting-for-reconnect' && systemInfo.running.gitHash && systemInfo.running.gitHash === updateStatus.sourceHead) {
+      setReconnectState('Ready')
+    }
+  }, [updateStatus, systemInfo])
+
   const isLoading = logLevelLoading || infoLoading
+  const sourceHead = systemInfo?.source.head ?? null
+  const gitHash = systemInfo?.running.gitHash ?? null
+  const updateReady = updateStatus?.status === 'succeeded'
+    || (updateStatus?.status === 'waiting-for-reconnect' && !!gitHash && gitHash === updateStatus.sourceHead)
+  const persistedUpdateActive = updateStatus?.status === 'running' || updateStatus?.status === 'waiting-for-reconnect'
+  const showUpdateButton = systemInfo?.install.mode === 'local-source'
+    && systemInfo.update.available
+    && systemInfo.update.status === 'update-available'
+    && !persistedUpdateActive
+    && !trackingUpdate
+  const showProgress = trackingUpdate || persistedUpdateActive || updateReady || reconnectState === 'Ready'
+  const progressLabel = updateReady ? 'Ready' : reconnectState ?? updateStatus?.stage ?? null
+  const updateMessage = updateStatus?.reason ?? systemInfo?.update.reason ?? null
+  const recentUpdateLogs = updateStatus?.logs?.slice(-5).reverse() ?? []
 
-  const sourceHead = systemInfo?.sourceHead ?? null
-  const gitHash = systemInfo?.gitHash ?? null
-  const upToDate = sourceHead === null || sourceHead === gitHash
-  const showRebuildButton = sourceHead !== null && !upToDate && reconnectState === 'idle'
-
-  const rebuildButton = () => {
-    if (reconnectState === 'rebuilding') {
-      return (
-        <Button
-          disabled
-          className="inline-flex items-center gap-2 bg-blue-400 cursor-not-allowed"
-        >
-          <SpinnerIcon className="h-4 w-4" />
-          Rebuilding...
-        </Button>
-      )
-    }
-    if (reconnectState === 'restarting') {
-      return (
-        <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-600 bg-amber-50 rounded-md">
-          <SpinnerIcon className="h-4 w-4" />
-          Restarting... reconnecting in {countdown}s
-        </span>
-      )
-    }
-    if (reconnectState === 'reconnecting') {
-      return (
-        <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted-foreground bg-muted rounded-md">
-          <SpinnerIcon className="h-4 w-4" />
-          Reconnecting...
-        </span>
-      )
-    }
-    if (showRebuildButton) {
-      return (
-        <Button
-          onClick={handleRebuild}
-          className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-        >
-          <RefreshIcon className="h-4 w-4" />
-          Rebuild &amp; Restart
-        </Button>
-      )
-    }
-    return null
+  const handleUpdate = async () => {
+    if (!systemInfo) return
+    if (systemInfo.source.dirty) return
+    setReconnectState(null)
+    await systemUpdate.mutateAsync()
+    setTrackingUpdate(true)
   }
 
   if (isLoading) {
@@ -234,7 +196,7 @@ export function SystemSettingsSection() {
     <div className="space-y-8">
       <div>
         <h3 className="text-sm font-medium text-foreground">System</h3>
-        <p className="text-xs text-muted-foreground mt-1">Logging and runtime information.</p>
+        <p className="text-xs text-muted-foreground mt-1">Logging, runtime identity, and local-source update status.</p>
       </div>
 
       <div className="space-y-3">
@@ -272,56 +234,135 @@ export function SystemSettingsSection() {
       <hr className="border" />
 
       <div className="space-y-3">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">About</h4>
+        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Server Runtime</h4>
 
+        {infoError || !systemInfo ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            Failed to load server runtime: {infoErrorValue instanceof Error ? infoErrorValue.message : 'runtime info unavailable'}
+          </div>
+        ) : (
         <div className="rounded-md border px-4 py-1">
-          <InfoRow label="Mohist">
-            v{systemInfo?.version ?? 'unknown'} · Git {gitHash ?? 'unknown'}
+          <InfoRow label="Running version">
+            {formatValue(systemInfo.running.version)}
           </InfoRow>
-          {sourceHead && (
-            <InfoRow label="Source HEAD">
-              {sourceHead}
-            </InfoRow>
-          )}
-          <InfoRow label="Status">
-            {upToDate ? (
-              <span className="inline-flex items-center gap-1.5 text-green-600">
-                <CheckCircleIcon className="h-3.5 w-3.5" />
-                Up to date
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 text-amber-600">
-                <ExclamationIcon className="h-3.5 w-3.5" />
-                Source changed — rebuild needed
-              </span>
-            )}
+          <InfoRow label="Running git hash">
+            <span title={gitHash ?? undefined}>{shortHash(gitHash)}</span>
           </InfoRow>
-          <InfoRow label="Server">
-            {systemInfo ? (
-              <>
-                {systemInfo.server.host}:{systemInfo.server.port}{' '}
-                <StatusBadge running={serverRunning} />
-              </>
-            ) : (
-              <>
-                — <StatusBadge running={false} />
-              </>
-            )}
+          <InfoRow label="Started at">
+            {formatTimestamp(systemInfo.running.startedAt)}
+          </InfoRow>
+          <InfoRow label="Source path">
+            {formatValue(systemInfo.source.path)}
+          </InfoRow>
+          <InfoRow label="Source branch">
+            {formatValue(systemInfo.source.branch)}
+          </InfoRow>
+          <InfoRow label="Source HEAD">
+            <span title={sourceHead ?? undefined}>{sourceHead ? `${shortHash(sourceHead)} (${sourceHead})` : 'unknown'}</span>
+          </InfoRow>
+          <InfoRow label="Source dirty state">
+            {systemInfo.source.dirty ? 'dirty' : 'clean'}
+          </InfoRow>
+          <InfoRow label="Install mode">
+            {formatValue(systemInfo.install.mode)}
+          </InfoRow>
+          <InfoRow label="Install detail">
+            {formatValue(systemInfo.install.reason)}
+          </InfoRow>
+          <InfoRow label="Service manager">
+            {formatValue(systemInfo.install.serviceManager)}
+          </InfoRow>
+          <InfoRow label="Server unit">
+            {formatValue(systemInfo.install.serverUnit)}
+          </InfoRow>
+          <InfoRow label="Runner unit">
+            {formatValue(systemInfo.install.runnerUnit)}
+          </InfoRow>
+          <InfoRow label="Update status">
+            {formatValue(systemInfo.update.status)}
+          </InfoRow>
+          <InfoRow label="Server service status">
+            <span className="inline-flex items-center gap-2">
+              {formatValue(systemInfo.services.server)} <StatusBadge status={systemInfo.services.server} />
+            </span>
+          </InfoRow>
+          <InfoRow label="Runner service status">
+            <span className="inline-flex items-center gap-2">
+              {formatValue(systemInfo.services.runner)} <StatusBadge status={systemInfo.services.runner} />
+            </span>
           </InfoRow>
           <InfoRow label="Database">
-            {systemInfo?.paths?.db ?? '—'}
+            {systemInfo.paths.db ?? '—'}
           </InfoRow>
           <InfoRow label="Config">
-            {systemInfo?.paths?.config ?? '—'}
+            {systemInfo.paths.config ?? '—'}
           </InfoRow>
           <InfoRow label="Opencode">
-            {systemInfo?.paths?.opencode ?? '—'}
+            {systemInfo.paths.opencode ?? '—'}
+          </InfoRow>
+          <InfoRow label="Logs">
+            {systemInfo.paths.logs ?? '—'}
           </InfoRow>
         </div>
+        )}
 
-        {rebuildButton() && (
+        {updateMessage && (
+          <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            {updateMessage}
+          </div>
+        )}
+
+        {systemInfo?.source.dirty && (
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+            Local source has uncommitted changes. Update is disabled until the tree is clean.
+          </div>
+        )}
+
+        {systemInfo && systemInfo.install.mode !== 'local-source' && (
+          <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            Web update is unsupported for this deployment.
+          </div>
+        )}
+
+        {(showUpdateButton || showProgress) && (
           <div className="pt-2">
-            {rebuildButton()}
+            {showProgress ? (
+              <div className="space-y-3">
+                <span className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-600 bg-amber-50 rounded-md">
+                  {!updateReady && <SpinnerIcon className="h-4 w-4" />}
+                  {progressLabel ?? 'Waiting for reconnect'}
+                </span>
+                {(updateStatus?.sourcePath || updateStatus?.serverUnit || updateStatus?.runnerUnit) && (
+                  <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                    {updateStatus.sourcePath && <div>Source: <span className="font-mono">{updateStatus.sourcePath}</span></div>}
+                    {updateStatus.serverUnit && <div>Server unit: <span className="font-mono">{updateStatus.serverUnit}</span></div>}
+                    {updateStatus.runnerUnit && <div>Runner unit: <span className="font-mono">{updateStatus.runnerUnit}</span></div>}
+                  </div>
+                )}
+                {recentUpdateLogs.length > 0 && (
+                  <div className="rounded-md border px-3 py-2">
+                    <div className="mb-2 text-xs font-medium text-foreground/80">Update log</div>
+                    <div className="space-y-1">
+                      {recentUpdateLogs.map((log) => (
+                        <div key={`${log.at}-${log.stage}-${log.message}`} className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-[8rem_1fr]">
+                          <span className="font-medium text-foreground/70">{log.stage}</span>
+                          <span>{log.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Button
+                onClick={handleUpdate}
+                disabled={systemUpdate.isPending || systemInfo?.source.dirty}
+                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <RefreshIcon className="h-4 w-4" />
+                Update &amp; Restart
+              </Button>
+            )}
           </div>
         )}
       </div>

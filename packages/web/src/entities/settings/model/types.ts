@@ -14,20 +14,71 @@ export interface AgentRuntimeConfig {
 }
 
 export interface SystemInfo {
-  version: string
-  gitHash: string
-  sourceHead: string | null
-  server: {
-    host: string
-    port: number
-    status: 'running'
+  running: {
+    version: string | null
+    gitHash: string | null
+    startedAt: string
+  }
+  source: {
+    path: string | null
+    branch: string | null
+    head: string | null
+    dirty: boolean
+  }
+  install: {
+    mode: 'local-source' | 'binary' | 'unknown'
+    serviceManager: string | null
+    serverUnit: string | null
+    runnerUnit: string | null
+    reason: string | null
+  }
+  update: {
+    status: 'up-to-date' | 'update-available' | 'dirty-source' | 'unsupported' | 'unknown'
+    available: boolean
+    reason: string | null
+  }
+  services: {
+    server: string | null
+    runner: string | null
   }
   paths: {
-    db: string
-    config: string
+    db: string | null
+    config: string | null
     opencode: string | null
-    logs: string
+    logs: string | null
   }
+}
+
+export interface SystemUpdateStartResponse {
+  job: SystemUpdateStatus
+}
+
+export interface SystemUpdateLogEntry {
+  at: string
+  stage: string
+  message: string
+}
+
+export interface SystemUpdateStatus {
+  jobId: string
+  status: string
+  stage: string
+  updateAvailable: boolean
+  runningGitHash: string | null
+  sourceHead: string | null
+  sourcePath: string | null
+  serverUnit: string | null
+  runnerUnit: string | null
+  reason: string | null
+  logs: SystemUpdateLogEntry[]
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+export interface SystemUpdateStatusEnvelope {
+  hasJob: boolean
+  job: SystemUpdateStatus | null
 }
 
 export interface WorkflowProfileInfo {
