@@ -97,6 +97,57 @@ public class AgentSessionSpecs
     }
 
     [Fact]
+    public async Task RunnerExecutesAgentWork_ToolEvents_AppearAsTranscriptToolParts()
+    {
+        var (project, issue, _, session) = await CreateStartedAgentSessionAsync("tool-transcript", title: "Tool transcript");
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new object[]
+            {
+                new { type = "agent_thought_chunk", payload = new { content = new { text = "I should inspect the file." } } },
+                new
+                {
+                    type = "tool_call",
+                    payload = new
+                    {
+                        toolCallId = "tool-1",
+                        kind = "read",
+                        status = "in_progress",
+                        title = "Read README.md",
+                        rawInput = new { filePath = "README.md" }
+                    }
+                },
+                new
+                {
+                    type = "tool_call_update",
+                    payload = new
+                    {
+                        toolCallId = "tool-1",
+                        kind = "read",
+                        status = "completed",
+                        rawOutput = new { text = "hello" }
+                    }
+                }
+            }
+        });
+
+        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
+        var turn = Assert.Single(detail.Turns.EnumerateArray());
+        var assistant = turn.GetProperty("assistant").EnumerateArray().ToArray();
+
+        Assert.Contains(assistant, p => p.GetProperty("type").GetString() == "reasoning" && p.GetProperty("text").GetString() == "I should inspect the file.");
+        var toolPart = Assert.Single(assistant, p => p.GetProperty("type").GetString() == "tool");
+        var tool = toolPart.GetProperty("tool");
+        Assert.Equal("tool-1", tool.GetProperty("toolCallId").GetString());
+        Assert.Equal("read", tool.GetProperty("toolName").GetString());
+        Assert.Equal("completed", tool.GetProperty("status").GetString());
+        Assert.Contains("README.md", tool.GetProperty("input").GetString());
+        Assert.Contains("hello", tool.GetProperty("output").GetString());
+    }
+
+    [Fact]
     public async Task IssueWorkflowSessionApi_UsesCurrentWorkflowRunAndSessionName()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("current-workflow", sessionName: "plan");

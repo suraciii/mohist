@@ -125,12 +125,7 @@ public class WorkflowAgentSessionQueryService
             .ToListAsync(ct);
 
         var createdAt = session.StartedAt ?? session.CreatedAt;
-        var text = string.Concat(events
-            .Where(e => e.Type is "agent_message_chunk" or "agent_output_chunk")
-            .Select(e => ExtractText(e.PayloadJson)));
-        object[] assistant = string.IsNullOrEmpty(text)
-            ? []
-            : [new { id = $"{session.Id}-text", type = "text", text, startedAt = createdAt.ToString("o"), completedAt = session.CompletedAt?.ToString("o") }];
+        var assistant = BuildAssistantParts(session, events, createdAt);
 
         var turns = new[]
         {
@@ -338,17 +333,234 @@ public class WorkflowAgentSessionQueryService
         return string.Empty;
     }
 
-    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
+    private static List<JsonElement> BuildAssistantParts(WorkflowAgentSessionRow session, IReadOnlyList<WorkflowAgentSessionEventRow> events, DateTime createdAt)
+    {
+        var parts = new List<JsonElement>();
+        var openText = new TextAccumulator("text", createdAt);
+        var openReasoning = new TextAccumulator("reasoning", createdAt);
+        var tools = new Dictionary<string, int>(StringComparer.Ordinal);
+        var toolParts = new Dictionary<string, ToolPartProjection>(StringComparer.Ordinal);
 
-    private static object? ParsePayload(string json)
+        foreach (var e in events)
+        {
+            if (e.Type is "agent_message_chunk" or "agent_output_chunk")
+            {
+                AppendTextPart(parts, openText, ExtractText(e.PayloadJson), e.CreatedAt, session.CompletedAt);
+                continue;
+            }
+
+            if (e.Type == "agent_thought_chunk")
+            {
+                AppendTextPart(parts, openReasoning, ExtractText(e.PayloadJson), e.CreatedAt, session.CompletedAt);
+                continue;
+            }
+
+            if (e.Type is "tool_call" or "tool_call_update")
+            {
+                var tool = ParseToolCall(e.PayloadJson, e.Type, e.CreatedAt);
+                if (tool is null) continue;
+
+                var toolCallId = tool.Tool.ToolCallId;
+                if (tools.TryGetValue(toolCallId, out var index))
+                {
+                    var merged = MergeToolPart(toolParts[toolCallId], tool);
+                    toolParts[toolCallId] = merged;
+                    parts[index] = ToJsonElement(merged);
+                }
+                else
+                {
+                    tools[toolCallId] = parts.Count;
+                    toolParts[toolCallId] = tool;
+                    parts.Add(ToJsonElement(tool));
+                }
+            }
+        }
+
+        if (parts.Count == 0 && session.CompletedAt is null)
+            return parts;
+
+        return parts;
+    }
+
+    private static void AppendTextPart(List<JsonElement> parts, TextAccumulator accumulator, string text, DateTime at, DateTime? completedAt)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(accumulator.Text))
+        {
+            accumulator.StartedAt = at;
+            accumulator.Index = parts.Count;
+            parts.Add(accumulator.ToPart(completedAt));
+        }
+
+        accumulator.Text += text;
+        parts[accumulator.Index] = accumulator.ToPart(completedAt);
+    }
+
+    private static ToolPartProjection MergeToolPart(ToolPartProjection existing, ToolPartProjection next)
+    {
+        var tool = existing.Tool;
+        var update = next.Tool;
+        var status = update.Status is "pending" ? tool.Status : update.Status;
+        return existing with
+        {
+            Tool = tool with
+            {
+                NormalizedName = update.NormalizedName ?? tool.NormalizedName,
+                DisplayTitle = update.DisplayTitle ?? tool.DisplayTitle,
+                DisplaySubtitle = update.DisplaySubtitle ?? tool.DisplaySubtitle,
+                Category = update.Category ?? tool.Category,
+                ToolName = update.ToolName == "unknown" ? tool.ToolName : update.ToolName,
+                Status = status,
+                Title = update.Title ?? tool.Title,
+                Input = update.Input ?? tool.Input,
+                Output = update.Output ?? tool.Output,
+                Error = update.Error ?? tool.Error,
+                CompletedAt = IsTerminalToolStatus(status) ? update.CompletedAt ?? tool.CompletedAt : tool.CompletedAt,
+                RawInput = update.RawInput ?? tool.RawInput,
+                RawOutput = update.RawOutput ?? tool.RawOutput,
+                Metadata = update.Metadata ?? tool.Metadata,
+                Details = update.Details ?? tool.Details,
+            }
+        };
+    }
+
+    private static ToolPartProjection? ParseToolCall(string json, string eventType, DateTime createdAt)
     {
         try
         {
-            return JsonSerializer.Deserialize<object>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            using var doc = JsonDocument.Parse(json);
+            var payload = doc.RootElement;
+            var nested = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("toolCall", out var toolCall)
+                ? toolCall
+                : default;
+            var toolCallId = GetString(nested, "toolCallId")
+                ?? GetString(payload, "toolCallId")
+                ?? GetString(payload, "id")
+                ?? GetString(payload, "callId");
+            if (string.IsNullOrWhiteSpace(toolCallId)) return null;
+
+            var toolName = GetString(nested, "toolName")
+                ?? GetString(payload, "toolName")
+                ?? GetString(payload, "name")
+                ?? GetString(payload, "kind")
+                ?? "unknown";
+            var status = GetString(nested, "status")
+                ?? GetString(payload, "status")
+                ?? (eventType == "tool_call_update" ? "completed" : "pending");
+            var state = MapToolStatus(status);
+            var title = GetString(nested, "title") ?? GetString(payload, "title");
+            var rawInput = CloneProperty(nested, "input") ?? CloneProperty(payload, "rawInput") ?? CloneProperty(payload, "input");
+            var rawOutput = CloneProperty(nested, "output") ?? CloneProperty(payload, "rawOutput") ?? CloneProperty(payload, "output");
+
+            return new ToolPartProjection(
+                $"{toolCallId}-{eventType}-{createdAt.Ticks}",
+                "tool",
+                new ToolProjection(
+                    toolCallId,
+                    GetString(nested, "normalizedName") ?? GetString(payload, "normalizedName"),
+                    GetString(nested, "displayTitle") ?? GetString(payload, "displayTitle"),
+                    GetString(nested, "displaySubtitle") ?? GetString(payload, "displaySubtitle"),
+                    GetString(nested, "category") ?? GetString(payload, "category"),
+                    toolName,
+                    state,
+                    title,
+                    null,
+                    rawInput.HasValue ? rawInput.Value.GetRawText() : null,
+                    rawOutput.HasValue ? rawOutput.Value.GetRawText() : null,
+                    state == "failed" && rawOutput.HasValue ? rawOutput.Value.GetRawText() : null,
+                    createdAt.ToString("o"),
+                    IsTerminalToolStatus(state) ? createdAt.ToString("o") : null,
+                    rawInput,
+                    rawOutput,
+                    CloneProperty(nested, "metadata") ?? CloneProperty(payload, "metadata") ?? CloneProperty(payload, "rawOutputMetadata"),
+                    CloneProperty(nested, "details") ?? CloneProperty(payload, "details")));
         }
         catch
         {
-            return json;
+            return null;
+        }
+    }
+
+    private static string MapToolStatus(string status) => status switch
+    {
+        "pending" => "pending",
+        "in_progress" or "running" or "started" => "running",
+        "completed" => "completed",
+        "failed" or "timeout" => "failed",
+        "cancelled" => "cancelled",
+        _ => "pending"
+    };
+
+    private static bool IsTerminalToolStatus(string status) =>
+        status is "completed" or "failed" or "cancelled";
+
+    private static string? GetString(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
+            ? prop.GetString()
+            : null;
+    }
+
+    private static JsonElement? CloneProperty(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
+            return null;
+        return value.Clone();
+    }
+
+    private static string Truncate(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "\u2026";
+
+    private static JsonElement ToJsonElement<T>(T value) =>
+        JsonSerializer.SerializeToElement(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+    private sealed class TextAccumulator(string type, DateTime startedAt)
+    {
+        public int Index { get; set; } = -1;
+        public string Text { get; set; } = string.Empty;
+        public DateTime StartedAt { get; set; } = startedAt;
+
+        public JsonElement ToPart(DateTime? completedAt) => ToJsonElement(new
+        {
+            id = $"{type}-{StartedAt.Ticks}",
+            type,
+            text = Text,
+            startedAt = StartedAt.ToString("o"),
+            completedAt = completedAt?.ToString("o")
+        });
+    }
+
+    private sealed record ToolPartProjection(string Id, string Type, ToolProjection Tool);
+
+    private sealed record ToolProjection(
+        string ToolCallId,
+        string? NormalizedName,
+        string? DisplayTitle,
+        string? DisplaySubtitle,
+        string? Category,
+        string ToolName,
+        string Status,
+        string? Title,
+        string? Target,
+        string? Input,
+        string? Output,
+        string? Error,
+        string StartedAt,
+        string? CompletedAt,
+        JsonElement? RawInput,
+        JsonElement? RawOutput,
+        JsonElement? Metadata,
+        JsonElement? Details);
+
+    private static JsonElement? ParsePayload(string json)
+    {
+        try
+        {
+            return JsonDocument.Parse(json).RootElement.Clone();
+        }
+        catch
+        {
+            return null;
         }
     }
 

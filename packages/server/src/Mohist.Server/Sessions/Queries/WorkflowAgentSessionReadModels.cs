@@ -27,7 +27,7 @@ public sealed record WorkflowAgentSessionDto(
     string? FailureReason,
     int? ExitCode);
 
-public sealed record WorkflowAgentSessionEventDto(string Id, string SessionId, string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName, string? AgentSessionId, string? WorkId, string? WorkType, string? Stage, long Sequence, string Type, object? Payload, string CreatedAt);
+public sealed record WorkflowAgentSessionEventDto(string Id, string SessionId, string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName, string? AgentSessionId, string? WorkId, string? WorkType, string? Stage, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
 
 public sealed record WorkflowAgentSessionSummaryDto(
     string Id,
@@ -65,7 +65,7 @@ public sealed record WorkflowAgentSessionTranscript(
     bool Incomplete,
     IReadOnlyList<WorkflowAgentSessionTranscriptItem> WorkflowLogs);
 
-public sealed record WorkflowAgentSessionTranscriptItem(string Id, string EventType, object? Data, string CreatedAt);
+public sealed record WorkflowAgentSessionTranscriptItem(string Id, string EventType, JsonElement? Data, string CreatedAt);
 
 public sealed record WorkflowAgentSessionInfoDto(int IssueNumber, string IssueTitle, string IssueStage, string SessionId, [property: JsonPropertyName("status")] string Status, string? Model, string? Title, string CreatedAt, string? CompletedAt, string? LastActivityAt);
 

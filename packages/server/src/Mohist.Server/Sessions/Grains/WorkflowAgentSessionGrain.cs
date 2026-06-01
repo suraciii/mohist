@@ -263,6 +263,30 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
                 session.Id,
                 text));
         }
+        else if (entry.Type is "tool_call" or "tool_call_update")
+        {
+            var tool = ParseToolCall(entry.PayloadJson, entry.Type);
+            if (tool is null) return;
+
+            _eventBus.Emit("coder_tool_call", new CoderToolCallEvent(
+                session.IssueNumber.ToString(),
+                session.ProjectId,
+                session.WorkId,
+                session.AgentSessionId ?? session.Id,
+                session.Id,
+                tool.ToolName,
+                tool.State,
+                tool.ToolCallId,
+                tool.Title,
+                tool.RawInput,
+                tool.RawOutput,
+                tool.Metadata,
+                tool.Details,
+                tool.NormalizedName,
+                tool.DisplayTitle,
+                tool.DisplaySubtitle,
+                tool.Category));
+        }
     }
 
     private void EmitStatusChanged(WorkflowAgentSession session) => _eventBus.Emit("coder_session_status_changed", new CoderSessionStatusChangedEvent(
@@ -355,6 +379,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
 
     private static string? GetStringProp(JsonElement element, string name)
     {
+        if (element.ValueKind != JsonValueKind.Object) return null;
         return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
             ? prop.GetString()
             : null;
@@ -362,8 +387,82 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
 
     private static int? GetIntProp(JsonElement element, string name)
     {
+        if (element.ValueKind != JsonValueKind.Object) return null;
         return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
             ? prop.GetInt32()
             : null;
     }
+
+    private static ToolCallProjection? ParseToolCall(string json, string eventType)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var payload = doc.RootElement;
+            var nested = payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("toolCall", out var toolCall)
+                ? toolCall
+                : default;
+
+            var toolCallId = GetStringProp(nested, "toolCallId")
+                ?? GetStringProp(payload, "toolCallId")
+                ?? GetStringProp(payload, "id")
+                ?? GetStringProp(payload, "callId");
+            if (string.IsNullOrWhiteSpace(toolCallId)) return null;
+
+            var toolName = GetStringProp(nested, "toolName")
+                ?? GetStringProp(payload, "toolName")
+                ?? GetStringProp(payload, "name")
+                ?? GetStringProp(payload, "kind")
+                ?? "unknown";
+            var status = GetStringProp(nested, "status")
+                ?? GetStringProp(payload, "status")
+                ?? (eventType == "tool_call_update" ? "completed" : "started");
+
+            return new ToolCallProjection(
+                toolName,
+                MapToolState(status),
+                toolCallId,
+                GetStringProp(nested, "title") ?? GetStringProp(payload, "title"),
+                CloneProperty(nested, "input") ?? CloneProperty(payload, "rawInput") ?? CloneProperty(payload, "input"),
+                CloneProperty(nested, "output") ?? CloneProperty(payload, "rawOutput") ?? CloneProperty(payload, "output"),
+                CloneProperty(nested, "metadata") ?? CloneProperty(payload, "metadata") ?? CloneProperty(payload, "rawOutputMetadata"),
+                CloneProperty(nested, "details") ?? CloneProperty(payload, "details"),
+                GetStringProp(nested, "normalizedName") ?? GetStringProp(payload, "normalizedName"),
+                GetStringProp(nested, "displayTitle") ?? GetStringProp(payload, "displayTitle"),
+                GetStringProp(nested, "displaySubtitle") ?? GetStringProp(payload, "displaySubtitle"),
+                GetStringProp(nested, "category") ?? GetStringProp(payload, "category"));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string MapToolState(string status) => status switch
+    {
+        "pending" or "in_progress" or "running" => "started",
+        "completed" or "failed" or "cancelled" or "timeout" => status,
+        _ => status
+    };
+
+    private static JsonElement? CloneProperty(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(name, out var value))
+            return null;
+        return value.Clone();
+    }
+
+    private sealed record ToolCallProjection(
+        string ToolName,
+        string State,
+        string ToolCallId,
+        string? Title,
+        JsonElement? RawInput,
+        JsonElement? RawOutput,
+        JsonElement? Metadata,
+        JsonElement? Details,
+        string? NormalizedName,
+        string? DisplayTitle,
+        string? DisplaySubtitle,
+        string? Category);
 }
