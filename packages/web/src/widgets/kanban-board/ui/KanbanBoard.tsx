@@ -2,8 +2,10 @@ import { useMemo, useState, useEffect, useCallback } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
+import { Link } from 'react-router-dom'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, type Issue } from '../../../entities/issue'
+import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import { StageColumn } from './StageColumn'
 import { IssueCard } from './IssueCard'
 import {
@@ -20,6 +22,7 @@ import {
   type SortMode,
 } from '../model/board-query'
 import { useLabels } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { deriveAttentionItems } from '../model/homepage-attention'
 
@@ -30,6 +33,12 @@ interface Props {
 }
 
 const ALL_PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4']
+
+function withProjectSearch(path: string, projectId?: string | null) {
+  if (!projectId) return path
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}projectId=${encodeURIComponent(projectId)}`
+}
 
 function FilterBar({
   state,
@@ -275,6 +284,8 @@ function NeedsAttentionSummary({
 }: {
   items: Array<{ issueNumber: number; issueId: string; label: string; detail?: string }>
 }) {
+  const { projectId } = useProject()
+
   if (items.length === 0) return null
 
   return (
@@ -284,7 +295,7 @@ function NeedsAttentionSummary({
         {items.map((item) => (
           <a
             key={item.issueId}
-            href={`/issues/${item.issueNumber}`}
+            href={withProjectSearch(`/issues/${item.issueNumber}`, projectId)}
             className="inline-flex items-center gap-1.5 rounded-md bg-background px-2 py-1 text-xs shadow-sm hover:shadow-md transition-shadow border border-amber-200"
           >
             <span className="font-mono text-amber-600">#{item.issueNumber}</span>
@@ -299,12 +310,22 @@ function NeedsAttentionSummary({
   )
 }
 
-function RunnerUnavailableBanner({ agentStatus }: { agentStatus: AgentStatus }) {
-  if (agentStatus.runnerAvailable !== false) return null
+function RunnerUnavailableBanner({
+  agentStatus,
+}: {
+  agentStatus: AgentStatus
+}) {
+  const { hasConnectedCapacity } = useRunnerSummary()
+  const { projectId } = useProject()
+  if (hasConnectedCapacity) return null
 
   return (
     <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
-      {agentStatus.runnerMessage ?? 'No runner is connected. Start a runner before starting workflow work.'}
+      {agentStatus.runnerMessage ?? 'No runner is connected.'}{' '}
+      <Link to={withProjectSearch('/activity', projectId)} className="underline hover:no-underline">
+        View runner status
+      </Link>{' '}
+      or start a runner before starting workflow work.
     </div>
   )
 }

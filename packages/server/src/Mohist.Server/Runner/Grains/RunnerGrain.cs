@@ -225,6 +225,16 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.FromResult(_status == RunnerStatus.Online);
     }
 
+    public Task<RunnerRuntimeState> GetRuntimeStateAsync()
+    {
+        var activeWork = _workById.Values.ToList();
+        return Task.FromResult(new RunnerRuntimeState(
+            _status,
+            _lastHeartbeat,
+            _assignedWorkflows.ToList(),
+            activeWork));
+    }
+
     public Task AssignWorkflowAsync(string workflowRunId)
     {
         _assignedWorkflows.Add(workflowRunId);

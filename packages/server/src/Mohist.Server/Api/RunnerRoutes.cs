@@ -22,7 +22,7 @@ public static class RunnerRoutes
                 req.Hostname ?? Environment.MachineName,
                 req.ProjectId,
                 req.CoderModels,
-                RunnerCapacity.Normalize(req.MaxWorkflowSlots)));
+                MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots)));
             return Results.Ok();
         });
 
@@ -44,7 +44,7 @@ public static class RunnerRoutes
                     req.Hostname ?? Environment.MachineName,
                     req.ProjectId,
                     req.CoderModels,
-                    RunnerCapacity.Normalize(req.MaxWorkflowSlots));
+                    MaxWorkflowSlots: RunnerCapacity.Normalize(req.MaxWorkflowSlots));
                 await runner.HeartbeatRepairAsync(info);
             }
             else
