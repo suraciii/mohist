@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { IssueStatus, IssueHealth, type RecoveryProjection } from '../../../entities/issue'
+import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
+import { IssueStatus, IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
 import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
@@ -14,14 +15,132 @@ import { IssueModelSelector } from '../../../features/select-issue-model'
 import { BranchBar, WorkflowView, TaskProgressPanel } from '../../../widgets/issue-workflow'
 import { SessionList } from '../../../widgets/coder-session'
 import { formatTime } from '../../../shared/lib/format-time'
-import { statusBadge, statusLabel } from '../../../entities/issue/lib/status-badge'
+import { statusLabel } from '../../../entities/issue/lib/status-badge'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
+import { getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
+import { getStageColors } from '../../../widgets/kanban-board/model/stage-colors'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+
+function PriorityChip({ priority }: { priority: string | null | undefined }) {
+  if (!priority) return null
+  const style = getPriorityStyle(priority)
+  return (
+    <span
+      data-testid="priority-chip"
+      className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+      style={{ backgroundColor: style.bg, color: style.text }}
+    >
+      {formatPriority(priority)}
+    </span>
+  )
+}
+
+const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
+  [WorkflowStage.Plan]: 'Plan',
+  [WorkflowStage.Build]: 'Build',
+  [WorkflowStage.Check]: 'Check',
+  [WorkflowStage.Integrate]: 'Integrate',
+  [WorkflowStage.Done]: 'Done',
+}
+
+function stageToIssueStatus(stage: WorkflowStage | undefined): IssueStatus {
+  if (!stage) return IssueStatus.Backlog
+  if (stage === WorkflowStage.Plan) return IssueStatus.Todo
+  if (stage === WorkflowStage.Done) return IssueStatus.Done
+  return IssueStatus.InProgress
+}
+
+function WorkflowStagePill({ stage }: { stage: WorkflowStage | undefined }) {
+  if (!stage) return null
+  const colors = getStageColors(stageToIssueStatus(stage))
+  return (
+    <span
+      data-testid="workflow-stage-pill"
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+      style={{ backgroundColor: `${colors.accent}1a`, color: colors.accent }}
+    >
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: colors.accent }}
+      />
+      {WORKFLOW_STAGE_LABELS[stage]}
+    </span>
+  )
+}
+
+function HealthPill({ health }: { health: IssueHealth }) {
+  const colorMap: Record<IssueHealth, { dot: string; bg: string; text: string }> = {
+    [IssueHealth.Active]: { dot: '#22c55e', bg: '#dcfce7', text: '#15803d' },
+    [IssueHealth.Paused]: { dot: '#eab308', bg: '#fef9c3', text: '#a16207' },
+    [IssueHealth.Blocked]: { dot: '#ef4444', bg: '#fee2e2', text: '#b91c1c' },
+    [IssueHealth.Interrupted]: { dot: '#f97316', bg: '#ffedd5', text: '#c2410c' },
+    [IssueHealth.Cancelled]: { dot: '#9ca3af', bg: '#f3f4f6', text: '#6b7280' },
+    [IssueHealth.Done]: { dot: '#22c55e', bg: '#dcfce7', text: '#15803d' },
+  }
+  const c = colorMap[health] ?? colorMap[IssueHealth.Active]
+  return (
+    <span
+      data-testid="health-pill"
+      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+      style={{ backgroundColor: c.bg, color: c.text }}
+    >
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: c.dot }}
+      />
+      {statusLabel(health)}
+    </span>
+  )
+}
+
+function CardSection({
+  title,
+  icon,
+  children,
+  tone = 'default',
+  className,
+}: {
+  title?: string
+  icon?: React.ReactNode
+  children: React.ReactNode
+  tone?: 'default' | 'amber' | 'red' | 'orange' | 'blue' | 'green'
+  className?: string
+}) {
+  const toneClasses: Record<typeof tone, string> = {
+    default: 'bg-card/50 border-border',
+    amber: 'bg-amber-50 border-amber-200',
+    red: 'bg-red-50 border-red-200',
+    orange: 'bg-orange-50 border-orange-200',
+    blue: 'bg-blue-50 border-blue-200',
+    green: 'bg-green-50 border-green-200',
+  }
+  const titleColors: Record<typeof tone, string> = {
+    default: 'text-foreground/80',
+    amber: 'text-amber-800',
+    red: 'text-red-800',
+    orange: 'text-orange-800',
+    blue: 'text-blue-800',
+    green: 'text-green-800',
+  }
+  return (
+    <div className={`rounded-lg border p-4 ${toneClasses[tone]} ${className ?? ''}`}>
+      {title && (
+        <h2
+          className={`text-xs font-semibold uppercase tracking-wide mb-3 flex items-center gap-1.5 ${titleColors[tone]}`}
+        >
+          {icon}
+          {title}
+        </h2>
+      )}
+      {children}
+    </div>
+  )
+}
 
 function MarkdownContent({ content }: { content: string }) {
   return (
@@ -298,73 +417,90 @@ export function IssueDetailPage() {
     <>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
-          <Button
-            variant="link"
+          <button
+            type="button"
             onClick={() => navigate('/')}
-            className="mb-4 inline-flex h-auto gap-1 px-0 text-muted-foreground"
+            data-testid="back-to-board"
+            className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Back to board
-          </Button>
+            <ArrowLeftIcon className="size-3.5" />
+            <span>Back to board</span>
+          </button>
 
           <div className="mb-6">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-sm font-mono text-gray-400">#{issue.number}</span>
-              <span
-                className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(issue.health)}`}
-              >
-                {statusLabel(issue.health)}
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              <span className="text-sm font-mono text-muted-foreground/70 tabular-nums">
+                #{issue.number}
               </span>
+              <PriorityChip priority={issue.priority} />
+              <WorkflowStagePill stage={issue.workflowStage ?? undefined} />
+              <HealthPill health={issue.health} />
               {isAgentRunningOnThis && (
-                <span className="inline-flex items-center gap-1 text-xs text-blue-600">
-                  <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                <span
+                  data-testid="running-pill"
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-[10px] font-semibold"
+                >
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
                   Running
                 </span>
               )}
+              {issue.approvalState?.status === 'awaiting' && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[10px] font-semibold">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  Approval needed
+                </span>
+              )}
             </div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900">{issue.title}</h1>
+            <div className="flex items-start gap-3">
+              <h1 className="text-2xl font-bold text-foreground flex-1 min-w-0">
+                {issue.title}
+              </h1>
               <Button
                 variant="ghost"
                 size="icon-sm"
                 onClick={() => setEditOpen(true)}
                 title="Edit issue"
+                data-testid="edit-issue-button"
               >
-                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
-                </svg>
+                <PencilIcon className="size-4" />
               </Button>
             </div>
             {issue.labels.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {issue.labels.map((label) => (
-                  <span
-                    key={label}
-                    className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600"
-                  >
-                    {label}
-                  </span>
-                ))}
+              <div className="mt-3 flex flex-wrap gap-1">
+                {sortLabels(issue.labels).map((label) => {
+                  const s = getLabelStyle(label)
+                  return (
+                    <span
+                      key={label}
+                      className={`inline-block rounded-full px-2 font-medium ${
+                        s.size === 'sm' ? 'text-[11px] py-0.5' : 'text-xs py-0.5'
+                      }`}
+                      style={{ backgroundColor: s.bg, color: s.text }}
+                    >
+                      {label}
+                    </span>
+                  )
+                })}
               </div>
-)}
-            </div>
-            {issue.primaryEpic && (
-              <Button
-                variant="link"
-                onClick={() => navigate(`/epic/${issue.primaryEpic!.id}`)}
-                className="mt-3 inline-flex h-auto gap-2 px-0"
-              >
-                <span className="text-gray-400">Part of Epic:</span>
-                <span className="font-medium">#{issue.primaryEpic.id.slice(0, 8)}</span>
-                <span>{issue.primaryEpic.title}</span>
-              </Button>
             )}
+            {issue.primaryEpic && (
+              <button
+                type="button"
+                onClick={() => navigate(`/epic/${issue.primaryEpic!.id}`)}
+                className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span className="text-xs text-muted-foreground/70">Part of Epic:</span>
+                <span className="font-mono font-medium text-foreground/80">
+                  #{issue.primaryEpic.id.slice(0, 8)}
+                </span>
+                <span className="font-medium text-foreground/90">
+                  {issue.primaryEpic.title}
+                </span>
+              </button>
+            )}
+            <div className="mt-2 text-xs text-muted-foreground/70">
+              Created {formatTime(issue.createdAt)} · Updated {formatTime(issue.updatedAt)}
+            </div>
           </div>
 
           <WorkflowView issue={issue} />
@@ -580,74 +716,66 @@ export function IssueDetailPage() {
             </div>
 
             <div className="space-y-4">
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">Details</h2>
+              <CardSection title="Details">
                 <dl className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Issue Stage</dt>
-                    <dd className="text-gray-900 font-medium">{formatStageName(issue.status)}</dd>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Issue Stage</dt>
+                    <dd className="text-foreground font-medium text-right">
+                      {formatStageName(issue.status)}
+                    </dd>
                   </div>
                   {issue.workflowProfileId && (
-                    <div className="flex justify-between">
-                      <dt className="text-gray-500">Workflow Profile</dt>
-                      <dd className="text-gray-900 font-mono text-xs">{issue.workflowProfileId}</dd>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted-foreground">Workflow Profile</dt>
+                      <dd className="text-foreground font-mono text-xs text-right">
+                        {issue.workflowProfileId}
+                      </dd>
                     </div>
                   )}
                   {workflowStage && (
-                    <div className="flex justify-between">
-                      <dt className="text-gray-500">Workflow Stage</dt>
-                      <dd className="text-gray-900 font-medium">{formatStageName(workflowStage)}</dd>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted-foreground">Workflow Stage</dt>
+                      <dd className="text-foreground font-medium text-right">
+                        {formatStageName(workflowStage)}
+                      </dd>
                     </div>
                   )}
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Status</dt>
-                    <dd
-                      className={`font-medium capitalize ${statusBadge(issue.health)}`}
-                    >
-                      {statusLabel(issue.health)}
-                    </dd>
-                  </div>
                   {issue.projectName && (
-                    <div className="flex justify-between">
-                      <dt className="text-gray-500">Project</dt>
-                      <dd className="text-gray-900">{issue.projectName}</dd>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted-foreground">Project</dt>
+                      <dd className="text-foreground text-right">
+                        {issue.projectName}
+                      </dd>
                     </div>
                   )}
                   {issue.repository && (
-                    <div className="flex justify-between">
-                      <dt className="text-gray-500">Repository</dt>
-                      <dd className="text-gray-900">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-muted-foreground">Repository</dt>
+                      <dd className="text-foreground text-right">
                         {issue.repository.name}
                         {issue.repository.path && (
-                          <span className="text-gray-400 text-xs ml-1">({issue.repository.path})</span>
+                          <span className="text-muted-foreground/70 text-xs ml-1">
+                            ({issue.repository.path})
+                          </span>
                         )}
                         {issue.repository.remote && (
-                          <span className="text-gray-400 text-xs ml-1">(remote)</span>
+                          <span className="text-muted-foreground/70 text-xs ml-1">
+                            (remote)
+                          </span>
                         )}
                       </dd>
                     </div>
                   )}
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Created</dt>
-                    <dd className="text-gray-500">{formatTime(issue.createdAt)}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-gray-500">Updated</dt>
-                    <dd className="text-gray-500">{formatTime(issue.updatedAt)}</dd>
-                  </div>
                 </dl>
-              </div>
+              </CardSection>
 
               {issue.drift?.drifted && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold mb-2 text-amber-800">
-                    Base Drift Detected
-                  </h2>
+                <CardSection title="Base Drift Detected" tone="amber">
                   <div className="space-y-1.5 text-xs">
                     {issue.drift.decision && (
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Rebase decision:</span>
-                        <span className={`font-medium ${issue.drift.decision === 'needs-attention' ? 'text-red-600' : issue.drift.decision === 'defer' ? 'text-orange-600' : 'text-amber-600'}`}>
+                        <span className="text-muted-foreground">Rebase decision:</span>
+                        <span className={`font-medium ${issue.drift.decision === 'needs-attention' ? 'text-red-600' : issue.drift.decision === 'defer' ? 'text-orange-600' : 'text-amber-700'}`}>
                           {issue.drift.decision === 'needs-attention' ? 'Needs Attention' :
                            issue.drift.decision === 'defer' ? 'Deferred' :
                            issue.drift.decision === 'suggest' ? 'Suggested' :
@@ -657,8 +785,8 @@ export function IssueDetailPage() {
                     )}
                     {issue.drift.deferReason && (
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Defer reason:</span>
-                        <span className="text-orange-600">
+                        <span className="text-muted-foreground">Defer reason:</span>
+                        <span className="text-orange-600 text-right">
                           {issue.drift.deferReason === 'agent-running' ? 'Agent running' :
                            issue.drift.deferReason === 'task-running' ? 'Task running' :
                            issue.drift.deferReason === 'waiting-for-task-boundary' ? 'Waiting for task boundary' :
@@ -669,22 +797,22 @@ export function IssueDetailPage() {
                     )}
                     {issue.drift.safeWindow !== null && (
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Safe window:</span>
-                        <span className={issue.drift.safeWindow ? 'text-green-600' : 'text-gray-600'}>
+                        <span className="text-muted-foreground">Safe window:</span>
+                        <span className={issue.drift.safeWindow ? 'text-green-600' : 'text-foreground/80'}>
                           {issue.drift.safeWindow ? 'Yes' : 'No'}
                         </span>
                       </div>
                     )}
                     {issue.drift.observedBaseSha && issue.drift.currentBaseSha && (
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Base:</span>
-                        <span className="font-mono text-gray-700">
+                        <span className="text-muted-foreground">Base:</span>
+                        <span className="font-mono text-foreground/80">
                           {issue.drift.observedBaseSha.slice(0, 7)} → {issue.drift.currentBaseSha.slice(0, 7)}
                         </span>
                       </div>
                     )}
                     {issue.drift.nextAction && (
-                      <div className="mt-2 pt-2 border-t border-orange-200 text-orange-700">
+                      <div className="mt-2 pt-2 border-t border-amber-200 text-amber-800">
                         {issue.drift.nextAction}
                       </div>
                     )}
@@ -697,27 +825,23 @@ export function IssueDetailPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </CardSection>
               )}
 
               {issue.health === IssueHealth.Interrupted && (
-                <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
-                  <h2 className="text-sm font-semibold text-orange-800 mb-2">
-                    Workflow Interrupted
-                  </h2>
-                  <p className="text-xs text-orange-600 mb-3">
+                <CardSection title="Workflow Interrupted" tone="orange">
+                  <p className="text-xs text-orange-700">
                     The workflow was interrupted (e.g. server restart). Your progress has been preserved.
-                    Click &quot;Resume Workflow&quot; below to continue from where it left off.
+                    Click &quot;Resume&quot; below to continue from where it left off.
                   </p>
-                </div>
+                </CardSection>
               )}
 
               {(issue.health === IssueHealth.Blocked || issue.convergence) && (
                 <WorkflowConvergencePanel convergence={issue.convergence} />
               )}
 
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <h2 className="text-sm font-semibold text-gray-700 mb-3">Actions</h2>
+              <CardSection title="Actions">
                 <div className="space-y-2">
                   {isBacklog && (
                     <>
@@ -879,7 +1003,7 @@ export function IssueDetailPage() {
                               </Button>
                             )}
                             {canInspect && recovery?.currentWorkItem && (
-                              <div className="text-xs text-gray-500">
+                              <div className="text-xs text-muted-foreground">
                                 Current: {recovery.currentWorkItem.type} — {recovery.currentWorkItem.title}
                               </div>
                             )}
@@ -911,44 +1035,42 @@ export function IssueDetailPage() {
                   )}
 
                   {!isAgentRunningOnThis && activeAgents.length > 0 && !isBacklog && (
-                    <div className="text-xs text-gray-400 text-center">
+                    <div className="text-xs text-muted-foreground text-center">
                       {activeAgents.length} agent{activeAgents.length > 1 ? 's' : ''} running on other issues
                     </div>
                   )}
 
-                  <div className="pt-2 border-t border-gray-100">
+                  <div className="pt-3 mt-2 border-t border-border/60">
                     <IssueModelSelector issueNumber={issue.number} currentWorkflowRunId={issue.workflowRunId} currentModel={issue.model} currentAgentConfig={issue.agentConfig} currentStageModels={issue.stageModels} />
                   </div>
                 </div>
-              </div>
+              </CardSection>
 
               {issue.prerequisites && issue.prerequisites.length > 0 && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                  <h2 className="text-sm font-semibold text-amber-800 mb-2">Start Prerequisites</h2>
+                <CardSection title="Start Prerequisites" tone="amber">
                   <div className="space-y-2">
                     {issue.prerequisites.map((prereq) => (
-                      <div key={prereq.number} className="flex items-center justify-between text-sm">
-                        <span className="text-amber-700">
-                          #{prereq.number} {prereq.title}
+                      <div key={prereq.number} className="flex items-center justify-between text-sm gap-2">
+                        <span className="text-amber-800 truncate">
+                          <span className="font-mono">#{prereq.number}</span> {prereq.title}
                         </span>
                         {prereq.completed ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 bg-green-100 px-1.5 py-0.5 rounded">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-100 px-1.5 py-0.5 rounded shrink-0">
                             Completed
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded shrink-0">
                             Waiting
                           </span>
                         )}
                       </div>
                     ))}
                   </div>
-                </div>
+                </CardSection>
               )}
 
               {isBacklog && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h2 className="text-sm font-semibold text-gray-700 mb-2">Add Prerequisite</h2>
+                <CardSection title="Add Prerequisite">
                   <div className="flex gap-2">
                     <Input
                       type="number"
@@ -972,7 +1094,6 @@ export function IssueDetailPage() {
                         setPrereqInput('')
                       }}
                       disabled={!prereqInput || addPrerequisiteMutation.isPending}
-                      className="bg-amber-600 hover:bg-amber-700 text-white"
                     >
                       {addPrerequisiteMutation.isPending ? 'Adding...' : 'Add'}
                     </Button>
@@ -988,8 +1109,8 @@ export function IssueDetailPage() {
                     </p>
                   )}
                   {issue.prerequisites && issue.prerequisites.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-100">
-                      <p className="text-xs text-gray-500 mb-2">Remove prerequisite:</p>
+                    <div className="mt-3 pt-3 border-t border-border/60">
+                      <p className="text-xs text-muted-foreground mb-2">Remove prerequisite:</p>
                       <div className="flex flex-wrap gap-1">
                         {issue.prerequisites.map((prereq) => (
                           <Button
@@ -1000,13 +1121,13 @@ export function IssueDetailPage() {
                             disabled={removePrerequisiteMutation.isPending}
                           >
                             #{prereq.number}
-                            <span className="text-gray-400">×</span>
+                            <span className="text-muted-foreground">×</span>
                           </Button>
                         ))}
                       </div>
                     </div>
                   )}
-                </div>
+                </CardSection>
               )}
 
               {!isBacklog && workflowStage && (
@@ -1027,6 +1148,7 @@ export function IssueDetailPage() {
             </div>
           </div>
         </div>
+      </div>
 
       {issue && (
         <EditIssueDialog
