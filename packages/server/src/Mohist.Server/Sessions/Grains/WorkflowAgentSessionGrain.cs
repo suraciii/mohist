@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Events;
 using Mohist.Server.Infrastructure.Persistence.Sessions;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence;
@@ -228,73 +229,63 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         return _session;
     }
 
-    private void EmitStarted(WorkflowAgentSession session) => _eventBus.Emit("coder_session_started", new
-    {
-        issueId = session.IssueNumber.ToString(),
+    private void EmitStarted(WorkflowAgentSession session) => _eventBus.Emit("coder_session_started", new CoderSessionStartedEvent(
+        session.IssueNumber.ToString(),
         session.ProjectId,
-        coderSessionId = session.Id,
-        acpSessionId = session.AgentSessionId ?? session.Id,
-        executionId = session.WorkId,
+        session.Id,
+        session.AgentSessionId ?? session.Id,
+        session.WorkId,
         session.Model,
-        stage = session.Stage,
-        taskDescription = session.Title,
-        title = session.Title,
-    });
+        session.Stage,
+        session.Title,
+        session.Title));
 
     private void EmitTranscriptEntry(WorkflowAgentSession session, WorkflowAgentSessionEventRow entry)
     {
         var text = ExtractText(entry.PayloadJson);
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
         {
-            _eventBus.Emit("coder_text_chunk", new
-            {
-                issueId = session.IssueNumber.ToString(),
+            _eventBus.Emit("coder_text_chunk", new CoderTranscriptEntryEvent(
+                session.IssueNumber.ToString(),
                 session.ProjectId,
-                executionId = session.WorkId,
-                acpSessionId = session.AgentSessionId ?? session.Id,
-                coderSessionId = session.Id,
-                text,
-            });
+                session.WorkId,
+                session.AgentSessionId ?? session.Id,
+                session.Id,
+                text));
         }
         else if (entry.Type is "agent_thought_chunk")
         {
-            _eventBus.Emit("coder_thought_chunk", new
-            {
-                issueId = session.IssueNumber.ToString(),
+            _eventBus.Emit("coder_thought_chunk", new CoderTranscriptEntryEvent(
+                session.IssueNumber.ToString(),
                 session.ProjectId,
-                executionId = session.WorkId,
-                acpSessionId = session.AgentSessionId ?? session.Id,
-                coderSessionId = session.Id,
-                text,
-            });
+                session.WorkId,
+                session.AgentSessionId ?? session.Id,
+                session.Id,
+                text));
         }
     }
 
-    private void EmitStatusChanged(WorkflowAgentSession session) => _eventBus.Emit("coder_session_status_changed", new
-    {
-        issueId = session.IssueNumber.ToString(),
+    private void EmitStatusChanged(WorkflowAgentSession session) => _eventBus.Emit("coder_session_status_changed", new CoderSessionStatusChangedEvent(
+        session.IssueNumber.ToString(),
         session.ProjectId,
-        coderSessionId = session.Id,
-        acpSessionId = session.AgentSessionId ?? session.Id,
-        status = AgentSessionStatusNames.ToName(session.Status),
-        lastDataAt = session.LastDataAt?.ToString("o"),
-        failureReason = session.FailureReason,
-    });
+        session.Id,
+        session.AgentSessionId ?? session.Id,
+        AgentSessionStatusNames.ToName(session.Status),
+        session.LastDataAt?.ToString("o"),
+        session.FailureReason));
 
     private void EmitTerminal(WorkflowAgentSession session, string terminal) => _eventBus.Emit(terminal switch
     {
         "failed" => "coder_session_failed",
         "cancelled" => "coder_session_cancelled",
         _ => "coder_session_completed"
-    }, new
-    {
-        issueId = session.IssueNumber.ToString(),
+    }, new CoderSessionTerminalEvent(
+        session.IssueNumber.ToString(),
         session.ProjectId,
-        coderSessionId = session.Id,
-        status = terminal,
-        reason = session.FailureReason,
-        duration = DurationMs(session),
-    });
+        session.Id,
+        terminal,
+        session.FailureReason,
+        DurationMs(session)));
 
     private static long DurationMs(WorkflowAgentSession session)
     {

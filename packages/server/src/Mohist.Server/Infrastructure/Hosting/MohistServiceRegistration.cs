@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Epic.Queries;
 using Mohist.Server.Project.Queries;
@@ -59,6 +60,7 @@ public static class MohistServiceRegistration
         services.AddHostedService<WorkflowBacklogRecoveryService>();
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
+        services.AddHostedService<EventBridge>();
         services.AddSingleton<ConfigService>();
         services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());

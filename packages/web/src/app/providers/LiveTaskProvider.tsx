@@ -6,8 +6,8 @@ import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
+import { useEventsConnection } from '../../shared/api/events-hub'
 
-const SSE_URL = '/api/events'
 const LIVE_TIMER_INTERVAL = 500
 
 type AgentDetailEventName = keyof AgentDetailEventMap
@@ -22,9 +22,8 @@ function getCurrentIssueNumber(): number | null {
   return match ? parseInt(match[1], 10) : null
 }
 
-function useSSEInner(projectId: string | null): LiveTaskState {
+function useLiveEvents(projectId: string | null): LiveTaskState {
   const queryClient = useQueryClient()
-  const eventSourceRef = useRef<EventSource | null>(null)
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [activeTaskElapsedMs, setActiveTaskElapsedMs] = useState<number | null>(null)
   const [rebaseConflict, setRebaseConflict] = useState<RebaseConflictState | null>(null)
@@ -63,9 +62,9 @@ function useSSEInner(projectId: string | null): LiveTaskState {
   }, [])
 
   const handleEvent = useCallback(
-    (eventName: string, data: string) => {
+    (eventName: string, rawData: unknown) => {
       try {
-        const parsed = JSON.parse(data)
+        const parsed = rawData as Record<string, unknown>
 
         if (isAgentDetailEvent(eventName)) {
           dispatchAgentEvent(eventName, parsed as AgentDetailEventMap[typeof eventName])
@@ -265,94 +264,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
     [queryClient, clearLiveTimer],
   )
 
-  useEffect(() => {
-    if (!projectId) {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
-        eventSourceRef.current = null
-      }
-      return
-    }
-
-    const url = `${SSE_URL}?projectId=${encodeURIComponent(projectId)}`
-    const es = new EventSource(url)
-    eventSourceRef.current = es
-
-    const eventTypes: EventName[] = [
-      'stage_changed',
-      'comment_added',
-      'agent_started',
-      'agent_completed',
-      'agent_paused',
-      'agent_error',
-      'approval_requested',
-      'agent_text_chunk',
-      'main_tool_call',
-      'coder_text_chunk',
-      'coder_tool_call',
-      'ralph_task_update',
-      'ralph_loop_progress',
-      'plan_round_start',
-      'plan_session_update',
-      'coder_session_started',
-      'coder_session_completed',
-      'coder_session_failed',
-      'coder_session_cancelled',
-      'coder_session_status_changed',
-      'agent_liveness_status',
-      'merge_queued',
-      'merge_started',
-      'merge_completed',
-      'merge_failed',
-      'coder_recovery_status',
-      'rebase_started',
-      'rebase_progress',
-      'rebase_completed',
-      'rebase_conflict',
-      'agent_blocked',
-      'agent_conflict_resolution_started',
-      'agent_conflict_resolution_completed',
-      'agent_conflict_resolution_failed',
-      'check_started',
-      'check_update',
-      'check_suite_status_changed',
-      'stage_task_update',
-      'base_drift_detected',
-      'rebase_opportunity',
-      'user_attention_requested',
-    ]
-
-    for (const type of eventTypes) {
-      es.addEventListener(type, (e) => {
-        handleEvent(type, (e as MessageEvent).data)
-      })
-    }
-
-    es.onerror = () => {
-      es.close()
-      eventSourceRef.current = null
-      setTimeout(() => {
-        if (eventSourceRef.current === null) {
-          const reconnect = new EventSource(url)
-          eventSourceRef.current = reconnect
-
-          for (const type of eventTypes) {
-            reconnect.addEventListener(type, (ev) => {
-              handleEvent(type, (ev as MessageEvent).data)
-            })
-          }
-        }
-      }, 3000)
-    }
-
-    return () => {
-      es.close()
-      eventSourceRef.current = null
-      clearLiveTimer()
-      setActiveTaskId(null)
-      setActiveTaskElapsedMs(null)
-    }
-  }, [projectId, handleEvent, clearLiveTimer])
+  useEventsConnection(projectId, handleEvent)
 
   useEffect(() => {
     return () => {
@@ -365,7 +277,7 @@ function useSSEInner(projectId: string | null): LiveTaskState {
 
 export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
   const { projectId } = useProject()
-  const state = useSSEInner(projectId)
+  const state = useLiveEvents(projectId)
   return (
     <LiveTaskContext.Provider value={state}>
       {children}
@@ -374,5 +286,5 @@ export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
 }
 
 export default function useSSE(projectId: string | null) {
-  return useSSEInner(projectId)
+  return useLiveEvents(projectId)
 }
