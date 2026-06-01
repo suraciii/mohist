@@ -26,7 +26,6 @@ export class RunnerHost {
     this.signalR = new RunnerSignalRClient(
       options.serverUrl,
       options.runnerId,
-      (issueNumber) => this.workspace.getExistingWorkDir(issueNumber),
     )
   }
 

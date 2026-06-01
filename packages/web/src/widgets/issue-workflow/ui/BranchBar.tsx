@@ -25,7 +25,7 @@ export function BranchBar({ issueNumber, stage, isAgentRunning }: BranchBarProps
   const rebaseMutation = useMutation({
     mutationFn: () => rebaseIssue(issueNumber, projectId),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, 'worktree-status'] })
+      queryClient.invalidateQueries({ queryKey: ['issues', issueNumber, projectId, 'worktree-status'] })
       queryClient.invalidateQueries({ queryKey: ['issues', issueNumber] })
       queryClient.invalidateQueries({ queryKey: ['issues'] })
     },

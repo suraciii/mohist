@@ -3,11 +3,9 @@ import { runCommand } from "../system/process.js"
 
 export class RunnerSignalRClient {
   private connection: signalR.HubConnection
-  private readonly getWorkDir: (issueNumber: number) => string | null
 
-  constructor(serverUrl: string, runnerId: string, getWorkDir: (issueNumber: number) => string | null) {
+  constructor(serverUrl: string, runnerId: string) {
     const baseUrl = serverUrl.replace(/\/$/, "")
-    this.getWorkDir = getWorkDir
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(`${baseUrl}/hubs/runner?runnerId=${encodeURIComponent(runnerId)}`)
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
@@ -25,33 +23,30 @@ export class RunnerSignalRClient {
   }
 
   private registerHandlers(): void {
-    this.connection.on("GetDiff", async (issueNumber: number) => {
-      const workDir = this.getWorkDir(issueNumber)
-      if (!workDir) return null
-
+    this.connection.on("GetDiff", async (query: WorkspaceQuery) => {
+      const workspace = resolveWorkspaceQuery(query)
+      if (!workspace) return null
       const ac = new AbortController()
-      const baseBranch = await detectBaseBranch(workDir, ac.signal)
-      const head = `mo/issue-${issueNumber}`
 
-      const branchExists = await git(workDir, ["rev-parse", "--verify", `refs/heads/${head}`], ac.signal)
+      const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
       if (branchExists.exitCode !== 0) return null
 
       const [numstat, fullDiff, mergeBaseResult, aheadBehindResult, logResult] = await Promise.all([
-        git(workDir, ["diff", `${baseBranch}...${head}`, "--numstat"], ac.signal),
-        git(workDir, ["diff", `${baseBranch}...${head}`], ac.signal),
-        git(workDir, ["merge-base", baseBranch, head], ac.signal),
-        git(workDir, ["rev-list", "--left-right", "--count", `${baseBranch}...${head}`], ac.signal),
-        git(workDir, ["log", `${baseBranch}...${head}`, "--format=%H"], ac.signal),
+        git(workspace.workDir, ["diff", `${workspace.baseBranch}...${workspace.head}`, "--numstat"], ac.signal),
+        git(workspace.workDir, ["diff", `${workspace.baseBranch}...${workspace.head}`], ac.signal),
+        git(workspace.workDir, ["merge-base", workspace.baseBranch, workspace.head], ac.signal),
+        git(workspace.workDir, ["rev-list", "--left-right", "--count", `${workspace.baseBranch}...${workspace.head}`], ac.signal),
+        git(workspace.workDir, ["log", `${workspace.baseBranch}...${workspace.head}`, "--format=%H"], ac.signal),
       ])
 
       const files = parseDiffFiles(numstat.stdout, fullDiff.stdout)
-      const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : baseBranch
+      const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : workspace.baseBranch
       const commitCount = logResult.exitCode === 0 ? logResult.stdout.trim().split("\n").filter(Boolean).length : 0
       const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
 
       return {
-        base: baseBranch,
-        head,
+        base: workspace.baseBranch,
+        head: workspace.head,
         mergeBase,
         ahead,
         behind,
@@ -62,29 +57,26 @@ export class RunnerSignalRClient {
       }
     })
 
-    this.connection.on("GetCommits", async (issueNumber: number) => {
-      const workDir = this.getWorkDir(issueNumber)
-      if (!workDir) return null
-
+    this.connection.on("GetCommits", async (query: WorkspaceQuery) => {
+      const workspace = resolveWorkspaceQuery(query)
+      if (!workspace) return null
       const ac = new AbortController()
-      const baseBranch = await detectBaseBranch(workDir, ac.signal)
-      const head = `mo/issue-${issueNumber}`
 
       const [logResult, numstat, mergeBaseResult, aheadBehindResult] = await Promise.all([
-        git(workDir, ["log", `${baseBranch}...${head}`, "--format=%H\t%h\t%s\t%an\t%ad", "--date=iso"], ac.signal),
-        git(workDir, ["diff", `${baseBranch}...${head}`, "--numstat"], ac.signal),
-        git(workDir, ["merge-base", baseBranch, head], ac.signal),
-        git(workDir, ["rev-list", "--left-right", "--count", `${baseBranch}...${head}`], ac.signal),
+        git(workspace.workDir, ["log", `${workspace.baseBranch}...${workspace.head}`, "--format=%H\t%h\t%s\t%an\t%ad", "--date=iso"], ac.signal),
+        git(workspace.workDir, ["diff", `${workspace.baseBranch}...${workspace.head}`, "--numstat"], ac.signal),
+        git(workspace.workDir, ["merge-base", workspace.baseBranch, workspace.head], ac.signal),
+        git(workspace.workDir, ["rev-list", "--left-right", "--count", `${workspace.baseBranch}...${workspace.head}`], ac.signal),
       ])
 
       const commits = parseCommits(logResult.stdout)
-      const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : baseBranch
+      const mergeBase = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : workspace.baseBranch
       const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
       const fileStats = parseNumstatTotal(numstat.stdout)
 
       return {
-        base: baseBranch,
-        head,
+        base: workspace.baseBranch,
+        head: workspace.head,
         mergeBase,
         ahead,
         behind,
@@ -95,52 +87,48 @@ export class RunnerSignalRClient {
       }
     })
 
-    this.connection.on("GetCommitDiff", async (_issueNumber: number, hash: string) => {
-      const workDir = this.getWorkDir(_issueNumber)
-      if (!workDir) return null
+    this.connection.on("GetCommitDiff", async (query: WorkspaceQuery, hash: string) => {
+      const workspace = resolveWorkspaceQuery(query)
+      if (!workspace) return null
 
       const ac = new AbortController()
-      const result = await git(workDir, ["show", "--format=", "--patch", hash], ac.signal)
+      const result = await git(workspace.workDir, ["show", "--format=", "--patch", hash], ac.signal)
       if (result.exitCode !== 0) return null
       return { diff: result.stdout }
     })
 
-    this.connection.on("GetWorktreeStatus", async (issueNumber: number) => {
-      const workDir = this.getWorkDir(issueNumber)
-      if (!workDir) return { exists: false }
+    this.connection.on("GetWorktreeStatus", async (query: WorkspaceQuery) => {
+      const workspace = resolveWorkspaceQuery(query)
+      if (!workspace) return { exists: false }
 
       const ac = new AbortController()
-      const baseBranch = await detectBaseBranch(workDir, ac.signal)
-      const branch = `mo/issue-${issueNumber}`
 
-      const branchExists = await git(workDir, ["rev-parse", "--verify", `refs/heads/${branch}`], ac.signal)
+      const branchExists = await git(workspace.workDir, ["rev-parse", "--verify", `refs/heads/${workspace.head}`], ac.signal)
       if (branchExists.exitCode !== 0) return { exists: false }
 
-      const aheadBehindResult = await git(workDir, ["rev-list", "--left-right", "--count", `${baseBranch}...${branch}`], ac.signal)
+      const aheadBehindResult = await git(workspace.workDir, ["rev-list", "--left-right", "--count", `${workspace.baseBranch}...${workspace.head}`], ac.signal)
       const [ahead, behind] = parseAheadBehind(aheadBehindResult.stdout)
-      const rebaseResult = await git(workDir, ["rebase", "--show-current-patch"], ac.signal)
+      const rebaseResult = await git(workspace.workDir, ["rebase", "--show-current-patch"], ac.signal)
       const rebaseInProgress = rebaseResult.exitCode === 0
 
       let conflictingFiles: string[] = []
       if (rebaseInProgress) {
-        const statusResult = await git(workDir, ["diff", "--name-only", "--diff-filter=U"], ac.signal)
+        const statusResult = await git(workspace.workDir, ["diff", "--name-only", "--diff-filter=U"], ac.signal)
         conflictingFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
       }
 
-      return { exists: true, branch, baseBranch, ahead, behind, rebaseInProgress, conflictingFiles }
+      return { exists: true, branch: workspace.head, baseBranch: workspace.baseBranch, ahead, behind, rebaseInProgress, conflictingFiles }
     })
 
-    this.connection.on("GetFileContent", async (_issueNumber: number, path: string) => {
-      const workDir = this.getWorkDir(_issueNumber)
-      if (!workDir) return { base: null, head: null }
+    this.connection.on("GetFileContent", async (query: WorkspaceQuery, path: string) => {
+      const workspace = resolveWorkspaceQuery(query)
+      if (!workspace) return { base: null, head: null }
 
       const ac = new AbortController()
-      const baseBranch = await detectBaseBranch(workDir, ac.signal)
-      const head = `mo/issue-${_issueNumber}`
 
       const [baseResult, headResult] = await Promise.all([
-        git(workDir, ["show", `${baseBranch}:${path}`], ac.signal),
-        git(workDir, ["show", `${head}:${path}`], ac.signal),
+        git(workspace.workDir, ["show", `${workspace.baseBranch}:${path}`], ac.signal),
+        git(workspace.workDir, ["show", `${workspace.head}:${path}`], ac.signal),
       ])
 
       return {
@@ -155,21 +143,19 @@ async function git(workDir: string, args: string[], signal: AbortSignal) {
   return runCommand("git", args, workDir, signal)
 }
 
-async function detectBaseBranch(workDir: string, signal: AbortSignal): Promise<string> {
-  const result = await git(workDir, ["symbolic-ref", "--short", "HEAD"], signal)
-  if (result.exitCode === 0) {
-    const branch = result.stdout.trim()
-    if (branch.startsWith("mo/issue-")) {
-      const upstreamResult = await git(workDir, ["config", `branch.${branch}.merge`], signal)
-      if (upstreamResult.exitCode === 0) {
-        const merge = upstreamResult.stdout.trim().replace("refs/heads/", "")
-        if (merge) return merge
-      }
-      return "main"
-    }
-    return branch
-  }
-  return "main"
+export interface WorkspaceQuery {
+  issueNumber?: number
+  worktreePath?: string | null
+  branch?: string | null
+  baseBranch?: string | null
+}
+
+export function resolveWorkspaceQuery(query: WorkspaceQuery | null | undefined): { workDir: string; baseBranch: string; head: string } | null {
+  if (!query?.worktreePath || !query.baseBranch) return null
+  const issueNumber = typeof query.issueNumber === "number" ? query.issueNumber : null
+  const head = query.branch ?? (issueNumber !== null ? `mo/issue-${issueNumber}` : null)
+  if (!head) return null
+  return { workDir: query.worktreePath, baseBranch: query.baseBranch, head }
 }
 
 function parseDiffFiles(numstat: string, fullDiff: string): Array<{ file: string; additions: number; deletions: number; diff: string; isBinary: boolean }> {
