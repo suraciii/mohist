@@ -1,5 +1,5 @@
 import { request, withProject, ApiError } from '../../../shared/api/client'
-import type { CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowTimeline } from '../model/types'
+import type { CommitDiffResponse, Comment, Issue, IssueCommitsResponse, IssueDiffResponse, WorkflowTimeline, IssueWorkflowProfileYamlResponse } from '../model/types'
 
 export function getIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   const search = new URLSearchParams()
@@ -94,6 +94,17 @@ export function getLabels() {
 
 export function getWorkflowYaml(number: number, projectId?: string | null) {
   return request<{ issueNumber: number; workflowRunId: string; yaml: string }>(`/issues/${number}/workflow/yaml`, withProject(undefined, projectId))
+}
+
+export function getIssueWorkflowProfileYaml(number: number, projectId?: string | null) {
+  return request<IssueWorkflowProfileYamlResponse>(`/issues/${number}/workflow/profile/yaml`, withProject(undefined, projectId))
+}
+
+export function updateIssueWorkflowProfileYaml(number: number, yaml: string, projectId?: string | null) {
+  return request<IssueWorkflowProfileYamlResponse>(`/issues/${number}/workflow/profile/yaml`, withProject({
+    method: 'PUT',
+    body: JSON.stringify({ yaml }),
+  }, projectId))
 }
 
 export function getWorkflowTimeline(number: number, projectId?: string | null) {

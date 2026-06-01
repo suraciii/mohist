@@ -1,15 +1,18 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Workspace;
 using System.Text.Json;
+using YamlDotNet.Core;
 
 namespace Mohist.Server.Api;
 
@@ -570,6 +573,78 @@ public static class IssueRoutes
             return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
         });
 
+         issues.MapGet("/{number:int}/workflow/profile/yaml", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var info = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
+            if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            var key = $"{pid}:{number}";
+            var profileRow = await issuesQuery.LoadIssueProfileAsync(key);
+            var profile = profileRow is null ? null : IssueWorkflowProfileSnapshot.Deserialize(profileRow.StateJson);
+
+            string? yaml = null;
+            if (profile is not null)
+            {
+                yaml = WorkflowYamlSerializer.ToYaml(profile.Definition);
+            }
+
+            return ApiResults.Ok(new IssueWorkflowProfileYamlResponse(
+                number,
+                pid,
+                yaml,
+                info.WorkflowRunId,
+                profile?.SourceProfileId ?? IssueWorkflowProfiles.DefaultId,
+                profile?.UpdateMode.ToString() ?? "reference",
+                info.UpdatedAt));
+        });
+
+        issues.MapPut("/{number:int}/workflow/profile/yaml", async (int number, string projectId, UpdateIssueWorkflowProfileYamlRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var info = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
+            if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            Workflow.Domain.Definition.WorkflowDefinition definition;
+            try
+            {
+                definition = WorkflowYamlSerializer.FromYaml(req.Yaml);
+            }
+            catch (YamlException ex)
+            {
+                return ApiResults.Fail("YAML syntax error: " + ex.Message, 400, "yaml_syntax");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Fail("Workflow definition error: " + ex.Message, 400, "workflow_shape");
+            }
+
+            var normalizedYaml = WorkflowYamlSerializer.ToYaml(definition);
+            var key = $"{pid}:{number}";
+
+            await grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number))
+                .UpdateWorkflowProfileAsync(new WorkflowProfileUpdateRequest(DefinitionYaml: normalizedYaml));
+
+            var updatedInfo = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
+            if (updatedInfo is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            var updatedProfileRow = await issuesQuery.LoadIssueProfileAsync(key);
+            var updatedProfile = updatedProfileRow is null ? null : IssueWorkflowProfileSnapshot.Deserialize(updatedProfileRow.StateJson);
+
+            return ApiResults.Ok(new IssueWorkflowProfileYamlResponse(
+                number,
+                pid,
+                normalizedYaml,
+                updatedInfo.WorkflowRunId,
+                updatedProfile?.SourceProfileId ?? IssueWorkflowProfiles.DefaultId,
+                updatedProfile?.UpdateMode.ToString() ?? "reference",
+                updatedInfo.UpdatedAt));
+        });
+
          return app;
     }
 
@@ -718,3 +793,24 @@ public record AddCommentRequest(string Body);
 public record UpdateWorkflowProfileApiRequest(
     string? ProfileId = null,
     string? DefinitionYaml = null);
+
+public record UpdateIssueWorkflowProfileYamlRequest(string Yaml);
+
+public sealed record IssueWorkflowProfileYamlResponse(
+    int IssueNumber,
+    string ProjectId,
+    string? Yaml,
+    string? WorkflowRunId,
+    string ProfileId,
+    string UpdateMode,
+    string UpdatedAt);
+
+public record ValidationError(string Code, string Message)
+{
+    public ApiResponse<object> ToApiResponse() => new(false, Error: Message, Code: Code);
+}
+
+public static class IssueWorkflowProfiles
+{
+    public const string DefaultId = "mohist/default";
+}

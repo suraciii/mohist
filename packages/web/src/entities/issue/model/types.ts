@@ -619,3 +619,13 @@ export interface WorkflowRun {
   stageRuns: WorkflowStageRun[]
   failure?: WorkflowFailureDetails | null
 }
+
+export interface IssueWorkflowProfileYamlResponse {
+  issueNumber: number
+  projectId: string
+  yaml: string | null
+  workflowRunId: string | null
+  profileId: string
+  updateMode: string
+  updatedAt: string
+}

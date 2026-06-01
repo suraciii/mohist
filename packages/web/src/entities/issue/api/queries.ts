@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue } from './client'
+import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue, getIssueWorkflowProfileYaml, updateIssueWorkflowProfileYaml } from './client'
 
 export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   return useQuery({
@@ -106,6 +106,27 @@ export function useUnarchiveIssue() {
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
+    },
+  })
+}
+
+export function useIssueWorkflowProfileYaml(issueNumber: number, enabled: boolean = true) {
+  const { projectId } = useProject()
+  return useQuery({
+    queryKey: ['issues', issueNumber, projectId, 'workflow-profile-yaml'],
+    queryFn: () => getIssueWorkflowProfileYaml(issueNumber, projectId),
+    enabled: enabled && issueNumber > 0 && !!projectId,
+  })
+}
+
+export function useUpdateIssueWorkflowProfileYaml() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation({
+    mutationFn: ({ issueNumber, yaml }: { issueNumber: number; yaml: string }) =>
+      updateIssueWorkflowProfileYaml(issueNumber, yaml, projectId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
     },
   })
 }

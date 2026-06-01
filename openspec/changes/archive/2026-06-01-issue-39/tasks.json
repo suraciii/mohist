@@ -1,0 +1,91 @@
+{
+  "project": "mohist",
+  "description": "Add issue-scoped workflow profile YAML viewing and editing on the issue detail page, including normalized persistence, validation, and active-run synchronization.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add issue workflow profile YAML read and save API",
+      "spec": "specs/issue-workflow-profile/spec.md#requirement-issue-scoped-workflow-profile-snapshot-editing",
+      "description": "Implement issue-scoped GET and PUT endpoints for workflow profile YAML under the existing project and issue context. The save flow should parse submitted YAML into a WorkflowDefinition, normalize it, persist the issue snapshot, and return normalized YAML with refresh-safe metadata plus structured validation errors for syntax and shape failures.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/workflow/profile/yaml returns the issue's normalized workflow profile YAML snapshot and refresh-safe metadata without reading from the current global default workflow YAML.",
+        "PUT /api/issues/:number/workflow/profile/yaml accepts valid YAML, parses it into a WorkflowDefinition, persists the updated IssueWorkflowProfile snapshot, and returns normalized YAML plus refresh-safe metadata.",
+        "Invalid YAML syntax returns a structured validation response that clearly identifies YAML parsing failure and leaves persisted issue workflow profile state unchanged.",
+        "Syntactically valid but semantically invalid workflow definitions return a structured validation response that clearly identifies workflow-shape failure and leaves persisted issue workflow profile state unchanged."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue-scoped workflow profile YAML REST endpoints and shared application logic for normalize-and-persist behavior.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Route both backlog and active-run saves through one shared save path so validation and persistence behavior stay consistent."
+    },
+    {
+      "id": "T-002",
+      "title": "Synchronize active run profile without regenerating initialized stages",
+      "spec": "specs/workflow-definition/spec.md#requirement-issue-workflow-profiles-are-normalized-snapshot-definitions",
+      "description": "Extend the save path so successful issue profile saves also update the active WorkflowRunProfile definition when a run exists. Preserve all initialized StageRun tasks and checks by limiting the change to stored profile definitions so only future uninitialized stages observe the new workflow definition when InitializeStage runs.",
+      "acceptanceCriteria": [
+        "When an issue has an active workflow run, saving issue workflow profile YAML updates the persisted WorkflowRunProfile definition to the same normalized definition saved on the issue profile.",
+        "Saving workflow YAML does not reinitialize, regenerate, or replace tasks/checks for any StageRun that was already initialized before the save.",
+        "A later stage that is still uninitialized at save time uses the updated WorkflowRunProfile definition when InitializeStage runs afterward."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runtime profile synchronization behavior that updates future stage initialization inputs while preserving existing stage work.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep the issue profile as the source-of-truth snapshot and mirror the normalized definition into the active run profile only when a run exists."
+    },
+    {
+      "id": "T-003",
+      "title": "Add issue detail workflow YAML editor UX",
+      "spec": "specs/web-ui/spec.md#requirement-issue-detail-page-supports-issue-workflow-profile-yaml-editing",
+      "description": "Add an issue-scoped workflow profile YAML editor to the issue detail page that loads the current issue snapshot through the new API and manages local draft state. The editor should show unsaved changes, inline validation errors, and save progress, then reset its clean baseline to the server-returned normalized YAML after a successful save.",
+      "acceptanceCriteria": [
+        "For a backlog issue, the issue detail page displays the issue-scoped workflow profile YAML and allows it to be edited before workflow start.",
+        "Changing the editor content without saving displays a dirty or unsaved state based on the difference between the draft YAML and the last server YAML.",
+        "Saving shows in-progress UI state until the PUT request completes and does not clear the dirty state or show success before the server responds.",
+        "Validation errors returned by the save API are shown inline without discarding the user's unsaved editor content, and those errors clear or update on subsequent edits/saves.",
+        "A successful save replaces both the displayed server baseline and the draft content with the normalized YAML returned by the server and clears the dirty state."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue detail page workflow profile YAML editor with fetch/save hooks, local draft state, and inline feedback.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep editor state local to the issue detail page instead of coupling it to the broader issue detail query payload."
+    },
+    {
+      "id": "T-004",
+      "title": "Add fake-backed coverage for issue profile editing flows",
+      "spec": "specs/http-api/spec.md#requirement-issue-workflow-profile-yaml-api",
+      "description": "Add tests that cover backlog issue editing, invalid YAML rejection, active run profile synchronization, and next-stage initialization after an edit, using fake external systems and product-level paths. The tests should verify normalized persistence, validation behavior, active-run synchronization, and preservation of already initialized stage work.",
+      "acceptanceCriteria": [
+        "Automated coverage verifies a backlog issue can read and save issue-scoped workflow profile YAML without mutating project or global default workflow profiles.",
+        "Automated coverage verifies invalid YAML syntax and invalid workflow shape are rejected with clear validation responses and no persisted snapshot changes.",
+        "Automated coverage verifies saving YAML for an issue with an active run synchronizes the WorkflowRunProfile definition while leaving already initialized StageRun tasks/checks unchanged.",
+        "Automated coverage verifies a later uninitialized stage uses the updated definition when InitializeStage runs after the save.",
+        "All tests use fakes or existing test doubles for external systems rather than live integrations."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Server and/or UI automated tests that lock in issue workflow profile editing behavior with fake external dependencies.",
+      "dependsOn": [
+        "T-001",
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Prefer product-path specs for workflow behavior and focused UI tests for editor state transitions where needed."
+    }
+  ]
+}
