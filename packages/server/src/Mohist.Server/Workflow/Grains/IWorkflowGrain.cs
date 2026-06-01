@@ -24,6 +24,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task AbandonCurrentWorkAsync(string runnerId, string reason);
     Task PatchVariablesAsync(string section, string patchJson);
     Task PatchStageVariablesAsync(string stage, string section, string patchJson);
+    Task UpdateProfileDefinitionAsync(WorkflowDefinition definition);
     Task<string?> GetRunStatusAsync();
     Task<string?> GetAssignedRunnerIdAsync();
     Task<string?> GetAssignedWorkIdAsync();

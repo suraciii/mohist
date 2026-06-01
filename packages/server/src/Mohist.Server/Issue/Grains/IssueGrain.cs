@@ -397,10 +397,17 @@ public class IssueGrain : Grain, IIssueGrain
         else
         {
             var parsed = WorkflowYamlSerializer.FromYaml(request.DefinitionYaml!, _profile.SourceProfileId);
-            _profile.ApplyCustomDefinition(_profile.SourceProfileId, parsed);
+            _profile.ApplyCustomDefinition(parsed.Id, parsed);
         }
 
         await SaveProfileAsync();
+
+        if (_issue!.WorkflowRunId is { } wrId)
+        {
+            var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
+            await wfGrain.UpdateProfileDefinitionAsync(_profile.Definition);
+        }
+
         await AppendIssueEventAsync(
             "workflow_profile_updated",
             "updated",

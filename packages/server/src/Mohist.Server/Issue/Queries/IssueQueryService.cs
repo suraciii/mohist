@@ -207,6 +207,12 @@ public class IssueQueryService
         }
     }
 
+    public async Task<IssueProfileRow?> LoadIssueProfileAsync(string key)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.IssueProfiles.AsNoTracking().FirstOrDefaultAsync(r => r.Key == key);
+    }
+
     private async Task<Dictionary<string, WorkflowStatusView>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
     {
         var workflowRunIds = issues

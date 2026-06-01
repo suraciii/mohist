@@ -458,6 +458,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await SaveVariablesAsync();
     }
 
+    public async Task UpdateProfileDefinitionAsync(WorkflowDefinition definition)
+    {
+        _profile = new WorkflowRunProfile(GrainKey, definition);
+        await _profileStore.SaveAsync(GrainKey, _profile);
+        _log.LogInformation("Workflow {Id} profile definition updated", GrainKey);
+    }
+
     public Task DeactivateForTestAsync()
     {
         DeactivateOnIdle();
