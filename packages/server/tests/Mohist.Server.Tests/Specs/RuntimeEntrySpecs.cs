@@ -115,8 +115,6 @@ public class RuntimeEntrySpecs
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/unregister", null);
 
-            await Task.Delay(200);
-
             var runnersAfterUnregister = await registry.ListRunnersAsync();
             Assert.Empty(runnersAfterUnregister);
 
