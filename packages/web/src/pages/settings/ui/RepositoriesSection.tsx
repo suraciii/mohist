@@ -3,6 +3,7 @@ import { useRepositories, useAddRepository, useRemoveRepository, useSetDefaultRe
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Label } from '@/shared/ui/components/label'
+import { SectionState } from './SectionState'
 
 interface Props {
   projectId: string
@@ -34,27 +35,36 @@ export function RepositoriesSection({ projectId }: Props) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-medium text-gray-900">Repositories</h3>
+      <h3 className="text-sm font-medium text-foreground">Repositories</h3>
 
       {isLoading ? (
-        <div className="text-sm text-gray-500">Loading...</div>
+        <SectionState variant="loading" skeletonRows={2} />
       ) : !repositories || repositories.length === 0 ? (
-        <div className="text-sm text-gray-500">No repositories configured.</div>
+        <SectionState
+          variant="empty"
+          title="Repositories"
+          description="No repositories configured for this project."
+        />
       ) : (
         <div className="space-y-2">
           {repositories.map((repo) => (
             <div
               key={repo.name}
-              className={`flex items-center justify-between rounded-lg border p-3 ${repo.isDefault ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}
+              data-testid={`repository-${repo.name}`}
+              className={`flex items-center justify-between rounded-lg border p-3 ${
+                repo.isDefault
+                  ? 'border-blue-200 bg-blue-50'
+                  : 'border-border bg-card/50'
+              }`}
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900">{repo.name}</span>
+                  <span className="text-sm font-medium text-foreground">{repo.name}</span>
                   {repo.isDefault && (
                     <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">default</span>
                   )}
                 </div>
-                <div className="mt-0.5 text-xs text-gray-500 truncate">
+                <div className="mt-0.5 text-xs text-muted-foreground truncate">
                   {repo.remote ? `remote: ${repo.remote}` : `path: ${repo.path}`}
                   {repo.baseBranch !== 'main' && ` · ${repo.baseBranch}`}
                 </div>
@@ -86,25 +96,45 @@ export function RepositoriesSection({ projectId }: Props) {
         </div>
       )}
 
-      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
-        <h4 className="text-xs font-medium text-gray-700">Add Repository</h4>
+      <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-2">
+        <h4 className="text-xs font-medium text-foreground/80">Add Repository</h4>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <Label className="text-xs">Name</Label>
-            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. frontend" className="h-8 text-sm" />
+            <Input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g. frontend"
+              className="h-8 text-sm"
+            />
           </div>
           <div>
             <Label className="text-xs">Base Branch</Label>
-            <Input value={newBranch} onChange={(e) => setNewBranch(e.target.value)} placeholder="main" className="h-8 text-sm" />
+            <Input
+              value={newBranch}
+              onChange={(e) => setNewBranch(e.target.value)}
+              placeholder="main"
+              className="h-8 text-sm"
+            />
           </div>
         </div>
         <div>
           <Label className="text-xs">Local Path</Label>
-          <Input value={newPath} onChange={(e) => setNewPath(e.target.value)} placeholder="/path/to/repo" className="h-8 text-sm" />
+          <Input
+            value={newPath}
+            onChange={(e) => setNewPath(e.target.value)}
+            placeholder="/path/to/repo"
+            className="h-8 text-sm"
+          />
         </div>
         <div>
           <Label className="text-xs">Remote URL</Label>
-          <Input value={newRemote} onChange={(e) => setNewRemote(e.target.value)} placeholder="https://github.com/org/repo.git" className="h-8 text-sm" />
+          <Input
+            value={newRemote}
+            onChange={(e) => setNewRemote(e.target.value)}
+            placeholder="https://github.com/org/repo.git"
+            className="h-8 text-sm"
+          />
         </div>
         <Button
           onClick={handleAdd}

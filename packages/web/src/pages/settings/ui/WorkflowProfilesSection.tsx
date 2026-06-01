@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { ArrowLeftIcon } from 'lucide-react'
 import { useWorkflowProfiles, useWorkflowProfile } from '../../../entities/settings'
 import type { WorkflowProfileInfo } from '../../../entities/settings'
+import { SectionState } from './SectionState'
 
 function YamlViewer({ yaml }: { yaml: string }) {
   return (
@@ -62,11 +64,10 @@ function ProfileDetail({ profileId, onBack }: { profileId: string; onBack: () =>
       <div>
         <button
           onClick={onBack}
+          data-testid="workflow-profile-back"
           className="text-xs text-muted-foreground hover:text-foreground transition-colors mb-2 inline-flex items-center gap-1"
         >
-          <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
-          </svg>
+          <ArrowLeftIcon className="w-3 h-3" />
           All profiles
         </button>
         <div className="flex items-center gap-2">
@@ -101,6 +102,7 @@ function ProfileCard({ profile, onClick }: { profile: WorkflowProfileInfo; onCli
   return (
     <button
       onClick={onClick}
+      data-testid={`workflow-profile-${profile.id}`}
       className="w-full text-left rounded-md border px-4 py-3 hover:bg-muted/50 transition-colors"
     >
       <div className="flex items-center gap-2">
@@ -126,24 +128,16 @@ export function WorkflowProfilesSection() {
   }
 
   if (isLoading) {
-    return (
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium text-foreground">Workflow Profiles</h3>
-        <div className="space-y-2">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-20 bg-muted rounded-md animate-pulse" />
-          ))}
-        </div>
-      </div>
-    )
+    return <SectionState variant="loading" title="Workflow Profiles" skeletonRows={2} />
   }
 
   if (isError || !profiles) {
     return (
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium text-foreground">Workflow Profiles</h3>
-        <p className="text-sm text-red-600">Failed to load profiles.</p>
-      </div>
+      <SectionState
+        variant="error"
+        title="Workflow Profiles"
+        message="Failed to load profiles."
+      />
     )
   }
 

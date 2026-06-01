@@ -23,6 +23,7 @@ import { Textarea } from '@/shared/ui/components/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/components/dialog'
 import { getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { getStageColors } from '../../../widgets/kanban-board/model/stage-colors'
+import { CardSection } from '@/shared/ui/components/card-section'
 
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 
@@ -95,50 +96,6 @@ function HealthPill({ health }: { health: IssueHealth }) {
       />
       {statusLabel(health)}
     </span>
-  )
-}
-
-function CardSection({
-  title,
-  icon,
-  children,
-  tone = 'default',
-  className,
-}: {
-  title?: string
-  icon?: React.ReactNode
-  children: React.ReactNode
-  tone?: 'default' | 'amber' | 'red' | 'orange' | 'blue' | 'green'
-  className?: string
-}) {
-  const toneClasses: Record<typeof tone, string> = {
-    default: 'bg-card/50 border-border',
-    amber: 'bg-amber-50 border-amber-200',
-    red: 'bg-red-50 border-red-200',
-    orange: 'bg-orange-50 border-orange-200',
-    blue: 'bg-blue-50 border-blue-200',
-    green: 'bg-green-50 border-green-200',
-  }
-  const titleColors: Record<typeof tone, string> = {
-    default: 'text-foreground/80',
-    amber: 'text-amber-800',
-    red: 'text-red-800',
-    orange: 'text-orange-800',
-    blue: 'text-blue-800',
-    green: 'text-green-800',
-  }
-  return (
-    <div className={`rounded-lg border p-4 ${toneClasses[tone]} ${className ?? ''}`}>
-      {title && (
-        <h2
-          className={`text-xs font-semibold uppercase tracking-wide mb-3 flex items-center gap-1.5 ${titleColors[tone]}`}
-        >
-          {icon}
-          {title}
-        </h2>
-      )}
-      {children}
-    </div>
   )
 }
 

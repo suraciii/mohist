@@ -160,10 +160,9 @@ describe('SettingsPage', () => {
     it('should render Coder Agent tab by default', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      expect(screen.getByText('Settings')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Coder Agent' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Runtime' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'System' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Coder Agent' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Runtime' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'System' })).toBeInTheDocument()
       expect(screen.getAllByRole('heading', { name: 'External Coder Agent' })[0]).toBeInTheDocument()
     })
 
@@ -182,7 +181,7 @@ describe('SettingsPage', () => {
     it('should switch to Runtime tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Runtime' }))
+      fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }))
 
       expect(screen.getAllByRole('heading', { name: 'Coder Agent Runtime' })[0]).toBeInTheDocument()
     })
@@ -190,28 +189,26 @@ describe('SettingsPage', () => {
     it('should switch back to Coder Agent tab when clicked', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      fireEvent.click(screen.getByRole('button', { name: 'Runtime' }))
+      fireEvent.click(screen.getByRole('tab', { name: 'Runtime' }))
       expect(screen.getAllByRole('heading', { name: 'Coder Agent Runtime' })[0]).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole('button', { name: 'Coder Agent' }))
+      fireEvent.click(screen.getByRole('tab', { name: 'Coder Agent' }))
       expect(screen.getAllByRole('heading', { name: 'External Coder Agent' })[0]).toBeInTheDocument()
     })
 
     it('should highlight active tab', () => {
       renderWithQueryClient(<SettingsPage />)
 
-      const aiTab = screen.getByRole('button', { name: 'Coder Agent' })
-      const agentTab = screen.getByRole('button', { name: 'Runtime' })
+      const aiTab = screen.getByRole('tab', { name: 'Coder Agent' })
+      const agentTab = screen.getByRole('tab', { name: 'Runtime' })
 
-      expect(aiTab).toHaveClass('bg-blue-50')
-      expect(aiTab).toHaveClass('text-blue-700')
-      expect(agentTab).not.toHaveClass('bg-blue-50')
+      expect(aiTab).toHaveAttribute('aria-selected', 'true')
+      expect(agentTab).toHaveAttribute('aria-selected', 'false')
 
       fireEvent.click(agentTab)
 
-      expect(agentTab).toHaveClass('bg-blue-50')
-      expect(agentTab).toHaveClass('text-blue-700')
-      expect(aiTab).not.toHaveClass('bg-blue-50')
+      expect(agentTab).toHaveAttribute('aria-selected', 'true')
+      expect(aiTab).toHaveAttribute('aria-selected', 'false')
     })
   })
 
@@ -279,15 +276,15 @@ describe('SettingsPage', () => {
       expect(screen.getAllByText('1.2.3').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Running git hash').length).toBeGreaterThan(0)
       expect(screen.getAllByText('abcdef12').length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Source path').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Path').length).toBeGreaterThan(0)
       expect(screen.getAllByText('/repo').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Started at').length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Install detail').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Detail').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Service manager').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Server unit').length).toBeGreaterThan(0)
       expect(screen.getAllByText('Runner unit').length).toBeGreaterThan(0)
       expect(screen.getAllByText(/fedcba09 \(fedcba0987654321\)/i).length).toBeGreaterThan(0)
-      expect(screen.getAllByText('Install mode').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('Mode').length).toBeGreaterThan(0)
       expect(screen.getAllByText('local-source').length).toBeGreaterThan(0)
       expect(screen.getAllByRole('button', { name: /Update & Restart/i }).length).toBeGreaterThan(0)
       expect(screen.queryByText(/Rebuild & Restart/i)).not.toBeInTheDocument()
@@ -323,7 +320,7 @@ describe('SettingsPage', () => {
 
       renderWithQueryClient(<SettingsPage />, ['/settings/system'])
 
-      expect(screen.getAllByText(/Failed to load server runtime: system info failed/i).length).toBeGreaterThan(0)
+      expect(screen.getAllByText(/system info failed/i).length).toBeGreaterThan(0)
       expect(screen.queryByText('Running version')).not.toBeInTheDocument()
       expect(screen.queryByText(/Web update is unsupported/i)).not.toBeInTheDocument()
     })

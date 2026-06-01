@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ChevronRightIcon } from 'lucide-react'
 import { useAvailableModelIds, useOpencodeModel, useOpencodeRuntime, useSetStageModels, useStageModels, useUpdateOpencodeModel } from '../../../entities/settings'
 import type { Model } from '../../../entities/settings'
 import { ModelSelect } from '../../../shared/ui/ModelSelect'
 import { Button } from '@/shared/ui/components/button'
+import { SectionState } from './SectionState'
 
 const STAGES = ['plan', 'build', 'check', 'integrate'] as const
-
-function ChevronRightIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M7.21 8.145a.75.75 0 011.06-.02L10 9.835l1.73-1.71a.75.75 0 011.04 1.08l-2.25 2.22a.75.75 0 01-1.04 0l-2.25-2.22a.75.75 0 01-.02-1.06z" clipRule="evenodd" />
-    </svg>
-  )
-}
 
 export function AiSettingsSection() {
   const { data: runtime, isLoading: runtimeLoading, error: runtimeError } = useOpencodeRuntime()
@@ -52,27 +46,17 @@ export function AiSettingsSection() {
   }
 
   if (runtimeLoading || modelsLoading) {
-    return (
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium text-foreground">Coder Agent & Models</h3>
-        <div className="space-y-3">
-          {[1, 2].map((i) => (
-            <div key={i} className="h-16 bg-muted rounded-lg animate-pulse" />
-          ))}
-        </div>
-      </div>
-    )
+    return <SectionState variant="loading" title="Coder Agent & Models" skeletonRows={2} />
   }
 
   const error = runtimeError ?? modelsError
   if (error) {
     return (
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium text-foreground">Coder Agent & Models</h3>
-        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          Failed to load opencode runtime: {(error as Error).message}
-        </div>
-      </div>
+      <SectionState
+        variant="error"
+        title="Coder Agent & Models"
+        message={`Failed to load opencode runtime: ${(error as Error).message}`}
+      />
     )
   }
 
@@ -121,7 +105,9 @@ export function AiSettingsSection() {
           onClick={() => setStageOverridesOpen(!stageOverridesOpen)}
           className="flex items-center gap-2 w-full text-left justify-start h-auto px-0 py-0 font-normal hover:bg-transparent"
         >
-          <ChevronRightIcon className={`h-4 w-4 text-muted-foreground/70 transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`} />
+          <ChevronRightIcon
+            className={`h-4 w-4 text-muted-foreground/70 transition-transform ${stageOverridesOpen ? 'rotate-90' : ''}`}
+          />
           <span className="text-sm font-medium text-foreground">Stage Model Overrides</span>
           <span className="text-xs text-muted-foreground/70 ml-1">Advanced</span>
         </Button>

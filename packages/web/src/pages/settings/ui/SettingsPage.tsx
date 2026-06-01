@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { useNavigate, useParams, Navigate } from 'react-router-dom'
+import { useParams, useNavigate, Navigate } from 'react-router-dom'
+import { BotIcon, ClockIcon, FolderTreeIcon, GitBranchIcon, SettingsIcon } from 'lucide-react'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
@@ -7,58 +8,22 @@ import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 import { RepositoriesSection } from './RepositoriesSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
-import { Button } from '@/shared/ui/components/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/shared/ui/components/tabs'
 
 const VALID_SECTIONS = ['ai', 'agent', 'repositories', 'workflows', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]
 
 const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
-  {
-    key: 'ai',
-    label: 'Coder Agent',
-    icon: (
-      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-        <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.06zM5.404 6.464a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 10-1.061 1.06l1.06 1.06z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'agent',
-    label: 'Runtime',
-    icon: (
-      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    key: 'repositories',
-    label: 'Repositories',
-    icon: (
-      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    key: 'workflows',
-    label: 'Workflows',
-    icon: (
-      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H4.598a.75.75 0 00-.75.75v3.634a.75.75 0 001.5 0v-2.033l.312.311a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm-8.624-2.848a5.5 5.5 0 019.201-2.466l.312.311h-2.433a.75.75 0 000 1.5h3.634a.75.75 0 00.75-.75V3.537a.75.75 0 00-1.5 0v2.033l-.312-.311a7 7 0 00-11.712 3.138.75.75 0 001.449.39z" clipRule="evenodd" />
-      </svg>
-    ),
-  },
-  {
-    key: 'system',
-    label: 'System',
-    icon: (
-      <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-        <path fillRule="evenodd" d="M7.84 1.804A1 1 0 018.82 1h2.36a1 1 0 01.98.804l.331 1.652a6.993 6.993 0 011.929 1.115l1.598-.54a1 1 0 011.186.447l1.18 2.044a1 1 0 01-.205 1.251l-1.267 1.113a7.047 7.047 0 010 2.228l1.267 1.113a1 1 0 01.206 1.25l-1.18 2.045a1 1 0 01-1.187.447l-1.598-.54a6.993 6.993 0 01-1.929 1.115l-.33 1.652a1 1 0 01-.98.804H8.82a1 1 0 01-.98-.804l-.331-1.652a6.993 6.993 0 01-1.929-1.115l-1.598.54a1 1 0 01-1.186-.447l-1.18-2.044a1 1 0 01.205-1.251l1.267-1.114a7.05 7.05 0 010-2.227L1.821 7.773a1 1 0 01-.206-1.25l1.18-2.045a1 1 0 011.187-.447l1.598.54A6.993 6.993 0 017.51 3.456l.33-1.652zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-      </svg>
-    ),
-  },
+  { key: 'ai', label: 'Coder Agent', icon: <BotIcon /> },
+  { key: 'agent', label: 'Runtime', icon: <ClockIcon /> },
+  { key: 'repositories', label: 'Repositories', icon: <FolderTreeIcon /> },
+  { key: 'workflows', label: 'Workflows', icon: <GitBranchIcon /> },
+  { key: 'system', label: 'System', icon: <SettingsIcon /> },
 ]
 
 function isValidSection(s: string): s is Section {
@@ -74,7 +39,11 @@ function SectionContent({ section }: { section: Section }) {
     case 'agent':
       return <AgentSettingsSection />
     case 'repositories':
-      return currentProject ? <RepositoriesSection projectId={currentProject.id} /> : <div className="text-sm text-gray-500">No project selected</div>
+      return currentProject ? (
+        <RepositoriesSection projectId={currentProject.id} />
+      ) : (
+        <div className="text-sm text-muted-foreground">No project selected</div>
+      )
     case 'workflows':
       return <WorkflowProfilesSection />
     case 'system':
@@ -93,62 +62,28 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex-1 bg-muted">
+    <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold text-foreground">Settings</h1>
-        </div>
-
-        <div className="md:hidden mb-4">
-          <Select value={section} onValueChange={(value) => navigate(`/settings/${value}`)}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select section" />
-            </SelectTrigger>
-            <SelectContent>
-              {SECTION_META.map((s) => (
-                <SelectItem key={s.key} value={s.key}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="hidden md:flex gap-6">
-          <nav className="w-48 shrink-0">
-            <div className="sticky top-6 space-y-1">
-              {SECTION_META.map((s) => (
-                <Button
-                  key={s.key}
-                  variant="ghost"
-                  className={`flex items-center gap-2 w-full px-3 py-2 text-sm font-medium rounded-md justify-start ${
-                    section === s.key
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  onClick={() => navigate(`/settings/${s.key}`)}
-                >
-                  <span className={section === s.key ? 'text-blue-500' : 'text-muted-foreground/70'}>
-                    {s.icon}
-                  </span>
-                  {s.label}
-                </Button>
-              ))}
-            </div>
-          </nav>
-
-          <div className="flex-1 min-w-0">
-            <div className="bg-background rounded-lg border shadow-sm p-6">
-              <SectionContent section={section} />
-            </div>
-          </div>
-        </div>
-
-        <div className="md:hidden">
-          <div className="bg-background rounded-lg border shadow-sm p-6">
-            <SectionContent section={section} />
-          </div>
-        </div>
+        <Tabs
+          value={section}
+          onValueChange={(value) => navigate(`/settings/${value}`)}
+          orientation="horizontal"
+          className="gap-4"
+        >
+          <TabsList variant="line" className="w-full justify-start overflow-x-auto bg-transparent p-0 border-b rounded-none">
+            {SECTION_META.map((s) => (
+              <TabsTrigger key={s.key} value={s.key} data-testid={`settings-tab-${s.key}`}>
+                {s.icon}
+                {s.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {SECTION_META.map((s) => (
+            <TabsContent key={s.key} value={s.key} className="mt-2">
+              <SectionContent section={s.key} />
+            </TabsContent>
+          ))}
+        </Tabs>
       </div>
     </div>
   )
