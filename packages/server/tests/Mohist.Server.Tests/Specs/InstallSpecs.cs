@@ -130,6 +130,14 @@ public class InstallSpecs
 
         public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
 
+        public bool DirectoryExists(string path) => false;
+
+        public void CreateDirectory(string path)
+        {
+        }
+
+        public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) => [];
+
         public void Delete(string path) => _files.Remove(Path.GetFullPath(path));
 
         public string Read(string path) => _files[Path.GetFullPath(path)];

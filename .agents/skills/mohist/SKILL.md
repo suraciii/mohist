@@ -6,13 +6,12 @@ hidden: true
 
 # mohist
 
-旧 Node CLI 已移除，不要再使用 `node packages/cli/bin/mo` 或 `mo-server`。
+获取完整指令：
 
-当前操作应优先通过：
+```bash
+mo skills get mohist
+```
 
-- ASP.NET Core API: `http://localhost:3456/api/...`
-- Server: `dotnet run --project packages/server/src/Mohist.Server/Mohist.Server.csproj`
-- Runner: `npm run dev:runner`
-- Tests: `dotnet test packages/server/Mohist.sln`
+`mo skills get` 会返回与当前 `mo` CLI 版本匹配的完整 Mohist 指导内容。
 
-如果用户明确要求旧 `mo` 命令，说明它已经废弃，并改用当前 API 或 Web UI 路径完成同等操作。
+重新运行 `mo skills install` 可以刷新这个 discovery stub；不需要手动维护仓库内的完整 skill 副本。

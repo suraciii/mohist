@@ -20,10 +20,14 @@ internal static class CliProgram
 
         var services = new ServiceCollection();
         services.AddSingleton(api);
+        services.AddSingleton<TextWriter>(Console.Out);
+        services.AddSingleton(_ => (TextWriter)Console.Error);
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton(systemd);
         services.AddSingleton(updater);
+        services.AddSingleton<SkillAssetService>();
+        services.AddSingleton<SkillInstallService>();
 
         var provider = services.BuildServiceProvider();
         var root = MohistCliCommands.Build(api, provider);
