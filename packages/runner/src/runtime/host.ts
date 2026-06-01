@@ -32,12 +32,7 @@ export class RunnerHost {
 
   async run(signal: AbortSignal) {
     while (!signal.aborted) {
-      await this.connectWhenServerIsReady(signal)
-      try {
-        await this.signalR.start()
-      } catch (error) {
-        console.error("signalr connection failed, will retry:", error)
-      }
+      await this.connectRunner(signal)
       const heartbeat = setInterval(() => void this.connection.heartbeat(signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
       try {
         await this.runWorkerPool(signal)
@@ -122,7 +117,7 @@ export class RunnerHost {
     }
   }
 
-  private async connectWhenServerIsReady(signal: AbortSignal) {
+  private async connectRunner(signal: AbortSignal) {
     while (!signal.aborted) {
       try {
         const coderModels = await discoverOpencodeModels(signal)
@@ -132,9 +127,11 @@ export class RunnerHost {
           coderModels,
           maxWorkflowSlots: this.maxConcurrentWorkflows,
         }, signal)
+        await this.signalR.start()
         return
       } catch (error) {
-        console.error(`runner registration failed; retrying in ${this.options.pollIntervalMs}ms`, error)
+        console.error(`runner connection failed; retrying in ${this.options.pollIntervalMs}ms`, error)
+        await this.shutdownConnection()
         await delay(this.options.pollIntervalMs, signal)
       }
     }
