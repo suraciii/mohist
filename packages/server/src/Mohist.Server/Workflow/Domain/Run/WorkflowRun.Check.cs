@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
 
@@ -20,7 +21,7 @@ public static partial class WorkflowRunExtensions
                         run.ResetCheck(a.Result);
                         break;
                     case "retry":
-                        run.RepairFailedCheck(a.Result, a.RetryTask!);
+                        run.ScheduleCheckRepair(a.Result.Name, a.RetryTask!, a.Result.Message, a.Result.Output);
                         break;
                     case "fail":
                         run.FailCheck(a.Result);
@@ -30,10 +31,18 @@ public static partial class WorkflowRunExtensions
         }
 
         public void RepairFailedCheck(CheckResult result, TaskDefinition repairTask)
+            => run.ScheduleCheckRepair(result.Name, repairTask, result.Message, result.Output);
+
+        public void ScheduleCheckRepair(
+            string checkName,
+            TaskDefinition repairTask,
+            string? message = null,
+            JsonElement? output = null)
         {
-            run.AddRetryTask(result.Name, repairTask);
-            run.ResetCheck(result);
-            run.ResetStageFailure();
+            var current = run.CurrentStage();
+            current.ScheduleCheckRepair(checkName, repairTask, message, output);
+            run.Failure = null;
+            run.Status = WorkflowRunStatus.Running;
         }
 
         public void PassCheck(CheckResult result)
