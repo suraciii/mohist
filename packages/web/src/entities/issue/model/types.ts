@@ -113,6 +113,15 @@ export interface BaseDriftInfo {
   nextAction: string | null
 }
 
+export interface WorkflowStageProgress {
+  stage: string
+  total: number
+  completed: number
+  running: number
+  failed: number
+  currentTaskTitle?: string | null
+}
+
 export interface Issue {
   id: string
   number: number
@@ -121,6 +130,7 @@ export interface Issue {
   status: IssueStatus
   workflowStage?: WorkflowStage | null
   workflowStatus?: string | null
+  workflowStageProgress?: WorkflowStageProgress | null
   workflowRunId?: string | null
   workflowProfileId?: string | null
   health: IssueHealth
@@ -408,6 +418,8 @@ export interface StageTaskState {
   updatedAt: string
   reason?: string
   causedBy?: StageTaskCause
+  requiredFiles?: WorkflowTaskRequiredFile[]
+  classification?: 'UserFacing' | 'Orchestration'
 }
 
 export interface StageCheckState {
@@ -472,6 +484,13 @@ export interface WorkflowTimelineStage {
   approval: StageApprovalState | null
 }
 
+export interface WorkflowTaskRequiredFile {
+  path: string
+  source: string
+  canFetchContent: boolean
+  markers?: string[]
+}
+
 export interface WorkflowTimelineTask {
   id: string
   title: string
@@ -482,6 +501,8 @@ export interface WorkflowTimelineTask {
   durationMs: number | null
   attempts: number
   message: string | null
+  requiredFiles?: WorkflowTaskRequiredFile[]
+  classification?: 'UserFacing' | 'Orchestration'
 }
 
 export interface WorkflowTimelineCheck {

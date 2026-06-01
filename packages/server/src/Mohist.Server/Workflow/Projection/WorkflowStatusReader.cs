@@ -18,7 +18,9 @@ public static class WorkflowStatusReader
                     t.Id,
                     t.Title,
                     t.Uses,
-                    t.Status.ToString())).ToList(),
+                    t.Status.ToString(),
+                    t.RequiredFiles,
+                    t.Classification)).ToList(),
                 s.Checks.Select(c => new CheckStatusView(
                     c.Name,
                     c.Title,

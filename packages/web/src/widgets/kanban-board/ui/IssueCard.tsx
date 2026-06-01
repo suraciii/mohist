@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { ArchiveIcon } from 'lucide-react'
 import { Button } from '@/shared/ui/components/button'
 import type { AgentStatus } from '../../../entities/agent'
-import { IssueStatus, WorkflowStage, IssueHealth, type Issue } from '../../../entities/issue'
+import { IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStageProgress } from '../../../entities/issue'
 import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
@@ -163,6 +163,25 @@ function PriorityChip({ priority }: { priority: string | null | undefined }) {
   )
 }
 
+function WorkflowStageProgressIndicator({
+  progress,
+}: {
+  progress?: WorkflowStageProgress | null
+}) {
+  if (!progress || progress.total === 0) return null
+
+  const label = `${progress.completed}/${progress.total}`
+  return (
+    <span
+      data-testid="workflow-stage-progress"
+      className="text-[10px] tabular-nums text-muted-foreground/80"
+      title={progress.currentTaskTitle ? `${progress.currentTaskTitle} (${label})` : label}
+    >
+      {label}
+    </span>
+  )
+}
+
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
@@ -239,6 +258,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
           </span>
           <PriorityChip priority={issue.priority} />
           {showWorkflowStagePill && <WorkflowStagePill issue={issue} />}
+          <WorkflowStageProgressIndicator progress={issue.workflowStageProgress} />
           {isIntegrateWithFailure && (
             <span
               data-testid="integration-badge"

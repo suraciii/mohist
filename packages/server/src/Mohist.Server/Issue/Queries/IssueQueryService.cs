@@ -262,7 +262,52 @@ var runRows = await db.WorkflowRuns
             issue.Attention = projection.Attention;
             issue.WorkflowStage = status.CurrentStage;
             issue.WorkflowStatus = status.Status;
+            issue.WorkflowStageProgress = ComputeStageProgress(status);
         }
+    }
+
+    private static WorkflowStageProgress? ComputeStageProgress(WorkflowStatusView status)
+    {
+        if (IsNonMeaningfulProgressState(status))
+            return null;
+
+        var currentStage = status.Stages.FirstOrDefault(s => s.Stage == status.CurrentStage);
+        if (currentStage is null) return null;
+
+        var userTasks = currentStage.Tasks.Where(t => t.Classification == TaskClassification.UserFacing).ToList();
+        if (userTasks.Count == 0) return null;
+
+        var total = userTasks.Count;
+        var completed = userTasks.Count(t => t.Status == "Completed");
+        var running = userTasks.Count(t => t.Status == "Running");
+        var failed = userTasks.Count(t => t.Status == "Failed");
+
+        if (total == 0) return null;
+
+        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "Running" or "Pending")?.Title;
+
+        return new WorkflowStageProgress(
+            status.CurrentStage!,
+            total,
+            completed,
+            running,
+            failed,
+            currentTaskTitle);
+    }
+
+    private static bool IsNonMeaningfulProgressState(WorkflowStatusView status)
+    {
+        if (status.Status is "Completed" or "Failed" or "AwaitingApproval" or "Paused")
+            return true;
+
+        var currentStage = status.Stages.FirstOrDefault(s => s.Stage == status.CurrentStage);
+        if (currentStage is null)
+            return true;
+
+        // Approval-only waiting should be omitted from the board API even if the run-level status
+        // still looks active after projection/materialization.
+        return currentStage.ApprovalStatus is { Result: null }
+            || (currentStage.Tasks.All(t => t.Status == "Completed") && currentStage.Checks.All(c => c.Status == "Completed"));
     }
 
     private static async Task<List<IssueReadModel>> EnrichAsync(MohistDbContext db, List<IssueReadModel> issues)
