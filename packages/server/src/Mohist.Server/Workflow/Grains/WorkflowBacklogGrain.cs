@@ -36,25 +36,44 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
 
     public async Task RegisterAsync(string workflowId)
     {
-        if (_all.Contains(workflowId))
-        {
-            if (_waiting.Contains(workflowId)) return;
-
-            _running.Remove(workflowId);
-            _waiting.Enqueue(workflowId);
-            await SaveAsync();
-            _log.LogInformation("Workflow {WfId} re-queued in backlog, waiting={Waiting}", workflowId, _waiting.Count);
-            return;
-        }
+        var removedRunning = _running.Remove(workflowId);
+        var alreadyWaiting = RemoveFromWaiting(workflowId);
 
         _all.Add(workflowId);
         _waiting.Enqueue(workflowId);
         await SaveAsync();
+
+        if (removedRunning || alreadyWaiting)
+        {
+            _log.LogInformation("Workflow {WfId} re-queued in backlog, waiting={Waiting}", workflowId, _waiting.Count);
+            return;
+        }
+
         _log.LogInformation("Workflow {WfId} registered to backlog, waiting={Waiting}", workflowId, _waiting.Count);
+    }
+
+    public async Task RestoreRunningAsync(string workflowId, string runnerId)
+    {
+        RemoveFromWaiting(workflowId);
+        _all.Add(workflowId);
+        _running[workflowId] = runnerId;
+        await SaveAsync();
+        _log.LogInformation("Workflow {WfId} restored as running for runner {RunnerId}", workflowId, runnerId);
     }
 
     public async Task<string?> ClaimAsync(string runnerId)
     {
+        var staleRunningIds = _running
+            .Where(kv => string.Equals(kv.Value, runnerId, StringComparison.Ordinal) && !_all.Contains(kv.Key))
+            .Select(kv => kv.Key)
+            .ToList();
+        if (staleRunningIds.Count > 0)
+        {
+            foreach (var workflowId in staleRunningIds)
+                _running.Remove(workflowId);
+            await SaveAsync();
+        }
+
         while (_waiting.Count > 0)
         {
             var wfId = _waiting.Dequeue();
@@ -72,9 +91,42 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
     public async Task ReleaseAsync(string workflowId)
     {
         _all.Remove(workflowId);
+        RemoveFromWaiting(workflowId);
         _running.Remove(workflowId);
-        await SaveAsync();
+        if (_waiting.Count == 0 && _running.Count == 0 && _all.Count == 0)
+        {
+            await _store.DeleteAsync(GrainKey);
+        }
+        else
+        {
+            await SaveAsync();
+        }
         _log.LogInformation("Workflow {WfId} released from backlog", workflowId);
+    }
+
+    private bool RemoveFromWaiting(string workflowId)
+    {
+        if (_waiting.Count == 0) return false;
+
+        var removed = false;
+        var remaining = new Queue<string>();
+
+        while (_waiting.Count > 0)
+        {
+            var candidate = _waiting.Dequeue();
+            if (candidate == workflowId)
+            {
+                removed = true;
+                continue;
+            }
+
+            remaining.Enqueue(candidate);
+        }
+
+        while (remaining.Count > 0)
+            _waiting.Enqueue(remaining.Dequeue());
+
+        return removed;
     }
 
     private Task SaveAsync() => _store.SaveAsync(GrainKey, new WorkflowBacklogState(_waiting.ToList(), new Dictionary<string, string>(_running), new HashSet<string>(_all)));

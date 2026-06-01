@@ -1,0 +1,143 @@
+{
+  "project": "mohist",
+  "description": "Clean stale workflow backlog entries and active leases when workflow runs become non-runnable, and repair persisted scheduling state during polling and recovery.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Enforce exclusive backlog state",
+      "spec": "specs/workflow-engine/spec.md#requirement-workflow-scheduling-state-is-authoritative-and-exclusive",
+      "description": "Make backlog registration, claiming, and release operations idempotently maintain one scheduling state per workflow. Registering a workflow must remove stale running state before persisting waiting, and claiming must remove waiting state before persisting running.",
+      "acceptanceCriteria": [
+        "Registering a workflow already present in Running removes the Running entry and persists only Waiting.",
+        "Claiming a workflow removes it from Waiting and persists it only in Running for the same backlog.",
+        "Release or unschedule behavior can remove a workflow from both Waiting and Running without failing when entries are already absent.",
+        "A focused backend test proves a workflow cannot remain in both Waiting and Running in one BacklogState."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow backlog grain behavior and tests enforce Waiting/Running exclusivity.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implement this before lifecycle and recovery cleanup so all later callers can rely on idempotent backlog repair semantics."
+    },
+    {
+      "id": "T-002",
+      "title": "Add shared workflow unschedule cleanup",
+      "spec": "specs/workflow-run/spec.md#requirement-non-runnable-workflow-runs-do-not-expose-work-leases",
+      "description": "Add or extend a shared cleanup path that removes a workflow from backlog Waiting and Running buckets, clears any active workflow lease, and records diagnostic evidence for abandoned or stale ownership. The operation must tolerate missing backlog entries and missing leases so pause, terminal transitions, polling, and recovery can call it safely.",
+      "acceptanceCriteria": [
+        "Calling the cleanup for a workflow with an active lease clears the active lease and removes backlog state.",
+        "Calling the cleanup repeatedly leaves state clean and does not throw for missing entries or leases.",
+        "Cleanup records a reasoned diagnostic when it clears stale or abandoned active ownership.",
+        "Runner assignment tracking is cleared when cleanup releases a lease or backlog claim."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reusable unschedule and lease cleanup path with diagnostic evidence.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Use the smallest existing diagnostic sink that can preserve workflow id, runner id when known, reason, and work item when known."
+    },
+    {
+      "id": "T-003",
+      "title": "Clean scheduling state on pause and cancellation",
+      "spec": "specs/workflow-run/spec.md#requirement-paused-workflow-runs-are-removed-from-scheduling-state",
+      "description": "Wire workflow pause paths, including issue cancellation that pauses the active workflow, through the shared unschedule cleanup. A paused or cancelled workflow must become absent from runnable backlog state and must not retain an active lease.",
+      "acceptanceCriteria": [
+        "Pausing a workflow with an active lease clears the lease and removes Running state.",
+        "Cancelling an issue with an active workflow run pauses and unschedules that workflow.",
+        "After cancellation, future runner polls cannot claim the cancelled issue's paused workflow as runnable work.",
+        "A backend test covers cancellation with an active lease and verifies backlog, lease, and runner assignment cleanup."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Pause and issue cancellation lifecycle paths clean backlog, lease, and assignment state.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "IssueGrain.CancelAsync should continue to drive cancellation through workflow pause; WorkflowGrain.PauseAsync should own the scheduling cleanup."
+    },
+    {
+      "id": "T-004",
+      "title": "Clean scheduling state on terminal transitions",
+      "spec": "specs/workflow-engine/spec.md#requirement-terminal-workflow-transitions-clean-scheduling-state",
+      "description": "Wire completed, failed, and cancelled workflow run transitions through the shared unschedule cleanup before or with the terminal state becoming observable. Terminal workflows must have no active lease and no persisted Waiting or Running backlog entry.",
+      "acceptanceCriteria": [
+        "Completed workflow transitions remove waiting and running backlog entries and clear active leases.",
+        "Failed workflow transitions remove waiting and running backlog entries and clear active leases.",
+        "Cancelled terminal workflow status does not retain active work ownership.",
+        "Backend tests cover completed and failed terminal workflow cleanup."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Terminal workflow lifecycle paths clean persisted scheduling state.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Keep terminal cleanup idempotent because recovery may also reconcile the same workflow later."
+    },
+    {
+      "id": "T-005",
+      "title": "Repair no-work runner poll claims",
+      "spec": "specs/agent-pool/spec.md#requirement-runner-polling-repairs-stale-workflow-claims",
+      "description": "Update RunnerGrain.PollAsync so a workflow claimed from backlog but returning no work from GetWorkAsync is immediately released from the runner assignment and repaired in persisted scheduling state. The poll path should record stale-state diagnostics and must not consume runner capacity for that workflow after the poll returns.",
+      "acceptanceCriteria": [
+        "When GetWorkAsync returns no work after a claim, the runner removes the workflow from its assigned workflow set.",
+        "The backlog running claim for that workflow is released or repaired before the poll returns.",
+        "Any active lease associated with the stale claim is cleared consistently.",
+        "A backend test covers poll-claim-no-work repair and verifies runner capacity is not consumed."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner polling repairs stale claimed workflows that cannot provide work.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "This repair is exceptional-path work; keep the successful poll path unchanged except for any required assignment/lease consistency checks."
+    },
+    {
+      "id": "T-006",
+      "title": "Reconcile backlog and leases during startup recovery",
+      "spec": "specs/workflow-engine/spec.md#requirement-startup-recovery-reconciles-stale-scheduling-state",
+      "description": "Expand WorkflowBacklogRecoveryService from only registering runnable workflows to reconciling persisted Waiting entries, Running entries, and workflow leases against authoritative WorkflowRun state. Recovery must remove paused, terminal, cancelled, missing, or no-work workflows from backlog and leases, while preserving only consistent runnable scheduling state.",
+      "acceptanceCriteria": [
+        "Recovery removes Waiting, Running, and lease state for paused workflows.",
+        "Recovery removes Waiting, Running, and lease state for failed, completed, and cancelled workflows.",
+        "Recovery removes Waiting, Running, and lease state for missing workflows or workflows that cannot provide runnable work.",
+        "Recovery leaves runnable workflows without active leases registered as Waiting and not Running.",
+        "Recovery leaves Running entries only when the workflow is runnable and has a corresponding active lease.",
+        "A backend test covers startup reconciliation of stale paused or terminal backlog and lease rows."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Startup recovery repairs stale persisted BacklogStates and WorkflowLeases.",
+      "dependsOn": ["T-001", "T-002", "T-004"],
+      "passes": false,
+      "notes": "Treat missing workflow run state as non-runnable and record diagnostics when removing stale persisted state."
+    },
+    {
+      "id": "T-007",
+      "title": "Add end-to-end consistency regression tests",
+      "spec": "specs/workflow-engine/spec.md#requirement-workflow-scheduling-state-is-authoritative-and-exclusive",
+      "description": "Add regression coverage across the product paths named in the acceptance criteria so stale scheduling state cannot reappear. Tests should verify cancellation with active lease cleanup, terminal cleanup, Waiting/Running deduplication, poll-claim-no-work repair, and startup recovery reconciliation through grains and services where practical.",
+      "acceptanceCriteria": [
+        "The test suite includes cancellation with active lease cleanup assertions for backlog, lease, and runner assignment state.",
+        "The test suite includes terminal completed and failed workflow cleanup assertions.",
+        "The test suite includes Waiting plus Running deduplication assertions for backlog registration or claim behavior.",
+        "The test suite includes poll-claim-no-work repair assertions.",
+        "The test suite includes startup recovery stale backlog and lease reconciliation assertions.",
+        "Relevant backend tests pass locally."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Backend regression tests proving issue-25 scheduling consistency invariants.",
+      "dependsOn": ["T-003", "T-004", "T-005", "T-006"],
+      "passes": false,
+      "notes": "Some focused tests may be added in earlier tasks; this task closes any remaining acceptance coverage and runs the relevant test target."
+    }
+  ]
+}

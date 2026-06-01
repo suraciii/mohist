@@ -39,7 +39,15 @@ public class WorkflowBacklogStore : IStateStore<WorkflowBacklogState>
         await db.SaveChangesAsync();
     }
 
-    public Task DeleteAsync(string key) => throw new NotSupportedException();
+    public async Task DeleteAsync(string key)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.BacklogStates.FindAsync(key);
+        if (row is null) return;
+
+        db.BacklogStates.Remove(row);
+        await db.SaveChangesAsync();
+    }
 
     public Task<IReadOnlyList<WorkflowBacklogState>> ListAsync() => throw new NotSupportedException();
 

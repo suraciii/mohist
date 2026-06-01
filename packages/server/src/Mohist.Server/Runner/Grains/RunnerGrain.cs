@@ -1,10 +1,14 @@
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Sessions.Grains;
+using Orleans.Concurrency;
 using System.Text.Json;
 
 namespace Mohist.Server.Runner.Grains;
 
+[Reentrant]
 public class RunnerGrain : Grain, IRunnerGrain
 {
     private RunnerStatus _status = RunnerStatus.Offline;
@@ -17,14 +21,16 @@ public class RunnerGrain : Grain, IRunnerGrain
     private DateTime _lastHeartbeat;
     private IDisposable? _heartbeatTimer;
     private readonly IWorkflowBacklogDirectory _backlogs;
+    private readonly IStateStore<WorkLease> _leaseStore;
     private readonly ILogger<RunnerGrain> _log;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan HeartbeatCheckInterval = TimeSpan.FromSeconds(10);
 
-    public RunnerGrain(IWorkflowBacklogDirectory backlogs, ILogger<RunnerGrain> log)
+    public RunnerGrain(IWorkflowBacklogDirectory backlogs, IStateStore<WorkLease> leaseStore, ILogger<RunnerGrain> log)
     {
         _backlogs = backlogs;
+        _leaseStore = leaseStore;
         _log = log;
     }
 
@@ -149,6 +155,12 @@ public class RunnerGrain : Grain, IRunnerGrain
                     TrackWorkProject(work, projectId);
                     return work;
                 }
+
+                _log.LogWarning(
+                    "Runner {Id} repairing stale workflow claim {WorkflowId}: backlog claim produced no runnable work",
+                    RunnerId,
+                    claimedId);
+                await workflow.UnscheduleAsync($"Runner {RunnerId} repaired stale workflow claim after poll returned no work");
             }
         }
 
@@ -209,6 +221,20 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         _assignedWorkflows.Add(workflowRunId);
         _log.LogInformation("Runner {Id} assigned to workflow {WorkflowId}", RunnerId, workflowRunId);
+        return Task.CompletedTask;
+    }
+
+    public Task RestoreLeasedWorkAsync(string workflowRunId, string workId, string workType, string stage, string? title)
+    {
+        _assignedWorkflows.Add(workflowRunId);
+        _workToWorkflow[workId] = workflowRunId;
+        _workById[workId] = new WorkDispatch(
+            WorkflowRunId: workflowRunId,
+            WorkId: workId,
+            WorkType: workType,
+            Stage: stage,
+            Title: title);
+        _log.LogInformation("Runner {Id} restored leased work {WorkId} for workflow {WorkflowId}", RunnerId, workId, workflowRunId);
         return Task.CompletedTask;
     }
 

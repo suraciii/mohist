@@ -11,6 +11,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<string?> ReportAsync(string workId, WorkDispatchResult result);
     Task<bool> IsAvailableAsync();
     Task AssignWorkflowAsync(string workflowRunId);
+    Task RestoreLeasedWorkAsync(string workflowRunId, string workId, string workType, string stage, string? title);
     Task ReleaseAsync(string? workflowRunId = null);
 }
 
