@@ -1,4 +1,5 @@
 using Mohist.Server.Api;
+using Mohist.Server.Events.Hub;
 using Mohist.Server.Runner.SignalR;
 using Microsoft.AspNetCore.Http.Extensions;
 
@@ -43,7 +44,6 @@ public static class MohistApiRegistration
         app.MapWorkflowEventRoutes();
         app.MapWorkflowSessionRoutes();
         app.MapWorkflowTaskRoutes();
-        app.MapEventRoutes();
         app.MapConfigRoutes();
         app.MapSystemRoutes();
         app.MapOpencodeRoutes();
@@ -56,6 +56,7 @@ public static class MohistApiRegistration
         app.MapRunnerRoutes();
         app.MapRunnerStatusRoutes();
         app.MapHub<RunnerHub>("/hubs/runner");
+        app.MapHub<MohistHub>("/hubs/events");
         return app;
     }
 }

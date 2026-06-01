@@ -38,4 +38,4 @@ public sealed record EventDto(
     string? Status,
     string? Message,
     object? Payload,
-    string CreatedAt);
+    string CreatedAt) : IProjectScoped;

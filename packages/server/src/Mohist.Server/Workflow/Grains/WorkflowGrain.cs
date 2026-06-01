@@ -937,15 +937,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_run is null) return;
         var current = _run.Stages.FirstOrDefault(s => s.Id == _run.CurrentStageId);
-        _eventBus.Emit("stage_changed", new
-        {
-            workflowRunId = GrainKey,
-            stage = _run.CurrentStageId,
-            status = current?.Status.ToString() ?? "Unknown",
+        _eventBus.Emit("stage_changed", new StageChangedEvent(
+            GetProjectId(),
+            GrainKey,
+            _run.CurrentStageId,
+            current?.Status.ToString() ?? "Unknown",
             action,
             reason,
-            timestamp = DateTime.UtcNow.ToString("o"),
-        });
+            DateTime.UtcNow.ToString("o")));
     }
 
     private Task AppendWorkDispatchedEventAsync(WorkDispatch dispatch, string runnerId) =>
