@@ -41,6 +41,11 @@ vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
     return Promise.resolve(sessionPageMocks.detail)
   }),
+  getWorkflowSessionDetail: vi.fn(() => {
+    if (sessionPageMocks.detailPending) return new Promise(() => {})
+    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
+    return Promise.resolve(sessionPageMocks.detail)
+  }),
 }))
 
 Object.defineProperty(navigator, 'clipboard', {

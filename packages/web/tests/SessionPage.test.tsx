@@ -43,6 +43,11 @@ vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
     return Promise.resolve(sessionPageMocks.detail)
   }),
+  getWorkflowSessionDetail: vi.fn(() => {
+    if (sessionPageMocks.detailPending) return new Promise(() => {})
+    if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
+    return Promise.resolve(sessionPageMocks.detail)
+  }),
 }))
 
 Object.defineProperty(navigator, 'clipboard', {
@@ -1560,6 +1565,22 @@ describe('SessionPage header and states', () => {
       })
     })
 
+    it('loads workflow session detail by route session name', async () => {
+      const api = await import('../src/entities/coder-session/api/client')
+      sessionPageMocks.params = { number: '123', sessionName: 'plan' } as any
+      setupSessionPage({
+        sessions: [{ ...makeMockSession(), id: 'proj_1/wr_1/plan', sessionName: 'plan' }],
+        detail: makeMockDetail({ id: 'proj_1/wr_1/plan', metadata: makeMockMetadata({ sessionId: 'proj_1/wr_1/plan', sessionName: 'plan' }) } as any),
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(api.getWorkflowSessionDetail).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
+      })
+      expect(api.getCoderSessionDetail).not.toHaveBeenCalled()
+    })
+
     it('shows duration for completed sessions', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
@@ -1755,7 +1776,8 @@ describe('SessionHeader navigation', () => {
   it('session header link routes to /issues/:number/session/:sessionId', async () => {
     const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = {
-      id: 'session-abc',
+      id: 'proj_1/wr_1/plan',
+      sessionName: 'plan',
       acpSessionId: 'acp-123',
       executionId: null,
       taskDescription: 'Test task',
@@ -1776,7 +1798,7 @@ describe('SessionHeader navigation', () => {
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
 
     const link = screen.getByRole('link')
-    expect(link.getAttribute('href')).toBe('/issues/42/session/session-abc')
+    expect(link.getAttribute('href')).toBe('/issues/42/workflow/sessions/plan')
   })
 
   it('session header shows session label', async () => {
@@ -1808,7 +1830,8 @@ describe('SessionHeader navigation', () => {
   it('showTranscriptLink renders View transcript link instead of full row link', async () => {
     const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
     const session = {
-      id: 'session-abc',
+      id: 'proj_1/wr_1/T-001.2',
+      sessionName: 'T-001.2',
       acpSessionId: 'acp-123',
       executionId: null,
       taskDescription: 'Test task',
@@ -1829,8 +1852,35 @@ describe('SessionHeader navigation', () => {
     renderWithQueryClient(<SessionHeader session={session} issueNumber={42} showTranscriptLink />)
 
     const link = screen.getByRole('link')
-    expect(link.getAttribute('href')).toBe('/issues/42/session/session-abc')
+    expect(link.getAttribute('href')).toBe('/issues/42/workflow/sessions/T-001.2')
     expect(screen.getByText('View transcript')).toBeInTheDocument()
+  })
+
+  it('session header encodes workflow session names as a single path segment', async () => {
+    const { SessionHeader } = await import('../src/widgets/coder-session/ui/SessionHeader')
+    const session = {
+      id: 'proj_1/wr_1/check/retry',
+      sessionName: 'check/retry',
+      acpSessionId: 'acp-123',
+      executionId: null,
+      taskDescription: 'Test task',
+      status: 'completed',
+      createdAt: '2024-01-01T10:00:00.000Z',
+      completedAt: '2024-01-01T10:30:00.000Z',
+      model: 'claude-3-5-sonnet',
+      coderType: null,
+      stage: 'check',
+      title: 'Check retry',
+      lastDataAt: null,
+      probeSentAt: null,
+      probeDeadlineAt: null,
+      failureReason: null,
+      workflowLogs: [],
+    }
+
+    renderWithQueryClient(<SessionHeader session={session} issueNumber={42} />)
+
+    expect(screen.getByRole('link').getAttribute('href')).toBe('/issues/42/workflow/sessions/check%2Fretry')
   })
 
   it('getSessionLabel returns title when present', async () => {

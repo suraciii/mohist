@@ -83,6 +83,8 @@ function StatusIcon({ status }: { status: string }) {
 
 export function SessionHeader({ session, issueNumber, showTranscriptLink }: SessionHeaderProps) {
   const label = getSessionLabel(session)
+  const sessionName = session.sessionName ?? session.executionId ?? session.id
+  const transcriptPath = `/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`
   const coderInfo = [session.coderType, session.model].filter(Boolean).join(' · ') || 'unknown'
   const startTime = formatTime(session.createdAt)
 
@@ -115,7 +117,7 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       </span>
       {showTranscriptLink ? (
         <Link
-          to={`/issues/${issueNumber}/session/${session.id}`}
+          to={transcriptPath}
           className="text-xs text-blue-600 hover:text-blue-800 shrink-0 ml-2"
         >
           View transcript
@@ -142,7 +144,7 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
 
   return (
     <Link
-      to={`/issues/${issueNumber}/session/${session.id}`}
+      to={transcriptPath}
       className="flex items-center gap-2.5 w-full text-left px-3 py-2 hover:bg-gray-50/80 transition-colors rounded-t-lg"
     >
       {content}

@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useIssue } from '../../../entities/issue'
 import { useCoderSessions } from '../../../entities/coder-session'
-import { getCoderSessionDetail } from '../../../entities/coder-session'
+import { getCoderSessionDetail, getWorkflowSessionDetail } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
@@ -293,24 +293,31 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
 }
 
 export function SessionPage() {
-  const { number: numberStr, sessionId } = useParams<{ number: string; sessionId: string }>()
+  const { number: numberStr, sessionId, sessionName } = useParams<{ number: string; sessionId?: string; sessionName?: string }>()
   const { projectId } = useProject()
   const issueNumber = Number(numberStr)
+  const decodedSessionId = sessionId ? decodeURIComponent(sessionId) : undefined
+  const decodedSessionName = sessionName ? decodeURIComponent(sessionName) : undefined
+  const routeSessionKey = decodedSessionName ?? decodedSessionId
 
   useDocumentTitle(`Session — Issue #${issueNumber} — Mohist`)
 
   const { data: issue } = useIssue(issueNumber)
   const { sessions, isLoading: sessionsLoading } = useCoderSessions(issueNumber)
-  const session = sessions.find((s) => s.id === sessionId)
+  const session = sessions.find((s) => decodedSessionName
+    ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
+    : s.id === decodedSessionId)
 
   const {
     data: detail,
     isLoading: detailLoading,
     isError: detailError,
   } = useQuery<CoderSessionDetail, Error>({
-    queryKey: ['issues', issueNumber, projectId, 'coder-sessions', sessionId],
-    queryFn: () => getCoderSessionDetail(issueNumber, sessionId!, projectId),
-    enabled: !!sessionId && sessionId.length > 0 && issueNumber > 0 && !!projectId,
+    queryKey: ['issues', issueNumber, projectId, decodedSessionName ? 'workflow-sessions' : 'coder-sessions', routeSessionKey],
+    queryFn: () => decodedSessionName
+      ? getWorkflowSessionDetail(issueNumber, decodedSessionName, projectId)
+      : getCoderSessionDetail(issueNumber, decodedSessionId!, projectId),
+    enabled: !!routeSessionKey && routeSessionKey.length > 0 && issueNumber > 0 && !!projectId,
   })
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -336,7 +343,7 @@ export function SessionPage() {
     isStreaming,
   } = useSessionTranscript({
     issueNumber,
-    sessionId: sessionId ?? '',
+    sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
     acpSessionId,
     initialTurns: detail?.turns ?? EMPTY_TURNS,
     isRunning,
@@ -458,7 +465,7 @@ export function SessionPage() {
     return () => window.removeEventListener('resize', handleResize)
   }, [isRunning])
 
-  if (!sessionId || isNaN(issueNumber) || issueNumber <= 0) {
+  if (!routeSessionKey || isNaN(issueNumber) || issueNumber <= 0) {
     return <SessionNotFound issueNumber={issueNumber || 0} />
   }
 
