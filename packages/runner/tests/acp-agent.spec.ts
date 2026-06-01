@@ -113,6 +113,15 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.filter((entry) => entry.event === "prompt")).toHaveLength(1)
   })
 
+  it("PromptCompletesWithoutSessionActivity_ActionFailsInsteadOfReportingEmptySuccess", async () => {
+    const fixture = createFixture("empty-complete")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("without any session activity")
+  })
+
   it("AbortSignalFires_PromptRunning_SendsSessionCancelBeforeCleanup", async () => {
     const fixture = createFixture("abort")
     const controller = new AbortController()
@@ -157,7 +166,7 @@ function createFixture(scenario: Scenario) {
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "tool-liveness" | "abort"
+type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "tool-liveness" | "empty-complete" | "abort"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -202,6 +211,7 @@ class FakeAcpAgent {
         if (self.scenario === "liveness") return await self.runLivenessPrompt(params.sessionId)
         if (self.scenario === "abort") return await new Promise(() => {})
         if (self.scenario === "tool-liveness") return await self.runToolLivenessPrompt(params.sessionId)
+        if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         else await self.emitBasicEvents(params.sessionId)
         return { stopReason: "end_turn" }

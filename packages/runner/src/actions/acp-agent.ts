@@ -53,6 +53,7 @@ interface AcpSessionResult {
   error?: string
   acpSessionId?: string
   exitCode?: number | null
+  activityCount?: number
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
@@ -210,6 +211,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   const toolIds = new ToolCallIdGenerator()
   let lastDataAt = Date.now()
   let dataVersion = 0
@@ -226,6 +228,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       const update = notification.update
       const type = update.sessionUpdate
       if (isSessionActivity(update)) {
+        activityCount += 1
         notifyData()
       }
       if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
@@ -258,12 +261,14 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1 }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
     }
-    return { text: agentText, success: true, acpSessionId: entry.sessionId, exitCode: 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
+    return { text: agentText, success: true, acpSessionId: entry.sessionId, exitCode: 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, acpSessionId: entry.sessionId, exitCode: 1 }
+    return { text: agentText, success: false, error: message, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
   } finally {
     clearActiveHandlers()
   }
@@ -279,6 +284,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   const sessionStartTimeoutMs = agentConfig?.sessionStartTimeoutMs ?? numberInput(context.with, "sessionStartTimeout") ?? DEFAULT_SESSION_START_TIMEOUT_MS
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   let lastDataAt = Date.now()
   let dataVersion = 0
   const dataWaiters = new Set<() => void>()
@@ -295,6 +301,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       const update = notification.update
       const type = update.sessionUpdate
       if (isSessionActivity(update)) {
+        activityCount += 1
         notifyData()
       }
       if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
@@ -345,13 +352,16 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       waitForData: (version) => waitForData(dataWaiters, () => dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1 }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1, activityCount }
     }
 
-    return { text: agentText, success: true, acpSessionId, exitCode: 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId, exitCode: 1, activityCount }
+
+    return { text: agentText, success: true, acpSessionId, exitCode: 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, acpSessionId, exitCode: 1 }
+    return { text: agentText, success: false, error: message, acpSessionId, exitCode: 1, activityCount }
   } finally {
     clearActiveHandlers()
   }
@@ -368,6 +378,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   let lastDataAt = Date.now()
   let dataVersion = 0
   const dataWaiters = new Set<() => void>()
@@ -384,6 +395,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       const update = notification.update
       const type = update.sessionUpdate
       if (isSessionActivity(update)) {
+        activityCount += 1
         notifyData()
       }
       if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
@@ -436,13 +448,19 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     })
     if (promptResult !== "completed") {
       try { await connection.closeSession?.({ sessionId }) } catch {}
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1 }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1, activityCount }
     }
 
-    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) {
+      try { await connection.closeSession?.({ sessionId }) } catch {}
+      return { text: agentText, success: false, error: activityFailure, acpSessionId: sessionId, exitCode: 1, activityCount }
+    }
+
+    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, exitCode: 1 }
+    return { text: agentText, success: false, error: message, exitCode: 1, activityCount }
   } finally {
     clearActiveHandlers()
   }
@@ -454,6 +472,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   let lastDataAt = Date.now()
   let dataVersion = 0
   const dataWaiters = new Set<() => void>()
@@ -471,6 +490,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
         const update = notification.update
         const type = update.sessionUpdate
         if (isSessionActivity(update)) {
+          activityCount += 1
           notifyData()
         }
         if (type === "agent_message_chunk" && "content" in update && update.content && typeof update.content === "object" && "text" in update.content) {
@@ -537,16 +557,23 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       exitFailure: acpProcess.exitFailure,
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode() }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode(), activityCount }
     }
 
-    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 1, activityCount }
+
+    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, acpSessionId: sessionId || undefined, exitCode: acpProcess.exitCode() ?? 1 }
+    return { text: agentText, success: false, error: message, acpSessionId: sessionId || undefined, exitCode: acpProcess.exitCode() ?? 1, activityCount }
   } finally {
     await acpProcess.cleanup()
   }
+}
+
+function validatePromptActivity(activityCount: number) {
+  return activityCount > 0 ? undefined : "ACP agent prompt completed without any session activity"
 }
 
 async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; lastDataAt(): number; dataVersion(): number; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string }> {
