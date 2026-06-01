@@ -89,4 +89,39 @@ describe("RunnerHost", () => {
     expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
     expect(stopSignalR).toHaveBeenCalled()
   })
+
+  it("RunnerConnection_WhenSignalRFails_DoesNotPollAndRetriesCleanly", async () => {
+    vi.clearAllMocks()
+    connect.mockResolvedValue(undefined)
+    heartbeat.mockResolvedValue(undefined)
+    disconnect.mockResolvedValue(undefined)
+    poll.mockResolvedValue(null)
+    let resolveSecondSignalR!: () => void
+    const secondSignalR = new Promise<void>((resolve) => {
+      resolveSecondSignalR = resolve
+    })
+    startSignalR
+      .mockRejectedValueOnce(new Error("signalr unavailable"))
+      .mockReturnValueOnce(secondSignalR)
+    stopSignalR.mockResolvedValue(undefined)
+    const controller = new AbortController()
+    const host = new RunnerHost({
+      serverUrl: "http://localhost:3456",
+      runnerId: "runner-test",
+      runnerRoot: "/tmp/mohist-runner-test",
+      maxConcurrentWorkflows: 1,
+      pollIntervalMs: 1,
+      heartbeatIntervalMs: 60_000,
+    })
+
+    const run = host.run(controller.signal)
+    await vi.waitFor(() => expect(startSignalR).toHaveBeenCalledTimes(2))
+    expect(poll).not.toHaveBeenCalled()
+    expect(disconnect).toHaveBeenCalledWith(expect.any(AbortSignal))
+
+    resolveSecondSignalR()
+    await vi.waitFor(() => expect(poll).toHaveBeenCalled())
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
 })
