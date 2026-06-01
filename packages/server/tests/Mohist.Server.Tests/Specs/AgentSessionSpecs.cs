@@ -69,6 +69,34 @@ public class AgentSessionSpecs
     }
 
     [Fact]
+    public async Task RunnerExecutesAgentWork_ContentTextPayload_AppearsInTranscriptAndActivityPreview()
+    {
+        var (project, issue, _, session) = await CreateStartedAgentSessionAsync("content-text", title: "Content text payload");
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new { type = "agent_message_chunk", payload = new { content = new { type = "text", text = "nested content message\n" }, messageId = "msg-1" } }
+            }
+        });
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+            }
+        });
+
+        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
+        Assert.Contains("nested content message", JsonSerializer.Serialize(detail.Turns));
+
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
+        Assert.Equal("nested content message\n", card.LastActivity?.Text);
+    }
+
+    [Fact]
     public async Task IssueWorkflowSessionApi_UsesCurrentWorkflowRunAndSessionName()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("current-workflow", sessionName: "plan");

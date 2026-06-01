@@ -309,6 +309,11 @@ public class WorkflowAgentSessionQueryService
                 if (payload.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
                     return value.GetString() ?? string.Empty;
             }
+            if (payload.TryGetProperty("content", out var content)
+                && content.ValueKind == JsonValueKind.Object
+                && content.TryGetProperty("text", out var contentText)
+                && contentText.ValueKind == JsonValueKind.String)
+                return contentText.GetString() ?? string.Empty;
         }
         catch { }
         return string.Empty;
@@ -321,6 +326,11 @@ public class WorkflowAgentSessionQueryService
             var payload = JsonSerializer.Deserialize<JsonElement>(json);
             if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("text", out var text))
                 return text.GetString() ?? string.Empty;
+            if (payload.ValueKind == JsonValueKind.Object
+                && payload.TryGetProperty("content", out var content)
+                && content.ValueKind == JsonValueKind.Object
+                && content.TryGetProperty("text", out var contentText))
+                return contentText.GetString() ?? string.Empty;
             if (payload.ValueKind == JsonValueKind.String)
                 return payload.GetString() ?? string.Empty;
         }
