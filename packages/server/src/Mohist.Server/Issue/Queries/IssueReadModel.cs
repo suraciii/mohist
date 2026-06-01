@@ -1,6 +1,7 @@
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
+using Mohist.Server.Workflow.Views;
 using System.Text.Json.Serialization;
 
 namespace Mohist.Server.Issue.Queries;
@@ -31,6 +32,8 @@ public class IssueReadModel
     public string? WorkflowRunId { get; set; }
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }
+    [JsonPropertyName("workflowStageProgress")]
+    public WorkflowStageProgress? WorkflowStageProgress { get; set; }
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public string? WorkflowProfileMode { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];

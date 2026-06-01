@@ -2,16 +2,16 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/components/button'
 import { Textarea } from '@/shared/ui/components/textarea'
-import { approveIssue, rejectIssue, resumeIssue, startIssue } from '../../../entities/issue'
+import { approveIssue, rejectIssue, resumeIssue, startIssue, getFileContent } from '../../../entities/issue'
 import { onAgentEvent } from '../../../entities/agent'
 import { IssueStatus, WorkflowStage, IssueHealth } from '../../../entities/issue'
 import type { Issue, StageTaskState, StageCheckState, StageStateRead, CheckRepairState, CheckRepairStatus, WorkItemOrigin } from '../../../entities/issue'
 import type { AgentDetailEventMap } from '../../../entities/agent'
 import { useWorkflowTimeline } from '../../../entities/issue'
+import { useProject } from '../../../entities/project'
 import { ReviewSummary, parseReviewOutput } from './ReviewSummary'
 import type { ReviewOutput } from './ReviewSummary'
 import { FullReportModal } from './ReviewReportModal'
-import { useProject } from '../../../entities/project'
 
 function classifyResult(result?: string): 'PASS' | 'FAIL' | 'UNKNOWN' {
   if (!result) return 'UNKNOWN'
@@ -94,6 +94,8 @@ function workflowTimelineToStageStateMap(timeline: ReturnType<typeof useWorkflow
         updatedAt: task.completedAt ?? task.startedAt ?? '',
         reason: task.message ?? undefined,
         origin: task.uses ? { source: 'runtime', uses: task.uses } : null,
+        requiredFiles: task.requiredFiles,
+        classification: task.classification,
       })),
       checks: stage.checks.map((check) => ({
         checkName: check.name,
@@ -293,12 +295,61 @@ function StageBar({
   )
 }
 
+function RequiredFileEntry({ rf, issueNumber }: { rf: { path: string; source: string; canFetchContent: boolean; markers?: string[] }; issueNumber: number }) {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [content, setContent] = useState<string | null>(null)
+  const [error, setError] = useState(false)
+  const { projectId } = useProject()
+
+  const handleToggle = useCallback(() => {
+    if (open) {
+      setOpen(false)
+    } else {
+      setOpen(true)
+      if (!content && !loading && rf.canFetchContent) {
+        setLoading(true)
+        setError(false)
+        getFileContent(issueNumber, rf.path, projectId)
+          .then((resp) => setContent(resp.head || resp.base))
+          .catch(() => setError(true))
+          .finally(() => setLoading(false))
+      }
+    }
+  }, [open, content, loading, rf.canFetchContent, rf.path, issueNumber, projectId])
+
+  return (
+    <div className="text-xs">
+      <button
+        onClick={handleToggle}
+        disabled={!rf.canFetchContent}
+        className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
+      >
+        <svg className="h-3 w-3 flex-shrink-0 text-blue-500" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
+        </svg>
+        <span className="font-mono truncate">{rf.path}</span>
+        {rf.source === 'task-expect' && <span className="text-[10px] text-blue-400 flex-shrink-0">expect</span>}
+      </button>
+      {open && (
+        <div className="mt-1 rounded bg-gray-100 p-2 max-h-60 overflow-auto">
+          {loading && <span className="text-gray-400">loading...</span>}
+          {error && <span className="text-red-400">File content unavailable</span>}
+          {content && <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-600">{content}</pre>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TaskItem({
   task,
+  issueNumber,
   readOnly,
   liveElapsed,
 }: {
   task: StageTaskState
+  issueNumber: number
   readOnly: boolean
   liveElapsed?: number | null
 }) {
@@ -308,7 +359,8 @@ function TaskItem({
   const isFailed = task.status === 'failed'
   const taskOutput = task.output
   const hasOutput = taskOutput != null
-  const canExpand = task.artifacts.length > 0 || isFailed || hasOutput
+  const hasRequiredFiles = (task.requiredFiles?.length ?? 0) > 0
+  const canExpand = task.artifacts.length > 0 || hasRequiredFiles || isFailed || hasOutput
 
   let icon: React.ReactNode
   if (task.status === 'completed') {
@@ -376,13 +428,8 @@ function TaskItem({
                 {task.reason}
               </div>
             )}
-            {task.artifacts.map((a) => (
-              <div key={a} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <svg className="h-3 w-3 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
-                </svg>
-                <span className="font-mono truncate">{a}</span>
-              </div>
+            {task.requiredFiles?.map((rf) => (
+              <RequiredFileEntry key={rf.path} rf={rf} issueNumber={issueNumber} />
             ))}
             {hasOutput && (
               <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words font-mono bg-gray-100 rounded p-2 max-h-40 overflow-auto">
@@ -785,6 +832,7 @@ function StepList({
                 <TaskItem
                   key={task.taskId}
                   task={task}
+                  issueNumber={issue.number}
                   readOnly={readOnly}
                   liveElapsed={liveElapsedByTask.get(task.taskId)}
                 />

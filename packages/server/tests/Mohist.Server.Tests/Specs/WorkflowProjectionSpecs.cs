@@ -1,0 +1,485 @@
+using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Views;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs;
+
+public class WorkflowProjectionSpecs
+{
+    [Fact]
+    public void WorkflowStatusReader_ProjectsTaskRequiredFiles()
+    {
+        var run = CreateRunWithTaskRequiredFiles();
+
+        var view = WorkflowStatusReader.Read(run, lease: null);
+
+        var task = view!.Stages[0].Tasks[0];
+        Assert.NotNull(task.RequiredFiles);
+        Assert.Single(task.RequiredFiles);
+        Assert.Equal("proposal.md", task.RequiredFiles[0].Path);
+        Assert.Equal("task-expect", task.RequiredFiles[0].Source);
+        Assert.True(task.RequiredFiles[0].CanFetchContent);
+    }
+
+    [Fact]
+    public void WorkflowStatusReader_ProjectsTaskClassification()
+    {
+        var run = CreateRunWithTaskRequiredFiles();
+
+        var view = WorkflowStatusReader.Read(run, lease: null);
+
+        var userTask = view!.Stages[0].Tasks[0];
+        var orchTask = view.Stages[0].Tasks[1];
+        Assert.Equal(TaskClassification.UserFacing, userTask.Classification);
+        Assert.Equal(TaskClassification.Orchestration, orchTask.Classification);
+    }
+
+    [Fact]
+    public void WorkflowStatusReader_ProjectsMultipleRequiredFiles()
+    {
+        var run = new WorkflowRun
+        {
+            Id = "wf-multiple",
+            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
+            Status = WorkflowRunStatus.Running,
+            CurrentStageId = "plan",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "plan",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "proposal.1",
+                            DefinitionId = "proposal",
+                            Attempt = 1,
+                            Title = "Generate proposal",
+                            Status = TaskRunStatus.Completed,
+                            Uses = "mohist/acp-agent",
+                            WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+                                {"expect": {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}}
+                                """),
+                            RequiredFiles = TaskRunExtensions.ExtractRequiredFiles(
+                                JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+                                    {"expect": {"files": [{"path": "proposal.md"}, {"path": "design.md"}, {"path": "tasks.json"}]}}
+                                    """)),
+                            Classification = TaskClassification.UserFacing
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var view = WorkflowStatusReader.Read(run, lease: null);
+
+        var task = view!.Stages[0].Tasks[0];
+        Assert.NotNull(task.RequiredFiles);
+        Assert.Equal(3, task.RequiredFiles.Count);
+        Assert.Equal("proposal.md", task.RequiredFiles[0].Path);
+        Assert.Equal("design.md", task.RequiredFiles[1].Path);
+        Assert.Equal("tasks.json", task.RequiredFiles[2].Path);
+    }
+
+    [Fact]
+    public void WorkflowStatusReader_WithoutRequiredFiles_ReturnsNullRequiredFiles()
+    {
+        var run = new WorkflowRun
+        {
+            Id = "wf-nofiles",
+            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
+            Status = WorkflowRunStatus.Running,
+            CurrentStageId = "build",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "build.1",
+                            DefinitionId = "build",
+                            Attempt = 1,
+                            Title = "Build",
+                            Status = TaskRunStatus.Running,
+                            Uses = "core/script",
+                            RequiredFiles = null,
+                            Classification = TaskClassification.Orchestration
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var view = WorkflowStatusReader.Read(run, lease: null);
+
+        var task = view!.Stages[0].Tasks[0];
+        Assert.Null(task.RequiredFiles);
+        Assert.Equal(TaskClassification.Orchestration, task.Classification);
+    }
+
+    [Fact]
+    public void WorkflowStatusMapper_MapTasks_PreservesRequiredFiles()
+    {
+        var stage = new StageRun
+        {
+            Id = "plan",
+            Attempt = 1,
+            RequiresApproval = false,
+            Status = StageRunStatus.Running,
+            Tasks =
+            [
+                new TaskRun
+                {
+                    Id = "proposal.1",
+                    DefinitionId = "proposal",
+                    Attempt = 1,
+                    Title = "Generate proposal",
+                    Status = TaskRunStatus.Completed,
+                    Uses = "mohist/acp-agent",
+                    RequiredFiles =
+                    [
+                        new WorkflowTaskRequiredFile("proposal.md", "task-expect", true, null)
+                    ],
+                    Classification = TaskClassification.UserFacing
+                }
+            ]
+        };
+
+        var result = WorkflowStatusMapper.MapTasks(stage, profile: null);
+
+        var task = Assert.Single(result);
+        Assert.NotNull(task.RequiredFiles);
+        Assert.Single(task.RequiredFiles);
+        Assert.Equal("proposal.md", task.RequiredFiles[0].Path);
+    }
+
+    [Fact]
+    public void WorkflowStatusMapper_MapTasks_FromDefinitionWithoutRuntimeTasks()
+    {
+        var stage = new StageRun
+        {
+            Id = "plan",
+            Attempt = 1,
+            RequiresApproval = false,
+            Status = StageRunStatus.Running,
+            Tasks = []
+        };
+
+        var result = WorkflowStatusMapper.MapTasks(stage, profile: null);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void TaskRunExtensions_ExtractRequiredFiles_PreservesMarkers()
+    {
+        var withInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+            {"expect": {"files": [{"path": "design.md", "markers": ["<promise>PASS</promise>", "<promise>REVIEW</promise>"]}]}}
+            """);
+
+        var result = TaskRunExtensions.ExtractRequiredFiles(withInput);
+
+        Assert.Single(result);
+        var markers = result[0].Markers;
+        Assert.NotNull(markers);
+        Assert.Equal(2, markers.Length);
+        Assert.Contains("<promise>PASS</promise>", markers);
+        Assert.Contains("<promise>REVIEW</promise>", markers);
+    }
+
+    [Fact]
+    public void ComputeStageProgress_ExcludesOrchestrationTasks()
+    {
+        var status = CreateStatusViewWithMixedTasks();
+
+        var progress = ComputeStageProgress(status);
+
+        Assert.NotNull(progress);
+        Assert.Equal(1, progress.Total);
+        Assert.Equal(0, progress.Completed);
+        Assert.Equal(1, progress.Running);
+        Assert.Equal(0, progress.Failed);
+    }
+
+    [Fact]
+    public void ComputeStageProgress_DoesNotCountFailedAsCompleted()
+    {
+        var status = new WorkflowStatusView(
+            WorkflowRunId: "wf-fail",
+            Status: "Running",
+            CurrentStage: "build",
+            Stages:
+            [
+                new StageStatusView(
+                    Stage: "build",
+                    Status: "Running",
+                    Order: 0,
+                    Tasks:
+                    [
+                        new TaskStatusView("t1", "Failed task", "mohist/acp-agent", "Failed", null, TaskClassification.UserFacing),
+                        new TaskStatusView("t2", "Pending task", "mohist/acp-agent", "Pending", null, TaskClassification.UserFacing)
+                    ],
+                    Checks: [],
+                    ApprovalStatus: null,
+                    Failure: null)
+            ],
+            PendingWork: null,
+            Failure: null,
+            AvailableActions: []);
+
+        var progress = ComputeStageProgress(status);
+
+        Assert.NotNull(progress);
+        Assert.Equal(2, progress.Total);
+        Assert.Equal(0, progress.Completed);
+        Assert.Equal(1, progress.Failed);
+    }
+
+    [Fact]
+    public void ComputeStageProgress_ReturnsNullForTerminalStatus()
+    {
+        var status = new WorkflowStatusView(
+            WorkflowRunId: "wf-done",
+            Status: "Completed",
+            CurrentStage: "done",
+            Stages: [],
+            PendingWork: null,
+            Failure: null,
+            AvailableActions: []);
+
+        var progress = ComputeStageProgress(status);
+
+        Assert.Null(progress);
+    }
+
+    [Fact]
+    public void ComputeStageProgress_ReturnsNullWhenNoUserFacingTasks()
+    {
+        var status = new WorkflowStatusView(
+            WorkflowRunId: "wf-orch",
+            Status: "Running",
+            CurrentStage: "build",
+            Stages:
+            [
+                new StageStatusView(
+                    Stage: "build",
+                    Status: "Running",
+                    Order: 0,
+                    Tasks:
+                    [
+                        new TaskStatusView("orch1", "Internal", "core/script", "Running", null, TaskClassification.Orchestration)
+                    ],
+                    Checks: [],
+                    ApprovalStatus: null,
+                    Failure: null)
+            ],
+            PendingWork: null,
+            Failure: null,
+            AvailableActions: []);
+
+        var progress = ComputeStageProgress(status);
+
+        Assert.Null(progress);
+    }
+
+    [Fact]
+    public void ComputeStageProgress_ReturnsNullForApprovalOnlyWaitingStage()
+    {
+        var status = new WorkflowStatusView(
+            WorkflowRunId: "wf-approval",
+            Status: "Running",
+            CurrentStage: "check",
+            Stages:
+            [
+                new StageStatusView(
+                    Stage: "check",
+                    Status: "AwaitingApproval",
+                    Order: 0,
+                    Tasks:
+                    [
+                        new TaskStatusView("review.1", "Prepare review", "mohist/acp-agent", "Completed", null, TaskClassification.UserFacing)
+                    ],
+                    Checks:
+                    [
+                        new CheckStatusView("merge-ready", "Merge ready", "mohist/merge-ready", "Completed", null)
+                    ],
+                    ApprovalStatus: new ApprovalStatusView(null, "2024-01-01T01:00:00Z", null),
+                    Failure: null)
+            ],
+            PendingWork: null,
+            Failure: null,
+            AvailableActions: []);
+
+        var progress = ComputeStageProgress(status);
+
+        Assert.Null(progress);
+    }
+
+    [Fact]
+    public void WorkflowTaskRequiredFile_NoFileContentStored()
+    {
+        var requiredFile = new WorkflowTaskRequiredFile("proposal.md", "task-expect", true, null);
+
+        var json = JsonSerializer.Serialize(requiredFile);
+
+        Assert.DoesNotContain("content", json);
+        Assert.DoesNotContain("proposal", json.ToLowerInvariant().Replace("proposal.md", ""));
+    }
+
+    [Fact]
+    public void FakeFileContent_ReturnsNullForMissingFile()
+    {
+        var fake = new FakeFileContentService();
+        fake.FileContents[("main", "exists.md")] = "file content";
+
+        var result1 = fake.GetFileContent("main", "exists.md");
+        var result2 = fake.GetFileContent("main", "missing.md");
+
+        Assert.Equal("file content", result1);
+        Assert.Null(result2);
+    }
+
+    private static WorkflowRun CreateRunWithTaskRequiredFiles()
+    {
+        return new WorkflowRun
+        {
+            Id = "wf-1",
+            Metadata = new WorkflowRunMetadata("test", DateTimeOffset.UtcNow),
+            Status = WorkflowRunStatus.Running,
+            CurrentStageId = "plan",
+            Stages =
+            [
+                new StageRun
+                {
+                    Id = "plan",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = StageRunStatus.Running,
+                    Tasks =
+                    [
+                        new TaskRun
+                        {
+                            Id = "proposal.1",
+                            DefinitionId = "proposal",
+                            Attempt = 1,
+                            Title = "Generate proposal",
+                            Status = TaskRunStatus.Completed,
+                            Uses = "mohist/acp-agent",
+                            WithInput = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+                                {"expect": {"files": [{"path": "proposal.md"}]}}
+                                """),
+                            RequiredFiles = TaskRunExtensions.ExtractRequiredFiles(
+                                JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>("""
+                                    {"expect": {"files": [{"path": "proposal.md"}]}}
+                                    """)),
+                            Classification = TaskClassification.UserFacing
+                        },
+                        new TaskRun
+                        {
+                            Id = "sync.1",
+                            DefinitionId = "sync",
+                            Attempt = 1,
+                            Title = "Sync spec",
+                            Status = TaskRunStatus.Running,
+                            Uses = "mohist/openspec-sync",
+                            RequiredFiles = null,
+                            Classification = TaskClassification.Orchestration
+                        }
+                    ]
+                }
+            ]
+        };
+    }
+
+    private static WorkflowStatusView CreateStatusViewWithMixedTasks()
+    {
+        return new WorkflowStatusView(
+            WorkflowRunId: "wf-mixed",
+            Status: "Running",
+            CurrentStage: "build",
+            Stages:
+            [
+                new StageStatusView(
+                    Stage: "build",
+                    Status: "Running",
+                    Order: 0,
+                    Tasks:
+                    [
+                        new TaskStatusView("user.1", "User task", "mohist/acp-agent", "Running", null, TaskClassification.UserFacing),
+                        new TaskStatusView("orch.1", "Internal orch", "core/script", "Running", null, TaskClassification.Orchestration)
+                    ],
+                    Checks: [],
+                    ApprovalStatus: null,
+                    Failure: null)
+            ],
+            PendingWork: null,
+            Failure: null,
+            AvailableActions: []);
+    }
+
+    private static WorkflowStageProgress? ComputeStageProgress(WorkflowStatusView status)
+    {
+        if (IsNonMeaningfulProgressState(status))
+            return null;
+
+        var currentStage = status.Stages.FirstOrDefault(s => s.Stage == status.CurrentStage);
+        if (currentStage is null) return null;
+
+        var userTasks = currentStage.Tasks.Where(t => t.Classification == TaskClassification.UserFacing).ToList();
+        if (userTasks.Count == 0) return null;
+
+        var total = userTasks.Count;
+        var completed = userTasks.Count(t => t.Status == "Completed");
+        var running = userTasks.Count(t => t.Status == "Running");
+        var failed = userTasks.Count(t => t.Status == "Failed");
+
+        if (total == 0) return null;
+
+        var currentTaskTitle = userTasks.FirstOrDefault(t => t.Status is "Running" or "Pending")?.Title;
+
+        return new WorkflowStageProgress(
+            status.CurrentStage!,
+            total,
+            completed,
+            running,
+            failed,
+            currentTaskTitle);
+    }
+
+    private static bool IsNonMeaningfulProgressState(WorkflowStatusView status)
+    {
+        if (status.Status is "Completed" or "Failed" or "AwaitingApproval" or "Paused")
+            return true;
+
+        var currentStage = status.Stages.FirstOrDefault(s => s.Stage == status.CurrentStage);
+        if (currentStage is null)
+            return true;
+
+        if (currentStage.Status == "AwaitingApproval")
+            return true;
+
+        return currentStage.ApprovalStatus is { Result: null }
+            || (currentStage.Tasks.All(t => t.Status == "Completed") && currentStage.Checks.All(c => c.Status == "Completed"));
+    }
+}
+
+public class FakeFileContentService
+{
+    public Dictionary<(string Branch, string FilePath), string?> FileContents { get; } = [];
+
+    public string? GetFileContent(string branch, string filePath)
+        => FileContents.GetValueOrDefault((branch, filePath));
+}

@@ -123,7 +123,7 @@ public class WorkflowProjectionService
             var end = taskSessions.Select(s => s.CompletedAt).Where(d => d is not null).Cast<DateTime?>().Max()?.ToString("o")
                 ?? (IsTerminal(task.Status) ? taskEvents.LastOrDefault()?.CreatedAt : null);
             var attempts = Math.Max(1, taskSessions.Count == 0 ? taskEvents.Count(e => e.Type == "workflow_task_started") : taskSessions.Count);
-            return new WorkflowTaskDto(task.Id, task.Title, task.Uses, NormalizeStatus(task.Status), start, end, DurationMs(start, end), attempts, taskEvents.LastOrDefault(e => e.Message is not null)?.Message);
+            return new WorkflowTaskDto(task.Id, task.Title, task.Uses, NormalizeStatus(task.Status), start, end, DurationMs(start, end), attempts, taskEvents.LastOrDefault(e => e.Message is not null)?.Message, task.RequiredFiles, task.Classification);
         }).ToList();
 
         var checks = stage.Checks.Select(check =>
@@ -228,7 +228,7 @@ public class WorkflowProjectionService
 
 public sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, PendingWorkView? PendingWork, IReadOnlyList<WorkflowStageDto> Stages, IReadOnlyList<AvailableActionView> AvailableActions);
 public sealed record WorkflowStageDto(string Stage, string Status, int Order, string? StartedAt, string? CompletedAt, long? DurationMs, IReadOnlyList<WorkflowTaskDto> Tasks, IReadOnlyList<WorkflowCheckDto> Checks, ApprovalDto? ApprovalStatus);
-public sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status, string? StartedAt, string? CompletedAt, long? DurationMs, int Attempts, string? Message);
+public sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status, string? StartedAt, string? CompletedAt, long? DurationMs, int Attempts, string? Message, IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles, TaskClassification Classification);
 public sealed record WorkflowCheckDto(string Name, string Title, string? Uses, string Status, string? Message, string? StartedAt, string? CompletedAt, long? DurationMs);
 public sealed record ApprovalDto(string? Result, string RequestedAt, string? RespondedAt);
 

@@ -44,12 +44,32 @@ public sealed record AvailableActionView(
     string Label,
     string? Target);
 
+public enum TaskClassification { UserFacing, Orchestration }
+
+[GenerateSerializer]
+public sealed record WorkflowTaskRequiredFile(
+    string Path,
+    string Source,
+    bool CanFetchContent,
+    string[]? Markers = null);
+
+[GenerateSerializer]
+public sealed record WorkflowStageProgress(
+    string Stage,
+    int Total,
+    int Completed,
+    int Running,
+    int Failed,
+    string? CurrentTaskTitle = null);
+
 [GenerateSerializer]
 public sealed record TaskStatusView(
     string Id,
     string Title,
     string? Uses,
-    string Status);
+    string Status,
+    IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles = null,
+    TaskClassification Classification = TaskClassification.UserFacing);
 
 [GenerateSerializer]
 public sealed record CheckStatusView(

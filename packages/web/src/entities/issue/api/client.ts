@@ -72,7 +72,7 @@ export function getCommitDiff(number: number, hash: string, projectId?: string |
 }
 
 export function getFileContent(number: number, filePath: string, projectId?: string | null) {
-  return request<{ base: string; head: string }>(`/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`, withProject(undefined, projectId))
+  return request<{ base: string; head: string }>(`/issues/${number}/workflow/file-content?path=${encodeURIComponent(filePath)}`, withProject(undefined, projectId))
 }
 
 export function addComment(issueNumber: number, body: string, projectId?: string | null) {
