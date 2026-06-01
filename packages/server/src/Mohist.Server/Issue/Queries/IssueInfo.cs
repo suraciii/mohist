@@ -30,6 +30,7 @@ public class IssueInfo
     public string? WorkflowRunId { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
+    public string? WorkflowProfileMode { get; set; }
     public IssueAttention? Attention { get; set; }
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }

@@ -43,6 +43,25 @@ public class IssueProfileStore : IStateStore<IssueWorkflowProfile>
 
     public Task<IReadOnlyList<IssueWorkflowProfile>> ListAsync() => throw new NotSupportedException();
 
+    public async Task<Dictionary<string, IssueWorkflowProfile>> LoadBatchAsync(IEnumerable<string> keys)
+    {
+        var keyList = keys.ToList();
+        if (keyList.Count == 0) return new();
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.IssueProfiles
+            .AsNoTracking()
+            .Where(r => keyList.Contains(r.Key))
+            .ToListAsync();
+        var result = new Dictionary<string, IssueWorkflowProfile>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var profile = Deserialize(row.StateJson);
+            if (profile is not null)
+                result[row.Key] = profile;
+        }
+        return result;
+    }
+
     public static IssueWorkflowProfile? Deserialize(string json) =>
         IssueWorkflowProfileSnapshot.Deserialize(json);
 

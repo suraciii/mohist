@@ -101,6 +101,27 @@ public static class IssueRoutes
             }
         });
 
+        issues.MapPut("/{number:int}/workflow-profile", async (int number, string projectId, UpdateWorkflowProfileApiRequest req, IGrainFactory grains) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
+            try
+            {
+                await grain.UpdateWorkflowProfileAsync(new WorkflowProfileUpdateRequest(req.ProfileId, req.DefinitionYaml));
+                return ApiResults.Ok(new { updated = true });
+            }
+            catch (InvalidOperationException)
+            {
+                return ApiResults.NotFound($"Issue #{number} not found");
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
+        });
+
         issues.MapPost("/{number:int}/prerequisites", async (int number, string projectId, AddPrerequisiteRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var pid = projectId;
@@ -685,3 +706,7 @@ public sealed record RuntimeTaskRequest(
 public record AddPrerequisiteRequest(int PrerequisiteNumber);
 
 public record AddCommentRequest(string Body);
+
+public record UpdateWorkflowProfileApiRequest(
+    string? ProfileId = null,
+    string? DefinitionYaml = null);
