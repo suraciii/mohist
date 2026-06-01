@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { KanbanBoard } from './KanbanBoard'
 import type { AgentStatus } from '../../../entities/agent'
 import { IssueStatus, IssueHealth, WorkflowStage, type Issue, type ApprovalState } from '../../../entities/issue'
+import { useRunnerSummary } from '../../../entities/runner/api/queries'
 import {
   parseBoardQuery,
   serializeBoardQuery,
@@ -27,6 +28,10 @@ vi.mock('../../../entities/issue', async (importOriginal) => {
     useLabels: vi.fn().mockReturnValue({ data: LABELS_MOCK, isLoading: false }),
   }
 })
+
+vi.mock('../../../entities/runner/api/queries', () => ({
+  useRunnerSummary: vi.fn().mockReturnValue({ hasConnectedCapacity: true, connectedIdleCount: 1, connectedBusyCount: 0, rows: [] }),
+}))
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -340,6 +345,8 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
   })
 
   it('shows runner unavailable banner when no runner is connected', () => {
+    vi.mocked(useRunnerSummary).mockReturnValueOnce({ hasConnectedCapacity: false, connectedIdleCount: 0, connectedBusyCount: 0, rows: [] })
+
     const queryClient = new QueryClient()
     const agentStatus: AgentStatus = {
       ...mockAgentStatus,
@@ -358,6 +365,92 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     )
 
     expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
+  })
+
+  it('does not show runner unavailable banner when connected idle runner exists', () => {
+    vi.mocked(useRunnerSummary).mockReturnValueOnce({
+      hasConnectedCapacity: true,
+      connectedIdleCount: 1,
+      connectedBusyCount: 0,
+      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'idle', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected' }],
+    })
+
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <KanbanBoard issues={makeIssues(1)} agentStatus={mockAgentStatus} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByText(/No runner is connected/i)).not.toBeInTheDocument()
+  })
+
+  it('does not show runner unavailable banner when connected busy runner exists', () => {
+    vi.mocked(useRunnerSummary).mockReturnValueOnce({
+      hasConnectedCapacity: true,
+      connectedIdleCount: 0,
+      connectedBusyCount: 1,
+      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'busy', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: 'connected', activeWork: { workId: 'w1', workflowRunId: 'wf1' } }],
+    })
+
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <KanbanBoard issues={makeIssues(1)} agentStatus={mockAgentStatus} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.queryByText(/No runner is connected/i)).not.toBeInTheDocument()
+  })
+
+  it('shows runner unavailable banner when only stale or offline runners exist', () => {
+    vi.mocked(useRunnerSummary).mockReturnValueOnce({
+      hasConnectedCapacity: false,
+      connectedIdleCount: 0,
+      connectedBusyCount: 0,
+      rows: [{ id: 'runner-1', kind: 'external', hostname: 'host1', scope: { type: 'global' }, status: 'stale', capabilities: [], coderModels: [], coderModelCount: 0, connectionState: null }],
+    })
+
+    const queryClient = new QueryClient()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <KanbanBoard issues={makeIssues(1)} agentStatus={mockAgentStatus} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByText(/No runner is connected/i)).toBeInTheDocument()
+  })
+
+  it('shows link to runner status in the banner', () => {
+    vi.mocked(useRunnerSummary).mockReturnValueOnce({ hasConnectedCapacity: false, connectedIdleCount: 0, connectedBusyCount: 0, rows: [] })
+
+    const queryClient = new QueryClient()
+    const agentStatus: AgentStatus = {
+      ...mockAgentStatus,
+      runnerAvailable: false,
+      embeddedRunnerEnabled: false,
+      runnerMessage: 'No runner is connected.',
+      runners: [],
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <KanbanBoard issues={makeIssues(1)} agentStatus={agentStatus} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByText('View runner status')).toBeInTheDocument()
   })
 
   it('displays filtered issue count after priority filter applied', () => {

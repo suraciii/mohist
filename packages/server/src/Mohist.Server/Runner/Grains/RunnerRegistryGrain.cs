@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure.Orleans;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -15,7 +16,8 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
     public Task RegisterAsync(RunnerInfo info)
     {
         var isNew = !_runners.ContainsKey(info.RunnerId);
-        _runners[info.RunnerId] = info;
+        var enriched = info with { RegisteredAt = info.RegisteredAt ?? DateTimeOffset.UtcNow };
+        _runners[info.RunnerId] = enriched;
         if (isNew)
         {
             _log.LogInformation(
@@ -25,7 +27,6 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
                 info.CoderModels?.Length ?? 0,
                 info.MaxWorkflowSlots);
         }
-
         return Task.CompletedTask;
     }
 
@@ -54,5 +55,41 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         return Task.FromResult<IReadOnlyList<string>>(models);
+    }
+
+    public Task<IReadOnlyList<RunnerInfo>> ListAllAsync()
+    {
+        return Task.FromResult<IReadOnlyList<RunnerInfo>>(_runners.Values.ToList());
+    }
+
+    public async Task<IReadOnlyList<RunnerInfo>> ListEligibleRunnersAsync(string projectId)
+    {
+        var localRunners = _runners.Values.ToList();
+        var currentKey = this.GetPrimaryKeyString();
+
+        List<RunnerInfo> otherRunners = new();
+        if (currentKey == RunnerRegistryKeys.Global)
+        {
+            var projectRegistry = GrainFactory.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId));
+            otherRunners = (await projectRegistry.ListAllAsync()).ToList();
+        }
+        else
+        {
+            var globalRegistry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+            otherRunners = (await globalRegistry.ListAllAsync()).ToList();
+        }
+
+        var allRunners = localRunners
+            .Concat(otherRunners)
+            .GroupBy(r => r.RunnerId, StringComparer.Ordinal)
+            .Select(g => g.First())
+            .ToList();
+
+        var eligible = allRunners
+            .Where(r => string.IsNullOrWhiteSpace(r.ProjectId)
+                || string.Equals(r.ProjectId, projectId, StringComparison.Ordinal))
+            .ToList();
+
+        return eligible;
     }
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { StatusBar } from '../../../shared/ui/StatusBar'
 import { ActiveSessionCard, WaitingCard, RecentCard, useActivityCards } from '../../../widgets/coder-session'
+import { RunnerSummaryBadge, RunnerListCard } from '../../../widgets/runner-status'
 
 function EmptySection({ message }: { message: string }) {
   return (
@@ -37,10 +38,16 @@ export function ActivityPage() {
         failed={statusCounts.failed}
         activeSlots={slotUsage.active}
         maxSlots={slotUsage.max}
-      />
+      >
+        <RunnerSummaryBadge />
+      </StatusBar>
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 py-4 md:px-6 space-y-6">
+          <section>
+            <RunnerListCard />
+          </section>
+
           <section>
             <SectionHeader title="Active" count={activeCards.length} />
             {activeCards.length === 0 ? (

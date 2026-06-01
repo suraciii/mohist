@@ -21,6 +21,7 @@ using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Recovery;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Runner.Projection;
 using Mohist.Server.Runner.SignalR;
 using Mohist.Server.SystemInfo;
 
@@ -80,6 +81,7 @@ public static class MohistServiceRegistration
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<RunnerConnectionTracker>();
+        services.AddScoped<RunnerStatusProjectionService>();
         services.AddSignalR();
 
         return services;

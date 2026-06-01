@@ -5,6 +5,7 @@ interface StatusBarProps {
   failed: number
   activeSlots: number
   maxSlots: number
+  children?: React.ReactNode
 }
 
 const counts = [
@@ -14,7 +15,7 @@ const counts = [
   { key: 'failed', label: 'Failed', color: 'bg-red-100 text-red-700' },
 ] as const
 
-export function StatusBar({ active, waiting, completed, failed, activeSlots, maxSlots }: StatusBarProps) {
+export function StatusBar({ active, waiting, completed, failed, activeSlots, maxSlots, children }: StatusBarProps) {
   const values = { active, waiting, completed, failed }
 
   return (
@@ -25,6 +26,7 @@ export function StatusBar({ active, waiting, completed, failed, activeSlots, max
           <span>{values[key]}</span>
         </span>
       ))}
+      {children}
       <span className="ml-auto text-xs text-gray-500 font-medium">
         {activeSlots}/{maxSlots} slots used
       </span>

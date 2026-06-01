@@ -54,6 +54,7 @@ public static class MohistApiRegistration
         app.MapEpicRoutes();
         app.MapAgentRoutes();
         app.MapRunnerRoutes();
+        app.MapRunnerStatusRoutes();
         app.MapHub<RunnerHub>("/hubs/runner");
         return app;
     }

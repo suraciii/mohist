@@ -14,6 +14,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task AssignWorkflowAsync(string workflowRunId);
     Task RestoreLeasedWorkAsync(string workflowRunId, string workId, string workType, string stage, string? title);
     Task ReleaseAsync(string? workflowRunId = null);
+    Task<RunnerRuntimeState> GetRuntimeStateAsync();
 }
 
 public static class RunnerCapacity
@@ -31,6 +32,8 @@ public record RunnerInfo(
     string Hostname,
     string? ProjectId,
     string[]? CoderModels = null,
+    string Kind = "external",
+    DateTimeOffset? RegisteredAt = null,
     int MaxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots);
 
 [GenerateSerializer]
@@ -55,3 +58,10 @@ public record WorkIssueRef(
 public record WorkDispatchResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);
 
 public enum RunnerStatus { Online, Offline }
+
+[GenerateSerializer]
+public record RunnerRuntimeState(
+    RunnerStatus Status,
+    DateTimeOffset LastHeartbeatAt,
+    IReadOnlyList<string> AssignedWorkflows,
+    IReadOnlyList<WorkDispatch> ActiveWork);

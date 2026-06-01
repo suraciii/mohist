@@ -1,0 +1,183 @@
+{
+  "project": "mohist",
+  "description": "Expose connected runner status through a stable backend read model/API and Web UI summary/list so users can see runner scope, liveness, capacity, models, and active work.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Expose eligible runner registrations",
+      "spec": "specs/runner-status/spec.md#project-runner-status-read-model",
+      "description": "Extend the runner registry query surface so callers can retrieve safe registered runner information, not only runner ids. The query must include global runners and runners scoped to the selected project while excluding runners scoped only to other projects.",
+      "acceptanceCriteria": [
+        "Runner registry exposes runner id, kind, hostname, capabilities, project scope, coder models, and registration or connection time when available.",
+        "Registry filtering returns global runners and selected-project runners for a selected project.",
+        "Registry filtering excludes runners scoped only to a different project.",
+        "Existing registry callers that only need minimal runner availability remain compatible."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "RunnerRegistryGrain query/API capable of returning safe eligible RunnerInfo records",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Keep registry output limited to operational metadata; do not expose environment data or secrets."
+    },
+    {
+      "id": "T-002",
+      "title": "Build runner status projection",
+      "spec": "specs/runner-status/spec.md#runner-status-projection-enriches-registry-data",
+      "description": "Add a server-side runner status projection service and UI-facing DTOs. The projection should combine eligible registry rows with runner runtime state such as heartbeat, SignalR connection state, active work, and capacity or slots where available.",
+      "acceptanceCriteria": [
+        "Projection returns stable RunnerStatusView rows with id, kind, hostname, scope, status, timing fields, heartbeat, connection state, capabilities, coder model names/count, capacity, and active work when available.",
+        "Recent runner with no active work is marked connected idle.",
+        "Runner with assigned or leased workflow work is marked connected busy and includes a concise active work reference.",
+        "Runner without fresh heartbeat or live connection is marked stale or offline according to server liveness policy.",
+        "Projection maps only allowlisted safe fields and does not include environment variables, tokens, secrets, or agent transcript content."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner status projection service and RunnerStatusView DTOs",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The Web UI must consume this projection through HTTP rather than querying runner grains directly."
+    },
+    {
+      "id": "T-003",
+      "title": "Cover runner projection behavior",
+      "spec": "specs/runner-status/spec.md#runner-status-projection-enriches-registry-data",
+      "description": "Add backend tests for the runner status projection using fake or test runner registry/runtime dependencies where appropriate. Tests should lock down shape, scope filtering, empty state, idle, busy, stale/offline, and secret-safe mapping behavior.",
+      "acceptanceCriteria": [
+        "Tests verify global and selected-project runners are included and other-project runners are excluded.",
+        "Tests verify empty projection returns an empty runner list suitable for no-runner UI state.",
+        "Tests verify idle, busy with active work, and stale/offline status derivation.",
+        "Tests verify id, host, scope, heartbeat, capabilities, coder models, capacity, and active work fields are mapped when available.",
+        "Tests verify sensitive data and agent transcript details are not exposed."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Backend runner projection regression tests",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Prefer product-facing projection tests over private method tests."
+    },
+    {
+      "id": "T-004",
+      "title": "Add runner status HTTP API",
+      "spec": "specs/http-api/spec.md#runner-status-api-exposes-ui-facing-runner-rows",
+      "description": "Expose a stable HTTP endpoint, preferably GET /api/runners, for the selected project's runner status rows. The endpoint must use runner terminology and return the server-side projection without requiring clients to query individual runtime actors.",
+      "acceptanceCriteria": [
+        "GET /api/runners returns runner rows from the projection for the current or selected project.",
+        "Response includes an empty runner list and enough metadata for UI no-runner rendering when no eligible runners exist.",
+        "Busy runner responses include active work when available and never include transcript details.",
+        "Endpoint includes global and selected-project runners and excludes other-project runners.",
+        "Response field names consistently use runner, connection, heartbeat, scope, and active work terminology rather than agent terminology."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "GET /api/runners endpoint backed by RunnerStatusView projection",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Use /api/runners unless the existing route structure strongly requires an equivalent runner-named path."
+    },
+    {
+      "id": "T-005",
+      "title": "Preserve agent status compatibility",
+      "spec": "specs/http-api/spec.md#agent-status-compatibility-preserves-existing-consumers",
+      "description": "Keep GET /api/agent/status parseable for existing consumers while runner status is added. It may reuse the projection service for availability, but must preserve existing runner availability and minimal runner list fields or provide a tested compatible migration path.",
+      "acceptanceCriteria": [
+        "GET /api/agent/status still exposes existing runner availability information expected by current clients.",
+        "Minimal runner fields such as runner id and kind remain readable by existing clients.",
+        "Adding GET /api/runners does not remove or rename existing agent status fields without compatibility coverage.",
+        "Backend API tests cover agent status compatibility."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Compatible /api/agent/status behavior with regression coverage",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Do not expand agent terminology into the new runner status surface; keep this endpoint as compatibility only."
+    },
+    {
+      "id": "T-006",
+      "title": "Add Web runner status client",
+      "spec": "specs/web-ui/spec.md#web-ui-provides-detailed-runner-list",
+      "description": "Add Web client types and query logic for the runner status endpoint. The client model should match the stable UI-facing runner rows and provide derived connected-capacity semantics for empty, idle, busy, and stale/offline rows.",
+      "acceptanceCriteria": [
+        "Web code can fetch runner status rows from GET /api/runners.",
+        "Client types cover runner identity, host, scope, status, heartbeat, connection state, capabilities, coder models, capacity, and active work.",
+        "Derived summary semantics treat idle and busy connected runners as available capacity and exclude stale/offline rows from connected capacity.",
+        "No Web code queries individual runner grains or runtime actors directly."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web runner status API client types/hooks and summary derivation helpers",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Keep terms aligned with the domain language: runner, connection, heartbeat, scope, active work."
+    },
+    {
+      "id": "T-007",
+      "title": "Render runner summary and list",
+      "spec": "specs/web-ui/spec.md#web-ui-shows-runner-status-summary",
+      "description": "Add a compact runner status summary in a stable Web UI location and a discoverable detailed runner list in Activity or Settings. The UI must clearly distinguish no runner, connected idle runner, connected busy runner, and stale/offline diagnostic rows.",
+      "acceptanceCriteria": [
+        "No-runner summary shows no connected capacity and includes a clear command hint for starting or installing a runner.",
+        "Idle summary shows connected idle capacity and does not present the project as lacking runner capacity.",
+        "Busy summary shows connected busy capacity and enough text to indicate work is assigned.",
+        "Detailed list renders runner id, kind, hostname, scope, status, heartbeat freshness, connection state, capabilities, coder models or count, capacity when available, and active work when present.",
+        "Empty detailed list includes startup or install command guidance."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web runner status summary and detailed runner list UI",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "Prefer an existing stable surface such as StatusBar plus Activity/Settings rather than introducing runner management actions."
+    },
+    {
+      "id": "T-008",
+      "title": "Link board no-runner banner",
+      "spec": "specs/web-ui/spec.md#board-no-runner-banner-links-to-runner-status",
+      "description": "Preserve the existing board no-runner warning while updating its capacity logic and copy to point users toward the runner status surface. Busy connected runners must suppress the no-runner banner because they represent connected capacity.",
+      "acceptanceCriteria": [
+        "Board warning remains visible when the current project has no connected runner capacity.",
+        "Board warning includes a link or clear pointer to the runner status surface and startup guidance.",
+        "Board warning is hidden when at least one connected idle runner can serve the project.",
+        "Board warning is hidden when at least one connected busy runner can serve the project.",
+        "Stale/offline runners alone do not count as connected capacity for banner suppression."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Board no-runner banner linked to runner status and using connected-capacity semantics",
+      "dependsOn": ["T-006", "T-007"],
+      "passes": false,
+      "notes": "Preserve the banner; do not remove it after adding the runner status surfaces."
+    },
+    {
+      "id": "T-009",
+      "title": "Cover runner status UI states",
+      "spec": "specs/web-ui/spec.md#runner-status-ui-regression-coverage",
+      "description": "Add Web regression tests for the runner status summary, detailed list, and board banner behavior. Tests should render representative empty, idle, busy, and stale/offline responses without relying on live runner processes.",
+      "acceptanceCriteria": [
+        "Tests verify no-runner summary/list empty state and startup command hint are visible.",
+        "Tests verify connected idle summary and detailed runner fields are visible.",
+        "Tests verify connected busy summary and active work reference are visible.",
+        "Tests verify board no-runner banner links or points to runner status when no connected capacity exists.",
+        "Tests verify board banner is not shown for connected idle or connected busy runner capacity."
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Web runner status rendering and board banner regression tests",
+      "dependsOn": ["T-007", "T-008"],
+      "passes": false,
+      "notes": "Use mocked API responses or test fixtures for empty, idle, busy, and stale/offline states."
+    }
+  ]
+}
