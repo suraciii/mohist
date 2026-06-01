@@ -106,6 +106,15 @@ describe("mohist/acp-agent", () => {
     expect(fixture.agent.calls.some((entry) => entry.event === "prompt" && entry.promptCount === 2 && entry.text.includes("still alive"))).toBe(true)
   })
 
+  it("PromptCompletesWithoutSessionActivity_ActionFailsInsteadOfReportingEmptySuccess", async () => {
+    const fixture = createFixture("empty-complete")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message).toContain("without any session activity")
+  })
+
   it("ProbeTimesOutWithoutQualifyingActivity_LivenessMonitored_FailsSession", async () => {
     const fixture = createFixture("quiet-then-done")
 
@@ -390,7 +399,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe"
+type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -439,6 +448,7 @@ class FakeAcpAgent {
         if (self.scenario === "probe-timeout") return await self.runProbeTimeoutPrompt()
         if (self.scenario === "abort-during-probe") return await self.runAbortDuringProbePrompt()
         if (self.scenario === "abort") return await new Promise(() => {})
+        if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
         else await self.emitBasicEvents(params.sessionId)
         return { stopReason: "end_turn" }
