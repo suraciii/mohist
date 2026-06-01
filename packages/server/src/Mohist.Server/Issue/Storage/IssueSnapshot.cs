@@ -43,7 +43,6 @@ public sealed class IssueSnapshot
     public DateTime? ArchivedAt { get; set; }
     public string? WorkflowRunId { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Backlog;
-    public IssueAttention? Attention { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public RepositoryInfo? Repository { get; set; }
 
@@ -61,7 +60,6 @@ public sealed class IssueSnapshot
         ArchivedAt = issue.ArchivedAt,
         WorkflowRunId = issue.WorkflowRunId,
         Status = issue.Status,
-        Attention = issue.Attention,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         Repository = issue.Repository,
     };
@@ -80,7 +78,6 @@ public sealed class IssueSnapshot
         ArchivedAt = ArchivedAt,
         WorkflowRunId = WorkflowRunId,
         Status = Status,
-        Attention = Attention,
         PrerequisiteNumbers = PrerequisiteNumbers,
         Repository = Repository,
     };

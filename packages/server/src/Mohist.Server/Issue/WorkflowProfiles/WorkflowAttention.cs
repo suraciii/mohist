@@ -1,26 +1,26 @@
-namespace Mohist.Server.Issue.Domain;
+namespace Mohist.Server.Issue.WorkflowProfiles;
 
-public sealed class IssueAttention
+public sealed class WorkflowAttention
 {
-    public IssueAttentionReason Reason { get; init; } = IssueAttentionReason.Blocked;
+    public WorkflowAttentionReason Reason { get; init; } = WorkflowAttentionReason.Blocked;
     public string? Message { get; init; }
     public string Source { get; init; } = "system";
     public string? WorkflowRunId { get; init; }
     public DateTime RequestedAt { get; init; } = DateTime.UtcNow;
     public string[] AvailableActions { get; init; } = [];
 
-    public static IssueAttention ReviewRequired(string? workflowRunId, string? message = null) => new()
+    public static WorkflowAttention ReviewRequired(string? workflowRunId, string? message = null) => new()
     {
-        Reason = IssueAttentionReason.ReviewRequired,
+        Reason = WorkflowAttentionReason.ReviewRequired,
         Message = message,
         Source = "workflow",
         WorkflowRunId = workflowRunId,
         AvailableActions = ["approve", "request_changes"],
     };
 
-    public static IssueAttention Blocked(string? workflowRunId, string? message = null) => new()
+    public static WorkflowAttention Blocked(string? workflowRunId, string? message = null) => new()
     {
-        Reason = IssueAttentionReason.Blocked,
+        Reason = WorkflowAttentionReason.Blocked,
         Message = message,
         Source = "workflow",
         WorkflowRunId = workflowRunId,

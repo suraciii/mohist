@@ -54,7 +54,6 @@ public class MohistDefaultWorkflowProfileSpecs
             154,
             "支持中文标题 🚀",
             "todo",
-            null,
             null);
 
         Assert.Equal("openspec/changes/issue-154", state.ChangeDir);

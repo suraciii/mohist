@@ -6,11 +6,29 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public static class MohistDefaultWorkflowProjection
 {
+    public static string IssueStatusName(IssueStatus status) => status switch
+    {
+        IssueStatus.InProgress => "in_progress",
+        _ => status.ToString().ToLowerInvariant(),
+    };
+
+    public static string Health(IssueStatus issueStatus) =>
+        RuntimeStatus(IssueStatusName(issueStatus), null, null);
+
+    public static MohistDefaultWorkflowState ProjectWorkflowState(
+        int issueNumber,
+        string issueTitle,
+        IssueStatus issueStatus,
+        WorkflowStatusView? workflow)
+    {
+        var issueStage = IssueStatusName(issueStatus);
+        return ProjectWorkflowState(issueNumber, issueTitle, issueStage, workflow);
+    }
+
     public static MohistDefaultWorkflowState ProjectWorkflowState(
         int issueNumber,
         string issueTitle,
         string issueStage,
-        IssueAttention? issueAttention,
         WorkflowStatusView? workflow)
     {
         var approval = workflow?.Stages
@@ -23,7 +41,7 @@ public static class MohistDefaultWorkflowProjection
             })
             .Where(a => a is not null)
             .LastOrDefault();
-        var attention = ProjectAttention(issueAttention, workflow);
+        var attention = ProjectAttention(workflow);
         if (workflow is null)
         {
             return new MohistDefaultWorkflowState(
@@ -46,24 +64,24 @@ public static class MohistDefaultWorkflowProjection
             workflow.Status == "Completed");
     }
 
-    private static IssueAttention? ProjectAttention(IssueAttention? issueAttention, WorkflowStatusView? workflow)
+    private static WorkflowAttention? ProjectAttention(WorkflowStatusView? workflow)
     {
         if (workflow?.Status == "AwaitingApproval")
-            return IssueAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
+            return WorkflowAttention.ReviewRequired(workflow.WorkflowRunId, $"Awaiting approval for {workflow.CurrentStage ?? "workflow"}");
         if (workflow?.Status == "Failed")
-            return IssueAttention.Blocked(workflow.WorkflowRunId, workflow.Failure?.Message ?? "Workflow failed");
-        return issueAttention;
+            return WorkflowAttention.Blocked(workflow.WorkflowRunId, workflow.Failure?.Message ?? "Workflow failed");
+        return null;
     }
 
-    private static string? ComputeBlockedReason(IssueAttention? attention, WorkflowStatusView? workflow) =>
+    private static string? ComputeBlockedReason(WorkflowAttention? attention, WorkflowStatusView? workflow) =>
         attention?.Message
         ?? (workflow?.Status == "Failed" ? workflow.Failure?.Message : null);
 
-    private static string RuntimeStatus(string issueStatus, IssueAttention? attention, string? workflowStatus = null)
+    private static string RuntimeStatus(string issueStatus, WorkflowAttention? attention, string? workflowStatus = null)
     {
         if (issueStatus == "done") return "done";
         if (issueStatus == "cancelled") return "cancelled";
-        if (attention?.Reason is IssueAttentionReason.Blocked or IssueAttentionReason.WorkflowFailed) return "blocked";
+        if (attention?.Reason is WorkflowAttentionReason.Blocked or WorkflowAttentionReason.WorkflowFailed) return "blocked";
         if (attention is not null) return "attention";
         return workflowStatus switch
         {
@@ -89,6 +107,6 @@ public sealed record MohistDefaultWorkflowState(
     string Health,
     string? BlockedReason,
     StageApproval? StageApproval,
-    IssueAttention? Attention,
+    WorkflowAttention? Attention,
     string ChangeDir,
     bool Completed);

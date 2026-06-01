@@ -16,7 +16,6 @@ public class Issue
     public DateTime? ArchivedAt { get; set; }
     public string? WorkflowRunId { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Backlog;
-    public IssueAttention? Attention { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public RepositoryInfo? Repository { get; set; }
 }

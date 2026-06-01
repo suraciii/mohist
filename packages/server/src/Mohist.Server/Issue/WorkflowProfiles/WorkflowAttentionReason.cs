@@ -1,18 +1,9 @@
 using System.Text.Json.Serialization;
 
-namespace Mohist.Server.Issue.Domain;
-
-public enum IssueStatus
-{
-    Backlog,
-    Todo,
-    InProgress,
-    Done,
-    Cancelled
-}
+namespace Mohist.Server.Issue.WorkflowProfiles;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum IssueAttentionReason
+public enum WorkflowAttentionReason
 {
     [JsonStringEnumMemberName("review_required")] ReviewRequired,
     [JsonStringEnumMemberName("blocked")] Blocked,

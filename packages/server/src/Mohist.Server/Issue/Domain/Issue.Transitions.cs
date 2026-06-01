@@ -51,7 +51,6 @@ public static partial class IssueExtensions
                 throw new InvalidOperationException($"Issue #{issue.Number} already has workflow {issue.WorkflowRunId}");
             issue.WorkflowRunId = wrId;
             issue.Status = IssueStatus.InProgress;
-            issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -62,7 +61,6 @@ public static partial class IssueExtensions
             if (issue.Status != IssueStatus.InProgress)
                 throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}, only InProgress can complete");
             issue.Status = IssueStatus.Done;
-            issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
             return true;
         }
@@ -87,7 +85,6 @@ public static partial class IssueExtensions
                 throw new InvalidOperationException($"Issue #{issue.Number} cannot close");
             issue.Status = IssueStatus.Cancelled;
             issue.WorkflowRunId = null;
-            issue.Attention = null;
             issue.UpdatedAt = DateTime.UtcNow;
         }
 

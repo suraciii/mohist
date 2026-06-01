@@ -316,7 +316,7 @@ public class IssueGrain : Grain, IIssueGrain
             type,
             IssueId: _issue.Id,
             WorkflowRunId: _issue.WorkflowRunId,
-            Stage: IssueDomainNames.StatusName(_issue.Status),
+            Stage: MohistDefaultWorkflowProjection.IssueStatusName(_issue.Status),
             Status: status,
             Message: message,
             Payload: payload));
