@@ -139,10 +139,13 @@ public abstract class WorkflowGrainSpecs
         return Grains.GetGrain<IWorkflowGrain>(id);
     }
 
-    protected async Task<IWorkflowGrain> StartWorkflowAsync(WorkflowDefinition definition, string? id = null)
+    protected async Task<IWorkflowGrain> StartWorkflowAsync(
+        WorkflowDefinition definition,
+        string? id = null,
+        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
         await ClearBacklogAsync();
-        var runnerId = await RegisterRunnerAsync();
+        var runnerId = await RegisterRunnerAsync(maxWorkflowSlots: maxWorkflowSlots);
         _runnerId = runnerId;
         var workflowId = id ?? $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;

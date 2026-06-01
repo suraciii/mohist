@@ -229,12 +229,27 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
 
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
 
-        await backlog.RegisterAsync(workflowId);
+        var duplicateClaim = await backlog.ClaimAsync(runnerId);
+        Assert.Null(duplicateClaim);
 
         var afterRegister = await LoadBacklogStateAsync("test-project");
         Assert.NotNull(afterRegister);
-        Assert.Equal([workflowId], afterRegister!.Waiting);
-        Assert.Empty(afterRegister.Running);
+        Assert.Empty(afterRegister!.Waiting);
+        Assert.Equal(runnerId, Assert.Single(afterRegister.Running).Value);
+
+        await backlog.RegisterAsync(workflowId);
+
+        afterRegister = await LoadBacklogStateAsync("test-project");
+        Assert.NotNull(afterRegister);
+        Assert.Empty(afterRegister!.Waiting);
+        Assert.Equal(runnerId, Assert.Single(afterRegister.Running).Value);
+
+        await backlog.RequeueAsync(workflowId);
+
+        var afterRequeue = await LoadBacklogStateAsync("test-project");
+        Assert.NotNull(afterRequeue);
+        Assert.Equal([workflowId], afterRequeue!.Waiting);
+        Assert.Empty(afterRequeue.Running);
 
         var claimedWorkflowId = await backlog.ClaimAsync(runnerId);
         Assert.Equal(workflowId, claimedWorkflowId);
@@ -523,7 +538,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.NotNull(await staleWorkflow.GetWorkAsync(runnerId));
         var staleLease = await LoadLeaseJsonAsync(staleWorkflowId);
         Assert.NotNull(staleLease);
-        await staleWorkflow.PauseAsync("hold");
+        await staleWorkflow.UnscheduleAsync("hold");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());

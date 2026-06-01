@@ -130,7 +130,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
         await SaveRunAsync();
-        await UnscheduleInternalAsync(reason ?? "Workflow paused");
+        await ReleaseFromBacklogOnlyAsync();
         await AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused");
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
@@ -583,6 +583,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             "released",
             $"Released {resource} lock",
             Payload: new { resource, projectId, reason, result.NextWorkflowRunId, result.WaitingCount });
+
+        if (!string.IsNullOrWhiteSpace(result.NextWorkflowRunId))
+            await RequeueWorkflowIdAsync(projectId, result.NextWorkflowRunId);
     }
 
     private string? GetSequentialLockResource(string stage)
@@ -603,13 +606,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
     }
 
+    private async Task RequeueInBacklogAsync()
+    {
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+        await RequeueWorkflowIdAsync(projectId, GrainKey);
+        _log.LogInformation("Workflow {Id} re-queued in backlog", GrainKey);
+    }
+
+    private async Task RequeueWorkflowIdAsync(string projectId, string workflowId)
+    {
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
+        await backlog.RequeueAsync(workflowId);
+    }
+
     private async Task RegisterToBacklogIfRunnableAsync()
     {
         if (_run?.Status != WorkflowRunStatus.Running) return;
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
         if (_run.NextWork() is null) return;
-        await RegisterToBacklogAsync();
+        await RequeueInBacklogAsync();
     }
 
     private WorkDispatch? PrepareWork(WorkflowWork work, string runnerId)
@@ -726,6 +743,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     }
 
     private async Task ReleaseBacklogAsync()
+    {
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
+        await backlog.ReleaseAsync(GrainKey);
+    }
+
+    private async Task ReleaseFromBacklogOnlyAsync()
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;

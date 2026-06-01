@@ -25,7 +25,7 @@ export class ServerConnection {
   }
 
   async report(work: WorkItem, result: WorkItemResult, signal: AbortSignal): Promise<Record<string, unknown>> {
-    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workId: work.workId, projectId: work.projectId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode }), signal })
+    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workflowRunId: work.workflowRunId, workId: work.workId, projectId: work.projectId, status: result.status, message: result.message, output: result.output, exitCode: result.exitCode }), signal })
     if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
     try {
       return await response.json() as Record<string, unknown>

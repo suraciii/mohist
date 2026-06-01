@@ -105,7 +105,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue!.WorkflowRunId is { } wrId)
         {
             var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-            await wfGrain.PauseAsync("issue-closed");
+            await wfGrain.UnscheduleAsync("issue-closed");
         }
         _issue.Close();
         await SaveIssueAsync();
