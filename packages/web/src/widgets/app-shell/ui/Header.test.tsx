@@ -5,6 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
+import { SidebarProvider } from '@/shared/ui/components/sidebar'
 import { Header } from './Header'
 
 vi.mock('../../../entities/project', async (importOriginal) => {
@@ -15,6 +16,10 @@ vi.mock('../../../entities/project', async (importOriginal) => {
   }
 })
 
+vi.mock('../../../entities/agent', () => ({
+  useAgentStatus: () => ({ data: { running: false, activeAgents: [], capacity: { active: 0, max: 8 } } }),
+}))
+
 function renderHeader(initialRoute: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -22,7 +27,9 @@ function renderHeader(initialRoute: string) {
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <MemoryRouter initialEntries={[initialRoute]}>
-          <Header onCreateIssue={vi.fn()} />
+          <SidebarProvider>
+            <Header onCreateIssue={vi.fn()} />
+          </SidebarProvider>
         </MemoryRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -34,9 +41,23 @@ describe('Header', () => {
     cleanup()
   })
 
-  it('highlights Epics on epic detail routes', () => {
-    renderHeader('/epic/epic-123')
+  it('shows Board as title on home route', () => {
+    renderHeader('/')
+    expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toBeInTheDocument()
+  })
 
-    expect(screen.getByRole('button', { name: 'Epics' })).toHaveClass('bg-blue-50')
+  it('shows Epics as title on epics route', () => {
+    renderHeader('/epics')
+    expect(screen.getByRole('heading', { level: 1, name: 'Epics' })).toBeInTheDocument()
+  })
+
+  it('shows Activity as title on activity route', () => {
+    renderHeader('/activity')
+    expect(screen.getByRole('heading', { level: 1, name: 'Activity' })).toBeInTheDocument()
+  })
+
+  it('shows Logs as title on logs route', () => {
+    renderHeader('/logs')
+    expect(screen.getByRole('heading', { level: 1, name: 'Logs' })).toBeInTheDocument()
   })
 })
