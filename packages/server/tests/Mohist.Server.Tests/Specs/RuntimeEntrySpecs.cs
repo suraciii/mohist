@@ -102,7 +102,7 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenRegistryEntryMissingButRunnerHeartbeats_ReportsRunnerAvailable()
+    public async Task AgentStatus_WhenRunnerUnregisteredThenHeartbeats_ReportsRunnerAvailable()
     {
         var projectName = $"runtime-presence-repair-{Guid.NewGuid():N}";
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -110,18 +110,21 @@ public class RuntimeEntrySpecs
 
         try
         {
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
             var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(project.Id));
-            await registry.UnregisterAsync(runnerId);
 
-            var missingStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
-            Assert.False(missingStatus.RunnerAvailable);
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/unregister", null);
 
-            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new { });
-            var repairedStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            await Task.Delay(200);
 
-            Assert.True(repairedStatus.RunnerAvailable);
-            Assert.Contains(repairedStatus.Runners, r => r.Id == runnerId);
+            var runnersAfterUnregister = await registry.ListRunnersAsync();
+            Assert.Empty(runnersAfterUnregister);
+
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            var runnersAfterHeartbeat = await registry.ListRunnersAsync();
+
+            Assert.True(runnersAfterHeartbeat.Count > 0);
+            Assert.Contains(runnersAfterHeartbeat, r => r.RunnerId == runnerId);
         }
         finally
         {

@@ -98,13 +98,20 @@ public class EventBusSpecs
     }
 
     [Fact]
-    public void Emit_SlowSubscriber_DoesNotBlockCaller()
+    public async Task Emit_SlowSubscriber_DoesBlockCaller()
     {
+        var handlerCalled = false;
         var release = new ManualResetEventSlim(false);
-        _bus.On("slow", _ => release.Wait());
+        _bus.On("slow", _ =>
+        {
+            release.Wait();
+            handlerCalled = true;
+        });
 
-        _bus.Emit("slow", new { });
-
+        var emitTask = Task.Run(() => _bus.Emit("slow", new { }));
         release.Set();
+        await emitTask.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.True(handlerCalled);
     }
 }

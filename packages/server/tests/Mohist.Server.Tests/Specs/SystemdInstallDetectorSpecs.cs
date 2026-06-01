@@ -93,7 +93,7 @@ public class SystemdInstallDetectorSpecs
         Assert.Equal("local-source", result.Mode);
         Assert.Equal("systemd-user", result.ServiceManager);
         Assert.Equal("mohist.service", result.ServerUnit);
-        Assert.Equal(repoDir, result.SourcePath);
+        Assert.Equal(repoDir.Replace('/', Path.DirectorySeparatorChar), result.SourcePath);
         Assert.Equal("Detected local-source systemd user install from mohist.service", result.Reason);
     }
 
@@ -262,11 +262,16 @@ public class SystemdInstallDetectorSpecs
 
         public void Write(string path, string contents)
         {
-            _files[Path.GetFullPath(path)] = contents;
+            _files[NormalizePath(path)] = contents;
         }
 
-        public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
+        public bool Exists(string path) => _files.ContainsKey(NormalizePath(path));
 
-        public string ReadAllText(string path) => _files[Path.GetFullPath(path)];
+        public string ReadAllText(string path) => _files[NormalizePath(path)];
+
+        private static string NormalizePath(string path)
+        {
+            return path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        }
     }
 }

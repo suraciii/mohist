@@ -52,7 +52,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         {
             if (_session.IsTerminal && command.SessionName != command.WorkId)
                 _session.StartNewWork(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
-            else if (!_session.IsTerminal)
+            else
                 _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 

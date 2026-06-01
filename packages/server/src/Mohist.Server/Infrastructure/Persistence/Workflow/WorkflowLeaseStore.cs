@@ -49,9 +49,7 @@ public class WorkflowLeaseStore : IStateStore<WorkLease>
 
     public Task<IReadOnlyList<WorkLease>> ListAsync() => throw new NotSupportedException();
 
-    internal static WorkLease? Deserialize(string json) =>
-        json == "null" ? null : JsonSerializer.Deserialize<WorkLease>(json, WorkflowStorageJson.Options);
+    internal static WorkLease? Deserialize(string json) => WorkflowLeaseJson.Deserialize(json);
 
-    internal static string Serialize(WorkLease state) =>
-        JsonSerializer.Serialize(state, WorkflowStorageJson.Options);
+    internal static string Serialize(WorkLease state) => WorkflowLeaseJson.Serialize(state);
 }
