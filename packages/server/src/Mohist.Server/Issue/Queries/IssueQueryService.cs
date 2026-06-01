@@ -2,15 +2,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.Queries;
 
@@ -25,7 +25,9 @@ public class IssueQueryService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
 
-    public IssueQueryService(IDbContextFactory<MohistDbContext> dbFactory, IssueWorkflowProfileRegistry profiles)
+    public IssueQueryService(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IssueWorkflowProfileRegistry profiles)
     {
         _dbFactory = dbFactory;
         _profiles = profiles;
@@ -42,7 +44,10 @@ public class IssueQueryService
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var issue = await LoadIssueAsync(db, projectId, number);
-        return issue is null ? null : ToInfo(issue, project);
+        if (issue is null) return null;
+        var info = ToInfo(issue, project);
+        await PopulateProfileDataOnInfoAsync(db, info, projectId, number);
+        return info;
     }
 
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)
@@ -76,6 +81,7 @@ public class IssueQueryService
             .ToList();
 
         ApplyWorkflowProjections(list, await LoadWorkflowStatesAsync(db, list));
+        await PopulateProfileDataAsync(db, list);
 
         var query = list.AsEnumerable();
 
@@ -100,6 +106,7 @@ public class IssueQueryService
     {
         var model = ToReadModel(ToInfo(issue, project));
         ApplyWorkflowProjections([model], await LoadWorkflowStatesAsync(db, [model]));
+        await PopulateProfileDataAsync(db, [model]);
         return model;
     }
 
@@ -138,7 +145,7 @@ public class IssueQueryService
         Number = issue.Number,
         Title = issue.Title,
         Body = issue.Body,
-Status = issue.Status,
+        Status = issue.Status,
         Health = issue.Health,
         ProjectId = issue.ProjectId,
         ProjectName = issue.ProjectName,
@@ -153,9 +160,52 @@ Status = issue.Status,
         Attention = issue.Attention,
         WorkflowRunId = issue.WorkflowRunId,
         WorkflowProfileId = issue.WorkflowProfileId,
+        WorkflowProfileMode = issue.WorkflowProfileMode,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         Repository = issue.Repository,
     };
+
+    private async Task PopulateProfileDataAsync(MohistDbContext db, List<IssueReadModel> issues)
+    {
+        var keys = issues.Select(i => $"{i.ProjectId}:{i.Number}").ToArray();
+        var rows = await db.IssueProfiles
+            .AsNoTracking()
+            .Where(r => keys.Contains(r.Key))
+            .ToListAsync();
+        var profilesByKey = new Dictionary<string, IssueWorkflowProfile>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var profile = IssueWorkflowProfileSnapshot.Deserialize(row.StateJson);
+            if (profile is not null)
+                profilesByKey[row.Key] = profile;
+        }
+        foreach (var issue in issues)
+        {
+            var key = $"{issue.ProjectId}:{issue.Number}";
+            if (profilesByKey.TryGetValue(key, out var profile))
+            {
+                issue.WorkflowProfileId = profile.SourceProfileId;
+                issue.WorkflowProfileMode = profile.UpdateMode.ToString();
+            }
+        }
+    }
+
+    private async Task PopulateProfileDataOnInfoAsync(MohistDbContext db, IssueInfo info, string projectId, int number)
+    {
+        var key = $"{projectId}:{number}";
+        var row = await db.IssueProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Key == key);
+        if (row is not null)
+        {
+            var profile = IssueWorkflowProfileSnapshot.Deserialize(row.StateJson);
+            if (profile is not null)
+            {
+                info.WorkflowProfileId = profile.SourceProfileId;
+                info.WorkflowProfileMode = profile.UpdateMode.ToString();
+            }
+        }
+    }
 
     private async Task<Dictionary<string, WorkflowStatusView>> LoadWorkflowStatesAsync(MohistDbContext db, IReadOnlyCollection<IssueReadModel> issues)
     {

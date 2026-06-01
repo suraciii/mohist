@@ -8,11 +8,14 @@ public class IssueWorkflowProfile
 {
     public string SourceProfileId { get; private set; }
     public WorkflowDefinition Definition { get; private set; }
+    public WorkflowProfileUpdateMode UpdateMode { get; private set; }
 
-    public IssueWorkflowProfile(string sourceProfileId, WorkflowDefinition definition)
+    public IssueWorkflowProfile(string sourceProfileId, WorkflowDefinition definition,
+        WorkflowProfileUpdateMode updateMode = WorkflowProfileUpdateMode.Reference)
     {
         SourceProfileId = sourceProfileId;
         Definition = definition;
+        UpdateMode = updateMode;
     }
 
     public static IssueWorkflowProfile CopyFrom(
@@ -27,6 +30,13 @@ public class IssueWorkflowProfile
         return new IssueWorkflowProfile(sourceProfileId, definition);
     }
 
+    public void ApplyCustomDefinition(string sourceProfileId, WorkflowDefinition definition)
+    {
+        SourceProfileId = sourceProfileId;
+        Definition = DeepCopy(definition);
+        UpdateMode = WorkflowProfileUpdateMode.Custom;
+    }
+
     public void SwitchTo(
         string sourceProfileId,
         WorkflowDefinition template,
@@ -37,6 +47,7 @@ public class IssueWorkflowProfile
         Definition = DeepCopy(template);
         Definition = MergeAgentIntoVariables(Definition, globalAgentConfig);
         Definition = MergeStageAgentIntoVariables(Definition, globalStageAgentConfigs);
+        UpdateMode = WorkflowProfileUpdateMode.Reference;
     }
 
     public void PatchVariables(string path, object? value)

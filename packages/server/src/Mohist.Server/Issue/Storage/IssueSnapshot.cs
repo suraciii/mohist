@@ -11,13 +11,15 @@ public sealed class IssueWorkflowProfileSnapshot
 {
     public string SourceProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public WorkflowDefinition Definition { get; set; } = null!;
+    public WorkflowProfileUpdateMode UpdateMode { get; set; } = WorkflowProfileUpdateMode.Reference;
 
-    public IssueWorkflowProfile ToDomain() => new(SourceProfileId, Definition);
+    public IssueWorkflowProfile ToDomain() => new(SourceProfileId, Definition, UpdateMode);
 
     public static IssueWorkflowProfileSnapshot FromDomain(IssueWorkflowProfile profile) => new()
     {
         SourceProfileId = profile.SourceProfileId,
         Definition = profile.Definition,
+        UpdateMode = profile.UpdateMode,
     };
 
     public static IssueWorkflowProfile? Deserialize(string json) =>

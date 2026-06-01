@@ -32,6 +32,7 @@ public class IssueReadModel
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
+    public string? WorkflowProfileMode { get; set; }
     public int[] PrerequisiteNumbers { get; set; } = [];
     public IssueCommentDto[] Comments { get; set; } = [];
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];

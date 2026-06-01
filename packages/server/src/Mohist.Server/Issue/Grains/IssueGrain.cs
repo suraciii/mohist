@@ -10,6 +10,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
 
 namespace Mohist.Server.Issue.Grains;
@@ -359,6 +360,56 @@ public class IssueGrain : Grain, IIssueGrain
         await db.SaveChangesAsync();
 
         return new IssueCommentResult(comment.Id, comment.Body);
+    }
+
+    public async Task UpdateWorkflowProfileAsync(WorkflowProfileUpdateRequest request)
+    {
+        EnsureIssue();
+
+        var hasProfileId = !string.IsNullOrWhiteSpace(request.ProfileId);
+        var hasYaml = !string.IsNullOrWhiteSpace(request.DefinitionYaml);
+
+        if (hasProfileId && hasYaml)
+            throw new ArgumentException("Specify either ProfileId or DefinitionYaml, not both.");
+        if (!hasProfileId && !hasYaml)
+            throw new ArgumentException("Specify either ProfileId or DefinitionYaml.");
+
+        var globalAgentConfig = await _config.GetAgentConfigAsync();
+        var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+
+        if (_profile is null)
+        {
+            _profile = IssueWorkflowProfile.CopyFrom(
+                IssueWorkflowProfiles.DefaultId,
+                defaultProfile.Definition,
+                globalAgentConfig,
+                globalStageAgentConfigs);
+        }
+
+        if (hasProfileId)
+        {
+            if (!_profiles.Exists(request.ProfileId))
+                throw new ArgumentException($"Workflow profile '{request.ProfileId}' not found");
+            var template = _profiles.Get(request.ProfileId!);
+            _profile.SwitchTo(request.ProfileId!, template.Definition, globalAgentConfig, globalStageAgentConfigs);
+        }
+        else
+        {
+            var parsed = WorkflowYamlSerializer.FromYaml(request.DefinitionYaml!, _profile.SourceProfileId);
+            _profile.ApplyCustomDefinition(_profile.SourceProfileId, parsed);
+        }
+
+        await SaveProfileAsync();
+        await AppendIssueEventAsync(
+            "workflow_profile_updated",
+            "updated",
+            "Workflow profile updated",
+            new { updateMode = _profile.UpdateMode.ToString(), sourceProfileId = _profile.SourceProfileId });
+        _log.LogInformation(
+            "Issue {Key} workflow profile updated (mode={Mode})",
+            GrainKey,
+            _profile.UpdateMode);
     }
 }
 
