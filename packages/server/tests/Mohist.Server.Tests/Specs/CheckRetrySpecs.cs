@@ -91,6 +91,40 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task ReviewPassedRepairTask_DoesNotReceiveMarkerCheckResult()
+    {
+        await StartWorkflowAsync(StageWithRepairAndVerifyCheck());
+
+        var (review1, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, review1.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r2, checks1, "review-passed", "marker missing");
+
+        var (fix, _) = await PollWorkAnyAsync();
+        Assert.Equal("fix-review-findings:1.1", fix.WorkId);
+        var with = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(fix.With!)!;
+        Assert.DoesNotContain("failedCheckResult", with.Keys);
+    }
+
+    [Fact]
+    public async Task NonReviewRepairTask_ReceivesFailedCheckResult()
+    {
+        await StartWorkflowAsync(StageWithRepairCheck());
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r2, checks1, "check-1", "needs fix");
+
+        var (fix, _) = await PollWorkAnyAsync();
+        Assert.Equal("fix-check:1.1", fix.WorkId);
+        var with = JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(fix.With!)!;
+        Assert.Contains("failedCheckResult", with.Keys);
+    }
+
+    [Fact]
     public async Task CheckFailsRepeatedly_RepairTaskRunsEachTime()
     {
         await StartWorkflowAsync(StageWithRepairCheck(repairLimit: 3));
