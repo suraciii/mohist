@@ -40,30 +40,25 @@ public static class WorkspaceRoutes
             if (string.IsNullOrEmpty(runId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
 
-            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
-            if (runnerId is null || connId is null)
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
-
             try
             {
-                var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerDiffResponse>("GetDiff", number, QueryTimeout, ct);
-
-                if (result is null)
-                    return ApiResults.Ok(new { available = false, reason = "empty", message = "No diff available" });
+                var result = await git.GetDiffAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
+                var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
+                var commits = await git.GetCommitsAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
+                var mergeBase = await git.GetMergeBaseAsync(repoPath, ResolveRepo(issue).BaseBranch, $"mo/issue-{number}");
 
                 return ApiResults.Ok(new
                 {
                     available = true,
                     reason = (string?)null,
-                    @base = result.Base,
-                    head = result.Head,
-                    mergeBase = result.MergeBase,
-                    ahead = result.Ahead,
-                    behind = result.Behind,
-                    canFastForward = result.Behind == 0,
+                    @base = ResolveRepo(issue).BaseBranch,
+                    head = $"mo/issue-{number}",
+                    mergeBase,
+                    ahead,
+                    behind,
+                    canFastForward = behind == 0,
                     comparison = "merge-base",
-                    summary = new { filesChanged = result.Files.Count, commits = result.CommitCount, additions = result.TotalAdditions, deletions = result.TotalDeletions },
+                    summary = new { filesChanged = result.Files.Count, commits = commits.Length, additions = result.TotalAdditions, deletions = result.TotalDeletions },
                     files = result.Files,
                 });
             }
@@ -92,31 +87,28 @@ public static class WorkspaceRoutes
             if (string.IsNullOrEmpty(runId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
 
-            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
-            if (runnerId is null || connId is null)
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
-
             try
             {
-                var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerCommitsResponse>("GetCommits", number, QueryTimeout, ct);
-
-                if (result is null)
-                    return ApiResults.Ok(new { available = false, reason = "empty", message = "No commits available" });
+                var (_, baseBranch) = ResolveRepo(issue);
+                var head = $"mo/issue-{number}";
+                var commits = await git.GetCommitsAsync(repoPath, baseBranch, head);
+                var result = await git.GetDiffAsync(repoPath, baseBranch, head);
+                var (ahead, behind) = await git.GetAheadBehindAsync(repoPath, baseBranch, head);
+                var mergeBase = await git.GetMergeBaseAsync(repoPath, baseBranch, head);
 
                 return ApiResults.Ok(new
                 {
                     available = true,
                     reason = (string?)null,
-                    @base = result.Base,
-                    head = result.Head,
-                    mergeBase = result.MergeBase,
-                    ahead = result.Ahead,
-                    behind = result.Behind,
-                    canFastForward = result.Behind == 0,
+                    @base = baseBranch,
+                    head,
+                    mergeBase,
+                    ahead,
+                    behind,
+                    canFastForward = behind == 0,
                     comparison = "merge-base",
-                    summary = new { filesChanged = result.FilesChanged, commits = result.Commits.Count, additions = result.TotalAdditions, deletions = result.TotalDeletions },
-                    commits = result.Commits,
+                    summary = new { filesChanged = result.Files.Count, commits = commits.Length, additions = result.TotalAdditions, deletions = result.TotalDeletions },
+                    commits,
                 });
             }
             catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
@@ -144,19 +136,14 @@ public static class WorkspaceRoutes
             if (string.IsNullOrEmpty(runId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow", hash, diff = "" });
 
-            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
-            if (runnerId is null || connId is null)
-                return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found", hash, diff = "" });
-
             try
             {
-                var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerCommitDiffResponse>("GetCommitDiff", number, hash, QueryTimeout, ct);
+                var diff = await git.GetCommitDiffAsync(repoPath, hash);
 
-                if (result is null)
+                if (diff is null)
                     return ApiResults.NotFound($"Commit {hash} not found");
 
-                return ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff = result.Diff });
+                return ApiResults.Ok(new { available = true, reason = (string?)null, hash, diff });
             }
             catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
             {
@@ -167,6 +154,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/worktree-status", async (
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IGitService git,
             IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
             CancellationToken ct) =>
         {
@@ -178,18 +166,12 @@ public static class WorkspaceRoutes
             if (string.IsNullOrEmpty(runId))
                 return ApiResults.Ok(new { exists = false });
 
-            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
-            if (runnerId is null || connId is null)
-                return ApiResults.Ok(new { exists = false, reason = "no_runner" });
-
             try
             {
-                var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerWorktreeStatusResponse>("GetWorktreeStatus", number, QueryTimeout, ct);
-
-                return result is null
-                    ? ApiResults.Ok(new { exists = false })
-                    : ApiResults.Ok(result);
+                var projectName = issue.ProjectName ?? issue.ProjectId;
+                var (repoPath, baseBranch) = ResolveRepo(issue);
+                var result = await git.GetWorktreeStatusAsync(repoPath, projectName, number, baseBranch);
+                return ApiResults.Ok(result);
             }
             catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
             {
@@ -200,6 +182,7 @@ public static class WorkspaceRoutes
         issues.MapGet("/file-content", async (
             int number, string path, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
+            IGitService git,
             IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
             CancellationToken ct) =>
         {
@@ -211,18 +194,12 @@ public static class WorkspaceRoutes
             if (string.IsNullOrEmpty(runId))
                 return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
 
-            var (runnerId, connId) = await ResolveRunnerAsync(runId, grains, tracker);
-            if (runnerId is null || connId is null)
-                return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
-
             try
             {
-                var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerFileContentResponse>("GetFileContent", number, path, QueryTimeout, ct);
-
-                return result is null
-                    ? ApiResults.Ok(new { @base = (string?)null, head = (string?)null })
-                    : ApiResults.Ok(new { @base = result.Base, head = result.Head });
+                var (_, baseBranch) = ResolveRepo(issue);
+                var baseContent = await git.GetFileContentAsync(ResolveRepo(issue).RepoPath, baseBranch, path);
+                var headContent = await git.GetFileContentAsync(ResolveRepo(issue).RepoPath, $"mo/issue-{number}", path);
+                return ApiResults.Ok(new { @base = baseContent, head = headContent });
             }
             catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
             {
@@ -250,8 +227,9 @@ public static class WorkspaceRoutes
 
             try
             {
+                var query = BuildWorkspaceQuery(issue);
                 var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerDiffResponse>("GetDiff", number, QueryTimeout, ct);
+                    .InvokeAsync<RunnerDiffResponse>("GetDiff", query, QueryTimeout, ct);
 
                 if (result is null)
                     return ApiResults.Ok(new { available = false, reason = "empty", message = "No diff available" });
@@ -297,8 +275,9 @@ public static class WorkspaceRoutes
 
             try
             {
+                var query = BuildWorkspaceQuery(issue);
                 var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerCommitsResponse>("GetCommits", number, QueryTimeout, ct);
+                    .InvokeAsync<RunnerCommitsResponse>("GetCommits", query, QueryTimeout, ct);
 
                 if (result is null)
                     return ApiResults.Ok(new { available = false, reason = "empty", message = "No commits available" });
@@ -344,8 +323,9 @@ public static class WorkspaceRoutes
 
             try
             {
+                var query = BuildWorkspaceQuery(issue);
                 var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerCommitDiffResponse>("GetCommitDiff", number, hash, QueryTimeout, ct);
+                    .InvokeAsync<RunnerCommitDiffResponse>("GetCommitDiff", query, hash, QueryTimeout, ct);
 
                 if (result is null)
                     return ApiResults.NotFound($"Commit {hash} not found");
@@ -378,8 +358,9 @@ public static class WorkspaceRoutes
 
             try
             {
+                var query = BuildWorkspaceQuery(issue);
                 var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerWorktreeStatusResponse>("GetWorktreeStatus", number, QueryTimeout, ct);
+                    .InvokeAsync<RunnerWorktreeStatusResponse>("GetWorktreeStatus", query, QueryTimeout, ct);
 
                 return result is null
                     ? ApiResults.Ok(new { exists = false })
@@ -411,8 +392,9 @@ public static class WorkspaceRoutes
 
             try
             {
+                var query = BuildWorkspaceQuery(issue);
                 var result = await hub.Clients.Client(connId)
-                    .InvokeAsync<RunnerFileContentResponse>("GetFileContent", number, path, QueryTimeout, ct);
+                    .InvokeAsync<RunnerFileContentResponse>("GetFileContent", query, path, QueryTimeout, ct);
 
                 return result is null
                     ? ApiResults.Ok(new { @base = (string?)null, head = (string?)null })
@@ -488,6 +470,25 @@ public static class WorkspaceRoutes
     private static Task<bool> BranchExistsAsync(IGitService git, IssueReadModel issue, string repoPath)
         => git.BranchExistsAsync(repoPath, $"mo/issue-{issue.Number}");
 
+    private static RunnerWorkspaceQuery BuildWorkspaceQuery(IssueReadModel issue)
+    {
+        var (repoPath, baseBranch) = ResolveRepo(issue);
+        var projectName = issue.ProjectName ?? issue.ProjectId;
+        var worktreePath = MohistWorkspaceLayout.IssueWorktreePath(
+            MohistWorkspaceLayout.DefaultRunnerRoot(),
+            projectName,
+            issue.Number);
+
+        return new RunnerWorkspaceQuery(
+            issue.Number,
+            issue.ProjectId,
+            issue.WorkflowRunId,
+            worktreePath,
+            $"mo/issue-{issue.Number}",
+            baseBranch,
+            repoPath);
+    }
+
     private static async Task<(string? ProjectId, IssueReadModel? Issue)> ResolveIssueAsync(
         int number, string? projectId, ProjectQueryService projectsQuery, IssueQueryService issuesQuery)
     {
@@ -528,6 +529,15 @@ public static class WorkspaceRoutes
         return resolved?.Id;
     }
 }
+
+public record RunnerWorkspaceQuery(
+    int IssueNumber,
+    string ProjectId,
+    string? WorkflowRunId,
+    string WorktreePath,
+    string Branch,
+    string BaseBranch,
+    string RepositoryPath);
 
 public record RunnerDiffResponse(
     string Base, string Head, string? MergeBase,
