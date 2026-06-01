@@ -850,7 +850,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var repairWith = repairTask.With is not null
             ? new Dictionary<string, JsonElement?>(repairTask.With)
             : new Dictionary<string, JsonElement?>();
-        if (resultJson is not null)
+        if (resultJson is not null && !string.Equals(checkName, "review-passed", StringComparison.Ordinal))
             repairWith["failedCheckResult"] = resultJson;
 
         return new TaskDefinition(

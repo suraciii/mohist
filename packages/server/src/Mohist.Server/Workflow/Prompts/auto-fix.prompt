@@ -1,41 +1,36 @@
 ## Input
 
-A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and structured `## Blocking Items`.
-Each blocking item should include Scope, Evidence, SuggestedAction, Verification, and Status.
+Read `${{ openspecChangeDir }}/review.md` directly. It is the authoritative source for what needs to be fixed.
 
 ## Process
 
-1. Read the context-files to understand the change intent (proposal), approach (design), and requirements (specs)
-2. Read `${{ openspecChangeDir }}/review.md` and extract every unresolved Blocking Item
-3. For each blocking item, use Scope, Evidence, SuggestedAction, and Verification to understand the required repair
-4. Read the affected files and apply the minimal product-code or test fix
-5. After all fixes, add/update tests for the fixed behavior
-6. Run the listed verification commands when practical, plus the smallest relevant build/test checks
+1. Read the issue context and plan artifacts:
+   - `${{ openspecChangeDir }}/proposal.md`
+   - `${{ openspecChangeDir }}/design.md`
+   - `${{ openspecChangeDir }}/tasks.json`
+   - `${{ openspecChangeDir }}/specs/`
+2. Read `${{ openspecChangeDir }}/review.md`.
+3. Fix every unresolved blocking item in the review.
+4. Add or update focused tests for the fixed behavior.
+5. Run the smallest relevant verification commands.
 
 ## Rules
 
-- Apply ONLY the blocking review repairs described — no speculative changes
-- If ambiguous, apply the most conservative interpretation
-- If a fix requires multiple files, make all changes
-- If a fix cannot be safely applied, skip it and note why
-- Each fix must be atomic — do not bundle unrelated fixes
-- New tests must focus on the specific fix
-- Do NOT remove Mohist workflow artifacts under `${{ openspecChangeDir }}/` unless the review finding explicitly identifies corrupted artifact content and the safe fix is to update that artifact.
-- Workflow artifacts under `${{ openspecChangeDir }}/` are planning/review context, not product deliverables to delete during auto-fix.
-- Do NOT edit `review.md`; the next review task will regenerate it from the repaired candidate snapshot.
+- Do not rely on marker-check output or server-provided summaries to decide what to fix.
+- Apply only the blocking repairs described in `review.md`.
+- Do not make unrelated changes.
+- Do not edit `review.md`; the next review task will regenerate it.
+- If a blocking item cannot be safely fixed, report why.
 
 ## Output
 
-```
+```markdown
 ## Applied Review Repairs
-1. [file:line] What was changed and why
+1. [file:line] What changed
 
 ## Skipped Review Repairs
-1. [file:line] Why it was skipped
+1. Why it was skipped
 
-## Build Result
-- Build: PASS / FAIL
-- Tests: PASS / FAIL
+## Verification
+- Build/tests run and result
 ```
-
-Do NOT modify `review.md`.
