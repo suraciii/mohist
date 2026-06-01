@@ -21,7 +21,7 @@ public static partial class WorkflowRunExtensions
                         run.ResetCheck(a.Result);
                         break;
                     case "repair":
-                        run.ScheduleCheckRepair(a.Result.Name, a.RepairTask!, a.Result.Message, a.Result.Output);
+                        run.ScheduleCheckRepair(a.Result.Name, a.RepairTasks!, a.Result.Message, a.Result.Output);
                         break;
                     case "fail":
                         run.FailCheck(a.Result);
@@ -31,16 +31,16 @@ public static partial class WorkflowRunExtensions
         }
 
         public void RepairFailedCheck(CheckResult result, TaskDefinition repairTask)
-            => run.ScheduleCheckRepair(result.Name, repairTask, result.Message, result.Output);
+            => run.ScheduleCheckRepair(result.Name, [repairTask], result.Message, result.Output);
 
         public void ScheduleCheckRepair(
             string checkName,
-            TaskDefinition repairTask,
+            IReadOnlyList<TaskDefinition> repairTasks,
             string? message = null,
             JsonElement? output = null)
         {
             var current = run.CurrentStage();
-            current.ScheduleCheckRepair(checkName, repairTask, message, output);
+            current.ScheduleCheckRepair(checkName, repairTasks, message, output);
             run.Failure = null;
             run.Status = WorkflowRunStatus.Running;
         }

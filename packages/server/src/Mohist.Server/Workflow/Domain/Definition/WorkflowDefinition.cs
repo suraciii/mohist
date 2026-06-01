@@ -12,7 +12,7 @@ public sealed record TaskDefinition(
     public string[]? OnSuccessEmit { get; init; }
 }
 
-public sealed record CheckFailureRepair(int Limit, TaskDefinition Task);
+public sealed record CheckFailureRepair(int Limit, TaskDefinition Task, TaskDefinition? VerifyTask = null);
 
 public sealed record CheckFailureAction(CheckFailureRepair? Repair = null);
 

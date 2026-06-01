@@ -145,18 +145,27 @@ public static partial class WorkflowRunExtensions
 
         internal void ScheduleCheckRepair(
             string checkName,
-            TaskDefinition repairTask,
+            IReadOnlyList<TaskDefinition> repairTasks,
             string? message = null,
             JsonElement? output = null)
         {
+            if (repairTasks.Count == 0)
+                throw new WorkflowDomainException($"Check {checkName} repair requires at least one task");
+
             var check = stage.FindCheck(checkName);
-            var repairRun = TaskRun.MakeTask(stage.Tasks, repairTask);
-            stage.Tasks.Add(repairRun);
+            foreach (var repairTask in repairTasks)
+            {
+                var repairRun = TaskRun.MakeTask(stage.Tasks, repairTask);
+                stage.Tasks.Add(repairRun);
+            }
 
             check.RepairCount++;
-            check.Status = StageCheckStatus.Pending;
-            check.Message = message;
-            check.Output = output;
+            foreach (var stageCheck in stage.Checks)
+            {
+                stageCheck.Status = StageCheckStatus.Pending;
+                stageCheck.Message = null;
+                stageCheck.Output = null;
+            }
             stage.Failure = null;
             stage.Status = StageRunStatus.Running;
         }

@@ -147,7 +147,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task MultipleChecks_FailedCheckHasRetry_RepairTaskInjectedThenCheckReRun()
+    public async Task MultipleChecks_FailedCheckHasRepair_RepairTaskInjectedThenAllChecksReRun()
     {
         var workflow = await StartWorkflowAsync(MultiCheckStage(
             checks: [
@@ -172,9 +172,9 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 
         var parsed = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(recheck.With!);
         Assert.True(parsed.TryGetProperty("checks", out var checksArr));
-        Assert.Equal(1, checksArr.GetArrayLength());
+        Assert.Equal(2, checksArr.GetArrayLength());
 
-        await ReportChecksPassAsync(r4, recheck, "lint");
+        await ReportChecksPassAsync(r4, recheck, "typecheck", "lint");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
         Assert.Null(await runner.PollAsync());
