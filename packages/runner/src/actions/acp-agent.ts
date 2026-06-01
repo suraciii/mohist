@@ -100,13 +100,18 @@ function recordLivenessActivity(notify: (activityType?: string) => void, activit
 
 function createAcpSessionUpdateHandler(options: {
   notifyData(activityType?: string): void
+  recordActivity?(): void
   appendAssistantText(text: string): void
   emitUpdate(type: string, update: SessionNotification["update"]): Promise<void>
 }) {
   return async (notification: SessionNotification) => {
     const update = notification.update
     const type = update.sessionUpdate
-    recordLivenessActivity(options.notifyData, classifyAcpLivenessActivity({ kind: "session_update", update }))
+    const activity = classifyAcpLivenessActivity({ kind: "session_update", update })
+    if (activity.isActivity) {
+      options.recordActivity?.()
+      options.notifyData(activity.activityType)
+    }
 
     const chunkText = assistantMessageChunkText(update)
     if (chunkText !== undefined) options.appendAssistantText(chunkText)
@@ -224,6 +229,7 @@ interface AcpSessionResult {
   error?: string
   acpSessionId?: string
   exitCode?: number | null
+  activityCount?: number
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
@@ -381,6 +387,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   const timeoutMs = agentConfig?.timeoutMs ?? numberInput(context.with, "timeout") ?? DEFAULT_TIMEOUT_MS
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   const toolIds = new ToolCallIdGenerator()
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
@@ -401,6 +408,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
   acp.setActiveHandlers(
     createAcpSessionUpdateHandler({
       notifyData,
+      recordActivity: () => { activityCount += 1 },
       appendAssistantText,
       emitUpdate: async (type, update) => {
         await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, entry.sessionId, toolIds))
@@ -424,12 +432,14 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1 }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
     }
-    return { text: agentText, success: true, acpSessionId: entry.sessionId, exitCode: 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
+    return { text: agentText, success: true, acpSessionId: entry.sessionId, exitCode: 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, acpSessionId: entry.sessionId, exitCode: 1 }
+    return { text: agentText, success: false, error: message, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
   } finally {
     acp.clearActiveHandlers()
   }
@@ -445,6 +455,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   const sessionStartTimeoutMs = agentConfig?.sessionStartTimeoutMs ?? numberInput(context.with, "sessionStartTimeout") ?? DEFAULT_SESSION_START_TIMEOUT_MS
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
@@ -465,6 +476,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
   acp.setActiveHandlers(
     createAcpSessionUpdateHandler({
       notifyData,
+      recordActivity: () => { activityCount += 1 },
       appendAssistantText,
       emitUpdate: async (type, update) => {
         await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
@@ -508,13 +520,16 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1 }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1, activityCount }
     }
 
-    return { text: agentText, success: true, acpSessionId, exitCode: 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId, exitCode: 1, activityCount }
+
+    return { text: agentText, success: true, acpSessionId, exitCode: 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, acpSessionId, exitCode: 1 }
+    return { text: agentText, success: false, error: message, acpSessionId, exitCode: 1, activityCount }
   } finally {
     acp.clearActiveHandlers()
   }
@@ -531,6 +546,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
@@ -551,6 +567,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
   acp.setActiveHandlers(
     createAcpSessionUpdateHandler({
       notifyData,
+      recordActivity: () => { activityCount += 1 },
       appendAssistantText,
       emitUpdate: async (type, update) => {
         await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
@@ -596,13 +613,19 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     })
     if (promptResult !== "completed") {
       try { await connection.closeSession?.({ sessionId }) } catch {}
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1 }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1, activityCount }
     }
 
-    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) {
+      try { await connection.closeSession?.({ sessionId }) } catch {}
+      return { text: agentText, success: false, error: activityFailure, acpSessionId: sessionId, exitCode: 1, activityCount }
+    }
+
+    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, exitCode: 1 }
+    return { text: agentText, success: false, error: message, exitCode: 1, activityCount }
   } finally {
     acp.clearActiveHandlers()
   }
@@ -614,6 +637,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
   let sessionId = ""
   let agentText = ""
   let agentTextTruncated = false
+  let activityCount = 0
   const liveness = createSessionLivenessState()
   const dataWaiters = new Set<() => void>()
   const toolIds = new ToolCallIdGenerator()
@@ -635,6 +659,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     () => ({
       sessionUpdate: createAcpSessionUpdateHandler({
         notifyData,
+        recordActivity: () => { activityCount += 1 },
         appendAssistantText,
         emitUpdate: async (type, update) => {
           await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
@@ -693,16 +718,23 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       exitFailure: acpProcess.exitFailure,
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode() }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode(), activityCount }
     }
 
-    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 0 }
+    const activityFailure = validatePromptActivity(activityCount)
+    if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 1, activityCount }
+
+    return { text: agentText, success: true, acpSessionId: sessionId, exitCode: acpProcess.exitCode() ?? 0, activityCount }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return { text: agentText, success: false, error: message, acpSessionId: sessionId || undefined, exitCode: acpProcess.exitCode() ?? 1 }
+    return { text: agentText, success: false, error: message, acpSessionId: sessionId || undefined, exitCode: acpProcess.exitCode() ?? 1, activityCount }
   } finally {
     await acpProcess.cleanup()
   }
+}
+
+function validatePromptActivity(activityCount: number) {
+  return activityCount > 0 ? undefined : "ACP agent prompt completed without any session activity"
 }
 
 async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string }> {
