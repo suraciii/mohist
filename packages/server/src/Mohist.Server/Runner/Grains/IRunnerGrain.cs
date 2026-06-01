@@ -5,6 +5,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task RegisterAsync(RunnerInfo info);
     Task UnregisterAsync();
     Task HeartbeatAsync();
+    Task HeartbeatRepairAsync(RunnerInfo info);
     Task<WorkDispatch?> PeekAsync();
     Task<IReadOnlyList<WorkDispatch>> PeekAllAsync();
     Task<WorkDispatch?> PollAsync();

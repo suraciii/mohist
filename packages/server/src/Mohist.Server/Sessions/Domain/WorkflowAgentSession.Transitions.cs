@@ -16,7 +16,8 @@ public static partial class WorkflowAgentSessionExtensions
             string? title,
             int? issueNumber)
         {
-            session.RunnerId ??= runnerId;
+            if (runnerId is not null)
+                session.RunnerId = runnerId;
             session.WorkId ??= workId;
             session.WorkType ??= workType;
             session.Stage ??= stage;

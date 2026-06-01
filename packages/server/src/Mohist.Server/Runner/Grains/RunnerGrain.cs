@@ -116,6 +116,14 @@ public class RunnerGrain : Grain, IRunnerGrain
         await TouchPresenceAsync();
     }
 
+    public async Task HeartbeatRepairAsync(RunnerInfo info)
+    {
+        if (_status != RunnerStatus.Online)
+            await RegisterAsync(info);
+        else
+            await TouchPresenceAsync();
+    }
+
     public async Task<WorkDispatch?> PollAsync()
     {
         if (_status == RunnerStatus.Offline)

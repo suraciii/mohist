@@ -33,10 +33,24 @@ public static class RunnerRoutes
             return Results.Ok();
         });
 
-        group.MapPost("/heartbeat", async (string runnerId, IGrainFactory grains) =>
+        group.MapPost("/heartbeat", async (string runnerId, IGrainFactory grains, RunnerHeartbeatRequest? req) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            await runner.HeartbeatAsync();
+            if (req is not null)
+            {
+                var info = new RunnerInfo(
+                    runnerId,
+                    req.Capabilities ?? [],
+                    req.Hostname ?? Environment.MachineName,
+                    req.ProjectId,
+                    req.CoderModels,
+                    RunnerCapacity.Normalize(req.MaxWorkflowSlots));
+                await runner.HeartbeatRepairAsync(info);
+            }
+            else
+            {
+                await runner.HeartbeatAsync();
+            }
             return Results.Ok();
         });
 
@@ -112,6 +126,7 @@ public static class RunnerRoutes
 }
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
+public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerReportRequest(string WorkId, string Status, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
 public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
 public record WorkflowAgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);

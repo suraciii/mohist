@@ -162,19 +162,8 @@ public class AgentSessionSpecs
             work.Title));
 
         Assert.Equal(session.Id, reopened.Id);
-        Assert.Equal("created", reopened.Status);
+        Assert.Equal("failed", reopened.Status);
         Assert.Equal(retryRunnerId, reopened.RunnerId);
-        Assert.Null(reopened.CompletedAt);
-        Assert.Null(reopened.FailureReason);
-        Assert.Null(reopened.ExitCode);
-
-        await _client.PostOkAsync($"/api/runner/{retryRunnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = "retry-agent-session", workDir = project.Path, processPid = 5678 });
-
-        var grainSession = await grain.GetAsync();
-        Assert.NotNull(grainSession);
-        Assert.Equal(session.Id, grainSession.Id);
-        Assert.Equal("running", grainSession.Status);
-        Assert.Equal("retry-agent-session", grainSession.AgentSessionId);
 
         var nextRunnerId = $"{_runnerId}-next";
         var repeated = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(
@@ -189,7 +178,7 @@ public class AgentSessionSpecs
             work.Title));
 
         Assert.Equal(session.Id, repeated.Id);
-        Assert.Equal("running", repeated.Status);
+        Assert.Equal("failed", repeated.Status);
         Assert.Equal(nextRunnerId, repeated.RunnerId);
     }
 

@@ -6,6 +6,7 @@ using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;
 
@@ -209,7 +210,7 @@ public class WorkflowProjectionService
         var rows = await db.WorkflowLeases.AsNoTracking()
             .Where(row => workflowIds.Contains(row.WorkflowRunId))
             .ToListAsync(ct);
-        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseStore.Deserialize(row.StateJson), StringComparer.Ordinal);
+        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.StateJson), StringComparer.Ordinal);
     }
 
     private static bool IsLeaseOwnedActiveSession(WorkflowAgentSession session, IReadOnlyDictionary<string, WorkLease?> leases)

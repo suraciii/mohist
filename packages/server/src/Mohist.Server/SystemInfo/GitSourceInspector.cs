@@ -17,6 +17,18 @@ public sealed class GitSourceInspector : IGitSourceInspector
 {
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
 
+    private readonly Func<string, string, string[], Task<(string Output, int ExitCode)>> _runGit;
+
+    public GitSourceInspector()
+        : this(DefaultRunGit)
+    {
+    }
+
+    internal GitSourceInspector(Func<string, string, string[], Task<(string Output, int ExitCode)>> runGit)
+    {
+        _runGit = runGit;
+    }
+
     public async Task<SourceState> InspectAsync(string repoPath)
     {
         if (!Directory.Exists(repoPath))
@@ -26,9 +38,9 @@ public sealed class GitSourceInspector : IGitSourceInspector
         if (!Directory.Exists(gitDir))
             return new SourceState(repoPath, null, null, false);
 
-        var branchTask = RunGitAsync(repoPath, "rev-parse", "--abbrev-ref", "HEAD");
-        var headTask = RunGitAsync(repoPath, "rev-parse", "HEAD");
-        var statusTask = RunGitAsync(repoPath, "status", "--porcelain");
+        var branchTask = _runGit(repoPath, "rev-parse", ["--abbrev-ref", "HEAD"]);
+        var headTask = _runGit(repoPath, "rev-parse", ["HEAD"]);
+        var statusTask = _runGit(repoPath, "status", ["--porcelain"]);
 
         await Task.WhenAll(branchTask, headTask, statusTask);
 
@@ -50,7 +62,7 @@ public sealed class GitSourceInspector : IGitSourceInspector
         return new SourceState(repoPath, branch, head, dirty);
     }
 
-    private static async Task<(string Output, int ExitCode)> RunGitAsync(string workingDir, string command, params string[] args)
+    private static async Task<(string Output, int ExitCode)> DefaultRunGit(string workingDir, string command, string[] args)
     {
         var psi = new ProcessStartInfo("git", [command, ..args])
         {
