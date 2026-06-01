@@ -201,14 +201,22 @@ public class MohistDefaultWorkflowProfileSpecs
                   uses: mohist/acp-agent
                   with:
                     prompt: Fix it
+                verifyTask:
+                  id: verify-health
+                  title: Verify health
+                  uses: core/script
+                  with:
+                    run: git diff --check
         """);
 
         var check = definition.Stages.Single().Checks.Single();
         Assert.Equal("core/script", check.Uses);
         Assert.Equal(1, check.OnFailure?.Repair?.Limit);
         Assert.Equal("fix-health", check.OnFailure?.Repair?.Task.Id);
+        Assert.Equal("verify-health", check.OnFailure?.Repair?.VerifyTask?.Id);
         Assert.Contains("\"timeout\":300000", JsonSerializer.Serialize(check.With));
         Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.Task.With));
+        Assert.Contains("\"run\":\"git diff --check\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.VerifyTask?.With));
     }
 
     [Fact]
@@ -221,12 +229,15 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
         Assert.Contains("repairTask:", yaml);
+        Assert.Contains("verifyTask:", yaml);
         Assert.Contains("id: fix-review-findings", yaml);
         Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
         var reviewRepair = reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Repair;
         Assert.Equal(2, reviewRepair?.Limit);
         Assert.Equal("fix-review-findings", reviewRepair?.Task.Id);
+        Assert.Equal("ai-review", reviewRepair?.VerifyTask?.Id);
+        Assert.Contains("\"expect\"", JsonSerializer.Serialize(reviewRepair?.VerifyTask?.With));
         Assert.DoesNotContain("\"expect\"", JsonSerializer.Serialize(reviewRepair?.Task.With));
     }
 

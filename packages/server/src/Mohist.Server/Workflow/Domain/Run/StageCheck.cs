@@ -20,7 +20,7 @@ public sealed record CheckResult(
 public sealed record CheckResultAction(
     CheckResult Result,
     string Action,
-    TaskDefinition? RepairTask = null);
+    IReadOnlyList<TaskDefinition>? RepairTasks = null);
 
 public sealed class StageCheck
 {

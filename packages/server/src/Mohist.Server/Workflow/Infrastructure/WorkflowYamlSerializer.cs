@@ -135,13 +135,16 @@ public static class WorkflowYamlSerializer
         var repairTask = map.TryGetValue("repairTask", out var repairTaskValue) && repairTaskValue is not null
             ? ToTask(repairTaskValue)
             : null;
+        var verifyTask = map.TryGetValue("verifyTask", out var verifyTaskValue) && verifyTaskValue is not null
+            ? ToTask(verifyTaskValue)
+            : null;
 
         return new CheckDefinition(
             name,
             title,
             NullIfEmpty(String(map, "uses")),
             JsonElementMap(OptionalMap(map, "with")),
-            repairLimit > 0 && repairTask is not null ? new CheckFailureAction(new CheckFailureRepair(repairLimit, repairTask)) : null);
+            repairLimit > 0 && repairTask is not null ? new CheckFailureAction(new CheckFailureRepair(repairLimit, repairTask, verifyTask)) : null);
     }
 
     private static Dictionary<string, object?> ToStageMap(StageDefinition stage)
@@ -184,6 +187,8 @@ public static class WorkflowYamlSerializer
         {
             map["repairLimit"] = repair.Limit;
             map["repairTask"] = ToTaskMap(repair.Task);
+            if (repair.VerifyTask is not null)
+                map["verifyTask"] = ToTaskMap(repair.VerifyTask);
         }
         return map;
     }

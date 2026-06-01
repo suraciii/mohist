@@ -732,11 +732,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             }
             else
             {
-                var repairTask = ResolveRepairTask(stageDef, cr);
-                actions.Add(repairTask is not null
-                    ? new(cr, "repair", repairTask)
+                var repairTasks = ResolveRepairTasks(stageDef, cr);
+                actions.Add(repairTasks is not null
+                    ? new(cr, "repair", repairTasks)
                     : new(cr, "fail"));
-                if (repairTask is not null)
+                if (repairTasks is not null)
                     break;
             }
         }
@@ -758,7 +758,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
-    private TaskDefinition? ResolveRepairTask(StageDefinition? stageDef, CheckResult cr)
+    private IReadOnlyList<TaskDefinition>? ResolveRepairTasks(StageDefinition? stageDef, CheckResult cr)
     {
         var checkDef = stageDef?.Checks.Find(c => c.Name == cr.Name);
         if (checkDef?.OnFailure?.Repair is not { } repair) return null;
@@ -766,7 +766,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var repairCount = _run!.GetRepairCount(cr.Name);
         if (repairCount >= repair.Limit) return null;
 
-        return BuildRepairTask(cr.Name, repair.Task, cr);
+        return BuildRepairTasks(cr.Name, repair, cr);
     }
 
     private bool TryScheduleRequestedCheckRepair()
@@ -779,20 +779,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             return false;
 
         var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == failure.Stage);
-        var repairTask = ResolveRequestedCheckRepairTask(stageDef, failure.CheckName);
-        if (repairTask is null)
+        var repairTasks = ResolveRequestedCheckRepairTasks(stageDef, failure.CheckName);
+        if (repairTasks is null)
             return false;
 
-        _run.ScheduleCheckRepair(failure.CheckName, repairTask, failure.Message);
+        _run.ScheduleCheckRepair(failure.CheckName, repairTasks, failure.Message);
         return true;
     }
 
-    private TaskDefinition? ResolveRequestedCheckRepairTask(StageDefinition? stageDef, string checkName)
+    private IReadOnlyList<TaskDefinition>? ResolveRequestedCheckRepairTasks(StageDefinition? stageDef, string checkName)
     {
         var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
         if (checkDef?.OnFailure?.Repair is not { } repair) return null;
 
-        return BuildRepairTask(checkName, repair.Task);
+        return BuildRepairTasks(checkName, repair);
+    }
+
+    private IReadOnlyList<TaskDefinition> BuildRepairTasks(string checkName, CheckFailureRepair repair, CheckResult? result = null)
+    {
+        var tasks = new List<TaskDefinition> { BuildRepairTask(checkName, repair.Task, result) };
+        if (repair.VerifyTask is not null)
+            tasks.Add(repair.VerifyTask);
+        return tasks;
     }
 
     private TaskDefinition BuildRepairTask(string checkName, TaskDefinition repairTask, CheckResult? result = null)

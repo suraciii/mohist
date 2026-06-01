@@ -22,6 +22,17 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
                     OnFailure: new CheckFailureAction(new CheckFailureRepair(repairLimit, new TaskDefinition("fix-check", "Fix check", "spec/fix"))))])
         ]);
 
+    private static WorkflowDefinition StageWithRepairAndVerifyCheck() =>
+        new("spec/workflow", [
+            new StageDefinition("check",
+                [new("ai-review", "AI review", "spec/review")],
+                [new("review-passed", "Review passed", "spec/marker",
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(
+                        2,
+                        new TaskDefinition("fix-review-findings", "Fix review findings", "spec/fix-review"),
+                        new TaskDefinition("ai-review", "AI review", "spec/review"))))])
+        ]);
+
     [Fact]
     public async Task CheckFails_RepairTaskRunsBeforeRecheck()
     {
@@ -46,6 +57,36 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, checks2, "check-1");
 
         var runner = Grains.GetGrain<IRunnerGrain>(r4);
+        Assert.Null(await runner.PollAsync());
+    }
+
+    [Fact]
+    public async Task CheckFails_RepairTaskRunsVerifyTaskBeforeRecheck()
+    {
+        await StartWorkflowAsync(StageWithRepairAndVerifyCheck());
+
+        var (review1, r1) = await PollWorkAnyAsync();
+        Assert.Equal("ai-review.1", review1.WorkId);
+        await ReportAsync(r1, review1.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        Assert.Equal("checks", checks1.WorkType);
+        await ReportChecksFailAsync(r2, checks1, "review-passed", "review failed");
+
+        var (fix, r3) = await PollWorkAnyAsync();
+        Assert.Equal("fix-review-findings:1.1", fix.WorkId);
+        await ReportAsync(r3, fix.WorkId, "completed");
+
+        var (review2, r4) = await PollWorkAnyAsync();
+        Assert.Equal("ai-review.2", review2.WorkId);
+        await ReportAsync(r4, review2.WorkId, "completed");
+
+        var (checks2, r5) = await PollWorkAnyAsync();
+        Assert.Equal("checks", checks2.WorkType);
+        Assert.NotEqual(checks1.WorkId, checks2.WorkId);
+        await ReportChecksPassAsync(r5, checks2, "review-passed");
+
+        var runner = Grains.GetGrain<IRunnerGrain>(r5);
         Assert.Null(await runner.PollAsync());
     }
 

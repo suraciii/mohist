@@ -144,18 +144,20 @@ public struct CheckFailureRepairSurrogate
 {
     [Id(0)] public int Limit;
     [Id(1)] public TaskDefinition Task;
+    [Id(2)] public TaskDefinition? VerifyTask;
 }
 
 [RegisterConverter]
 public sealed class CheckFailureRepairSurrogateConverter : IConverter<CheckFailureRepair, CheckFailureRepairSurrogate>
 {
     public CheckFailureRepair ConvertFromSurrogate(in CheckFailureRepairSurrogate surrogate) =>
-        new(surrogate.Limit, surrogate.Task);
+        new(surrogate.Limit, surrogate.Task, surrogate.VerifyTask);
 
     public CheckFailureRepairSurrogate ConvertToSurrogate(in CheckFailureRepair value) => new()
     {
         Limit = value.Limit,
         Task = value.Task,
+        VerifyTask = value.VerifyTask,
     };
 }
 

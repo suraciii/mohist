@@ -176,6 +176,17 @@ stages:
             session: check
             prompt: ${{ prompts.auto-fix }}
             agent: ${{ vars.agent }}
+        verifyTask:
+          id: ai-review
+          title: AI review
+          uses: mohist/acp-agent
+          with:
+            session: check
+            prompt: ${{ prompts.review }}
+            agent: ${{ vars.agent }}
+            expect:
+              files:
+                - path: ${{ openspecChangeDir }}/review.md
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
