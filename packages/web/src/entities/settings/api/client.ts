@@ -1,5 +1,5 @@
 import { request, withProject } from '../../../shared/api/client'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
 
 export function getConfig() {
   return request<GeneralConfig>('/config')
@@ -96,4 +96,15 @@ export function getWorkflowProfile(id: string) {
 
 export function getSystemInfo() {
   return request<SystemInfo>('/system/info')
+}
+
+export function startSystemUpdate() {
+  return request<SystemUpdateStartResponse>('/system/update', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
+export function getSystemUpdateStatus() {
+  return request<SystemUpdateStatusEnvelope>('/system/update/status')
 }

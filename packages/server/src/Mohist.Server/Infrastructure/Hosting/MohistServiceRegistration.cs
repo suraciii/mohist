@@ -22,6 +22,7 @@ using Mohist.Server.Workflow.Recovery;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.SignalR;
+using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -58,6 +59,24 @@ public static class MohistServiceRegistration
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddSingleton<ConfigService>();
+        services.AddSingleton<RuntimeBuildInfo>();
+        services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
+        services.AddSingleton<IFileSystem, PhysicalFileSystem>();
+        services.AddSingleton<SystemdInstallDetector>();
+        services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
+        services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
+        services.AddSingleton<SystemInfoService>();
+        services.AddSingleton<ISystemUpdateStore, FileSystemSystemUpdateStore>();
+        services.AddSingleton<ISystemUpdateCommandRunner, ProcessSystemUpdateCommandRunner>();
+        services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>
+        {
+            var serverUrl = configuration["Mohist:ServerUrl"]
+                ?? Environment.GetEnvironmentVariable("MOHIST_SERVER_URL")
+                ?? "http://127.0.0.1:3456";
+            client.BaseAddress = new Uri(serverUrl);
+            client.Timeout = TimeSpan.FromSeconds(5);
+        });
+        services.AddSingleton<SystemUpdateService>();
         var runnerRoot = ResolveRunnerRoot(configuration);
         services.AddSingleton<IGitService>(_ => new GitService(runnerRoot));
         services.AddSingleton<RunnerConnectionTracker>();
