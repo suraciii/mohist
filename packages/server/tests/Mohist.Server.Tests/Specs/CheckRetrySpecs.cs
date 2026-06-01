@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -111,6 +113,55 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Null(status.PendingWork);
         var build = Assert.Single(status.Stages);
         Assert.DoesNotContain(build.Tasks, t => t.Id.StartsWith("fix-check:3."));
+    }
+
+    [Fact]
+    public async Task CheckFailsBeyondRetryLimit_UserRetries_InjectsRepairTaskIgnoringRetryLimit()
+    {
+        var workflow = await StartWorkflowAsync(StageWithRetryCheck(retryLimit: 2));
+
+        var (task, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task.WorkId, "completed");
+
+        var (checks1, r2) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r2, checks1, "check-1", "first fail");
+
+        var (fix1, r3) = await PollWorkAnyAsync();
+        Assert.Equal("fix-check:1.1", fix1.WorkId);
+        await ReportAsync(r3, fix1.WorkId, "completed");
+
+        var (checks2, r4) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r4, checks2, "check-1", "second fail");
+
+        var (fix2, r5) = await PollWorkAnyAsync();
+        Assert.Equal("fix-check:2.1", fix2.WorkId);
+        await ReportAsync(r5, fix2.WorkId, "completed");
+
+        var (checks3, r6) = await PollWorkAnyAsync();
+        await ReportChecksFailAsync(r6, checks3, "check-1", "third fail");
+
+        await workflow.RetryAsync();
+
+        var (manualFix, r7) = await PollWorkAnyAsync();
+        Assert.Equal("fix-check:3.1", manualFix.WorkId);
+        Assert.Equal("spec/fix", manualFix.Uses);
+
+        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        Assert.NotNull(status);
+        Assert.Equal("Running", status.Status);
+
+        await using var db = new MohistDbContext(
+            new DbContextOptionsBuilder<MohistDbContext>()
+                .UseSqlite(_fixture.ConnectionString)
+                .Options);
+        var runState = await db.WorkflowRuns.FindAsync(_workflowId!);
+        Assert.NotNull(runState);
+        var run = JsonSerializer.Deserialize<WorkflowRun>(runState!.State, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        })!;
+        Assert.Equal(3, run.GetRetryCount("check-1"));
     }
 
     [Fact]

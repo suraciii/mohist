@@ -1,5 +1,6 @@
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Errors;
+using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
@@ -138,6 +139,24 @@ public static partial class WorkflowRunExtensions
             failedCheck.Status = StageCheckStatus.Pending;
             failedCheck.Message = null;
             failedCheck.Output = null;
+            stage.Failure = null;
+            stage.Status = StageRunStatus.Running;
+        }
+
+        internal void ScheduleCheckRepair(
+            string checkName,
+            TaskDefinition repairTask,
+            string? message = null,
+            JsonElement? output = null)
+        {
+            var check = stage.FindCheck(checkName);
+            var repairRun = TaskRun.MakeTask(stage.Tasks, repairTask);
+            stage.Tasks.Add(repairRun);
+
+            check.RetryCount++;
+            check.Status = StageCheckStatus.Pending;
+            check.Message = message;
+            check.Output = output;
             stage.Failure = null;
             stage.Status = StageRunStatus.Running;
         }

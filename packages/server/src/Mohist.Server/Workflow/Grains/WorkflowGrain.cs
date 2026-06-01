@@ -168,7 +168,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var phaseBefore = _run.Status;
         await ReleaseCurrentStageLocksAsync("retried");
         await ClearAndDeleteLeaseAsync();
-        _run.Retry();
+        if (!TryScheduleRequestedCheckRepair())
+            _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
@@ -765,14 +766,50 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var retryCount = _run!.GetRetryCount(cr.Name);
         if (retryCount >= retry.Limit) return null;
 
-        var resultJson = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(cr));
-        var retryWith = retry.Task.With is not null
-            ? new Dictionary<string, JsonElement?>(retry.Task.With) { ["failedCheckResult"] = resultJson }
-            : new Dictionary<string, JsonElement?> { ["failedCheckResult"] = resultJson };
+        return BuildRetryTask(cr.Name, retry.Task, cr);
+    }
+
+    private bool TryScheduleRequestedCheckRepair()
+    {
+        if (_run?.Status != WorkflowRunStatus.Failed)
+            return false;
+
+        var failure = _run.Failure;
+        if (failure?.Reason != FailureReason.CheckUnrepaired || string.IsNullOrWhiteSpace(failure.CheckName))
+            return false;
+
+        var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == failure.Stage);
+        var repairTask = ResolveRequestedCheckRepairTask(stageDef, failure.CheckName);
+        if (repairTask is null)
+            return false;
+
+        _run.ScheduleCheckRepair(failure.CheckName, repairTask, failure.Message);
+        return true;
+    }
+
+    private TaskDefinition? ResolveRequestedCheckRepairTask(StageDefinition? stageDef, string checkName)
+    {
+        var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
+        if (checkDef?.OnFailure?.Retry is not { } retry) return null;
+
+        return BuildRetryTask(checkName, retry.Task);
+    }
+
+    private TaskDefinition BuildRetryTask(string checkName, TaskDefinition retryTask, CheckResult? result = null)
+    {
+        JsonElement? resultJson = result is null
+            ? null
+            : JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
+        var retryWith = retryTask.With is not null
+            ? new Dictionary<string, JsonElement?>(retryTask.With)
+            : new Dictionary<string, JsonElement?>();
+        if (resultJson is not null)
+            retryWith["failedCheckResult"] = resultJson;
+
         return new TaskDefinition(
-            $"{retry.Task.Id}:{retryCount + 1}",
-            retry.Task.Title,
-            retry.Task.Uses,
+            $"{retryTask.Id}:{_run!.GetRetryCount(checkName) + 1}",
+            retryTask.Title,
+            retryTask.Uses,
             retryWith);
     }
 
