@@ -30,6 +30,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
+    public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
@@ -201,6 +202,13 @@ public class MohistDbContext : DbContext
         {
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowStageLockRow>(entity =>
+        {
+            entity.HasKey(e => e.Key);
+            entity.Property(e => e.Key).HasMaxLength(512);
             entity.Property(e => e.StateJson).IsRequired();
         });
 

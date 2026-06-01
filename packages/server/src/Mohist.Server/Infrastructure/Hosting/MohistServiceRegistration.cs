@@ -38,6 +38,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<IssueWorkflowProfile>, IssueProfileStore>();
         services.AddScoped<IStateStore<IssueCounterState>, IssueCounterStore>();
         services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
+        services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
         services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();

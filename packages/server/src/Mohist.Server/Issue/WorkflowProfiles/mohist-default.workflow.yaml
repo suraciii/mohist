@@ -180,6 +180,9 @@ stages:
         uses: mohist/merge-ready
 
   - stage: integrate
+    lockBehavior: sequential
+    resources:
+      - project-integration
     tasks:
       - id: integrate:spec-sync
         title: Sync specs
