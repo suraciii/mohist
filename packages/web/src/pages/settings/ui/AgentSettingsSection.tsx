@@ -3,6 +3,7 @@ import { useAgentRuntime, useSetAgentRuntime } from '../../../entities/settings'
 import type { AgentRuntimeConfig } from '../../../entities/settings'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
+import { SectionState } from './SectionState'
 
 const DEFAULTS: AgentRuntimeConfig = {
   timeout: 1800000,
@@ -310,31 +311,24 @@ export function AgentSettingsSection() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <h3 className="text-sm font-medium text-foreground">Coder Agent Runtime</h3>
-        <div className="space-y-6">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="space-y-1.5">
-              <div className="h-4 w-32 bg-muted rounded animate-pulse" />
-              <div className="h-9 w-full bg-muted rounded-md animate-pulse" />
-            </div>
-          ))}
-        </div>
-      </div>
+      <SectionState
+        variant="loading"
+        title="Coder Agent Runtime"
+        description="Configure how Mohist schedules external coder agent sessions."
+        skeletonRows={6}
+      />
     )
   }
 
   if (error) {
     return (
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium text-foreground">Coder Agent Runtime</h3>
-        <div className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          Failed to load settings: {error.message}
-        </div>
-        <Button onClick={() => refetch()}>
-          Retry
-        </Button>
-      </div>
+      <SectionState
+        variant="error"
+        title="Coder Agent Runtime"
+        description="Configure how Mohist schedules external coder agent sessions."
+        message={`Failed to load settings: ${error.message}`}
+        onRetry={() => refetch()}
+      />
     )
   }
 
