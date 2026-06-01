@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Errors;
 
 namespace Mohist.Server.Workflow.Domain.Run;
 
-public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Completed, Failed }
+public enum WorkflowRunStatus { Pending, Running, AwaitingApproval, Paused, Stopped, Completed, Failed }
 
 public sealed record WorkflowRunMetadata(
     string? Name,

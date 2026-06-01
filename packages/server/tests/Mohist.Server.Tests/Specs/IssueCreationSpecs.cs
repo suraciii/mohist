@@ -234,10 +234,8 @@ public class IssueCreationSpecs
         Assert.Null(await runner.PollAsync());
 
         var events = await GetWorkflowEventsAsync(workflowRunId);
-        var abandoned = Assert.Single(events, e => e.Type == "workflow_work_abandoned");
-        Assert.Equal(runnerId, abandoned.RunnerId);
-        Assert.Equal(dispatch!.WorkId, abandoned.TaskId);
-        Assert.Equal("issue-closed", abandoned.Message);
+        var stopped = Assert.Single(events, e => e.Type == "workflow_stopped");
+        Assert.Equal("issue-closed", stopped.Message);
     }
 
     [Fact]

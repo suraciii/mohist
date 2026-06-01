@@ -6,6 +6,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
@@ -125,7 +126,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
-        await ReleaseCurrentStageLocksIfIdleAsync("paused");
         _run.Pause();
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
@@ -135,10 +135,28 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
-    public Task UnscheduleAsync(string reason)
+    public async Task StopAsync(string? reason = null)
     {
         EnsureRun();
-        return UnscheduleInternalAsync(reason);
+        var phaseBefore = _run.Status;
+
+        if (_run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
+            throw new WorkflowDomainException($"Cannot stop workflow in {_run.Status} state");
+
+        await ReleaseClaimAsync(reason ?? "stopped");
+        _run.Stop();
+
+        _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
+        EmitStageChanged("stopped", reason);
+        await SaveRunAsync();
+        await AppendWorkflowEventAsync("workflow_stopped", "stopped", reason ?? "Workflow stopped");
+        await DispatchCompletedHookIfNeededAsync(phaseBefore);
+    }
+
+    public Task ReleaseClaimAsync(string reason)
+    {
+        EnsureRun();
+        return ReleaseClaimInternalAsync(reason);
     }
 
     public async Task ApproveAsync()
@@ -235,7 +253,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
     {
         if (_run is null) return null;
-        if (_run.Status == WorkflowRunStatus.Paused) return null;
+        if (_run.Status is WorkflowRunStatus.Paused or WorkflowRunStatus.Stopped) return null;
 
         var activeLease = await ReconcileLeaseAsync(runnerId);
         if (activeLease is not null)
@@ -499,7 +517,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return;
         if (_run.Status is WorkflowRunStatus.Completed or WorkflowRunStatus.Failed)
         {
-            await UnscheduleInternalAsync($"Workflow {_run.Status.ToString().ToLowerInvariant()}");
+            await ReleaseClaimAsync($"Workflow {_run.Status.ToString().ToLowerInvariant()}");
             _log.LogInformation("Workflow {Id} released from scheduling state (status={Status})", GrainKey, _run.Status);
         }
     }
@@ -715,31 +733,34 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await _leaseStore.DeleteAsync(GrainKey);
     }
 
-    private async Task UnscheduleInternalAsync(string reason)
+    private async Task ReleaseClaimInternalAsync(string reason)
     {
-        var activeLease = await RestoreLeaseAsync();
+        // 1. Release stage lock (the workflow's held exclusive resource)
+        await ReleaseCurrentStageLocksAsync(reason);
+
+        // 2. Clear the workflow's own lease record (do NOT command the runner)
+        var lease = await RestoreLeaseAsync();
+        if (lease is not null)
+            await ClearAndDeleteLeaseAsync();
+
+        // 3. Release backlog slot
         await ReleaseBacklogAsync();
 
-        if (activeLease is null)
+        // 4. Emit observability event only when there was an in-flight claim to release.
+        //    This keeps the call idempotent: a no-op second call does not emit a duplicate.
+        if (lease is not null)
         {
-            await ClearAndDeleteLeaseAsync();
-            return;
+            await AppendWorkflowEventAsync(
+                "workflow_claim_released",
+                "released",
+                reason,
+                RunnerId: lease.RunnerId,
+                Payload: new
+                {
+                    Stage = _run?.CurrentStageId,
+                    Resource = GetSequentialLockResource(_run?.CurrentStageId ?? ""),
+                });
         }
-
-        if (!string.IsNullOrWhiteSpace(activeLease.RunnerId))
-        {
-            var runner = GrainFactory.GetGrain<IRunnerGrain>(activeLease.RunnerId);
-            await runner.ReleaseAsync(GrainKey);
-        }
-
-        await ClearAndDeleteLeaseAsync();
-        await AppendWorkflowEventAsync(
-            "workflow_work_abandoned",
-            "abandoned",
-            reason,
-            TaskId: activeLease.LogicalId,
-            RunnerId: activeLease.RunnerId,
-            Payload: new { activeLease.WorkId, activeLease.WorkType });
     }
 
     private async Task ReleaseBacklogAsync()

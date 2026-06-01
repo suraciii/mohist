@@ -5,7 +5,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ArrowLeftIcon, PencilIcon } from 'lucide-react'
 import { IssueStatus, IssueHealth, WorkflowStage, type RecoveryProjection } from '../../../entities/issue'
-import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue } from '../../../entities/issue'
+import { addComment, addPrerequisite, closeIssue, deleteComment, forceStopIssue, removePrerequisite, reopenIssue, rerunIssue, resumeIssue, retryIssue, startIssue, stopIssue } from '../../../entities/issue'
 import { useIssue, useIssueDiff, useIssueCommits, useWorkflowTimeline, useWorkflowYaml } from '../../../entities/issue'
 import { useAgentStatus } from '../../../entities/agent'
 import { EditIssueDialog } from '../../../features/edit-issue'
@@ -286,6 +286,38 @@ export function IssueDetailPage() {
       setForceStopConfirming(false)
     },
   })
+
+  const [stopConfirming, setStopConfirming] = useState(false)
+  const stopPanelRef = useRef<HTMLDivElement>(null)
+  const stopMutation = useMutation({
+    mutationFn: () => stopIssue(issueNumber, projectId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+      queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+      setStopConfirming(false)
+    },
+  })
+
+  useEffect(() => {
+    if (!stopConfirming) return
+    const timer = setTimeout(() => setStopConfirming(false), 5000)
+    const handler = (e: MouseEvent) => {
+      if (stopPanelRef.current && !stopPanelRef.current.contains(e.target as Node)) {
+        setStopConfirming(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handler)
+    }
+  }, [stopConfirming])
+
+  const canStopWorkflow = !!issue?.workflowRunId
+    && issue.health !== IssueHealth.Done
+    && issue.status !== IssueStatus.Done
+    && issue.status !== IssueStatus.Cancelled
+    && issue.health !== IssueHealth.Paused
 
   const reopenMutation = useMutation({
     mutationFn: () => reopenIssue(issueNumber, projectId),
@@ -960,6 +992,36 @@ export function IssueDetailPage() {
                               >
                                 {rerunMutation.isPending ? 'Rerunning...' : 'Rerun Stage'}
                               </Button>
+                            )}
+                            {canStopWorkflow && (
+                              <div ref={stopPanelRef} className="rounded-md border border-red-200 bg-red-50 p-3 space-y-2">
+                                <div className="text-xs text-red-700">
+                                  Stop is terminal: the workflow run will be permanently stopped and cannot be resumed. The issue itself is not closed.
+                                </div>
+                                <Button
+                                  onClick={() => {
+                                    if (stopConfirming) {
+                                      stopMutation.mutate()
+                                    } else {
+                                      setStopConfirming(true)
+                                    }
+                                  }}
+                                  disabled={stopMutation.isPending}
+                                  variant={stopConfirming ? 'destructive' : 'outline'}
+                                  className="w-full border-red-300 text-red-600 hover:bg-red-50"
+                                >
+                                  {stopMutation.isPending
+                                    ? 'Stopping...'
+                                    : stopConfirming
+                                      ? 'Confirm Stop'
+                                      : 'Stop Workflow'}
+                                </Button>
+                                {stopMutation.error && (
+                                  <div className="text-xs text-red-600">
+                                    {stopMutation.error.message}
+                                  </div>
+                                )}
+                              </div>
                             )}
                             {canInspect && recovery?.currentWorkItem && (
                               <div className="text-xs text-muted-foreground">

@@ -99,7 +99,7 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
             }
 
             var workflow = _grains.GetGrain<IWorkflowGrain>(workflowId);
-            await workflow.UnscheduleAsync($"Startup recovery removed stale workflow scheduling state ({state.Status ?? "missing"})");
+            await workflow.ReleaseClaimAsync($"Startup recovery removed stale workflow scheduling state ({state.Status ?? "missing"})");
         }
 
         foreach (var state in workflowStates.Values)
@@ -122,14 +122,14 @@ public sealed class WorkflowBacklogRecoveryService : IHostedService
                 if (recoveredLease is null || string.IsNullOrWhiteSpace(recoveredLease.RunnerId))
                 {
                     var workflow = _grains.GetGrain<IWorkflowGrain>(state.WorkflowRunId);
-                    await workflow.UnscheduleAsync("Startup recovery removed stale workflow lease without runner ownership");
+                    await workflow.ReleaseClaimAsync("Startup recovery removed stale workflow lease without runner ownership");
                     continue;
                 }
 
                 if (!state.MatchesLeaseBackedDispatchableWork(recoveredLease))
                 {
                     var workflowGrain = _grains.GetGrain<IWorkflowGrain>(state.WorkflowRunId);
-                    await workflowGrain.UnscheduleAsync("Startup recovery removed stale running workflow claim after persisted state showed no dispatchable work");
+                    await workflowGrain.ReleaseClaimAsync("Startup recovery removed stale running workflow claim after persisted state showed no dispatchable work");
                     continue;
                 }
 

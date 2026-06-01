@@ -148,6 +148,10 @@ export function forceStopIssue(number: number, projectId?: string | null) {
   return request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/force-stop`, withProject({ method: 'POST' }, projectId))
 }
 
+export function stopIssue(number: number, projectId?: string | null) {
+  return request<{ ok: boolean; issueNumber: number }>(`/issues/${number}/stop`, withProject({ method: 'POST' }, projectId))
+}
+
 export function getWorktreeStatus(number: number, projectId?: string | null) {
   return request<{
     exists: boolean

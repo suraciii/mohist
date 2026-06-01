@@ -171,14 +171,14 @@ public class RunnerGrain : Grain, IRunnerGrain
                 }
 
                 var status = await workflow.GetRunStatusAsync();
-                if (status is "Completed" or "Failed" or "Paused")
+                if (status is "Completed" or "Failed" or "Paused" or "Stopped")
                 {
+                    _assignedWorkflows.Remove(claimedId);
                     _log.LogWarning(
-                        "Runner {Id} repairing stale workflow claim {WorkflowId}: backlog claim produced no runnable work (status={Status})",
+                        "Runner {Id} releasing stale workflow claim {WorkflowId}: workflow is {Status} and produced no runnable work",
                         RunnerId,
                         claimedId,
                         status);
-                    await workflow.UnscheduleAsync($"Runner {RunnerId} repaired stale workflow claim after poll returned no work");
                 }
                 else
                 {

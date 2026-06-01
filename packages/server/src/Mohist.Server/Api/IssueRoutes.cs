@@ -5,6 +5,7 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
+using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Projection;
@@ -449,6 +450,8 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
+        // Force-stop is implemented as workflow pause. The user can resume afterwards.
+        // For terminal disposal, use /close (issue close -> workflow Stopped) or /stop.
         issues.MapPost("/{number:int}/force-stop", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
@@ -456,6 +459,24 @@ public static class IssueRoutes
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("user-force-stop");
             return ApiResults.Ok();
+        });
+
+        // Stop is a terminal pause: the workflow run is permanently stopped (cannot be resumed).
+        // The issue itself is NOT closed; the user can re-open or close it separately.
+        issues.MapPost("/{number:int}/stop", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            if (wrId is null) return ApiResults.NotFound("No workflow run");
+            try
+            {
+                await grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("user-stop");
+                return ApiResults.Ok();
+            }
+            catch (WorkflowDomainException ex)
+            {
+                return ApiResults.Conflict(ex.Message);
+            }
         });
 
         // Stage-level variable overrides
