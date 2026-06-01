@@ -10,7 +10,15 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task StartAsync(WorkflowDefinition? definition = null, WorkflowStartInput? input = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
-    Task UnscheduleAsync(string reason);
+    Task StopAsync(string? reason = null);
+
+    /// <summary>
+    /// Releases the workflow's in-flight claim: stage lock, lease record, and backlog slot.
+    /// Does NOT change workflow status, does NOT command the runner. The runner manages its own state.
+    /// Used for stale claim recovery and terminal workflow cleanup.
+    /// </summary>
+    Task ReleaseClaimAsync(string reason);
+
     Task ApproveAsync();
     Task RejectAsync(string? reason = null);
     Task RetryAsync();

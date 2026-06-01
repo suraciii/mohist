@@ -77,5 +77,12 @@ public static partial class WorkflowRunExtensions
 
             run.Status = WorkflowRunStatus.Running;
         }
+
+        public void Stop()
+        {
+            if (run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
+                throw new WorkflowDomainException($"WorkflowRun is {run.Status}, stop requires Running or Paused");
+            run.Status = WorkflowRunStatus.Stopped;
+        }
     }
 }

@@ -1,4 +1,6 @@
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Errors;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -60,5 +62,79 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 
         var runner2 = Grains.GetGrain<IRunnerGrain>(r3);
         Assert.True(await runner2.IsAvailableAsync());
+    }
+
+    [Fact]
+    public async Task StoppedWorkflow_Resume_ThrowsDomainException()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        await workflow.StopAsync("user-stop");
+
+        await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.ResumeAsync());
+    }
+
+    [Fact]
+    public async Task StoppedWorkflow_HasTerminalStatus()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        var statusBefore = await workflow.GetRunStatusAsync();
+        Assert.Equal("Running", statusBefore);
+
+        await workflow.StopAsync("user-stop");
+
+        var statusAfter = await workflow.GetRunStatusAsync();
+        Assert.Equal("Stopped", statusAfter);
+    }
+
+    [Fact]
+    public async Task StoppedWorkflow_Resumes_DoesNotReturnNewWork()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+        var (task1, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task1.WorkId, "completed");
+
+        await workflow.StopAsync("user-stop");
+
+        var runner = Grains.GetGrain<IRunnerGrain>(r1);
+        Assert.Null(await runner.PollAsync());
+    }
+
+    [Fact]
+    public async Task StoppedWorkflow_ReleasesLease()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+        var (_, r1) = await PollWorkAnyAsync();
+
+        await workflow.StopAsync("user-stop");
+
+        Assert.Null(await workflow.GetAssignedWorkIdAsync());
+    }
+
+    [Fact]
+    public async Task StoppedWorkflow_CannotBeStoppedAgain()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+
+        await workflow.StopAsync("first");
+
+        await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.StopAsync("second"));
+    }
+
+    [Fact]
+    public async Task CompletedWorkflow_CannotBeStopped()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage());
+        var (task1, r1) = await PollWorkAnyAsync();
+        await ReportAsync(r1, task1.WorkId, "completed");
+
+        var (check, r2) = await PollWorkAnyAsync();
+        await ReportChecksPassAsync(r2, check, "check-1");
+
+        var status = await workflow.GetRunStatusAsync();
+        Assert.Equal("Completed", status);
+
+        await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.StopAsync("after-completion"));
     }
 }

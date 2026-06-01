@@ -503,18 +503,16 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.Equal(runnerId, Assert.Single(before!.Running).Value);
         Assert.NotNull(await LoadLeaseJsonAsync(_workflowId!));
 
-        await workflow.UnscheduleAsync("stale ownership repaired");
-        await workflow.UnscheduleAsync("stale ownership repaired");
+        await workflow.ReleaseClaimAsync("stale ownership repaired");
+        await workflow.ReleaseClaimAsync("stale ownership repaired");
 
         var after = await LoadBacklogStateAsync("test-project");
         Assert.True(after is null || (after.Waiting.Count == 0 && after.Running.Count == 0 && after.All.Count == 0));
         Assert.Null(await LoadLeaseJsonAsync(_workflowId!));
 
         var events = (await EventStore.ListWorkflowEventsAsync(_workflowId!)).ToList();
-        var abandoned = events.Single(e => e.Type == "workflow_work_abandoned");
-        Assert.Equal(runnerId, abandoned.RunnerId);
-        Assert.Equal(work.WorkId, abandoned.TaskId);
-        Assert.Equal("stale ownership repaired", abandoned.Message);
+        var released = events.Single(e => e.Type == "workflow_claim_released");
+        Assert.Equal("stale ownership repaired", released.Message);
 
         Assert.Null(await backlog.ClaimAsync($"probe-{Guid.NewGuid():N}"));
 
@@ -538,7 +536,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.NotNull(await staleWorkflow.GetWorkAsync(runnerId));
         var staleLease = await LoadLeaseJsonAsync(staleWorkflowId);
         Assert.NotNull(staleLease);
-        await staleWorkflow.UnscheduleAsync("hold");
+        await staleWorkflow.ReleaseClaimAsync("hold");
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());
@@ -548,9 +546,8 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.Null(await LoadLeaseJsonAsync(staleWorkflowId));
 
         var events = (await EventStore.ListWorkflowEventsAsync(staleWorkflowId)).ToList();
-        var abandoned = events.Single(e => e.Type == "workflow_work_abandoned");
-        Assert.Equal(runnerId, abandoned.RunnerId);
-        Assert.Equal("hold", abandoned.Message);
+        var released = events.Single(e => e.Type == "workflow_claim_released");
+        Assert.Equal("hold", released.Message);
 
         var activeWorkflow = await CreateWorkflowAsync(activeWorkflowId);
         _workflowId = activeWorkflowId;
