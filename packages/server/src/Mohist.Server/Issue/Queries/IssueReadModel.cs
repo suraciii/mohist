@@ -28,7 +28,7 @@ public class IssueReadModel
     [JsonPropertyName("approvalState")]
     public StageApproval? StageApproval { get; set; }
     public string? BlockedReason { get; set; }
-    public IssueAttention? Attention { get; set; }
+    public WorkflowAttention? Attention { get; set; }
     public string? WorkflowRunId { get; set; }
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }

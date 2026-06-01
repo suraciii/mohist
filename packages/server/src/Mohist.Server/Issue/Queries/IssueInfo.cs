@@ -31,7 +31,7 @@ public class IssueInfo
     public int[] PrerequisiteNumbers { get; set; } = [];
     public string WorkflowProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
     public string? WorkflowProfileMode { get; set; }
-    public IssueAttention? Attention { get; set; }
+    public WorkflowAttention? Attention { get; set; }
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }
     public RepositoryInfo? Repository { get; set; }
@@ -53,8 +53,8 @@ public class IssuePrerequisiteSummary
         Number = issue.Number,
         Title = issue.Title,
         Completed = issue.Status == IssueStatus.Done,
-        Stage = IssueDomainNames.StatusName(issue.Status),
-        Status = IssueDomainNames.Health(issue.Status, issue.Attention),
+        Stage = MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
+        Status = MohistDefaultWorkflowProjection.Health(issue.Status),
     };
 
     public static IssuePrerequisiteSummary FromReadModel(IssueReadModel issue) => new()
