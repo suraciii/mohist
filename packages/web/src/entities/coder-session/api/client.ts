@@ -9,6 +9,10 @@ export function getCoderSessionDetail(number: number, sessionId: string, project
   return request<CoderSessionDetail>(`/issues/${number}/coder-sessions/${sessionId}`, withProject(undefined, projectId))
 }
 
+export function getWorkflowSessionDetail(number: number, sessionName: string, projectId?: string | null) {
+  return request<CoderSessionDetail>(`/issues/${number}/workflow/sessions/${encodeURIComponent(sessionName)}`, withProject(undefined, projectId))
+}
+
 export function getWorkflowLogs(number: number, projectId?: string | null) {
   return request<WorkflowLogItem[]>(`/issues/${number}/logs`, withProject(undefined, projectId))
 }

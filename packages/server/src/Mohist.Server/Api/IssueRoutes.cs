@@ -358,6 +358,14 @@ public static class IssueRoutes
             return detail is null ? ApiResults.NotFound($"Coder session {sessionId} not found") : ApiResults.Ok(detail);
         });
 
+        issues.MapGet("/{number:int}/workflow/sessions/{sessionName}", async (int number, string sessionName, string projectId, WorkflowAgentSessionQueryService sessions) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var detail = await sessions.GetCurrentWorkflowTranscriptAsync(pid, number, sessionName);
+            return detail is null ? ApiResults.NotFound($"Workflow session {sessionName} not found") : ApiResults.Ok(detail);
+        });
+
         issues.MapPost("/{number:int}/resume", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;

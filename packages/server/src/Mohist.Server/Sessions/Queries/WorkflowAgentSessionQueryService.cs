@@ -4,6 +4,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Storage;
 
@@ -91,8 +92,35 @@ public class WorkflowAgentSessionQueryService
             .FirstOrDefaultAsync(s => s.Id == sessionId && s.ProjectId == projectId && s.IssueNumber == issueNumber, ct);
         if (session is null) return null;
 
+        return await BuildTranscriptAsync(db, session, ct);
+    }
+
+    public async Task<WorkflowAgentSessionTranscript?> GetCurrentWorkflowTranscriptAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var issue = await db.IssueStates.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Key == $"{projectId}:{issueNumber}", ct);
+        var workflowRunId = issue is null
+            ? null
+            : IssueSnapshot.DeserializeIssue(issue.StateJson)?.WorkflowRunId;
+        if (workflowRunId is null) return null;
+
+        var session = await db.WorkflowAgentSessions.AsNoTracking()
+            .FirstOrDefaultAsync(s =>
+                s.ProjectId == projectId
+                && s.IssueNumber == issueNumber
+                && s.WorkflowRunId == workflowRunId
+                && s.SessionName == sessionName,
+                ct);
+        if (session is null) return null;
+
+        return await BuildTranscriptAsync(db, session, ct);
+    }
+
+    private static async Task<WorkflowAgentSessionTranscript> BuildTranscriptAsync(MohistDbContext db, WorkflowAgentSessionRow session, CancellationToken ct)
+    {
         var events = await db.WorkflowAgentSessionEvents.AsNoTracking()
-            .Where(e => e.SessionId == sessionId)
+            .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync(ct);
 
@@ -119,8 +147,9 @@ public class WorkflowAgentSessionQueryService
         var metadata = new
         {
             sessionId = session.Id,
+            sessionName = session.SessionName,
             coderSessionId = session.Id,
-            issueId = issueNumber.ToString(),
+            issueId = session.IssueNumber.ToString(),
             acpSessionId = session.AgentSessionId ?? session.Id,
             executionId = session.WorkId,
             title = session.Title,
@@ -142,6 +171,7 @@ public class WorkflowAgentSessionQueryService
 
         return new WorkflowAgentSessionTranscript(
             session.Id,
+            session.SessionName,
             session.AgentSessionId ?? session.Id,
             session.WorkId,
             session.Title,
@@ -327,7 +357,7 @@ public class WorkflowAgentSessionQueryService
         s.CompletedAt?.ToString("o"), s.FailureReason, s.ExitCode);
 
     private static WorkflowAgentSessionSummaryDto ToSummaryDto(WorkflowAgentSessionRow s) => new(
-        s.Id, s.AgentSessionId ?? s.Id, s.WorkId, s.Title,
+        s.Id, s.SessionName, s.AgentSessionId ?? s.Id, s.WorkId, s.Title,
         s.Status, s.CreatedAt.ToString("o"), s.CompletedAt?.ToString("o"),
         s.Model, null, s.Stage, s.Title,
         s.LastDataAt?.ToString("o"), null, null, s.FailureReason);

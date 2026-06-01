@@ -31,6 +31,7 @@ public sealed record WorkflowAgentSessionEventDto(string Id, string SessionId, s
 
 public sealed record WorkflowAgentSessionSummaryDto(
     string Id,
+    string SessionName,
     [property: JsonPropertyName("acpSessionId")] string AgentRuntimeSessionId,
     [property: JsonPropertyName("executionId")] string? WorkId,
     [property: JsonPropertyName("taskDescription")] string? TaskTitle,
@@ -48,6 +49,7 @@ public sealed record WorkflowAgentSessionSummaryDto(
 
 public sealed record WorkflowAgentSessionTranscript(
     string Id,
+    string SessionName,
     [property: JsonPropertyName("acpSessionId")] string AgentRuntimeSessionId,
     [property: JsonPropertyName("executionId")] string? WorkId,
     [property: JsonPropertyName("taskDescription")] string? TaskTitle,

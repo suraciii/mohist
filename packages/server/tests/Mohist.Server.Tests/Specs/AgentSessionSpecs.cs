@@ -7,6 +7,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -47,7 +48,7 @@ public class AgentSessionSpecs
         });
 
         var sessions = await _client.GetDataAsync<WorkflowAgentSessionSummaryDto[]>($"/api/issues/{issue.Number}/coder-sessions?projectId={project.Id}");
-        Assert.Contains(sessions, s => s.Id == session.Id && s.Status == "completed");
+        Assert.Contains(sessions, s => s.Id == session.Id && s.SessionName == session.SessionName && s.Status == "completed");
 
         var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/coder-sessions/{session.Id}?projectId={project.Id}");
         Assert.Equal(session.Id, detail.Id);
@@ -65,6 +66,28 @@ public class AgentSessionSpecs
         Assert.Equal("text", card.LastActivity?.Kind);
         Assert.Equal(1, activity.Summary.Completed);
         Assert.Equal(0, activity.Summary.Active);
+    }
+
+    [Fact]
+    public async Task IssueWorkflowSessionApi_UsesCurrentWorkflowRunAndSessionName()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("current-workflow", sessionName: "plan");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        await issueGrain.StartWorkAsync();
+        await PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "old workflow transcript");
+
+        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
+        var currentSessionId = GrainKey.WorkflowAgentSession(project.Id, currentWorkflowRunId, "plan");
+        var currentSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(currentSessionId)
+            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Current plan"));
+        await PostEventEntriesAsync(project.Id, currentSession.WorkflowRunId, currentSession.SessionName, "current workflow transcript");
+
+        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/workflow/sessions/plan?projectId={project.Id}");
+
+        Assert.Equal(currentSession.Id, detail.Id);
+        Assert.Equal("plan", detail.SessionName);
+        Assert.Contains("current workflow transcript", JsonSerializer.Serialize(detail.Turns));
+        Assert.DoesNotContain("old workflow transcript", JsonSerializer.Serialize(detail.Turns));
     }
 
     [Fact]
@@ -408,8 +431,8 @@ public class AgentSessionSpecs
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(int Number, string Title);
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
-    private sealed record WorkflowAgentSessionSummaryDto(string Id, string Status);
-    private sealed record WorkflowAgentSessionTranscript(string Id, JsonElement Turns);
+    private sealed record WorkflowAgentSessionSummaryDto(string Id, string SessionName, string Status);
+    private sealed record WorkflowAgentSessionTranscript(string Id, string SessionName, JsonElement Turns);
     private sealed record WorkflowAgentSessionInfoDto(string SessionId, string IssueTitle, string Status, string? AgentSessionId, string? FailureReason);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);

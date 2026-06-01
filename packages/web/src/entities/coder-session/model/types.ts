@@ -16,6 +16,7 @@ export interface FileChangeSummary {
 
 export interface CoderSessionSummary {
   id: string
+  sessionName?: string | null
   acpSessionId: string
   executionId: string | null
   taskDescription: string | null
@@ -54,6 +55,7 @@ export interface PromptSummary {
 
 export interface SessionMetadata {
   sessionId: string
+  sessionName?: string | null
   coderSessionId: string
   issueId: string
   acpSessionId: string
