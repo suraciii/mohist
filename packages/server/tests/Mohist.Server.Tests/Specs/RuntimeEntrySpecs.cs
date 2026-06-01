@@ -29,9 +29,11 @@ public class RuntimeEntrySpecs
     {
         var root = await _fixture.Client.GetStringAsync("/");
         var route = await _fixture.Client.GetStringAsync("/issues/1");
+        var workflowSession = await _fixture.Client.GetStringAsync("/issues/1/workflow/sessions/plan");
 
         Assert.Contains("Mohist Test Web", root);
         Assert.Contains("Mohist Test Web", route);
+        Assert.Contains("Mohist Test Web", workflowSession);
     }
 
     [Fact]

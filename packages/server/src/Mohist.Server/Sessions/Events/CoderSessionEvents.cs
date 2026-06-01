@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure.Events;
 
@@ -21,6 +22,25 @@ public sealed record CoderTranscriptEntryEvent(
     [property: JsonPropertyName("acpSessionId")] string AcpSessionId,
     [property: JsonPropertyName("coderSessionId")] string CoderSessionId,
     [property: JsonPropertyName("text")] string? Text) : IProjectScoped;
+
+public sealed record CoderToolCallEvent(
+    [property: JsonPropertyName("issueId")] string IssueId,
+    [property: JsonPropertyName("projectId")] string? ProjectId,
+    [property: JsonPropertyName("executionId")] string? ExecutionId,
+    [property: JsonPropertyName("acpSessionId")] string AcpSessionId,
+    [property: JsonPropertyName("coderSessionId")] string CoderSessionId,
+    [property: JsonPropertyName("toolName")] string ToolName,
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("toolCallId")] string ToolCallId,
+    [property: JsonPropertyName("title")] string? Title,
+    [property: JsonPropertyName("rawInput")] JsonElement? RawInput,
+    [property: JsonPropertyName("rawOutput")] JsonElement? RawOutput,
+    [property: JsonPropertyName("metadata")] JsonElement? Metadata,
+    [property: JsonPropertyName("details")] JsonElement? Details,
+    [property: JsonPropertyName("normalizedName")] string? NormalizedName,
+    [property: JsonPropertyName("displayTitle")] string? DisplayTitle,
+    [property: JsonPropertyName("displaySubtitle")] string? DisplaySubtitle,
+    [property: JsonPropertyName("category")] string? Category) : IProjectScoped;
 
 public sealed record CoderSessionStatusChangedEvent(
     [property: JsonPropertyName("issueId")] string IssueId,

@@ -23,6 +23,7 @@ public static class MohistWebRegistration
         });
 
         app.MapGet("/issue/{number:int}/session/{**sessionId}", async context => await SendIndexAsync(context, webRoot));
+        app.MapGet("/issues/{number:int}/workflow/sessions/{**sessionName}", async context => await SendIndexAsync(context, webRoot));
 
         app.MapFallback(async context =>
         {
