@@ -81,6 +81,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("tasks.json", JsonSerializer.Serialize(loadTask.With));
 
         var merge = definition.Stages[3].Tasks.Single(t => t.Id == "integrate:merge");
+        Assert.Equal("sequential", definition.Stages[3].LockBehavior);
+        Assert.Equal(["project-integration"], definition.Stages[3].Resources);
         Assert.Equal("mohist/merge", merge.Uses);
         Assert.Contains("mo/issue-${{ issue.number }}", JsonSerializer.Serialize(merge.With));
     }

@@ -22,6 +22,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private WorkLease? _lease;
     private WorkflowExecutionContext? _variables;
     private string? _lastRunnerId;
+    private readonly HashSet<string> _announcedWaitingLocks = [];
+    private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IStateStore<WorkflowRunProfile> _profileStore;
     private readonly IWorkflowRunStore _runStore;
     private readonly IStateStore<WorkLease> _leaseStore;
@@ -123,6 +125,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
+        await ReleaseCurrentStageLocksIfIdleAsync("paused");
         _run.Pause();
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
@@ -163,6 +166,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
+        await ReleaseCurrentStageLocksAsync("retried");
         await ClearAndDeleteLeaseAsync();
         _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
@@ -176,6 +180,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         EnsureRun();
         var phaseBefore = _run.Status;
+        await ReleaseCurrentStageLocksAsync("rerun");
         await ClearAndDeleteLeaseAsync();
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
@@ -250,6 +255,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var work = _run.NextWork();
         if (work is null) return null;
+
+        if (!await AcquireStageLocksIfNeededAsync(work.Stage))
+            return null;
 
         var dispatch = PrepareWork(work, runnerId);
         if (dispatch is not null)
@@ -386,6 +394,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         await SaveRunAsync();
         await AppendTerminalEventIfNeededAsync();
+        await ReleaseStageLocksIfDoneAsync(lease.Stage);
         await ReleaseFromBacklogIfTerminalAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
@@ -408,6 +417,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await ClearAndDeleteLeaseAsync();
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_work_abandoned", "abandoned", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
+        await ReleaseStageLocksAsync(lease.Stage, "abandoned");
         await RegisterToBacklogIfRunnableAsync();
     }
 
@@ -477,6 +487,96 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             await backlog.ReleaseAsync(GrainKey);
             _log.LogInformation("Workflow {Id} released from backlog (status={Status})", GrainKey, _run.Status);
         }
+    }
+
+    private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
+    {
+        var resource = GetSequentialLockResource(stage);
+        if (resource is null) return true;
+
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new InvalidOperationException($"Workflow '{GrainKey}' stage '{stage}' requires resource '{resource}' but project id is missing");
+
+        var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
+        var lockGrain = GrainFactory.GetGrain<IWorkflowStageLockGrain>(key);
+        var result = await lockGrain.AcquireSequentialAsync(new StageLockRequest(GrainKey, stage, resource, projectId));
+        var eventKey = $"{stage}:{resource}";
+
+        if (!result.Acquired)
+        {
+            if (_announcedWaitingLocks.Add(eventKey))
+                await AppendWorkflowEventAsync(
+                    "workflow_stage_lock_waiting",
+                    "waiting",
+                    $"Waiting for {resource} lock",
+                    Payload: new { resource, projectId, result.OwnerWorkflowRunId, result.WaitingCount });
+            return false;
+        }
+
+        _announcedWaitingLocks.Remove(eventKey);
+        if (_announcedAcquiredLocks.Add(eventKey))
+            await AppendWorkflowEventAsync(
+                "workflow_stage_lock_acquired",
+                "acquired",
+                $"Acquired {resource} lock",
+                Payload: new { resource, projectId, result.WaitingCount });
+
+        return true;
+    }
+
+    private async Task ReleaseStageLocksIfDoneAsync(string stage)
+    {
+        if (_run is null) return;
+        var current = _run.Stages.FirstOrDefault(s => s.Id == stage);
+        if (current is null) return;
+        if (current.Status is not (StageRunStatus.Completed or StageRunStatus.Failed)) return;
+        await ReleaseStageLocksAsync(stage, current.Status.ToString().ToLowerInvariant());
+    }
+
+    private async Task ReleaseCurrentStageLocksAsync(string reason)
+    {
+        if (_run?.CurrentStageId is null) return;
+        await ReleaseStageLocksAsync(_run.CurrentStageId, reason);
+    }
+
+    private async Task ReleaseCurrentStageLocksIfIdleAsync(string reason)
+    {
+        if (_lease is not null) return;
+        await ReleaseCurrentStageLocksAsync(reason);
+    }
+
+    private async Task ReleaseStageLocksAsync(string stage, string reason)
+    {
+        var resource = GetSequentialLockResource(stage);
+        if (resource is null) return;
+
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+
+        var key = WorkflowStageLockKeys.ForProjectResource(projectId, resource);
+        var lockGrain = GrainFactory.GetGrain<IWorkflowStageLockGrain>(key);
+        var result = await lockGrain.ReleaseAsync(new StageLockOwner(GrainKey, stage));
+        var eventKey = $"{stage}:{resource}";
+        _announcedWaitingLocks.Remove(eventKey);
+        _announcedAcquiredLocks.Remove(eventKey);
+
+        if (!result.Released) return;
+
+        await AppendWorkflowEventAsync(
+            "workflow_stage_lock_released",
+            "released",
+            $"Released {resource} lock",
+            Payload: new { resource, projectId, reason, result.NextWorkflowRunId, result.WaitingCount });
+    }
+
+    private string? GetSequentialLockResource(string stage)
+    {
+        var stageDef = _profile?.Definition.Stages.Find(s => s.Stage == stage);
+        if (stageDef?.LockBehavior is null) return null;
+        if (!string.Equals(stageDef.LockBehavior, "sequential", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return stageDef.Resources?.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
     }
 
     private async Task RegisterToBacklogAsync()

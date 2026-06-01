@@ -41,13 +41,15 @@ public struct StageDefinitionSurrogate
     [Id(4)] public bool RequiresApproval;
     [Id(5)] public Dictionary<string, JsonElement?>? Variables;
     [Id(6)] public Dictionary<string, StageEventPolicy>? On;
+    [Id(7)] public string? LockBehavior;
+    [Id(8)] public List<string>? Resources;
 }
 
 [RegisterConverter]
 public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefinition, StageDefinitionSurrogate>
 {
     public StageDefinition ConvertFromSurrogate(in StageDefinitionSurrogate surrogate) =>
-        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.RequiresApproval, surrogate.Variables, surrogate.On);
+        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.RequiresApproval, surrogate.Variables, surrogate.On, surrogate.LockBehavior, surrogate.Resources);
 
     public StageDefinitionSurrogate ConvertToSurrogate(in StageDefinition value) => new()
     {
@@ -57,6 +59,8 @@ public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefiniti
         RequiresApproval = value.RequiresApproval,
         Variables = value.Variables,
         On = value.On,
+        LockBehavior = value.LockBehavior,
+        Resources = value.Resources,
     };
 }
 

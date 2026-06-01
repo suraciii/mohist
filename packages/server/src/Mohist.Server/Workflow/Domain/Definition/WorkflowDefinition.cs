@@ -36,7 +36,9 @@ public sealed record StageDefinition(
     List<CheckDefinition> Checks,
     bool RequiresApproval = false,
     Dictionary<string, JsonElement?>? Variables = null,
-    Dictionary<string, StageEventPolicy>? On = null);
+    Dictionary<string, StageEventPolicy>? On = null,
+    string? LockBehavior = null,
+    List<string>? Resources = null);
 
 public sealed record WorkflowDefinition(
     string Id,
@@ -45,5 +47,4 @@ public sealed record WorkflowDefinition(
     Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, JsonElement?>? Defaults = null,
     Dictionary<string, string>? Artifacts = null);
-
 

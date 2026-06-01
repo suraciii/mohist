@@ -559,6 +559,21 @@ namespace Mohist.Server.Migrations
                     b.ToTable("workflow_runs");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowStageLockRow", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StateJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("WorkflowStageLocks");
+                });
+
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowVariablesRow", b =>
                 {
                     b.Property<string>("WorkflowRunId")

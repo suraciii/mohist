@@ -24,6 +24,7 @@ public class BacklogFixture : IAsyncLifetime
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, InMemoryStateStore<WorkflowStageLockState>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
@@ -76,6 +77,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         builder.ConfigureSilo((_, siloBuilder) =>
         {
             siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, InMemoryStateStore<WorkflowStageLockState>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
