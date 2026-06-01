@@ -21,8 +21,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var resource = $"project-integration-{suffix}";
         var workflow1Id = $"wf-stage-lock-1-{suffix}";
         var workflow2Id = $"wf-stage-lock-2-{suffix}";
-        var runner1Id = await RegisterRunnerAsync($"stage-lock-runner-1-{suffix}");
-        var runner2Id = await RegisterRunnerAsync($"stage-lock-runner-2-{suffix}");
+        var runner1Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-runner-1-{suffix}");
+        var runner2Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-runner-2-{suffix}");
         var runner1 = Grains.GetGrain<IRunnerGrain>(runner1Id);
         var runner2 = Grains.GetGrain<IRunnerGrain>(runner2Id);
 
@@ -103,8 +103,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var resource = $"project-integration-fail-{suffix}";
         var workflow1Id = $"wf-stage-lock-fail-1-{suffix}";
         var workflow2Id = $"wf-stage-lock-fail-2-{suffix}";
-        var runner1Id = await RegisterRunnerAsync($"stage-lock-fail-runner-1-{suffix}");
-        var runner2Id = await RegisterRunnerAsync($"stage-lock-fail-runner-2-{suffix}");
+        var runner1Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-fail-runner-1-{suffix}");
+        var runner2Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-fail-runner-2-{suffix}");
         var runner1 = Grains.GetGrain<IRunnerGrain>(runner1Id);
         var runner2 = Grains.GetGrain<IRunnerGrain>(runner2Id);
 
@@ -147,8 +147,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var resource = $"project-integration-abandon-{suffix}";
         var workflow1Id = $"wf-stage-lock-abandon-1-{suffix}";
         var workflow2Id = $"wf-stage-lock-abandon-2-{suffix}";
-        var runner1Id = await RegisterRunnerAsync($"stage-lock-abandon-runner-1-{suffix}");
-        var runner2Id = await RegisterRunnerAsync($"stage-lock-abandon-runner-2-{suffix}");
+        var runner1Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-abandon-runner-1-{suffix}");
+        var runner2Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-abandon-runner-2-{suffix}");
         var runner1 = Grains.GetGrain<IRunnerGrain>(runner1Id);
         var runner2 = Grains.GetGrain<IRunnerGrain>(runner2Id);
 

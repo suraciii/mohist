@@ -229,7 +229,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return null;
         if (_run.Status == WorkflowRunStatus.Paused) return null;
 
-        var activeLease = await ReconcileLeaseAsync();
+        var activeLease = await ReconcileLeaseAsync(runnerId);
         if (activeLease is not null)
         {
             if (!string.Equals(activeLease.RunnerId, runnerId, StringComparison.Ordinal))
@@ -268,12 +268,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return dispatch;
     }
 
-    private async Task<WorkLease?> ReconcileLeaseAsync()
+    private async Task<WorkLease?> ReconcileLeaseAsync(string pollingRunnerId)
     {
         var activeLease = await RestoreLeaseAsync();
         if (activeLease is null) return null;
 
         if (string.IsNullOrWhiteSpace(activeLease.RunnerId) || string.IsNullOrWhiteSpace(activeLease.WorkId))
+            return activeLease;
+
+        if (string.Equals(activeLease.RunnerId, pollingRunnerId, StringComparison.Ordinal))
             return activeLease;
 
         var projectId = GetProjectId();

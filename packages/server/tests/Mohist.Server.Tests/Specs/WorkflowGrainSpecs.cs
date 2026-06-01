@@ -121,9 +121,14 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
+        return await RegisterRunnerForProjectAsync("test-project", runnerId, maxWorkflowSlots);
+    }
+
+    protected async Task<string> RegisterRunnerForProjectAsync(string projectId, string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
+    {
         runnerId ??= $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project", MaxWorkflowSlots: maxWorkflowSlots));
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, MaxWorkflowSlots: maxWorkflowSlots));
         return runnerId;
     }
 
