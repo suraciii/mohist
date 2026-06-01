@@ -131,6 +131,30 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
+    public async Task RunnerHeartbeat_WithNoBody_RefreshesRegisteredRunner()
+    {
+        var projectName = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var runnerId = $"runtime-empty-heartbeat-{Guid.NewGuid():N}";
+
+        try
+        {
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 1 });
+
+            using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/heartbeat", content: null);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            Assert.True(status.RunnerAvailable);
+            Assert.Contains(status.Runners, r => r.Id == runnerId && r.Max == 1);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
         var status = AgentStatusResponse.Create([], []);
