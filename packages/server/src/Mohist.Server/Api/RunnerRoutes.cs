@@ -33,9 +33,13 @@ public static class RunnerRoutes
             return Results.Ok();
         });
 
-        group.MapPost("/heartbeat", async (string runnerId, IGrainFactory grains, RunnerHeartbeatRequest? req) =>
+        group.MapPost("/heartbeat", async (string runnerId, HttpRequest request, IGrainFactory grains) =>
         {
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            var req = request.ContentLength.GetValueOrDefault() > 0
+                ? await JsonSerializer.DeserializeAsync<RunnerHeartbeatRequest>(request.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                : null;
+
             if (req is not null)
             {
                 var info = new RunnerInfo(
