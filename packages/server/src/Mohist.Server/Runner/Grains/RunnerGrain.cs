@@ -43,11 +43,19 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task RegisterAsync(RunnerInfo info)
     {
+        var previousRegistryKey = _info is null ? null : RunnerRegistryKey();
         _info = info;
         _projectId = string.IsNullOrWhiteSpace(info.ProjectId) ? null : info.ProjectId;
         _status = RunnerStatus.Online;
         _lastHeartbeat = DateTime.UtcNow;
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        var registryKey = RunnerRegistryKey();
+        if (previousRegistryKey is not null && previousRegistryKey != registryKey)
+        {
+            var previousRegistry = GrainFactory.GetGrain<IRunnerRegistryGrain>(previousRegistryKey);
+            await previousRegistry.UnregisterAsync(RunnerId);
+        }
+
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(registryKey);
         await registry.RegisterAsync(info);
         _heartbeatTimer ??= this.RegisterGrainTimer(
             _ => CheckHeartbeatAsync(),
@@ -88,13 +96,12 @@ public class RunnerGrain : Grain, IRunnerGrain
         }
     }
 
-    public Task HeartbeatAsync()
+    public async Task HeartbeatAsync()
     {
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
-        _lastHeartbeat = DateTime.UtcNow;
-        return Task.CompletedTask;
+        await TouchPresenceAsync();
     }
 
     public async Task<WorkDispatch?> PollAsync()
@@ -102,7 +109,7 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
-        _lastHeartbeat = DateTime.UtcNow;
+        await TouchPresenceAsync();
 
         foreach (var wfId in _assignedWorkflows)
         {
@@ -151,6 +158,9 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task<string?> ReportAsync(string workId, WorkDispatchResult result)
     {
+        if (_status == RunnerStatus.Online)
+            await TouchPresenceAsync();
+
         if (!_workToWorkflow.Remove(workId, out var wfId))
             return null;
         _workById.Remove(workId);
@@ -266,6 +276,15 @@ public class RunnerGrain : Grain, IRunnerGrain
     }
 
     private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;
+
+    private async Task TouchPresenceAsync()
+    {
+        _lastHeartbeat = DateTime.UtcNow;
+        if (_info is null) return;
+
+        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
+        await registry.RegisterAsync(_info);
+    }
 
     private IReadOnlyList<string> BacklogProjectIds()
     {

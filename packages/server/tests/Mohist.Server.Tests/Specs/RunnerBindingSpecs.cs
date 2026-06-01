@@ -90,4 +90,51 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         Assert.Equal("wf-report-2", nextPoll.WorkflowRunId);
         Assert.StartsWith("task-1.", nextPoll.WorkId);
     }
+
+    [Fact]
+    public async Task Heartbeat_WhenRegistryEntryMissing_ReRegistersRunnerPresence()
+    {
+        var runnerId = await RegisterRunnerAsync("heartbeat-repair-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject("test-project"));
+
+        await registry.UnregisterAsync(runnerId);
+        Assert.DoesNotContain(runnerId, await registry.ListRunnerIdsAsync());
+
+        await runner.HeartbeatAsync();
+
+        Assert.Contains(runnerId, await registry.ListRunnerIdsAsync());
+    }
+
+    [Fact]
+    public async Task Poll_WhenRegistryEntryMissing_ReRegistersRunnerPresence()
+    {
+        var runnerId = await RegisterRunnerAsync("poll-repair-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var registry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject("test-project"));
+
+        await registry.UnregisterAsync(runnerId);
+        Assert.DoesNotContain(runnerId, await registry.ListRunnerIdsAsync());
+
+        var work = await runner.PollAsync();
+
+        Assert.Null(work);
+        Assert.Contains(runnerId, await registry.ListRunnerIdsAsync());
+    }
+
+    [Fact]
+    public async Task Register_WhenRunnerScopeChanges_RemovesStaleRegistryPresence()
+    {
+        var runnerId = await RegisterRunnerAsync("scope-change-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var projectRegistry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject("test-project"));
+        var globalRegistry = Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+
+        Assert.Contains(runnerId, await projectRegistry.ListRunnerIdsAsync());
+
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", null));
+
+        Assert.DoesNotContain(runnerId, await projectRegistry.ListRunnerIdsAsync());
+        Assert.Contains(runnerId, await globalRegistry.ListRunnerIdsAsync());
+    }
 }

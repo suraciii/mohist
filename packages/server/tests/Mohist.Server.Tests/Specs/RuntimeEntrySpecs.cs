@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Mohist.Server.Api;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -68,6 +69,34 @@ public class RuntimeEntrySpecs
             Assert.True(status.RunnerAvailable);
             Assert.Null(status.RunnerMessage);
             Assert.Contains(status.Runners, r => r.Id == runnerId);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task AgentStatus_WhenRegistryEntryMissingButRunnerHeartbeats_ReportsRunnerAvailable()
+    {
+        var projectName = $"runtime-presence-repair-{Guid.NewGuid():N}";
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var runnerId = $"runtime-presence-repair-{Guid.NewGuid():N}";
+
+        try
+        {
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+            var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(project.Id));
+            await registry.UnregisterAsync(runnerId);
+
+            var missingStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            Assert.False(missingStatus.RunnerAvailable);
+
+            await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/heartbeat", new { });
+            var repairedStatus = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+
+            Assert.True(repairedStatus.RunnerAvailable);
+            Assert.Contains(repairedStatus.Runners, r => r.Id == runnerId);
         }
         finally
         {

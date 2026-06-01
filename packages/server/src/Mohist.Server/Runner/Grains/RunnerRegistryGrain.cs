@@ -14,8 +14,11 @@ public class RunnerRegistryGrain : Grain, IRunnerRegistryGrain
 
     public Task RegisterAsync(RunnerInfo info)
     {
+        var isNew = !_runners.ContainsKey(info.RunnerId);
         _runners[info.RunnerId] = info;
-        _log.LogInformation("Runner {Id} registered with [{Caps}] and {ModelCount} coder models", info.RunnerId, string.Join(", ", info.Capabilities), info.CoderModels?.Length ?? 0);
+        if (isNew)
+            _log.LogInformation("Runner {Id} registered with [{Caps}] and {ModelCount} coder models", info.RunnerId, string.Join(", ", info.Capabilities), info.CoderModels?.Length ?? 0);
+
         return Task.CompletedTask;
     }
 
