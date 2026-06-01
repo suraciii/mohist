@@ -153,7 +153,7 @@ public static partial class WorkflowRunExtensions
             var repairRun = TaskRun.MakeTask(stage.Tasks, repairTask);
             stage.Tasks.Add(repairRun);
 
-            check.RetryCount++;
+            check.RepairCount++;
             check.Status = StageCheckStatus.Pending;
             check.Message = message;
             check.Output = output;

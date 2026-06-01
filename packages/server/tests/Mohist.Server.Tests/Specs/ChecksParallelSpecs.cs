@@ -153,7 +153,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
             checks: [
                 new("typecheck", "TypeCheck", "spec/typecheck"),
                 new("lint", "Lint", "spec/lint",
-                    OnFailure: new CheckFailureAction(new CheckFailureRetry(2, new TaskDefinition("fix-lint", "Fix lint", "spec/fix-lint"))))
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(2, new TaskDefinition("fix-lint", "Fix lint", "spec/fix-lint"))))
             ]));
 
         var (task, r1) = await PollWorkAnyAsync();
@@ -181,12 +181,12 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task MultipleChecks_FailedCheckWithRetry_DoesNotFailLaterChecksBeforeRepairRuns()
+    public async Task MultipleChecks_FailedCheckWithRepair_DoesNotFailLaterChecksBeforeRepairRuns()
     {
         await StartWorkflowAsync(MultiCheckStage(
             checks: [
                 new("review", "Review", "spec/review",
-                    OnFailure: new CheckFailureAction(new CheckFailureRetry(2, new TaskDefinition("re-review", "Re-review", "spec/review-agent")))),
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(2, new TaskDefinition("fix-review", "Fix review findings", "spec/review-repair-agent")))),
                 new("merge-ready", "Merge Ready", "spec/merge-ready")
             ]));
 
@@ -200,7 +200,7 @@ public class ChecksParallelSpecs : WorkflowGrainSpecs
 
         var (repair, r3) = await PollWorkAnyAsync();
         Assert.Equal("task", repair.WorkType);
-        Assert.StartsWith("re-review:", repair.WorkId);
+        Assert.StartsWith("fix-review:", repair.WorkId);
 
         var status = await GetQueryService().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);

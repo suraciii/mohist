@@ -106,7 +106,7 @@ public static class WorkflowStatusMapper
             }
             else if (failure.Reason is FailureReason.CheckUnrepaired && failure.CheckName is not null)
             {
-                actions.Add(new AvailableActionView("retry", "Retry failed check", failure.CheckName));
+                actions.Add(new AvailableActionView("retry", "Repair failed check", failure.CheckName));
             }
 
             actions.Add(new AvailableActionView("rerun", "Rerun stage", run.CurrentStageId));

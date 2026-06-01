@@ -12,9 +12,9 @@ public sealed record TaskDefinition(
     public string[]? OnSuccessEmit { get; init; }
 }
 
-public sealed record CheckFailureRetry(int Limit, TaskDefinition Task);
+public sealed record CheckFailureRepair(int Limit, TaskDefinition Task);
 
-public sealed record CheckFailureAction(CheckFailureRetry? Retry = null);
+public sealed record CheckFailureAction(CheckFailureRepair? Repair = null);
 
 public sealed record CheckDefinition(
     string Name,
@@ -47,4 +47,3 @@ public sealed record WorkflowDefinition(
     Dictionary<string, JsonElement?>? Variables = null,
     Dictionary<string, JsonElement?>? Defaults = null,
     Dictionary<string, string>? Artifacts = null);
-
