@@ -3,6 +3,7 @@ namespace Mohist.Server.Workflow.Grains;
 public interface IWorkflowBacklogGrain : IGrainWithStringKey
 {
     Task RegisterAsync(string workflowId);
+    Task RestoreRunningAsync(string workflowId, string runnerId);
     Task<string?> ClaimAsync(string runnerId);
     Task ReleaseAsync(string workflowId);
 }

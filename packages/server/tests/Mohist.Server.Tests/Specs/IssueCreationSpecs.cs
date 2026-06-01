@@ -1,10 +1,16 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Project.Grains;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -14,11 +20,13 @@ public class IssueCreationSpecs
 {
     private readonly IGrainFactory _grains;
     private readonly IServiceProvider _services;
+    private readonly string _connectionString;
 
     public IssueCreationSpecs(MohistIntegrationFixture fixture)
     {
         _grains = fixture.Grains;
         _services = fixture.Services;
+        _connectionString = fixture.ConnectionString;
     }
 
     private async Task<ProjectInfo> SetupProjectAsync()
@@ -41,6 +49,35 @@ public class IssueCreationSpecs
         using var scope = _services.CreateScope();
         var issues = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
         return await issues.GetInfoAsync(projectId, number);
+    }
+
+    private async Task<WorkflowBacklogState?> LoadBacklogStateAsync(string projectId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.BacklogStates.FindAsync(projectId);
+        return row is null ? null : JsonSerializer.Deserialize<WorkflowBacklogState>(row.StateJson);
+    }
+
+    private async Task<string?> LoadLeaseJsonAsync(string workflowId)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowLeases.FindAsync(workflowId);
+        return row?.StateJson;
+    }
+
+    private async Task<IReadOnlyList<EventDto>> GetWorkflowEventsAsync(string workflowRunId)
+    {
+        using var scope = _services.CreateScope();
+        var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
+        return (await events.ListWorkflowEventsAsync(workflowRunId)).ToList();
     }
 
     [Fact]
@@ -159,6 +196,48 @@ public class IssueCreationSpecs
         Assert.NotNull(info);
         Assert.Equal("cancelled", info.Status);
         Assert.Equal("cancelled", info.Health);
+    }
+
+    [Fact]
+    public async Task Cancel_ActiveIssue_ClearsBacklogLease_AndRunnerAssignment()
+    {
+        var project = await SetupProjectAsync();
+        var created = await CreateIssueAsync(project.Id, "Cancelable");
+
+        var issue = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var workflowRunId = await issue.StartWorkAsync(new WorkflowProjectContext(project.Id, project.Name, project.Path, project.BaseBranch));
+
+        var runnerId = $"runner-{Guid.NewGuid():N}";
+        var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
+
+        WorkDispatch? dispatch = null;
+        for (var attempt = 0; attempt < 100 && dispatch is null; attempt++)
+        {
+            dispatch = await runner.PollAsync();
+            if (dispatch is null)
+                await Task.Delay(20);
+        }
+
+        Assert.NotNull(dispatch);
+
+        await issue.CancelAsync();
+
+        var info = await GetIssueInfoAsync(project.Id, created.Number);
+        Assert.NotNull(info);
+        Assert.Equal("cancelled", info!.Status);
+        Assert.Equal("cancelled", info.Health);
+
+        var backlog = await LoadBacklogStateAsync(project.Id);
+        Assert.True(backlog is null || (!backlog.Waiting.Contains(workflowRunId) && !backlog.Running.ContainsKey(workflowRunId) && !backlog.All.Contains(workflowRunId)));
+        Assert.Null(await LoadLeaseJsonAsync(workflowRunId));
+        Assert.Null(await runner.PollAsync());
+
+        var events = await GetWorkflowEventsAsync(workflowRunId);
+        var abandoned = Assert.Single(events, e => e.Type == "workflow_work_abandoned");
+        Assert.Equal(runnerId, abandoned.RunnerId);
+        Assert.Equal(dispatch!.WorkId, abandoned.TaskId);
+        Assert.Equal("issue-closed", abandoned.Message);
     }
 
     [Fact]

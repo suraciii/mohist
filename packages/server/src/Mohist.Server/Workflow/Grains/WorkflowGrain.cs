@@ -130,8 +130,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
         await SaveRunAsync();
+        await UnscheduleInternalAsync(reason ?? "Workflow paused");
         await AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused");
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
+    }
+
+    public Task UnscheduleAsync(string reason)
+    {
+        EnsureRun();
+        return UnscheduleInternalAsync(reason);
     }
 
     public async Task ApproveAsync()
@@ -485,11 +492,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return;
         if (_run.Status is WorkflowRunStatus.Completed or WorkflowRunStatus.Failed)
         {
-            var projectId = GetProjectId();
-            if (string.IsNullOrWhiteSpace(projectId)) return;
-            var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
-            await backlog.ReleaseAsync(GrainKey);
-            _log.LogInformation("Workflow {Id} released from backlog (status={Status})", GrainKey, _run.Status);
+            await UnscheduleInternalAsync($"Workflow {_run.Status.ToString().ToLowerInvariant()}");
+            _log.LogInformation("Workflow {Id} released from scheduling state (status={Status})", GrainKey, _run.Status);
         }
     }
 
@@ -685,6 +689,41 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         _lease = null;
         await _leaseStore.DeleteAsync(GrainKey);
+    }
+
+    private async Task UnscheduleInternalAsync(string reason)
+    {
+        var activeLease = await RestoreLeaseAsync();
+        await ReleaseBacklogAsync();
+
+        if (activeLease is null)
+        {
+            await ClearAndDeleteLeaseAsync();
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(activeLease.RunnerId))
+        {
+            var runner = GrainFactory.GetGrain<IRunnerGrain>(activeLease.RunnerId);
+            await runner.ReleaseAsync(GrainKey);
+        }
+
+        await ClearAndDeleteLeaseAsync();
+        await AppendWorkflowEventAsync(
+            "workflow_work_abandoned",
+            "abandoned",
+            reason,
+            TaskId: activeLease.LogicalId,
+            RunnerId: activeLease.RunnerId,
+            Payload: new { activeLease.WorkId, activeLease.WorkType });
+    }
+
+    private async Task ReleaseBacklogAsync()
+    {
+        var projectId = GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
+        await backlog.ReleaseAsync(GrainKey);
     }
 
     private async Task<WorkLease?> RestoreLeaseAsync()

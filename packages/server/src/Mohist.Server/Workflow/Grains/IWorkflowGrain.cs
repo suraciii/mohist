@@ -10,6 +10,7 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task StartAsync(WorkflowDefinition? definition = null, WorkflowStartInput? input = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
+    Task UnscheduleAsync(string reason);
     Task ApproveAsync();
     Task RejectAsync(string? reason = null);
     Task RetryAsync();
