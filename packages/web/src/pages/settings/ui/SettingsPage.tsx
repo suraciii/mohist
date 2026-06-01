@@ -66,8 +66,7 @@ function isValidSection(s: string): s is Section {
 }
 
 function SectionContent({ section }: { section: Section }) {
-  const { projects } = useProject()
-  const currentProject = projects?.[0]
+  const { currentProject } = useProject()
 
   switch (section) {
     case 'ai':
