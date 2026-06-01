@@ -253,14 +253,14 @@ public class AgentSessionSpecs
                 work.WorkflowRunId,
                 session.SessionName,
                 _runnerId,
-                "ai-re-review:1.1",
+                "fix-review-findings:1.1",
                 "task",
                 "check",
-                "AI re-review"));
+                "Fix review findings"));
 
         Assert.Equal(session.Id, ensured.Id);
         Assert.Equal("created", ensured.Status);
-        Assert.Equal("ai-re-review:1.1", ensured.WorkId);
+        Assert.Equal("fix-review-findings:1.1", ensured.WorkId);
         Assert.Null(ensured.CompletedAt);
         Assert.Null(ensured.FailureReason);
     }

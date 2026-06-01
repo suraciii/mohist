@@ -20,8 +20,8 @@ public static partial class WorkflowRunExtensions
                     case "pending":
                         run.ResetCheck(a.Result);
                         break;
-                    case "retry":
-                        run.ScheduleCheckRepair(a.Result.Name, a.RetryTask!, a.Result.Message, a.Result.Output);
+                    case "repair":
+                        run.ScheduleCheckRepair(a.Result.Name, a.RepairTask!, a.Result.Message, a.Result.Output);
                         break;
                     case "fail":
                         run.FailCheck(a.Result);

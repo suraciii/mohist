@@ -131,9 +131,9 @@ public static class WorkflowYamlSerializer
         if (string.IsNullOrWhiteSpace(title))
             throw new InvalidOperationException($"Workflow check {name} requires title");
 
-        var retryLimit = Int(map, "retryLimit");
-        var retryTask = map.TryGetValue("retryTask", out var retryTaskValue) && retryTaskValue is not null
-            ? ToTask(retryTaskValue)
+        var repairLimit = Int(map, "repairLimit");
+        var repairTask = map.TryGetValue("repairTask", out var repairTaskValue) && repairTaskValue is not null
+            ? ToTask(repairTaskValue)
             : null;
 
         return new CheckDefinition(
@@ -141,7 +141,7 @@ public static class WorkflowYamlSerializer
             title,
             NullIfEmpty(String(map, "uses")),
             JsonElementMap(OptionalMap(map, "with")),
-            retryLimit > 0 && retryTask is not null ? new CheckFailureAction(new CheckFailureRetry(retryLimit, retryTask)) : null);
+            repairLimit > 0 && repairTask is not null ? new CheckFailureAction(new CheckFailureRepair(repairLimit, repairTask)) : null);
     }
 
     private static Dictionary<string, object?> ToStageMap(StageDefinition stage)
@@ -180,10 +180,10 @@ public static class WorkflowYamlSerializer
         };
         if (check.Uses is not null) map["uses"] = check.Uses;
         AddWith(map, check.With);
-        if (check.OnFailure?.Retry is { } retry)
+        if (check.OnFailure?.Repair is { } repair)
         {
-            map["retryLimit"] = retry.Limit;
-            map["retryTask"] = ToTaskMap(retry.Task);
+            map["repairLimit"] = repair.Limit;
+            map["repairTask"] = ToTaskMap(repair.Task);
         }
         return map;
     }

@@ -181,7 +181,7 @@ public class MohistDefaultWorkflowProfileSpecs
     }
 
     [Fact]
-    public void WorkflowYamlParser_ParsesRetryTasksAndWithObjects()
+    public void WorkflowYamlParser_ParsesRepairTasksAndWithObjects()
     {
         var definition = MohistWorkflow.ParseYaml("""
         stages:
@@ -194,8 +194,8 @@ public class MohistDefaultWorkflowProfileSpecs
                 with:
                   run: git diff --check
                   timeout: 300000
-                retryLimit: 1
-                retryTask:
+                repairLimit: 1
+                repairTask:
                   id: fix-health
                   title: Fix health
                   uses: mohist/acp-agent
@@ -205,10 +205,10 @@ public class MohistDefaultWorkflowProfileSpecs
 
         var check = definition.Stages.Single().Checks.Single();
         Assert.Equal("core/script", check.Uses);
-        Assert.Equal(1, check.OnFailure?.Retry?.Limit);
-        Assert.Equal("fix-health", check.OnFailure?.Retry?.Task.Id);
+        Assert.Equal(1, check.OnFailure?.Repair?.Limit);
+        Assert.Equal("fix-health", check.OnFailure?.Repair?.Task.Id);
         Assert.Contains("\"timeout\":300000", JsonSerializer.Serialize(check.With));
-        Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Retry?.Task.With));
+        Assert.Contains("\"prompt\":\"Fix it\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.Task.With));
     }
 
     [Fact]
@@ -220,13 +220,14 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(MohistWorkflow.Definition.Stages.Select(s => s.Stage), reparsed.Stages.Select(s => s.Stage));
         Assert.Contains("agent: ${{ vars.agent }}", yaml);
         Assert.Contains("prompt: ${{ prompts.proposal }}", yaml);
-        Assert.Contains("id: ai-re-review", yaml);
-        Assert.Contains("prompt: ${{ prompts.review }}", yaml);
+        Assert.Contains("repairTask:", yaml);
+        Assert.Contains("id: fix-review-findings", yaml);
+        Assert.Contains("prompt: ${{ prompts.auto-fix }}", yaml);
         Assert.Equal("mohist/openspec-tasks", reparsed.Stages[1].Tasks[0].Uses);
-        var reviewRetry = reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Retry;
-        Assert.Equal(2, reviewRetry?.Limit);
-        Assert.Equal("ai-re-review", reviewRetry?.Task.Id);
-        Assert.Contains("\"path\":\"${{ openspecChangeDir }}/review.md\"", JsonSerializer.Serialize(reviewRetry?.Task.With));
+        var reviewRepair = reparsed.Stages[2].Checks.Single(c => c.Name == "review-passed").OnFailure?.Repair;
+        Assert.Equal(2, reviewRepair?.Limit);
+        Assert.Equal("fix-review-findings", reviewRepair?.Task.Id);
+        Assert.DoesNotContain("\"expect\"", JsonSerializer.Serialize(reviewRepair?.Task.With));
     }
 
     [Fact]

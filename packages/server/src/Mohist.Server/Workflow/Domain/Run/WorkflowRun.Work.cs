@@ -112,13 +112,13 @@ public static partial class WorkflowRunExtensions
             }
         }
 
-        private void AddRetryTask(string checkName, TaskDefinition task)
+        private void AddRepairTask(string checkName, TaskDefinition task)
         {
             var current = run.CurrentStage();
             var newTask = TaskRun.MakeTask(current.Tasks, task);
             current.Tasks.Add(newTask);
             var check = current.FindCheck(checkName);
-            check.RetryCount++;
+            check.RepairCount++;
         }
 
         public bool HasIncompleteTaskWithUses(string uses)
@@ -133,11 +133,11 @@ public static partial class WorkflowRunExtensions
             return current.Tasks.Any(t => t.Id == id && t.Status != TaskRunStatus.Completed);
         }
 
-        public int GetRetryCount(string checkName)
+        public int GetRepairCount(string checkName)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(checkName);
-            return check.RetryCount;
+            return check.RepairCount;
         }
     }
 }

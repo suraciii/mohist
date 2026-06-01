@@ -34,11 +34,11 @@ function buildIssueSummary(review: ReviewOutput): string {
   }
 
   if (review.reviewReport) {
-    const fixMatch = review.reviewReport.match(
-      /^## Fix Suggestions\s*\n([\s\S]*?)(?=^## |\s*$)/m,
+    const blockingMatch = review.reviewReport.match(
+      /^## Blocking Items\s*\n([\s\S]*?)(?=^## |\s*$)/m,
     )
-    if (fixMatch && fixMatch[1]?.trim()) {
-      return `Please fix the following issues:\n\n${fixMatch[1].trim()}`
+    if (blockingMatch && blockingMatch[1]?.trim()) {
+      return `Please fix the following issues:\n\n${blockingMatch[1].trim()}`
     }
     return `Please fix the following issues:\n\n${review.reviewReport}`
   }

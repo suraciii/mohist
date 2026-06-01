@@ -83,8 +83,8 @@ stages:
         with:
           path: ${{ openspecChangeDir }}/self-review.md
           expect: <promise>PASS</promise>
-        retryLimit: 1
-        retryTask:
+        repairLimit: 1
+        repairTask:
           id: fix-plan-review
           title: Fix plan review findings
           uses: mohist/acp-agent
@@ -118,8 +118,8 @@ stages:
         with:
           run: git diff --check
           timeout: 300000
-        retryLimit: 1
-        retryTask:
+        repairLimit: 1
+        repairTask:
           id: fix-build-health
           title: Fix build health
           uses: mohist/acp-agent
@@ -150,8 +150,8 @@ stages:
         with:
           run: git diff --check
           timeout: 300000
-        retryLimit: 1
-        retryTask:
+        repairLimit: 1
+        repairTask:
           id: fix-check-health
           title: Fix check health
           uses: mohist/acp-agent
@@ -167,17 +167,14 @@ stages:
         with:
           path: ${{ openspecChangeDir }}/review.md
           expect: <promise>PASS</promise>
-        retryLimit: 2
-        retryTask:
-          id: ai-re-review
-          title: AI re-review
+        repairLimit: 2
+        repairTask:
+          id: fix-review-findings
+          title: Fix review findings
           uses: mohist/acp-agent
           with:
             session: check
-            prompt: ${{ prompts.review }}
-            expect:
-              files:
-                - path: ${{ openspecChangeDir }}/review.md
+            prompt: ${{ prompts.auto-fix }}
             agent: ${{ vars.agent }}
       - name: merge-ready
         title: Merge ready
@@ -213,8 +210,8 @@ stages:
         with:
           run: git diff --check
           timeout: 300000
-        retryLimit: 1
-        retryTask:
+        repairLimit: 1
+        repairTask:
           id: fix-integrate-health
           title: Fix integrate health
           uses: mohist/acp-agent

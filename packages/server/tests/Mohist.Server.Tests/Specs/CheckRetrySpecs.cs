@@ -14,18 +14,18 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
 {
     public CheckRetrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    private static WorkflowDefinition StageWithRetryCheck(int retryLimit = 2) =>
+    private static WorkflowDefinition StageWithRepairCheck(int repairLimit = 2) =>
         new("spec/workflow", [
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task")],
                 [new("check-1", "Check 1", "spec/check",
-                    OnFailure: new CheckFailureAction(new CheckFailureRetry(retryLimit, new TaskDefinition("fix-check", "Fix check", "spec/fix"))))])
+                    OnFailure: new CheckFailureAction(new CheckFailureRepair(repairLimit, new TaskDefinition("fix-check", "Fix check", "spec/fix"))))])
         ]);
 
     [Fact]
-    public async Task CheckFails_RetryTaskRunsBeforeRecheck()
+    public async Task CheckFails_RepairTaskRunsBeforeRecheck()
     {
-        await StartWorkflowAsync(StageWithRetryCheck(retryLimit: 2));
+        await StartWorkflowAsync(StageWithRepairCheck(repairLimit: 2));
 
         var (task, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
@@ -50,9 +50,9 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task CheckFailsRepeatedly_RetryTaskRunsEachTime()
+    public async Task CheckFailsRepeatedly_RepairTaskRunsEachTime()
     {
-        await StartWorkflowAsync(StageWithRetryCheck(retryLimit: 3));
+        await StartWorkflowAsync(StageWithRepairCheck(repairLimit: 3));
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
@@ -82,7 +82,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task CheckFailsBeyondRetryLimit_WorkflowFailsWithoutInjectingAnotherRepairTask()
     {
-        await StartWorkflowAsync(StageWithRetryCheck(retryLimit: 2));
+        await StartWorkflowAsync(StageWithRepairCheck(repairLimit: 2));
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
@@ -118,7 +118,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
     [Fact]
     public async Task CheckFailsBeyondRetryLimit_UserRetries_InjectsRepairTaskIgnoringRetryLimit()
     {
-        var workflow = await StartWorkflowAsync(StageWithRetryCheck(retryLimit: 2));
+        var workflow = await StartWorkflowAsync(StageWithRepairCheck(repairLimit: 2));
 
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "completed");
@@ -161,13 +161,13 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
             PropertyNameCaseInsensitive = true,
             Converters = { new JsonStringEnumConverter() }
         })!;
-        Assert.Equal(3, run.GetRetryCount("check-1"));
+        Assert.Equal(3, run.GetRepairCount("check-1"));
     }
 
     [Fact]
-    public void CheckRetryCount_IsStageCheckStateAndSurvivesSnapshotRestore()
+    public void CheckRepairCount_IsStageCheckStateAndSurvivesSnapshotRestore()
     {
-        var definition = StageWithRetryCheck(retryLimit: 2);
+        var definition = StageWithRepairCheck(repairLimit: 2);
         var run = WorkflowRun.Create("wf-domain", definition);
 
         run.Start();
@@ -176,7 +176,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         run.RepairFailedCheck(new("check-1", "fail", "broken"), new("fix-check", "Fix check", "spec/fix"));
 
         var currentStage = run.Stages.First(s => s.Id == run.CurrentStageId);
-        Assert.Equal(1, currentStage.Checks.Single(c => c.Name == "check-1").RetryCount);
+        Assert.Equal(1, currentStage.Checks.Single(c => c.Name == "check-1").RepairCount);
 
         var jsonOptions = new JsonSerializerOptions
         {
@@ -186,7 +186,7 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         };
         var json = JsonSerializer.Serialize(run, jsonOptions);
         var restored = JsonSerializer.Deserialize<WorkflowRun>(json, jsonOptions)!;
-        Assert.Equal(1, restored.GetRetryCount("check-1"));
+        Assert.Equal(1, restored.GetRepairCount("check-1"));
     }
 
     [Fact]

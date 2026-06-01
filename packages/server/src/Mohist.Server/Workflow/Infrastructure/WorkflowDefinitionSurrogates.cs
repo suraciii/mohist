@@ -124,35 +124,35 @@ public sealed class CheckDefinitionSurrogateConverter : IConverter<CheckDefiniti
 [GenerateSerializer]
 public struct CheckFailureActionSurrogate
 {
-    [Id(0)] public CheckFailureRetry? Retry;
+    [Id(0)] public CheckFailureRepair? Repair;
 }
 
 [RegisterConverter]
 public sealed class CheckFailureActionSurrogateConverter : IConverter<CheckFailureAction, CheckFailureActionSurrogate>
 {
     public CheckFailureAction ConvertFromSurrogate(in CheckFailureActionSurrogate surrogate) =>
-        new(surrogate.Retry);
+        new(surrogate.Repair);
 
     public CheckFailureActionSurrogate ConvertToSurrogate(in CheckFailureAction value) => new()
     {
-        Retry = value.Retry,
+        Repair = value.Repair,
     };
 }
 
 [GenerateSerializer]
-public struct CheckFailureRetrySurrogate
+public struct CheckFailureRepairSurrogate
 {
     [Id(0)] public int Limit;
     [Id(1)] public TaskDefinition Task;
 }
 
 [RegisterConverter]
-public sealed class CheckFailureRetrySurrogateConverter : IConverter<CheckFailureRetry, CheckFailureRetrySurrogate>
+public sealed class CheckFailureRepairSurrogateConverter : IConverter<CheckFailureRepair, CheckFailureRepairSurrogate>
 {
-    public CheckFailureRetry ConvertFromSurrogate(in CheckFailureRetrySurrogate surrogate) =>
+    public CheckFailureRepair ConvertFromSurrogate(in CheckFailureRepairSurrogate surrogate) =>
         new(surrogate.Limit, surrogate.Task);
 
-    public CheckFailureRetrySurrogate ConvertToSurrogate(in CheckFailureRetry value) => new()
+    public CheckFailureRepairSurrogate ConvertToSurrogate(in CheckFailureRepair value) => new()
     {
         Limit = value.Limit,
         Task = value.Task,

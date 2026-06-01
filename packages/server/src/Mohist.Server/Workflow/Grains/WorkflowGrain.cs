@@ -732,11 +732,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             }
             else
             {
-                var retryTask = ResolveRetryTask(stageDef, cr);
-                actions.Add(retryTask is not null
-                    ? new(cr, "retry", retryTask)
+                var repairTask = ResolveRepairTask(stageDef, cr);
+                actions.Add(repairTask is not null
+                    ? new(cr, "repair", repairTask)
                     : new(cr, "fail"));
-                if (retryTask is not null)
+                if (repairTask is not null)
                     break;
             }
         }
@@ -749,7 +749,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             {
                 "pass" => ("workflow_check_passed", "pass"),
                 "pending" => ("workflow_check_pending", "pending"),
-                "retry" => ("workflow_retry_task_injected", "retrying"),
+                "repair" => ("workflow_repair_task_injected", "repairing"),
                 "fail" => ("workflow_check_failed", "fail"),
                 _ => (a.Action, a.Action)
             };
@@ -758,15 +758,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         }
     }
 
-    private TaskDefinition? ResolveRetryTask(StageDefinition? stageDef, CheckResult cr)
+    private TaskDefinition? ResolveRepairTask(StageDefinition? stageDef, CheckResult cr)
     {
         var checkDef = stageDef?.Checks.Find(c => c.Name == cr.Name);
-        if (checkDef?.OnFailure?.Retry is not { } retry) return null;
+        if (checkDef?.OnFailure?.Repair is not { } repair) return null;
 
-        var retryCount = _run!.GetRetryCount(cr.Name);
-        if (retryCount >= retry.Limit) return null;
+        var repairCount = _run!.GetRepairCount(cr.Name);
+        if (repairCount >= repair.Limit) return null;
 
-        return BuildRetryTask(cr.Name, retry.Task, cr);
+        return BuildRepairTask(cr.Name, repair.Task, cr);
     }
 
     private bool TryScheduleRequestedCheckRepair()
@@ -790,27 +790,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private TaskDefinition? ResolveRequestedCheckRepairTask(StageDefinition? stageDef, string checkName)
     {
         var checkDef = stageDef?.Checks.Find(c => c.Name == checkName);
-        if (checkDef?.OnFailure?.Retry is not { } retry) return null;
+        if (checkDef?.OnFailure?.Repair is not { } repair) return null;
 
-        return BuildRetryTask(checkName, retry.Task);
+        return BuildRepairTask(checkName, repair.Task);
     }
 
-    private TaskDefinition BuildRetryTask(string checkName, TaskDefinition retryTask, CheckResult? result = null)
+    private TaskDefinition BuildRepairTask(string checkName, TaskDefinition repairTask, CheckResult? result = null)
     {
         JsonElement? resultJson = result is null
             ? null
             : JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(result));
-        var retryWith = retryTask.With is not null
-            ? new Dictionary<string, JsonElement?>(retryTask.With)
+        var repairWith = repairTask.With is not null
+            ? new Dictionary<string, JsonElement?>(repairTask.With)
             : new Dictionary<string, JsonElement?>();
         if (resultJson is not null)
-            retryWith["failedCheckResult"] = resultJson;
+            repairWith["failedCheckResult"] = resultJson;
 
         return new TaskDefinition(
-            $"{retryTask.Id}:{_run!.GetRetryCount(checkName) + 1}",
-            retryTask.Title,
-            retryTask.Uses,
-            retryWith);
+            $"{repairTask.Id}:{_run!.GetRepairCount(checkName) + 1}",
+            repairTask.Title,
+            repairTask.Uses,
+            repairWith);
     }
 
     private static List<CheckResult> ParseCheckResults(string? output)
