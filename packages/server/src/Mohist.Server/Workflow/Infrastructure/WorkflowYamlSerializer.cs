@@ -66,7 +66,9 @@ public static class WorkflowYamlSerializer
             List(map, "tasks").Select(ToTask).ToList(),
             List(map, "checks").Select(ToCheck).ToList(),
             Bool(map, "requiresApproval"),
-            Variables: JsonElementMap(OptionalMap(map, "variables")));
+            Variables: JsonElementMap(OptionalMap(map, "variables")),
+            LockBehavior: NullIfEmpty(String(map, "lockBehavior")),
+            Resources: StringList(map, "resources"));
     }
 
     private static TaskDefinition ToTask(object? value)
@@ -152,6 +154,8 @@ public static class WorkflowYamlSerializer
         };
         if (stage.RequiresApproval) map["requiresApproval"] = true;
         if (stage.Variables is not null) map["variables"] = ObjectMap(stage.Variables);
+        if (!string.IsNullOrWhiteSpace(stage.LockBehavior)) map["lockBehavior"] = stage.LockBehavior;
+        if (stage.Resources is { Count: > 0 }) map["resources"] = stage.Resources;
         return map;
     }
 
@@ -216,6 +220,16 @@ public static class WorkflowYamlSerializer
     private static List<object?> List(IReadOnlyDictionary<string, object?> map, string key)
     {
         return map.TryGetValue(key, out var value) && Normalize(value) is List<object?> list ? list : [];
+    }
+
+    private static List<string>? StringList(IReadOnlyDictionary<string, object?> map, string key)
+    {
+        var values = List(map, key)
+            .Select(v => v?.ToString())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Cast<string>()
+            .ToList();
+        return values.Count == 0 ? null : values;
     }
 
     private static string String(IReadOnlyDictionary<string, object?> map, string key) =>

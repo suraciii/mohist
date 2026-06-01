@@ -48,6 +48,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
+            siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
