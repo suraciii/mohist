@@ -16,6 +16,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(RunnerCommands.Build(api, provider));
         root.Subcommands.Add(InstallCommands.Build(provider));
         root.Subcommands.Add(UpdateCommands.Build(provider));
+        root.Subcommands.Add(SkillsCommands.Build(provider));
         root.Subcommands.Add(BuildUseCommand(api));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
@@ -63,6 +64,8 @@ internal static class MohistCliCommands
         services.AddSingleton(commandExecutor);
         services.AddSingleton<SystemdServiceInstaller>();
         services.AddSingleton<SourceCodeUpdater>();
+        services.AddSingleton<SkillAssetService>();
+        services.AddSingleton<SkillInstallService>();
         var provider = services.BuildServiceProvider();
         var root = Build(api, provider);
         return root.Parse(args).InvokeAsync();

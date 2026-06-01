@@ -13,3 +13,5 @@ mo skills get mohist-explore
 
 The CLI serves skill content that always matches the installed version,
 so instructions never go stale.
+
+Re-run `mo skills install` to refresh this discovery stub.

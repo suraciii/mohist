@@ -301,6 +301,9 @@ internal interface IFileSystem
     Task WriteAllTextAsync(string path, string contents);
     Task<string> ReadAllTextAsync(string path);
     bool Exists(string path);
+    bool DirectoryExists(string path);
+    void CreateDirectory(string path);
+    IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption);
     void Delete(string path);
 }
 
@@ -323,6 +326,13 @@ internal sealed class RealFileSystem : IFileSystem
     public Task<string> ReadAllTextAsync(string path) => File.ReadAllTextAsync(path, Encoding.UTF8);
 
     public bool Exists(string path) => File.Exists(path);
+
+    public bool DirectoryExists(string path) => Directory.Exists(path);
+
+    public void CreateDirectory(string path) => Directory.CreateDirectory(path);
+
+    public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) =>
+        Directory.EnumerateFiles(path, searchPattern, searchOption);
 
     public void Delete(string path) => File.Delete(path);
 }

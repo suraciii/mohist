@@ -106,6 +106,14 @@ public class ProjectCliSpecs
 
         public bool Exists(string path) => _files.Count > 0;
 
+        public bool DirectoryExists(string path) => false;
+
+        public void CreateDirectory(string path)
+        {
+        }
+
+        public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) => [];
+
         public void Delete(string path) => _files.Clear();
     }
 

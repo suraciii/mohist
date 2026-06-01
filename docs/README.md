@@ -118,10 +118,52 @@ mo issue approve 1
 | `mo providers list` | 列出模型目录 provider |
 | `mo providers save <provider>` | 添加模型目录 provider |
 | `mo providers delete <provider>` | 移除模型目录 provider |
-| `mo skills install [--force]` | 安装共享 agent skills |
-| `mo skills update` | 更新共享 agent skills |
-| `mo skills list` | 列出已安装 skills |
+| `mo skills install [--path <repo>] [--claude] [--hermes]` | 安装或刷新 Mohist 内置 coder-agent skills |
+| `mo skills list [--json]` | 列出 Mohist 内置 skills |
+| `mo skills get [name] [--full] [--json] [--all]` | 输出当前 CLI 版本内置 skill 的完整指导内容 |
+| `mo skills path <name> [--json]` | 输出内置 skill 打包目录路径 |
 | `mo label list` | 列出标签 |
+
+### Coder Agent Skills (`mo skills`)
+
+`mo skills` 管理的是给 OpenCode、Claude Code、Hermes 等 coder agent 使用的 Mohist 共享 skills，不会操作 Mohist 运行时内部的 `.mohist/skills`。
+
+```bash
+# 默认安装到当前仓库的 .agents/skills/
+mo skills install
+
+# 重新运行 install 即可刷新到当前 CLI 版本
+mo skills install
+
+# 安装到指定仓库
+mo skills install --path /path/to/repo
+
+# Claude Code discovery stubs
+mo skills install --claude
+
+# Hermes 安装完整打包 skill 内容
+mo skills install --hermes
+
+# 查看内置 skills
+mo skills list
+mo skills list --json
+
+# 获取与当前 CLI 版本匹配的完整指导
+mo skills get mohist
+mo skills get mohist-explore --full
+
+# 查看打包 skill 目录
+mo skills path mohist
+```
+
+默认 `install` 和 `install --claude` 会写入轻量 discovery stubs：
+
+- OpenCode: `.agents/skills/<name>/SKILL.md`
+- Claude Code: `.claude/skills/<name>/SKILL.md`
+
+这些 stubs 会引导 agent 运行 `mo skills get <name>` 来读取与当前 `mo` 版本匹配的完整指导内容，因此用户不需要手动维护仓库内的完整 skill 副本。
+
+`install --hermes` 则不同：它会把完整打包 skill 目录复制到 `${HERMES_HOME:-~/.hermes}/skills/`，供 Hermes 直接使用，而不是安装依赖 `mo skills get` 的 discovery stub。
 
 ## Web UI
 
