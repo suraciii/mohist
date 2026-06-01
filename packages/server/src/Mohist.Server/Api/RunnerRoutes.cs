@@ -82,7 +82,7 @@ public static class RunnerRoutes
         {
             var result = new WorkDispatchResult(req.Status, req.Message, req.Output, req.ExitCode);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var workflowRunId = await runner.ReportAsync(req.WorkId, result);
+            var workflowRunId = await runner.ReportAsync(req.WorkId, result, req.WorkflowRunId);
 
             string? workflowStatus = null;
             if (workflowRunId is not null)
@@ -131,7 +131,7 @@ public static class RunnerRoutes
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
-public record RunnerReportRequest(string WorkId, string Status, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
+public record RunnerReportRequest(string WorkId, string Status, string? WorkflowRunId = null, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
 public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
 public record WorkflowAgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
 public record WorkflowAgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);

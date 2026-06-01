@@ -87,6 +87,37 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task DynamicTaskRegistration_DoesNotAbandonInFlightLoadTaskOnConcurrentPoll()
+    {
+        await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("build",
+                [new("load-tasks", "Load tasks", "spec/load")],
+                [new("check-1", "Check 1", "spec/check")])
+        ]), maxWorkflowSlots: 2);
+
+        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId!);
+        var load = await runner.PollAsync();
+        Assert.NotNull(load);
+        Assert.StartsWith("load-tasks.", load.WorkId);
+
+        var addResult = await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).AddTasksAsync(
+            new AddTasksBatchRequest([
+                new AddTasksBatchItem("dynamic-1", "Dynamic 1", "spec/task")
+            ]));
+        Assert.Equal(1, addResult.AddedCount);
+
+        Assert.Null(await runner.PollAsync());
+
+        var reportedWorkflowId = await runner.ReportAsync(load.WorkId, new WorkDispatchResult("completed"));
+        Assert.Equal(_workflowId, reportedWorkflowId);
+
+        var dynamicTask = await runner.PollAsync();
+        Assert.NotNull(dynamicTask);
+        Assert.StartsWith("dynamic-1.", dynamicTask.WorkId);
+    }
+
+    [Fact]
     public async Task StageWithDynamicTasks_TaskWithContract_DispatchPreservesWithContract()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",

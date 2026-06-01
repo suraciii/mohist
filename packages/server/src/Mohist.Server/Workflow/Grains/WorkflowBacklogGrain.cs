@@ -36,6 +36,30 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
 
     public async Task RegisterAsync(string workflowId)
     {
+        var alreadyWaiting = RemoveFromWaiting(workflowId);
+
+        _all.Add(workflowId);
+        if (!_running.ContainsKey(workflowId))
+            _waiting.Enqueue(workflowId);
+        await SaveAsync();
+
+        if (_running.ContainsKey(workflowId))
+        {
+            _log.LogInformation("Workflow {WfId} is already running in backlog; registration left it in place", workflowId);
+            return;
+        }
+
+        if (alreadyWaiting)
+        {
+            _log.LogInformation("Workflow {WfId} re-queued in backlog, waiting={Waiting}", workflowId, _waiting.Count);
+            return;
+        }
+
+        _log.LogInformation("Workflow {WfId} registered to backlog, waiting={Waiting}", workflowId, _waiting.Count);
+    }
+
+    public async Task RequeueAsync(string workflowId)
+    {
         var removedRunning = _running.Remove(workflowId);
         var alreadyWaiting = RemoveFromWaiting(workflowId);
 
@@ -49,7 +73,7 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
             return;
         }
 
-        _log.LogInformation("Workflow {WfId} registered to backlog, waiting={Waiting}", workflowId, _waiting.Count);
+        _log.LogInformation("Workflow {WfId} queued in backlog, waiting={Waiting}", workflowId, _waiting.Count);
     }
 
     public async Task RestoreRunningAsync(string workflowId, string runnerId)
@@ -63,6 +87,7 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
 
     public async Task<string?> ClaimAsync(string runnerId)
     {
+        var changed = false;
         var staleRunningIds = _running
             .Where(kv => string.Equals(kv.Value, runnerId, StringComparison.Ordinal) && !_all.Contains(kv.Key))
             .Select(kv => kv.Key)
@@ -71,19 +96,24 @@ public class WorkflowBacklogGrain : Grain, IWorkflowBacklogGrain
         {
             foreach (var workflowId in staleRunningIds)
                 _running.Remove(workflowId);
-            await SaveAsync();
+            changed = true;
         }
 
         while (_waiting.Count > 0)
         {
             var wfId = _waiting.Dequeue();
+            changed = true;
             if (!_all.Contains(wfId)) continue;
+            if (_running.ContainsKey(wfId)) continue;
 
             _running[wfId] = runnerId;
             await SaveAsync();
             _log.LogInformation("Runner {RunnerId} claimed workflow {WfId}", runnerId, wfId);
             return wfId;
         }
+
+        if (changed)
+            await SaveAsync();
 
         return null;
     }

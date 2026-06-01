@@ -131,7 +131,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         await TouchPresenceAsync();
 
-        if (_workToWorkflow.Count >= MaxWorkflowSlots)
+        if (ActiveWorkflowCount >= MaxWorkflowSlots)
             return null;
 
         foreach (var wfId in _assignedWorkflows)
@@ -141,8 +141,11 @@ public class RunnerGrain : Grain, IRunnerGrain
             if (work is not null)
             {
                 _workToWorkflow[work.WorkId] = wfId;
+                _workToWorkflow[WorkKey(wfId, work.WorkId)] = wfId;
                 _workById[work.WorkId] = work;
+                _workById[WorkKey(wfId, work.WorkId)] = work;
                 TrackWorkProject(work);
+                await MarkBacklogRunningAsync(wfId, work);
                 return work;
             }
         }
@@ -159,16 +162,33 @@ public class RunnerGrain : Grain, IRunnerGrain
                 if (work is not null)
                 {
                     _workToWorkflow[work.WorkId] = claimedId;
+                    _workToWorkflow[WorkKey(claimedId, work.WorkId)] = claimedId;
                     _workById[work.WorkId] = work;
+                    _workById[WorkKey(claimedId, work.WorkId)] = work;
                     TrackWorkProject(work, projectId);
+                    await MarkBacklogRunningAsync(claimedId, work, projectId);
                     return work;
                 }
 
-                _log.LogWarning(
-                    "Runner {Id} repairing stale workflow claim {WorkflowId}: backlog claim produced no runnable work",
-                    RunnerId,
-                    claimedId);
-                await workflow.UnscheduleAsync($"Runner {RunnerId} repaired stale workflow claim after poll returned no work");
+                var status = await workflow.GetRunStatusAsync();
+                if (status is "Completed" or "Failed" or "Paused")
+                {
+                    _log.LogWarning(
+                        "Runner {Id} repairing stale workflow claim {WorkflowId}: backlog claim produced no runnable work (status={Status})",
+                        RunnerId,
+                        claimedId,
+                        status);
+                    await workflow.UnscheduleAsync($"Runner {RunnerId} repaired stale workflow claim after poll returned no work");
+                }
+                else
+                {
+                    _assignedWorkflows.Remove(claimedId);
+                    _log.LogInformation(
+                        "Runner {Id} claimed workflow {WorkflowId} but no work was dispatchable yet (status={Status}); released runner assignment",
+                        RunnerId,
+                        claimedId,
+                        status ?? "<unknown>");
+                }
             }
         }
 
@@ -176,6 +196,8 @@ public class RunnerGrain : Grain, IRunnerGrain
     }
 
     private int MaxWorkflowSlots => RunnerCapacity.Normalize(_info?.MaxWorkflowSlots);
+
+    private int ActiveWorkflowCount => _workToWorkflow.Values.Distinct(StringComparer.Ordinal).Count();
 
     public Task<WorkDispatch?> PeekAsync()
     {
@@ -187,15 +209,15 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.FromResult<IReadOnlyList<WorkDispatch>>([]);
     }
 
-    public async Task<string?> ReportAsync(string workId, WorkDispatchResult result)
+    public async Task<string?> ReportAsync(string workId, WorkDispatchResult result, string? workflowRunId = null)
     {
         if (_status == RunnerStatus.Online)
             await TouchPresenceAsync();
 
-        if (!_workToWorkflow.Remove(workId, out var wfId))
+        var lookupKey = workflowRunId is null ? workId : WorkKey(workflowRunId, workId);
+        if (!_workToWorkflow.Remove(lookupKey, out var wfId))
             return null;
-        _workById.Remove(workId);
-        _workToProject.Remove(workId);
+        RemoveWorkTracking(wfId, workId);
 
         var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
         await workflow.ReportResultAsync(RunnerId, workId, result);
@@ -227,7 +249,10 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
-        var activeWork = _workById.Values.ToList();
+        var activeWork = _workById.Values
+            .GroupBy(work => WorkKey(work.WorkflowRunId, work.WorkId), StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToList();
         return Task.FromResult(new RunnerRuntimeState(
             _status,
             _lastHeartbeat,
@@ -245,13 +270,16 @@ public class RunnerGrain : Grain, IRunnerGrain
     public Task RestoreLeasedWorkAsync(string workflowRunId, string workId, string workType, string stage, string? title)
     {
         _assignedWorkflows.Add(workflowRunId);
-        _workToWorkflow[workId] = workflowRunId;
-        _workById[workId] = new WorkDispatch(
+        var dispatch = new WorkDispatch(
             WorkflowRunId: workflowRunId,
             WorkId: workId,
             WorkType: workType,
             Stage: stage,
             Title: title);
+        _workToWorkflow[workId] = workflowRunId;
+        _workToWorkflow[WorkKey(workflowRunId, workId)] = workflowRunId;
+        _workById[workId] = dispatch;
+        _workById[WorkKey(workflowRunId, workId)] = dispatch;
         _log.LogInformation("Runner {Id} restored leased work {WorkId} for workflow {WorkflowId}", RunnerId, workId, workflowRunId);
         return Task.CompletedTask;
     }
@@ -266,11 +294,7 @@ public class RunnerGrain : Grain, IRunnerGrain
                 .Select(kv => kv.Key)
                 .ToList();
             foreach (var key in staleKeys)
-            {
-                _workToWorkflow.Remove(key);
-                _workById.Remove(key);
-                _workToProject.Remove(key);
-            }
+                RemoveWorkTrackingKey(key);
         }
         else
         {
@@ -378,6 +402,33 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         var projectId = work.Issue?.ProjectId ?? fallbackProjectId ?? _projectId;
         if (!string.IsNullOrWhiteSpace(projectId))
+        {
             _workToProject[work.WorkId] = projectId;
+            _workToProject[WorkKey(work.WorkflowRunId, work.WorkId)] = projectId;
+        }
+    }
+
+    private async Task MarkBacklogRunningAsync(string workflowRunId, WorkDispatch work, string? fallbackProjectId = null)
+    {
+        var projectId = work.Issue?.ProjectId ?? fallbackProjectId ?? _projectId;
+        if (string.IsNullOrWhiteSpace(projectId)) return;
+
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(GrainKey.WorkflowBacklog(projectId));
+        await backlog.RestoreRunningAsync(workflowRunId, RunnerId);
+    }
+
+    private static string WorkKey(string workflowRunId, string workId) => $"{workflowRunId}\u001f{workId}";
+
+    private void RemoveWorkTracking(string workflowRunId, string workId)
+    {
+        RemoveWorkTrackingKey(workId);
+        RemoveWorkTrackingKey(WorkKey(workflowRunId, workId));
+    }
+
+    private void RemoveWorkTrackingKey(string key)
+    {
+        _workToWorkflow.Remove(key);
+        _workById.Remove(key);
+        _workToProject.Remove(key);
     }
 }

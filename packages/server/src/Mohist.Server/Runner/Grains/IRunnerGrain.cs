@@ -9,7 +9,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task<WorkDispatch?> PeekAsync();
     Task<IReadOnlyList<WorkDispatch>> PeekAllAsync();
     Task<WorkDispatch?> PollAsync();
-    Task<string?> ReportAsync(string workId, WorkDispatchResult result);
+    Task<string?> ReportAsync(string workId, WorkDispatchResult result, string? workflowRunId = null);
     Task<bool> IsAvailableAsync();
     Task AssignWorkflowAsync(string workflowRunId);
     Task RestoreLeasedWorkAsync(string workflowRunId, string workId, string workType, string stage, string? title);
