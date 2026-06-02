@@ -147,11 +147,106 @@ public sealed class SkillsContentSpecs : IDisposable
     }
 
     [Fact]
+    public async Task Path_PrintsManagedCachePath_WhenManagedCacheIsSelected()
+    {
+        var managedRoot = SetUpManagedCache(_tempRoot);
+        using var stdout = new StringWriter();
+        using var jsonStdout = new StringWriter();
+        var resolver = new SkillAssetRootResolver(
+            getOverrideAssetRoot: () => null,
+            getManagedAssetRoot: null,
+            getUserHome: () => _tempRoot);
+        var assets = new SkillAssetService(resolver);
+
+        var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
+        var jsonExitCode = await BuildRootCommand(jsonStdout, assets: assets).Parse(["skills", "path", "mohist", "--json"]).InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(0, jsonExitCode);
+        var textPath = stdout.ToString().Trim();
+        Assert.Equal(Path.Combine(managedRoot, "mohist"), textPath);
+        var item = JsonNode.Parse(jsonStdout.ToString())!.AsObject();
+        Assert.Equal("mohist", item["name"]!.GetValue<string>());
+        Assert.Equal(Path.Combine(managedRoot, "mohist"), item["path"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Get_ReturnsFullPackagedGuidance_FromManagedCache_WhenSelected()
+    {
+        _ = SetUpManagedCache(_tempRoot);
+        var resolver = new SkillAssetRootResolver(
+            getOverrideAssetRoot: () => null,
+            getManagedAssetRoot: null,
+            getUserHome: () => _tempRoot);
+        var assets = new SkillAssetService(resolver);
+        using var mohistStdout = new StringWriter();
+        using var exploreStdout = new StringWriter();
+
+        var mohistExit = await BuildRootCommand(mohistStdout, assets: assets).Parse(["skills", "get", "mohist"]).InvokeAsync();
+        var exploreExit = await BuildRootCommand(exploreStdout, assets: assets).Parse(["skills", "get", "mohist-explore"]).InvokeAsync();
+
+        Assert.Equal(0, mohistExit);
+        Assert.Equal(0, exploreExit);
+        Assert.Contains("name: mohist", mohistStdout.ToString());
+        Assert.Contains("name: mohist-explore", exploreStdout.ToString());
+    }
+
+    [Fact]
+    public async Task Path_FallsBackToSiblingRoot_WhenManagedCacheIsAbsent()
+    {
+        using var stdout = new StringWriter();
+        var resolver = new SkillAssetRootResolver(
+            getOverrideAssetRoot: () => null,
+            getManagedAssetRoot: null,
+            getUserHome: () => Path.Combine(_tempRoot, "empty-home"));
+        var assets = new SkillAssetService(resolver);
+
+        var exitCode = await BuildRootCommand(stdout, assets: assets).Parse(["skills", "path", "mohist"]).InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        var textPath = stdout.ToString().Trim();
+        Assert.Equal(Path.Combine(AppContext.BaseDirectory, "skill-data", "mohist"), textPath);
+    }
+
+    [Fact]
+    public async Task Get_FailsWithRepairGuidance_WhenManagedCacheIsIncompatible()
+    {
+        var managedRoot = Path.Combine(_tempRoot, "user-home", ".mohist", "cli", "skill-data");
+        WriteSkill(managedRoot, "mohist", "stale mohist body");
+        WriteSkill(managedRoot, "mohist-explore", "stale explore body");
+        SkillAssetManifest.Write(
+            managedRoot,
+            new SkillAssetBuildIdentity("0.0.0-stale", "deadbeef"),
+            new[] { "mohist", "mohist-explore" });
+
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var resolver = new SkillAssetRootResolver(
+            getOverrideAssetRoot: () => null,
+            getManagedAssetRoot: null,
+            getUserHome: () => Path.Combine(_tempRoot, "user-home"));
+        var assets = new SkillAssetService(resolver);
+
+        var exitCode = await BuildRootCommand(stdout, stderr, assets)
+            .Parse(["skills", "get", "mohist"]).InvokeAsync();
+
+        Assert.Equal(1, exitCode);
+        Assert.Equal(string.Empty, stdout.ToString());
+        var diagnostic = stderr.ToString();
+        Assert.Contains("mo update", diagnostic, StringComparison.Ordinal);
+        Assert.Contains("scripts/install-mo.sh", diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Commands_UseMohistSkillsDirOverride_ForListGetAndPath()
     {
         var overrideRoot = Path.Combine(_tempRoot, "override-assets");
         WriteSkill(overrideRoot, "mohist", "override mohist");
         WriteSkill(overrideRoot, "mohist-explore", "override explore");
+        SkillAssetManifest.Write(
+            overrideRoot,
+            SkillAssetManifest.ResolveCurrentBuildIdentity(),
+            new[] { "mohist", "mohist-explore" });
         using var listStdout = new StringWriter();
         using var getStdout = new StringWriter();
         using var pathStdout = new StringWriter();
@@ -222,7 +317,10 @@ public sealed class SkillsContentSpecs : IDisposable
             Directory.Delete(_tempRoot, recursive: true);
     }
 
-    private static System.CommandLine.RootCommand BuildRootCommand(TextWriter? output = null, TextWriter? error = null)
+    private static System.CommandLine.RootCommand BuildRootCommand(
+        TextWriter? output = null,
+        TextWriter? error = null,
+        SkillAssetService? assets = null)
     {
         output ??= TextWriter.Null;
         error ??= TextWriter.Null;
@@ -234,12 +332,24 @@ public sealed class SkillsContentSpecs : IDisposable
         services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
         services.AddSingleton<SystemdServiceInstaller>();
         services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton<SkillAssetService>();
+        services.AddSingleton(assets ?? new SkillAssetService());
         services.AddSingleton<SkillInstallService>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();
         return MohistCliCommands.Build(api, provider);
+    }
+
+    private static string SetUpManagedCache(string homeDirectory)
+    {
+        var managedRoot = Path.Combine(homeDirectory, ".mohist", "cli", "skill-data");
+        WriteSkill(managedRoot, "mohist", "managed mohist body");
+        WriteSkill(managedRoot, "mohist-explore", "managed explore body");
+        SkillAssetManifest.Write(
+            managedRoot,
+            SkillAssetManifest.ResolveCurrentBuildIdentity(),
+            new[] { "mohist", "mohist-explore" });
+        return managedRoot;
     }
 
     private static string[] SplitLines(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);

@@ -8,6 +8,9 @@
     <PackageId>Mohist.Cli</PackageId>
     <Description>Mohist command line interface.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,5 +20,14 @@
     <None Include="..\..\..\docs\README.md" Pack="true" PackagePath="\" />
     <Content Include="skill-data\**\*" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="skill-data/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
+
+  <Target Name="GenerateSkillDataManifest" BeforeTargets="Build" Condition="'$(OS)' != 'Windows_NT'">
+    <PropertyGroup>
+      <_SkillDataManifestPath>$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'skill-data', 'manifest.json'))</_SkillDataManifestPath>
+    </PropertyGroup>
+    <Exec
+      Command="bash &quot;$(MSBuildThisFileDirectory)scripts/generate-skill-manifest.sh&quot; &quot;$(_SkillDataManifestPath)&quot; &quot;$(Version)&quot;"
+      IgnoreExitCode="true" />
+  </Target>
 
 </Project>

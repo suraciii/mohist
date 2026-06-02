@@ -1,17 +1,28 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # Mohist CLI 本地安装脚本
 # 将 mo 命令作为单文件可执行程序安装到 ~/.local/bin
+# 并将 publish 输出的 packaged skill assets 同步到
+# ~/.mohist/cli/skill-data，保证 mo skills get 等命令在
+# 安装后不需要设置 MOHIST_SKILLS_DIR 即可工作。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="${HOME}/.local/bin"
 MO_BIN="${INSTALL_DIR}/mo"
+PUBLISH_DIR="$REPO_ROOT/.publish/mo"
+SOURCE_SKILL_DATA="$PUBLISH_DIR/skill-data"
+MANAGED_PARENT="${HOME}/.mohist/cli"
+MANAGED_SKILL_DATA="$MANAGED_PARENT/skill-data"
+
+# 同步时必须存在的内置 skill 名称（与 Mohist.Cli 的 BuiltInSkillNames 保持一致）
+BUILTIN_SKILL_NAMES=("mohist" "mohist-explore")
 
 echo "Installing Mohist CLI (mo)..."
 echo "Repository: $REPO_ROOT"
 echo "Install directory: $INSTALL_DIR"
+echo "Managed skill asset root: $MANAGED_SKILL_DATA"
 
 # 确保安装目录存在
 mkdir -p "$INSTALL_DIR"
@@ -28,26 +39,85 @@ cd "$REPO_ROOT"
 dotnet publish packages/cli/Mohist.Cli/Mohist.Cli.csproj \
     -c Release \
     -r linux-x64 \
-    -o "$REPO_ROOT/.publish/mo" \
+    -o "$PUBLISH_DIR" \
     --self-contained true \
     -p:PublishSingleFile=true \
     -p:IncludeNativeLibrariesForSelfExtract=true
 
 # 安装可执行文件
-PUBLISH_DIR="$REPO_ROOT/.publish/mo"
-if [ -f "$PUBLISH_DIR/Mohist.Cli" ]; then
-    # 备份旧版本
-    [ -f "$MO_BIN" ] && mv "$MO_BIN" "${MO_BIN}.bak.$(date +%s)"
-
-    # 复制可执行文件
-    cp "$PUBLISH_DIR/Mohist.Cli" "$MO_BIN"
-    chmod +x "$MO_BIN"
-
-    echo "Successfully installed mo to $MO_BIN"
-    echo ""
-    echo "Verifying installation..."
-    "$MO_BIN" --help
-else
+if [ ! -f "$PUBLISH_DIR/Mohist.Cli" ]; then
     echo "Error: Published executable not found at $PUBLISH_DIR/Mohist.Cli"
     exit 1
 fi
+
+# 备份旧版本
+[ -f "$MO_BIN" ] && mv "$MO_BIN" "${MO_BIN}.bak.$(date +%s)"
+
+# 复制可执行文件
+cp "$PUBLISH_DIR/Mohist.Cli" "$MO_BIN"
+chmod +x "$MO_BIN"
+
+echo "Successfully installed mo to $MO_BIN"
+
+# 同步 packaged skill assets 到 managed cache
+echo ""
+echo "Synchronizing packaged skill assets to managed cache..."
+
+TEMP_SKILL_DATA=""
+cleanup_temp() {
+    if [ -n "$TEMP_SKILL_DATA" ] && [ -d "$TEMP_SKILL_DATA" ]; then
+        rm -rf "$TEMP_SKILL_DATA"
+    fi
+}
+trap cleanup_temp EXIT
+
+if [ ! -d "$SOURCE_SKILL_DATA" ]; then
+    echo "Error: Published skill-data not found at $SOURCE_SKILL_DATA. Aborting managed asset sync." >&2
+    exit 1
+fi
+
+if [ ! -f "$SOURCE_SKILL_DATA/manifest.json" ]; then
+    echo "Error: Source skill-data at '$SOURCE_SKILL_DATA' is missing manifest.json. Aborting managed asset sync." >&2
+    exit 1
+fi
+
+mkdir -p "$MANAGED_PARENT"
+
+if ! TEMP_SKILL_DATA=$(mktemp -d -p "$MANAGED_PARENT" "skill-data.tmp.XXXXXX"); then
+    echo "Error: Failed to create temporary managed skill-data directory under '$MANAGED_PARENT'." >&2
+    exit 1
+fi
+
+# 复制 source skill-data 到临时目录
+if ! cp -R "$SOURCE_SKILL_DATA/." "$TEMP_SKILL_DATA/"; then
+    echo "Error: Failed to copy source skill-data to '$TEMP_SKILL_DATA'." >&2
+    exit 1
+fi
+
+# 验证临时目录的 manifest.json 存在
+if [ ! -f "$TEMP_SKILL_DATA/manifest.json" ]; then
+    echo "Error: Prepared skill-data at '$TEMP_SKILL_DATA' is missing manifest.json. Aborting managed asset sync." >&2
+    exit 1
+fi
+
+# 验证临时目录中每个内置 skill 的 SKILL.md 存在
+for skill_name in "${BUILTIN_SKILL_NAMES[@]}"; do
+    if [ ! -f "$TEMP_SKILL_DATA/$skill_name/SKILL.md" ]; then
+        echo "Error: Prepared skill-data at '$TEMP_SKILL_DATA' is missing '$skill_name/SKILL.md'. Aborting managed asset sync." >&2
+        exit 1
+    fi
+done
+
+# 替换现有的 managed skill-data 目录
+if [ -d "$MANAGED_SKILL_DATA" ]; then
+    rm -rf "$MANAGED_SKILL_DATA"
+fi
+mv "$TEMP_SKILL_DATA" "$MANAGED_SKILL_DATA"
+TEMP_SKILL_DATA=""
+trap - EXIT
+
+echo "Synchronized managed skill assets to $MANAGED_SKILL_DATA"
+
+echo ""
+echo "Verifying installation..."
+"$MO_BIN" --help

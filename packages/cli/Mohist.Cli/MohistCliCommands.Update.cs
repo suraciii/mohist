@@ -97,6 +97,7 @@ internal sealed class SourceCodeUpdater
     private readonly ICommandExecutor _commandExecutor;
     private readonly HttpClient _http;
     private readonly TimeSpan _serverReadyTimeout;
+    private readonly Func<string?> _getUserHome;
 
     public SourceCodeUpdater(
         TextWriter output,
@@ -104,7 +105,8 @@ internal sealed class SourceCodeUpdater
         SystemdServiceInstaller systemd,
         ICommandExecutor commandExecutor,
         HttpClient? http = null,
-        TimeSpan? serverReadyTimeout = null)
+        TimeSpan? serverReadyTimeout = null,
+        Func<string?>? getUserHome = null)
     {
         _out = output;
         _err = error;
@@ -116,6 +118,18 @@ internal sealed class SourceCodeUpdater
             Timeout = TimeSpan.FromSeconds(5),
         };
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
+        _getUserHome = getUserHome ?? DefaultUserHome;
+    }
+
+    private static string? DefaultUserHome() =>
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    internal string ResolveManagedSkillAssetRoot()
+    {
+        var home = _getUserHome();
+        if (string.IsNullOrWhiteSpace(home))
+            return Path.Combine(AppContext.BaseDirectory, "skill-data");
+        return Path.Combine(home, ".mohist", "cli", "skill-data");
     }
 
     internal Uri? ServerBaseAddress => _http.BaseAddress;
@@ -178,6 +192,8 @@ internal sealed class SourceCodeUpdater
         var publishDir = Path.Combine(root, ".publish", "cli");
         var binary = Path.Combine(publishDir, "Mohist.Cli");
         var tempTarget = $"{target}.tmp";
+        var sourceSkillData = Path.Combine(publishDir, "skill-data");
+        var managedSkillData = ResolveManagedSkillAssetRoot();
 
         _out.WriteLine($"Updating CLI from source: {root}");
 
@@ -188,6 +204,7 @@ internal sealed class SourceCodeUpdater
             _out.WriteLine($"  cp {binary} {tempTarget}");
             _out.WriteLine($"  chmod +x {tempTarget}");
             _out.WriteLine($"  mv {tempTarget} {target}");
+            _out.WriteLine($"  synchronize {sourceSkillData} into {managedSkillData} (prepare temp dir, replace managed root)");
             return 0;
         }
 
@@ -235,6 +252,14 @@ internal sealed class SourceCodeUpdater
             if (!string.IsNullOrWhiteSpace(moveErr)) _err.WriteLine(moveErr);
             _err.WriteLine("CLI replace failed. Aborting update.");
             return move;
+        }
+
+        var synchronizer = new SkillAssetSynchronizer(_out, _err);
+        var syncExitCode = await synchronizer.SyncAsync(sourceSkillData, managedSkillData);
+        if (syncExitCode != 0)
+        {
+            _err.WriteLine("Managed skill asset sync failed. Aborting update.");
+            return syncExitCode;
         }
 
         _out.WriteLine($"CLI updated: {target}");

@@ -10,17 +10,53 @@ internal sealed class SkillAssetService
         new("mohist-explore", "从产品和用户视角探索 mohist 项目，发现功能缺陷、体验问题、设计机会和价值增长点。当用户想要探索代码库、发现改进点、审查用户体验、思考功能设计、或无目标地巡检产品时使用。触发词包括 \"explore\"、\"探索\"、\"巡检\"、\"找问题\"、\"体验审查\"、\"功能设计\"、\"产品思考\"。"),
     ];
 
-    private readonly string _assetRoot;
+    internal static IReadOnlyList<string> BuiltInSkillNames =>
+        BuiltIns.Select(skill => skill.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+
+    private readonly SkillAssetRootResolution _resolution;
+    private readonly string? _assetRoot;
 
     public SkillAssetService()
-        : this(Environment.GetEnvironmentVariable("MOHIST_SKILLS_DIR"))
+        : this(SkillAssetRootResolver.Default)
     {
+    }
+
+    internal SkillAssetService(SkillAssetRootResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(resolver);
+        _resolution = resolver.Resolve(BuiltInSkillNames);
+        _assetRoot = _resolution.AssetRoot;
+    }
+
+    internal SkillAssetService(SkillAssetRootResolution resolution)
+    {
+        ArgumentNullException.ThrowIfNull(resolution);
+        _resolution = resolution;
+        _assetRoot = resolution.AssetRoot;
     }
 
     internal SkillAssetService(string? overrideAssetRoot)
+        : this(BuildTestOnlyResolution(overrideAssetRoot))
     {
-        _assetRoot = ResolveAssetRoot(overrideAssetRoot);
     }
+
+    private static SkillAssetRootResolution BuildTestOnlyResolution(string? overrideAssetRoot)
+    {
+        var resolvedRoot = string.IsNullOrWhiteSpace(overrideAssetRoot)
+            ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "skill-data"))
+            : Path.GetFullPath(overrideAssetRoot);
+
+        return SkillAssetRootResolution.Selected(
+            resolvedRoot,
+            SkillAssetRootSource.Override,
+            SkillAssetManifestValidation.Valid());
+    }
+
+    public string? AssetRoot => _assetRoot;
+
+    public SkillAssetRootSource AssetRootSource => _resolution.Source;
+
+    public string? ResolverDiagnostic => _resolution.DiagnosticSummary;
 
     public IReadOnlyList<BuiltInSkillMetadata> ListVisibleSkills() =>
         BuiltIns
@@ -34,11 +70,14 @@ internal sealed class SkillAssetService
         if (definition is null)
             return SkillAssetReadResult.Fail($"Unknown Mohist built-in skill '{name}'.");
 
+        if (_assetRoot is null)
+            return SkillAssetReadResult.Fail(BuildUnresolvedDiagnostic(definition.Name));
+
         var skillDirectory = Path.Combine(_assetRoot, definition.Name);
         var skillFile = Path.Combine(skillDirectory, "SKILL.md");
 
         if (!File.Exists(skillFile))
-            return SkillAssetReadResult.Fail($"Built-in skill asset '{definition.Name}' is missing SKILL.md at '{skillFile}'.");
+            return SkillAssetReadResult.Fail(BuildMissingAssetDiagnostic(definition.Name, skillFile));
 
         var content = File.ReadAllText(skillFile, Encoding.UTF8);
         if (!TryReadFrontmatter(content, out var frontmatterName, out var frontmatterDescription))
@@ -62,16 +101,29 @@ internal sealed class SkillAssetService
             supplementaryFiles));
     }
 
-    private static string ResolveAssetRoot(string? overrideAssetRoot)
+    private string BuildMissingAssetDiagnostic(string skillName, string skillFile)
     {
-        if (!string.IsNullOrWhiteSpace(overrideAssetRoot))
-        {
-            var candidate = Path.GetFullPath(overrideAssetRoot);
-            if (Directory.Exists(candidate))
-                return candidate;
-        }
+        const string repairGuidance = "Repair by running 'mo update' or 'scripts/install-mo.sh'.";
+        var message = $"Built-in skill asset '{skillName}' is missing SKILL.md at '{skillFile}'.";
+        var resolverMessage = _resolution.DiagnosticSummary;
+        if (string.IsNullOrWhiteSpace(resolverMessage))
+            return $"{message} {repairGuidance}";
 
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "skill-data"));
+        if (resolverMessage.Contains("mo update", StringComparison.Ordinal))
+            return $"{message} {resolverMessage}";
+
+        return $"{message} {resolverMessage} {repairGuidance}";
+    }
+
+    private string BuildUnresolvedDiagnostic(string skillName)
+    {
+        const string repairGuidance = "Repair by running 'mo update' or 'scripts/install-mo.sh'.";
+        var message = $"Built-in skill asset '{skillName}' could not be resolved from any packaged asset root.";
+        var resolverMessage = _resolution.DiagnosticSummary;
+        if (string.IsNullOrWhiteSpace(resolverMessage))
+            return $"{message} {repairGuidance}";
+
+        return $"{message} {resolverMessage}";
     }
 
     private static IReadOnlyList<SkillSupplementaryFile> EnumerateSupplementaryFiles(string skillDirectory)

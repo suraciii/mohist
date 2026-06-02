@@ -30,9 +30,22 @@ internal sealed class SkillInstallService
         var results = new List<SkillInstallResult>();
         foreach (var skill in _assets.ListVisibleSkills())
         {
-            results.Add(options.Hermes
-                ? await InstallHermesSkillAsync(targetRoot, skill.Name)
-                : await InstallDiscoveryStubAsync(targetRoot, skill));
+            SkillInstallResult result;
+            if (options.Hermes)
+            {
+                var resolved = await TryInstallHermesSkillAsync(targetRoot, skill.Name);
+                if (resolved.Error is not null)
+                {
+                    await _error.WriteLineAsync(resolved.Error);
+                    return 1;
+                }
+                result = resolved.Result;
+            }
+            else
+            {
+                result = await InstallDiscoveryStubAsync(targetRoot, skill);
+            }
+            results.Add(result);
         }
 
         await WriteSummaryAsync(options, targetRoot, results);
@@ -84,6 +97,19 @@ internal sealed class SkillInstallService
         }
 
         return new SkillInstallResult(skillName, existed ? "updated" : "created");
+    }
+
+    private async Task<(SkillInstallResult Result, string? Error)> TryInstallHermesSkillAsync(string targetRoot, string skillName)
+    {
+        try
+        {
+            var result = await InstallHermesSkillAsync(targetRoot, skillName);
+            return (result, null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return (new SkillInstallResult(skillName, "error"), ex.Message);
+        }
     }
 
     private async Task WriteSummaryAsync(SkillInstallOptions options, string targetRoot, IReadOnlyList<SkillInstallResult> results)
