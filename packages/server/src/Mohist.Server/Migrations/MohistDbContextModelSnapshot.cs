@@ -548,6 +548,10 @@ namespace Mohist.Server.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(State, '$.Metadata.Annotations.projectId')", true);
 
+                    b.Property<long>("ETag")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
