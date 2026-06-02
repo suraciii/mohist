@@ -244,4 +244,4 @@ Runner 不可以说：
 - Explore 不放进 Server；探索通过外部 agent skill 完成。
 - 当前假设单机 daemon；actor runtime 主要作为 state model，而不是优先服务分布式部署。
 - 可以先接受单进程事件总线，但不能因此把执行逻辑塞回 server。
-- OpenSpec spec 不作为架构文档来源；架构文档由 `design/` 和 `talks/` 人工维护。
+- OpenSpec spec 不作为架构文档来源；架构边界以 `design/` 下的人工维护文档为准。

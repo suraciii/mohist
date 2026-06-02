@@ -11,11 +11,8 @@ mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLit
 | `packages/server/` | 新后端核心实现 | ASP.NET Core + Orleans + Issue/Workflow API |
 | `packages/runner/` | Runner 实现 | shared runner host、action catalog、agent/process/check actions |
 | `packages/web/` | Web UI | React + Vite + Tailwind + TanStack Query |
-| `prd/` | 产品文档 | 产品定位、功能规划、用户故事 |
-| `prd/backlog/` | 产品待办 | 从设计讨论中搁置延后的事项，按类别分组，标注所属 Milestone |
 | `design/` | 技术设计 | 架构设计、技术规格、流程设计 |
-| `docs/` | 用户文档 | README、CONTRIBUTING、使用指南 |
-| `talks/` | 设计讨论 | 日期归档的架构探索与设计决策记录，文件名格式：`YYYY-MM-DD-<主题>.md` |
+| `docs/` | 项目文档 | CONTRIBUTING、使用指南等补充文档 |
 | `opensrc/openclaw/` | 参考源码 | openclaw 项目源代码，供架构参考 |
 | `opensrc/nanoclaw/` | 参考源码 | nanoclaw 项目源代码，极简 AI agent 框架（~8K 行），供架构参考 |
 
@@ -85,10 +82,6 @@ npm run dev:web
 ├── config.jsonc    # 配置文件
 └── logs/           # 日志文件
 ```
-
-## 探索讨论记录
-
-探索讨论由外部 agent skill 完成。需要保留结论时，外部 agent 可将提炼后的发现记录到 `.mohist/explores/` 或 `talks/`，也可以通过当前 Issue API 创建 Mohist issue。Mohist server 不保存 Explore session/chat runtime。
 
 ## Web UI
 
