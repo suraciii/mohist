@@ -36,7 +36,33 @@ describe("mohist/openspec-tasks", () => {
     expect(loadedWith.prompt).toContain("runner can claim recovered work")
   })
 
-  it("OpenSpecTaskWithoutAgentDefault_LoadsTaskWithWorkflowAgentConfig", async () => {
+  it("OpenSpecTaskWithAgentTemplate_LoadsTaskWithTemplatePreservedForLateExpansion", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
+    const tasksPath = join(workDir, "tasks.json")
+    await writeFile(tasksPath, JSON.stringify({
+      tasks: [
+        {
+          id: "T-001",
+          title: "Implement workflow recovery",
+        },
+      ],
+    }))
+
+    const addTasks = vi.fn()
+    const result = await openspecTasksAction(context(workDir, {
+      path: tasksPath,
+      task: { with: { agent: "${{ vars.agent }}" } },
+    }, addTasks, {
+      vars: { agent: { type: "opencode", model: "openai/gpt-5.4" } },
+    }))
+    const loadedTasks = addTasks.mock.calls[0]?.[1] ?? []
+    const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
+
+    expect(result.status).toBe("success")
+    expect(loadedWith.agent).toBe("${{ vars.agent }}")
+  })
+
+  it("OpenSpecTaskWithoutAgentTemplate_LoadsTaskWithoutAgent", async () => {
     const workDir = await mkdtemp(join(tmpdir(), "mohist-openspec-"))
     const tasksPath = join(workDir, "tasks.json")
     await writeFile(tasksPath, JSON.stringify({
@@ -56,7 +82,7 @@ describe("mohist/openspec-tasks", () => {
     const loadedWith = JSON.parse(loadedTasks[0].with ?? "{}")
 
     expect(result.status).toBe("success")
-    expect(loadedWith.agent).toEqual({ type: "opencode", model: "openai/gpt-5.4" })
+    expect(loadedWith.agent).toBeUndefined()
   })
 })
 
