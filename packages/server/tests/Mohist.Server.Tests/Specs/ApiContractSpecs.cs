@@ -65,11 +65,17 @@ public class ApiContractSpecs
             projectId,
             coderModels = new[] { "zai/glm-5", "openai/gpt-5.5" },
         });
+        try
+        {
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/opencode/models?projectId={projectId}");
 
-        var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/opencode/models?projectId={projectId}");
-
-        Assert.Contains("zai/glm-5", response.Models);
-        Assert.Contains("openai/gpt-5.5", response.Models);
+            Assert.Contains("zai/glm-5", response.Models);
+            Assert.Contains("openai/gpt-5.5", response.Models);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
     }
 
     [Fact]
@@ -167,28 +173,36 @@ public class ApiContractSpecs
             projectId,
         });
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId!, number));
-        var issueStatus = await issueGrain.GetWorkflowStatusAsync();
-        var wrId = issueStatus!.WorkflowRunId!;
+        try
+        {
+            var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId!, number));
+            var issueStatus = await issueGrain.GetWorkflowStatusAsync();
+            var wrId = issueStatus!.WorkflowRunId!;
 
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
-        await workflow.AssignRunnerAsync(runnerId);
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.PollAsync();
+            var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
+            await workflow.AssignRunnerAsync(runnerId);
+            var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+            await runner.PollAsync();
 
-        using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
+            using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = payload.GetProperty("data");
-        Assert.Equal("queued", data.GetProperty("status").GetString());
-        Assert.Equal("trunk", data.GetProperty("baseBranch").GetString());
-        Assert.StartsWith("rebase-", data.GetProperty("taskId").GetString());
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var data = payload.GetProperty("data");
+            Assert.Equal("queued", data.GetProperty("status").GetString());
+            Assert.Equal("trunk", data.GetProperty("baseBranch").GetString());
+            Assert.StartsWith("rebase-", data.GetProperty("taskId").GetString());
 
-        using var duplicate = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
-        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
-        var duplicatePayload = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("rebase_already_pending", duplicatePayload.GetProperty("code").GetString());
+            using var duplicate = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
+            Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+            var duplicatePayload = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("rebase_already_pending", duplicatePayload.GetProperty("code").GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+            await _fixture.Client.PostAsync($"/api/issues/{number}/stop?projectId={projectId}", null);
+        }
     }
 
     private sealed record OpencodeModelsDto(string[] Models);

@@ -11,7 +11,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("MohistIntegration")]
-public class IssueWorkflowProfileApiSpecs
+public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
@@ -23,6 +23,21 @@ public class IssueWorkflowProfileApiSpecs
     {
         _fixture = fixture;
         _client = fixture.Client;
+    }
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_runnerId))
+        {
+            using var __ = await _client.PostAsync($"/api/runner/{_runnerId}/unregister", null);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_projectId) && _issueNumber > 0)
+        {
+            using var _ = await _client.PostAsync($"/api/issues/{_issueNumber}/stop?projectId={_projectId}", null);
+        }
     }
 
     [Fact]

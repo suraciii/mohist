@@ -283,23 +283,28 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ReportAsync(string runnerId, string workId, string status, string? message = null)
     {
-        await ReportAsync(runnerId, workId, new WorkDispatchResult(status, message));
+        await ReportAsync(runnerId, _workflowId!, workId, new WorkResult(status, message));
     }
 
-    protected async Task ReportAsync(string runnerId, string workId, WorkDispatchResult result)
+    protected async Task ReportAsync(string runnerId, string workId, WorkResult result)
     {
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportAsync(workId, result);
+        await ReportAsync(runnerId, _workflowId!, workId, result);
+    }
+
+    protected async Task ReportAsync(string runnerId, string workflowRunId, string workId, WorkResult result)
+    {
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowRunId);
+        await workflow.ReportResultAsync(runnerId, workId, result);
     }
 
     protected async Task ReportAsync(string runnerId, WorkDispatch work, string status, string? message = null)
     {
-        await ReportAsync(runnerId, work, new WorkDispatchResult(status, message));
+        await ReportAsync(runnerId, work, new WorkResult(status, message));
     }
 
-    protected async Task ReportAsync(string runnerId, WorkDispatch work, WorkDispatchResult result)
+    protected async Task ReportAsync(string runnerId, WorkDispatch work, WorkResult result)
     {
-        await ReportAsync(runnerId, work.WorkId, result);
+        await ReportAsync(runnerId, work.WorkflowRunId, work.WorkId, result);
     }
 
     protected async Task ReportChecksAsync(string runnerId, WorkDispatch checksWork, params (string Name, string Status, string? Message)[] checkResults)
@@ -310,7 +315,7 @@ public abstract class WorkflowGrainSpecs
             ["status"] = cr.Status,
             ["message"] = cr.Message,
         }));
-        await ReportAsync(runnerId, checksWork.WorkId, new WorkDispatchResult(
+        await ReportAsync(runnerId, checksWork.WorkId, new WorkResult(
             checkResults.All(cr => cr.Status == "pass") ? "pass" : "fail",
             Output: output));
     }

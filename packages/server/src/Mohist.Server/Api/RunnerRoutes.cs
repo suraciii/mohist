@@ -80,18 +80,15 @@ public static class RunnerRoutes
 
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
         {
-            var result = new WorkDispatchResult(req.Status, req.Message, req.Output, req.ExitCode);
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-            var workflowRunId = await runner.ReportAsync(req.WorkId, result, req.WorkflowRunId);
+            if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
+                return Results.BadRequest(new { error = "workflowRunId is required" });
 
-            string? workflowStatus = null;
-            if (workflowRunId is not null)
-            {
-                var workflow = grains.GetGrain<IWorkflowGrain>(workflowRunId);
-                workflowStatus = await workflow.GetRunStatusAsync();
-            }
+            var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode);
+            var workflow = grains.GetGrain<IWorkflowGrain>(req.WorkflowRunId);
+            await workflow.ReportResultAsync(runnerId, req.WorkId, result);
+            var workflowStatus = await workflow.GetRunStatusAsync();
 
-            return Results.Ok(new RunnerReportResponse(workflowRunId, workflowStatus));
+            return Results.Ok(new RunnerReportResponse(req.WorkflowRunId, workflowStatus));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/ensure", async (
@@ -131,8 +128,8 @@ public static class RunnerRoutes
 
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
-public record RunnerReportRequest(string WorkId, string Status, string? WorkflowRunId = null, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
-public record RunnerReportResponse(string? WorkflowRunId, string? WorkflowStatus);
+public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
+public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus);
 public record WorkflowAgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
 public record WorkflowAgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
 public record WorkflowAgentSessionEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<WorkflowAgentSessionEventRequest> Events);

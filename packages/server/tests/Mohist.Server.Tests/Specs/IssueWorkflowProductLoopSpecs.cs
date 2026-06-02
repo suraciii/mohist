@@ -27,6 +27,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        if (!string.IsNullOrWhiteSpace(_runnerId))
+        {
+            using var __ = await _client.PostAsync($"/api/runner/{_runnerId}/unregister", null);
+        }
+
         if (string.IsNullOrWhiteSpace(_projectId) || _issueNumber <= 0)
             return;
 
@@ -126,14 +131,16 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         var projectName = $"global-runner-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-global-runner", baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
-        var runnerId = $"global-runner-{Guid.NewGuid():N}";
-        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", maxWorkflowSlots = 16 });
+        _runnerId = $"global-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 16 });
 
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            using var response = await _client.PostAsync($"/api/runner/{runnerId}/poll", null);
+            using var response = await _client.PostAsync($"/api/runner/{_runnerId}/poll", null);
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
             {
                 await Task.Delay(20);
@@ -146,7 +153,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
             if (work.ProjectId != project.Id || work.IssueNumber != issue.Number)
             {
                 await _client.PostOkAsync(
-                    $"/api/runner/{runnerId}/report",
+                    $"/api/runner/{_runnerId}/report",
                     new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = work.WorkType == "checks" ? "pass" : "completed", projectId = work.ProjectId });
                 continue;
             }

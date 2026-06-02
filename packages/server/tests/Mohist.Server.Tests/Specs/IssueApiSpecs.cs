@@ -173,15 +173,22 @@ public class IssueApiSpecs
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lifecycle status issue", projectId = project.Id });
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", new { });
-        var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/status?projectId={project.Id}");
+        try
+        {
+            var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/status?projectId={project.Id}");
 
-        Assert.Equal(1, status.Issues);
-        Assert.Equal(1, status.IssuesByStatus["in_progress"]);
-        Assert.Contains("ready", status.IssuesByStatus.Keys);
-        Assert.Contains("cancelled", status.IssuesByStatus.Keys);
-        Assert.DoesNotContain("plan", status.IssuesByStatus.Keys);
-        Assert.DoesNotContain("build", status.IssuesByStatus.Keys);
-        Assert.DoesNotContain("check", status.IssuesByStatus.Keys);
+            Assert.Equal(1, status.Issues);
+            Assert.Equal(1, status.IssuesByStatus["in_progress"]);
+            Assert.Contains("ready", status.IssuesByStatus.Keys);
+            Assert.Contains("cancelled", status.IssuesByStatus.Keys);
+            Assert.DoesNotContain("plan", status.IssuesByStatus.Keys);
+            Assert.DoesNotContain("build", status.IssuesByStatus.Keys);
+            Assert.DoesNotContain("check", status.IssuesByStatus.Keys);
+        }
+        finally
+        {
+            using var _ = await _client.PostAsync($"/api/issues/{issue.Number}/stop?projectId={project.Id}", null);
+        }
     }
 
     [Fact]
