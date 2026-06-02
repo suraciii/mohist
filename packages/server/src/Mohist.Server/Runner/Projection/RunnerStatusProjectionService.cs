@@ -55,7 +55,7 @@ public class RunnerStatusProjectionService
             : new RunnerScopeView("project", info.ProjectId, null);
 
         var capacity = runtime is not null
-            ? new RunnerCapacityView(runtime.AssignedWorkflows.Count, RunnerCapacity.Normalize(info.MaxWorkflowSlots))
+            ? new RunnerCapacityView(runtime.ActiveWork.Select(work => work.WorkflowRunId).Distinct(StringComparer.Ordinal).Count(), RunnerCapacity.Normalize(info.MaxWorkflowSlots))
             : null;
 
         var activeWork = runtime?.ActiveWork.FirstOrDefault();
@@ -66,12 +66,7 @@ public class RunnerStatusProjectionService
                 activeWork.WorkType,
                 activeWork.Stage,
                 activeWork.Title)
-            : runtime is not null && runtime.AssignedWorkflows.Count > 0
-                ? new RunnerActiveWorkView(
-                    runtime.AssignedWorkflows[0],
-                    runtime.AssignedWorkflows[0],
-                    null, null, null)
-                : null;
+            : null;
 
         return new RunnerStatusView(
             info.RunnerId,
@@ -102,9 +97,6 @@ public class RunnerStatusProjectionService
             return "stale";
 
         if (runtime.ActiveWork.Count > 0)
-            return "busy";
-
-        if (runtime.AssignedWorkflows.Count > 0)
             return "busy";
 
         var requiresLiveConnection = info.Capabilities.Contains("workspace-query", StringComparer.OrdinalIgnoreCase);

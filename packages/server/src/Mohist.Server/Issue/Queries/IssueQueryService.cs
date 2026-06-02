@@ -10,6 +10,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.Queries;
@@ -226,12 +227,12 @@ public class IssueQueryService
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
-        var queueRows = await db.WorkflowQueue
+        var leaseRows = await db.WorkflowLeases
             .AsNoTracking()
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
-        var leases = queueRows.ToDictionary(r => r.WorkflowRunId, QueueLease, StringComparer.Ordinal);
+        var leases = leaseRows.ToDictionary(r => r.WorkflowRunId, r => DeserializeLease(r.StateJson), StringComparer.Ordinal);
 
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
@@ -246,17 +247,7 @@ public class IssueQueryService
         return workflows;
     }
 
-    private static WorkLease? QueueLease(Workflow.Storage.WorkflowQueueRow row)
-    {
-        if (row.State != Workflow.Storage.WorkflowQueueStates.Leased
-            || string.IsNullOrWhiteSpace(row.WorkId)
-            || string.IsNullOrWhiteSpace(row.WorkType)
-            || string.IsNullOrWhiteSpace(row.Stage)
-            || string.IsNullOrWhiteSpace(row.LogicalId))
-            return null;
-
-        return new WorkLease(row.WorkId, row.WorkType, row.Stage, row.LogicalId, row.Title, row.RunnerId);
-    }
+    private static WorkLease? DeserializeLease(string json) => WorkflowLeaseJson.Deserialize(json);
 
     private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusView> workflows)
     {

@@ -5,6 +5,7 @@ public static class MohistSiloRegistration
     public static ISiloBuilder ConfigureMohistSilo(this ISiloBuilder silo)
     {
         silo.UseLocalhostClustering();
+        silo.UseInMemoryReminderService();
 
         silo.ConfigureLogging(logging =>
         {

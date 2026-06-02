@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Projection;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Grains;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -15,6 +17,27 @@ public class RunnerStatusApiSpecs
     public RunnerStatusApiSpecs(MohistIntegrationFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    private async Task AssignActiveWorkForTestAsync(
+        string runnerId,
+        string workflowId,
+        string workId,
+        string workType,
+        string stage,
+        string title)
+    {
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.StartAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(stage,
+                [new TaskDefinition("task-1", title, "spec/task")],
+                [])
+        ]), new WorkflowStartInput(Variables: """{"project":{"id":"test-project"}}"""));
+        await workflow.AssignRunnerAsync(runnerId);
+
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.NotNull(await runner.PollAsync());
     }
 
     [Fact]
@@ -160,7 +183,7 @@ public class RunnerStatusApiSpecs
 
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         var workflowId = $"wf-{Guid.NewGuid():N}";
-        await runner.AssignWorkflowAsync(workflowId);
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
         try
         {
@@ -200,7 +223,7 @@ public class RunnerStatusApiSpecs
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.HeartbeatAsync();
         var workflowId = $"wf-{Guid.NewGuid():N}";
-        await runner.AssignWorkflowAsync(workflowId);
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
         try
         {

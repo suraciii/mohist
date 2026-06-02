@@ -16,9 +16,13 @@ public sealed class WorkflowRun
     public required string Id { get; init; }
     public required WorkflowRunMetadata Metadata { get; set; }
     public WorkflowRunStatus Status { get; set; }
+    public WorkflowClaimInfo? Claim { get; set; }
     public string? CurrentStageId { get; set; }
     public required List<StageRun> Stages { get; init; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public FailureDetails? Failure { get; set; }
+
+    public bool IsClaimed => Claim is not null;
+    public string? ClaimedBy => Claim?.RunnerId;
 }

@@ -262,10 +262,9 @@ public class IssueWorkflowProfileApiSpecs
         _runnerId = runnerId;
 
         await _client.PostOkAsync($"/api/issues/{issueNumber}/start?projectId={projectId}", null);
-        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId });
         var startedIssue = await _client.GetDataAsync<IssueWithWorkflowDto>($"/api/issues/{issueNumber}?projectId={projectId}");
         Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
-        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).AssignWorkflowAsync(startedIssue.WorkflowRunId!);
     }
 
     private async Task DrainUntilApprovalAsync(string projectId, int issueNumber, string stage)
@@ -294,14 +293,14 @@ public class IssueWorkflowProfileApiSpecs
                         new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
                     ]));
                 }
-                await ReportAsync(work.WorkId, "completed");
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
                 break;
             case "checks":
                 var checkNames = ParseCheckNames(work.With);
-                await ReportAsync(work.WorkId, "pass", output: JsonSerializer.Serialize(checkNames.Select(name => new { name, status = "pass" })));
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "pass", output: JsonSerializer.Serialize(checkNames.Select(name => new { name, status = "pass" })));
                 break;
             default:
-                await ReportAsync(work.WorkId, "completed");
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
                 break;
         }
     }
@@ -324,13 +323,13 @@ public class IssueWorkflowProfileApiSpecs
             {
                 if (!IsCurrentIssueWork(work))
                 {
-                    await ReportAsync(work.WorkId, "completed");
+                    await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
                     continue;
                 }
             }
             else if (!IsCurrentIssueWork(work))
             {
-                await ReportAsync(work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
+                await ReportAsync(work.WorkflowRunId, work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
                 continue;
             }
 
@@ -346,8 +345,8 @@ public class IssueWorkflowProfileApiSpecs
         return work.ProjectId == _projectId && work.IssueNumber == _issueNumber;
     }
 
-    private Task ReportAsync(string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
-        _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId, status, message, output, exitCode });
+    private Task ReportAsync(string workflowRunId, string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
+        _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workflowRunId, workId, status, message, output, exitCode });
 
     private static string[] ParseCheckNames(string? with)
     {

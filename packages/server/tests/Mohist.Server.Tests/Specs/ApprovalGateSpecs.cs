@@ -51,7 +51,7 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task AwaitingApproval_UserApproves_WorkflowIsClaimableByAnotherRunner()
+    public async Task AwaitingApproval_UserApproves_AssignedRunnerContinuesWorkflow()
     {
         var workflow = await StartWorkflowAsync(ApprovalStage());
 
@@ -65,8 +65,10 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 
         var nextRunnerId = await RegisterRunnerAsync();
         var nextRunner = Grains.GetGrain<IRunnerGrain>(nextRunnerId);
-        var buildWork = await nextRunner.PollAsync();
+        Assert.Null(await nextRunner.PollAsync());
 
+        var assignedRunner = Grains.GetGrain<IRunnerGrain>(r2);
+        var buildWork = await assignedRunner.PollAsync();
         Assert.NotNull(buildWork);
         Assert.StartsWith("compile.", buildWork.WorkId);
     }

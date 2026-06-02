@@ -136,10 +136,11 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
 
-        var duplicateDispatch = await workflow.GetWorkAsync("different-runner");
-        Assert.Null(duplicateDispatch);
+        var duplicateAssignment = await workflow.AssignRunnerAsync("different-runner");
+        Assert.Equal(WorkflowAssignmentStatus.Rejected, duplicateAssignment.Status);
+        Assert.Equal("already-assigned", duplicateAssignment.Reason);
 
-        var assignedRunner = await workflow.GetAssignedRunnerIdAsync();
+        var assignedRunner = await workflow.GetClaimedRunnerIdAsync();
         Assert.Equal(r1, assignedRunner);
     }
 
@@ -151,10 +152,14 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var (work, ownerRunnerId) = await PollWorkAnyAsync();
         var otherRunnerId = await RegisterRunnerAsync();
 
-        Assert.Null(await workflow.GetWorkAsync(otherRunnerId));
-        Assert.Null(await workflow.GetWorkAsync(otherRunnerId));
-        Assert.Equal(ownerRunnerId, await workflow.GetAssignedRunnerIdAsync());
-        Assert.Equal(work.WorkId, await workflow.GetAssignedWorkIdAsync());
+        var firstAttempt = await workflow.AssignRunnerAsync(otherRunnerId);
+        var secondAttempt = await workflow.AssignRunnerAsync(otherRunnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Rejected, firstAttempt.Status);
+        Assert.Equal("already-assigned", firstAttempt.Reason);
+        Assert.Equal(WorkflowAssignmentStatus.Rejected, secondAttempt.Status);
+        Assert.Equal("already-assigned", secondAttempt.Reason);
+        Assert.Equal(ownerRunnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
 
         var startEvents = (await EventStore.ListWorkflowEventsAsync(_workflowId!))
             .Where(e => e.Type == "workflow_task_started")
@@ -171,10 +176,12 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         var (firstWork, runnerId) = await PollWorkAnyAsync();
 
-        Assert.Null(await workflow.GetWorkAsync(runnerId));
-        Assert.Null(await workflow.GetWorkAsync(runnerId));
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
-        Assert.Equal(firstWork.WorkId, await workflow.GetAssignedWorkIdAsync());
+        var firstAttempt = await workflow.AssignRunnerAsync(runnerId);
+        var secondAttempt = await workflow.AssignRunnerAsync(runnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, firstAttempt.Status);
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, secondAttempt.Status);
+        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(firstWork.WorkId, await workflow.GetCurrentWorkIdAsync());
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());
@@ -210,6 +217,26 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(lease.RunnerId, started.RunnerId);
     }
 
+    [Fact]
+    public async Task StoppedClaimedWorkflow_RequestWorkRejectsAsNotRunnable()
+    {
+        var runnerId = await RegisterRunnerAsync("stopped-claimed-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        var workflow = await CreateWorkflowAsync("wf-stopped-claimed");
+        await workflow.StartAsync(SingleStage(checks: []), TestInput());
+        await AssignWorkflowToRunnerAsync(_workflowId!, runnerId);
+        await workflow.StopAsync("test-stop");
+
+        var request = await workflow.AssignRunnerAsync(runnerId);
+        Assert.Equal(WorkflowAssignmentStatus.Rejected, request.Status);
+        Assert.Equal("not-runnable", request.Reason);
+
+        Assert.Null(await runner.PollAsync());
+        var runtime = await runner.GetRuntimeStateAsync();
+        Assert.DoesNotContain(runtime.ActiveWork, work => work.WorkflowRunId == _workflowId);
+    }
+
     private async Task<string?> ReadLeaseJsonAsync(string workflowRunId)
     {
         var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<MohistDbContext>()
@@ -217,11 +244,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var queue = await db.WorkflowQueue.FindAsync(workflowRunId);
-        if (queue is null || string.IsNullOrWhiteSpace(queue.WorkId))
-            return null;
-
-        var lease = new WorkLease(queue.WorkId, queue.WorkType ?? "task", queue.Stage ?? "", queue.LogicalId ?? queue.WorkId, queue.Title ?? queue.LogicalId ?? queue.WorkId, queue.RunnerId ?? "");
-        return JsonSerializer.Serialize(lease);
+        var lease = await db.WorkflowLeases.FindAsync(workflowRunId);
+        return lease?.StateJson;
     }
 }

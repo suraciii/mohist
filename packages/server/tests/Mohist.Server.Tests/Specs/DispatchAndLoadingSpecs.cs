@@ -17,8 +17,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await workflow.StartAsync(SingleStage(), TestInput());
 
         _runnerId = await RegisterRunnerAsync();
-        var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
-        await runner.AssignWorkflowAsync(_workflowId!);
 
         var (task, rId) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task.WorkId);
@@ -37,7 +35,6 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await workflow.PauseAsync("paused before capacity");
         _runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(_runnerId);
-        await runner.AssignWorkflowAsync(_workflowId!);
 
         Assert.Null(await runner.PollAsync());
         Assert.True(await runner.IsAvailableAsync());
