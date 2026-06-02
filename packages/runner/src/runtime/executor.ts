@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import type { ActionContext, JsonObject, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
-import { renderTemplate } from "../core/template.js"
+import { renderTemplate, unresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
@@ -33,6 +33,10 @@ export class WorkExecutor {
 
     try {
       const variables = await this.variables(work, signal)
+      const unresolved = unresolvedReferences(work.with, variables)
+      if (unresolved.length > 0) {
+        return failure(work, formatUnresolvedError(work, unresolved))
+      }
       const renderedWith = renderTemplate(work.with, variables)
       const workDir = await this.resolveWorkDir(renderedWith, variables)
       return normalize(work, await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), with: renderedWith, workDir }))
@@ -50,6 +54,10 @@ export class WorkExecutor {
       const action = this.actions.resolve(check.uses)
       if (!action) return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
       try {
+        const unresolved = unresolvedReferences(check.with ?? null, variables)
+        if (unresolved.length > 0) {
+          return { name: check.name, status: "fail", message: formatCheckUnresolvedError(unresolved) }
+        }
         const renderedWith = renderTemplate(check.with ?? null, variables)
         const workDir = await this.resolveWorkDir(renderedWith, variables)
         const result = await action({ ...baseContext(work, variables, signal, this.sessionManager, this.acpConnection, this.connection), workType: "check", title: check.title, uses: check.uses, with: renderedWith, workDir })
@@ -125,4 +133,17 @@ function stringAt(value: JsonObject, path: string[]) {
     return (current as JsonObject)[part]
   }, value)
   return typeof found === "string" ? found : undefined
+}
+
+function formatUnresolvedError(work: WorkItem, unresolved: string[]): string {
+  const label = work.title?.trim() || work.uses || work.workId
+  const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
+  return "Task " + work.workId + " (" + label + ") references undefined variable(s): " + refs + ". " +
+    "Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}."
+}
+
+function formatCheckUnresolvedError(unresolved: string[]): string {
+  const refs = unresolved.map((p) => "'${{ " + p + " }}'").join(", ")
+  return "check references undefined variable(s): " + refs + ". " +
+    "Add the variable to workflow.variables, define it in a parent stage, or escape the literal with \\${{ ... }}."
 }

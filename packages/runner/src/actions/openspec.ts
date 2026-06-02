@@ -58,15 +58,6 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
 function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject, variables?: JsonObject) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
   const title = stringInput(task, "title") ?? stringInput(task, "id") ?? stringInput(task, "taskId") ?? "OpenSpec task"
-  addString(merged, task, "description")
-  addValue(merged, task, "acceptanceCriteria")
-  addValue(merged, task, "dependsOn")
-  addString(merged, task, "priority")
-  addString(merged, task, "mode")
-  addString(merged, task, "type")
-  addValue(merged, task, "output")
-  addValue(merged, task, "requireFiles")
-  addValue(merged, task, "requireMarkers")
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
   if (!stringInput(merged, "prompt")?.trim()) {
@@ -122,16 +113,6 @@ function formatValue(value: unknown): string {
   if (Array.isArray(value)) return value.map((item) => `- ${String(item)}`).join("\n")
   if (typeof value === "object") return JSON.stringify(value, null, 2)
   return String(value)
-}
-
-function addString(target: JsonObject, source: JsonObject, key: string) {
-  const value = stringInput(source, key)
-  if (value?.trim()) target[key] = value
-}
-
-function addValue(target: JsonObject, source: JsonObject, key: string) {
-  const value = source[key]
-  if (value !== undefined && value !== null) target[key] = value
 }
 
 function resolveChangeDir(context: ActionContext) {
