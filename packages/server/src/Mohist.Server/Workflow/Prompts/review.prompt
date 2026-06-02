@@ -22,6 +22,7 @@ Read the issue, proposal, specs, design, tasks, and all changed files before pro
 
 <instruction>
 Perform a full review pass. Do not stop after the first blocker.
+When you find a bug, inspect nearby changed code and tests for sibling bugs caused by the same mistaken assumption before writing the review.
 
 Inspect:
 1. Current issue acceptance criteria with concrete evidence.
