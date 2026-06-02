@@ -20,6 +20,7 @@ using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Recovery;
+using Mohist.Server.Workflow.Scheduling;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Projection;
@@ -44,7 +45,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
         services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
-        services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
+        services.AddSingleton<IWorkflowScheduler, WorkflowScheduler>();
         services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
         services.AddScoped<IStateStore<WorkflowAgentSession>, WorkflowAgentSessionStore>();
         services.AddSingleton<ProjectQueryService>();
@@ -57,7 +58,7 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowAgentSessionQueryService>();
         services.AddScoped<WorkflowProjectionService>();
         services.AddScoped<WorkflowQueryService>();
-        services.AddHostedService<WorkflowBacklogRecoveryService>();
+        services.AddHostedService<WorkflowQueueMaintenanceService>();
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddHostedService<EventBridge>();

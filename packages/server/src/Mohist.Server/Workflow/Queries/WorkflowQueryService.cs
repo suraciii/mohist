@@ -52,15 +52,25 @@ public class WorkflowQueryService
             ? JsonSerializer.Deserialize<WorkflowRunProfile>(profileJson)
             : null;
 
-        var leaseJson = await db.WorkflowLeases.AsNoTracking()
+        var queueRow = await db.WorkflowQueue.AsNoTracking()
             .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.StateJson)
             .FirstOrDefaultAsync();
-        var lease = leaseJson is not null && leaseJson != "null"
-            ? JsonSerializer.Deserialize<WorkLease>(leaseJson, StorageJsonOptions)
-            : null;
+        var lease = QueueLease(queueRow);
 
         return WorkflowStatusMapper.BuildStatusView(run, profile, lease);
+    }
+
+    private static WorkLease? QueueLease(Workflow.Storage.WorkflowQueueRow? row)
+    {
+        if (row is null
+            || row.State != Workflow.Storage.WorkflowQueueStates.Leased
+            || string.IsNullOrWhiteSpace(row.WorkId)
+            || string.IsNullOrWhiteSpace(row.WorkType)
+            || string.IsNullOrWhiteSpace(row.Stage)
+            || string.IsNullOrWhiteSpace(row.LogicalId))
+            return null;
+
+        return new WorkLease(row.WorkId, row.WorkType, row.Stage, row.LogicalId, row.Title, row.RunnerId);
     }
 
     public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)

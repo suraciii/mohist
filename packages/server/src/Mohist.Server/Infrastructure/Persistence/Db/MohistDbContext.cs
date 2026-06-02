@@ -28,6 +28,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowRunProfileRow> WorkflowRunProfiles { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
+    public DbSet<WorkflowQueueRow> WorkflowQueue { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
@@ -189,6 +190,23 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
             entity.Property(e => e.StateJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowQueueRow>(entity =>
+        {
+            entity.HasKey(e => e.WorkflowRunId);
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.State).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.RunnerId).HasMaxLength(256);
+            entity.Property(e => e.WorkId).HasMaxLength(256);
+            entity.Property(e => e.WorkType).HasMaxLength(64);
+            entity.Property(e => e.Stage).HasMaxLength(64);
+            entity.Property(e => e.LogicalId).HasMaxLength(256);
+            entity.Property(e => e.Title).HasMaxLength(512);
+            entity.HasIndex(e => new { e.ProjectId, e.State, e.UpdatedAt });
+            entity.HasIndex(e => new { e.RunnerId, e.State });
+            entity.HasIndex(e => e.LeaseExpiresAt);
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>

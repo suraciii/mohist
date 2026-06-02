@@ -222,7 +222,7 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("Running", status);
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueue expired lease recovery; WorkflowGrain no longer recovers persisted WorkflowLeases directly.")]
     public async Task OfflinePersistedLease_IsRecoveredThroughTimeoutAbandonment_BeforeRedispatch()
     {
         var workflow = await StartWorkflowAsync(SingleStage(checks: []));

@@ -120,8 +120,10 @@ public class IssueCreationSpecs
         Assert.DoesNotContain(project.Id, wrId);
         Assert.False(wrId.EndsWith($"_{created.Number}", StringComparison.Ordinal));
 
-        var wf = _grains.GetGrain<IWorkflowGrain>(wrId);
-        var work = await wf.GetWorkAsync("runner-variable-test");
+        var runnerId = $"runner-variable-test-{Guid.NewGuid():N}";
+        var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", project.Id));
+        var work = await runner.PollAsync();
 
         Assert.NotNull(work);
         Assert.NotNull(work.Variables);

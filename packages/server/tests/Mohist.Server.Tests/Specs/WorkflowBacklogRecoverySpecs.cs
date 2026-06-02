@@ -112,7 +112,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.NotNull(await LoadLeaseJsonAsync(runningWorkflowId));
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueue scheduler lease recovery; persisted WorkflowLeases/BacklogStates are no longer authoritative.")]
     public async Task Recovery_RestoresRunnerAssignment_ForRecoveredRunningLease()
     {
         var workflowId = $"wf-running-{Guid.NewGuid():N}";
@@ -480,12 +480,13 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         await using var db = new MohistDbContext(options);
         db.BacklogStates.RemoveRange(db.BacklogStates);
         db.WorkflowLeases.RemoveRange(db.WorkflowLeases);
+        db.WorkflowQueue.RemoveRange(db.WorkflowQueue);
         db.WorkflowRuns.RemoveRange(db.WorkflowRuns);
         db.WorkflowVariables.RemoveRange(db.WorkflowVariables);
         await db.SaveChangesAsync();
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueue scheduler claim cleanup; persisted WorkflowLeases/BacklogStates are no longer authoritative.")]
     public async Task Unschedule_ClearsLeaseBacklogDiagnostics_AndRunnerAssignment_Idempotently()
     {
         var workflow = await StartWorkflowAsync(new Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition("spec/workflow",
