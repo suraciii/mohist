@@ -25,6 +25,12 @@ function makeToolPart(
     target?: string
     changedFiles?: FileChangeSummary[]
     error?: string
+    input?: string
+    output?: string
+    rawInput?: string
+    rawOutput?: string
+    metadata?: Record<string, unknown>
+    details?: Record<string, unknown>
   },
 ): ToolPart {
   return {
@@ -37,12 +43,16 @@ function makeToolPart(
       status,
       title: opts?.title,
       target: opts?.target,
-      input: undefined,
-      output: undefined,
+      input: opts?.input,
+      output: opts?.output,
       startedAt: '2024-01-01T00:00:02Z',
       completedAt: status === 'completed' || status === 'failed' ? '2024-01-01T00:00:03Z' : null,
       changedFiles: opts?.changedFiles,
       error: opts?.error,
+      rawInput: opts?.rawInput,
+      rawOutput: opts?.rawOutput,
+      metadata: opts?.metadata,
+      details: opts?.details,
     },
   }
 }
@@ -363,6 +373,51 @@ describe('projectTurn', () => {
     expect(display.prompt.subtitle).toBeUndefined()
     expect(display.prompt.outputPath).toBe('src/auth.ts')
     expect(display.prompt.contextFiles).toEqual(['src/auth.ts', 'src/utils.ts'])
+  })
+
+  it('preserves raw input, output, metadata, and details on tool parts', () => {
+    const rawInput = '{"command":"npm test","cwd":"/project"}'
+    const rawOutput = '{"stdout":"ok","exitCode":1}'
+    const metadata = { childSessionId: 'child-session-xyz' }
+    const details = { family: 'execution', cwd: '/project', exitCode: 1, outputPreview: 'ok' }
+    const turn = makeTurn('turn-1', 'Run tests', [
+      makeToolPart('tool-1', 'call-1', 'bash', 'bash', 'completed', {
+        rawInput,
+        rawOutput,
+        metadata,
+        details,
+      }),
+    ])
+    const display = projectTurn(turn)
+    const toolPart = display.assistantParts[0] as any
+    expect(toolPart.partType).toBe('tool')
+    expect(toolPart.rawInput).toBe(rawInput)
+    expect(toolPart.rawOutput).toBe(rawOutput)
+    expect(toolPart.metadata).toEqual(metadata)
+    expect(toolPart.details).toEqual(details)
+  })
+
+  it('exposes raw tool fields on diff tool parts for reviewable disclosure', () => {
+    const rawInput = '{"file_path":"src/app.ts","old_string":"old","new_string":"new"}'
+    const rawOutput = 'old content\nnew content'
+    const metadata = { toolName: 'edit' }
+    const details = { family: 'mutation', files: [] }
+    const turn = makeTurn('turn-1', 'Edit file', [
+      makeToolPart('tool-1', 'call-1', 'edit', 'edit', 'completed', {
+        rawInput,
+        rawOutput,
+        metadata,
+        details,
+      }),
+    ])
+    const display = projectTurn(turn)
+    const toolPart = display.assistantParts[0] as any
+    expect(toolPart.partType).toBe('tool')
+    expect(toolPart.normalizedName).toBe('edit')
+    expect(toolPart.rawInput).toBe(rawInput)
+    expect(toolPart.rawOutput).toBe(rawOutput)
+    expect(toolPart.metadata).toEqual(metadata)
+    expect(toolPart.details).toEqual(details)
   })
 })
 

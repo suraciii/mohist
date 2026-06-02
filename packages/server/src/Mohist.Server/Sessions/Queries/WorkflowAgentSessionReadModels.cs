@@ -61,11 +61,31 @@ public sealed record WorkflowAgentSessionTranscript(
     string? Stage,
     string? Title,
     object Metadata,
-    object Turns,
+    IReadOnlyList<WorkflowAgentSessionTranscriptTurn> Turns,
     bool Incomplete,
     IReadOnlyList<WorkflowAgentSessionTranscriptItem> WorkflowLogs);
 
 public sealed record WorkflowAgentSessionTranscriptItem(string Id, string EventType, JsonElement? Data, string CreatedAt);
+
+public sealed record WorkflowAgentSessionTranscriptTurn(
+    string Id,
+    string StartedAt,
+    string? CompletedAt,
+    WorkflowAgentSessionTranscriptTurnUser User,
+    IReadOnlyList<JsonElement> Assistant);
+
+public sealed record WorkflowAgentSessionTranscriptTurnUser(
+    string Role,
+    string Text,
+    string Kind,
+    string SentAt,
+    WorkflowAgentSessionTranscriptPromptSummary? Summary);
+
+public sealed record WorkflowAgentSessionTranscriptPromptSummary(
+    string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OutputPath = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ContextFiles = null);
 
 public sealed record WorkflowAgentSessionInfoDto(int IssueNumber, string IssueTitle, string IssueStage, string SessionId, [property: JsonPropertyName("status")] string Status, string? Model, string? Title, string CreatedAt, string? CompletedAt, string? LastActivityAt);
 
