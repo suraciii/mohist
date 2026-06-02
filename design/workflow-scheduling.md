@@ -57,7 +57,6 @@ IRunnerGrain
   HeartbeatAsync()
   AssignWorkAsync(work) -> Assigned | Rejected
   PollAsync() -> WorkDispatch?
-  ReportAsync(workId, result, workflowRunId?)
 ```
 
 ## Project Scan
@@ -188,7 +187,7 @@ RunnerGrain.AssignWorkAsync(work)
     |       -> Assigned
     |
     |-- same workflowRunId has different pending/active work
-    |       -> Rejected(workflow-busy)
+    |       -> replace old entries, accept new work
     |
     |-- runner offline / cannot accept
     |       -> Rejected
@@ -226,26 +225,24 @@ local active work
 ## Report
 
 ```text
-RunnerProcess              RunnerGrain                    WorkflowGrain
-    |                           |                                |
-    | PollAsync()               |                                |
-    |-------------------------->|                                |
-    |                           | pending -> active              |
-    | return WorkDispatch       |                                |
-    |<--------------------------|                                |
-    |                           |                                |
-    | execute work              |                                |
-    |                           |                                |
-    | ReportAsync(workId,result,workflowRunId?)                  |
-    |-------------------------->| ReportResultAsync(...)         |
-    |                           |------------------------------->|
-    |                           |                                | validate lease owner
-    |                           |                                | advance workflow
-    |                           | return                         |
-    |<--------------------------|<-------------------------------|
+RunnerProcess                      WorkflowGrain
+    |                                    |
+    | PollAsync()                        |
+    |-------------------------->         |
+    | return WorkDispatch                |
+    |<--------------------------         |
+    |                                    |
+    | execute work                       |
+    |                                    |
+    | ReportResultAsync(runnerId, workId, result)
+    |----------------------------------->|
+    |                                    | validate lease owner
+    |                                    | advance workflow
+    | return                             |
+    |<-----------------------------------|
 ```
 
-`workflowRunId` is optional for compatibility, but callers should provide it when they have a `WorkDispatch`. It makes report routing unambiguous when one runner holds multiple workflows with similar work ids.
+`workflowRunId` is required. Runner process calls `WorkflowGrain.ReportResultAsync` directly.
 
 ## Recovery Reminder
 
