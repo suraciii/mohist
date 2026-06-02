@@ -212,6 +212,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
+
+        var runnerId = _run.Claim?.RunnerId;
+        if (runnerId is not null)
+        {
+            var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
+            await runner.AssignWorkAsync(new WorkDispatch(GrainKey, $"__rerun__{Guid.NewGuid():N}"));
+        }
+
         await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
         await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
@@ -392,7 +400,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
-    public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
+    public async Task ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
         if (_run is null || !_run.IsClaimedBy(runnerId)) return;
         var lease = await RestoreReportLeaseAsync(runnerId, workId);
@@ -751,7 +759,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return lease;
     }
 
-    private void ProcessTaskResult(WorkDispatchResult result)
+    private void ProcessTaskResult(WorkResult result)
     {
         if (result.Status == "completed")
             _run!.CompleteTask();
@@ -759,7 +767,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             _run!.FailTask(new TaskResult("failed", result.Message));
     }
 
-    private async Task ProcessCheckResultAsync(WorkDispatchResult result)
+    private async Task ProcessCheckResultAsync(WorkResult result)
     {
         var checkResults = ParseCheckResults(result.Output);
         if (checkResults.Count == 0)
@@ -971,7 +979,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             RunnerId: runnerId,
             Payload: dispatch);
 
-    private Task AppendTaskResultEventAsync(WorkLease lease, WorkDispatchResult result) =>
+    private Task AppendTaskResultEventAsync(WorkLease lease, WorkResult result) =>
         AppendWorkflowEventAsync(
             result.Status == "completed" ? "workflow_task_completed" : "workflow_task_failed",
             result.Status,

@@ -87,7 +87,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("checks-", check.WorkId);
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(_workflowId!);
-        await workflow.ReportResultAsync(r1, task.WorkId, new WorkDispatchResult("failed", "stale"));
+        await workflow.ReportResultAsync(r1, task.WorkId, new WorkResult("failed", "stale"));
 
         await ReportChecksPassAsync(r2, check, "check-1");
 
@@ -234,7 +234,7 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         Assert.Null(await runner.PollAsync());
         var runtime = await runner.GetRuntimeStateAsync();
-        Assert.DoesNotContain(runtime.ActiveWork, work => work.WorkflowRunId == _workflowId);
+        Assert.DoesNotContain(_workflowId, runtime.ActiveWorkflowRunIds);
     }
 
     private async Task<string?> ReadLeaseJsonAsync(string workflowRunId)

@@ -106,11 +106,11 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 
         Assert.Null(await runner.PollAsync());
 
-        var reportedWorkflowId = await runner.ReportAsync(load.WorkId, new WorkDispatchResult("completed"));
-        Assert.Equal(_workflowId, reportedWorkflowId);
+        await _fixture.Grains.GetGrain<IWorkflowGrain>(_workflowId!).ReportResultAsync(_runnerId!, load.WorkId, new WorkResult("completed"));
 
         var dynamicTask = await runner.PollAsync();
         Assert.NotNull(dynamicTask);
+        Assert.Equal(_workflowId, dynamicTask.WorkflowRunId);
         Assert.StartsWith("dynamic-1.", dynamicTask.WorkId);
     }
 
@@ -303,7 +303,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
             checks: [new("check-1", "Check 1", "spec/check")]));
 
         var (rebase, runnerId) = await PollWorkAnyAsync();
-        await ReportAsync(runnerId, rebase.WorkId, new WorkDispatchResult("failed", "rebase failed", Output: """
+        await ReportAsync(runnerId, rebase.WorkId, new WorkResult("failed", "rebase failed", Output: """
         {
           "kind": "rebase",
           "status": "failed",

@@ -2,10 +2,8 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Sessions.Grains;
 using Microsoft.EntityFrameworkCore;
 using Orleans.Concurrency;
-using System.Text.Json;
 
 namespace Mohist.Server.Runner.Grains;
 
@@ -16,9 +14,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerInfo? _info;
     private string? _projectId;
     private readonly Queue<WorkDispatch> _pendingWorks = new();
-    private readonly Dictionary<string, string> _workToWorkflow = new();
-    private readonly Dictionary<string, WorkDispatch> _workById = new();
-    private readonly Dictionary<string, string> _workToProject = new();
+    private readonly Dictionary<string, WorkDispatch> _trackedWork = new(StringComparer.Ordinal);
     private DateTime _lastHeartbeat;
     private int _nextProjectIndex;
     private IDisposable? _heartbeatTimer;
@@ -80,29 +76,12 @@ public class RunnerGrain : Grain, IRunnerGrain
     {
         _log.LogInformation("Runner {Id} unregistered", RunnerId);
 
-        var workMappings = _workToWorkflow.ToList();
-        var agentWorkMappings = workMappings.Where(kv => IsAgentWork(kv.Key)).ToList();
-        var workProjects = new Dictionary<string, string>(_workToProject, StringComparer.Ordinal);
-        var agentSessions = agentWorkMappings.Select(kv =>
-        {
-            var sessionName = _workById.TryGetValue(kv.Key, out var work) ? AgentSessionName(work) : kv.Key;
-            return (WorkId: kv.Key, WorkflowRunId: kv.Value, SessionName: sessionName);
-        }).ToList();
         _status = RunnerStatus.Offline;
         _info = null;
         _pendingWorks.Clear();
-        _workToWorkflow.Clear();
-        _workById.Clear();
-        _workToProject.Clear();
+        _trackedWork.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
-
-        foreach (var (workId, workflowRunId, sessionName) in agentSessions)
-        {
-            if (!workProjects.TryGetValue(workId, out var projectId)) continue;
-            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
-            await session.FailIfRunningAsync($"Runner {RunnerId} unregistered");
-        }
     }
 
     public async Task HeartbeatAsync()
@@ -132,13 +111,16 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (pending is not null)
             return pending;
 
-        await CleanupInactiveWorkAsync();
+        await SweepStaleWorkAsync();
 
-        while (await ActiveWorkflowCountAsync() < MaxWorkflowSlots)
+        if (ActiveWorkflowCount >= MaxWorkflowSlots)
+            return null;
+
+        while (true)
         {
             var claimed = await ClaimFromBacklogAsync();
             if (string.IsNullOrWhiteSpace(claimed))
-                return null;
+                break;
 
             var claimedWork = await DequeuePendingWorkAsync();
             if (claimedWork is not null)
@@ -150,15 +132,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private int MaxWorkflowSlots => RunnerCapacity.Normalize(_info?.MaxWorkflowSlots);
 
-    private async Task<int> ActiveWorkflowCountAsync()
-    {
-        await Task.CompletedTask;
-        return _workToWorkflow.Values
-            .Concat(_pendingWorks.Select(work => work.WorkflowRunId))
-            .Where(workflowRunId => !string.IsNullOrWhiteSpace(workflowRunId))
-            .Distinct(StringComparer.Ordinal)
-            .Count();
-    }
+    private int ActiveWorkflowCount =>
+        _trackedWork.Values.Select(w => w.WorkflowRunId).Distinct(StringComparer.Ordinal).Count();
 
     public Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work)
     {
@@ -169,37 +144,24 @@ public class RunnerGrain : Grain, IRunnerGrain
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work"));
 
         var key = WorkKey(work.WorkflowRunId, work.WorkId);
-        if (_workById.ContainsKey(key)
-            || _pendingWorks.Any(p => string.Equals(WorkKey(p.WorkflowRunId, p.WorkId), key, StringComparison.Ordinal)))
+        if (_trackedWork.ContainsKey(key))
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
 
-        if (_workToWorkflow.Values.Contains(work.WorkflowRunId, StringComparer.Ordinal)
-            || _pendingWorks.Any(p => string.Equals(p.WorkflowRunId, work.WorkflowRunId, StringComparison.Ordinal)))
-            return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "workflow-busy"));
+        var staleKeys = _trackedWork.Keys
+            .Where(k => _trackedWork[k].WorkflowRunId == work.WorkflowRunId)
+            .ToArray();
+        if (staleKeys.Length > 0)
+        {
+            foreach (var sk in staleKeys)
+                _trackedWork.Remove(sk);
+            _log.LogDebug("Runner {Id} replaced {Count} stale work entries for workflow {WorkflowId}",
+                RunnerId, staleKeys.Length, work.WorkflowRunId);
+        }
 
+        _trackedWork[key] = work;
         _pendingWorks.Enqueue(work);
-        TrackWorkProject(work);
         _log.LogInformation("Runner {Id} assigned work {WorkId} for workflow {WorkflowId}", RunnerId, work.WorkId, work.WorkflowRunId);
         return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
-    }
-
-    public async Task<string?> ReportAsync(string workId, WorkDispatchResult result, string? workflowRunId = null)
-    {
-        if (_status == RunnerStatus.Online)
-            await TouchPresenceAsync();
-
-        var lookupKey = workflowRunId is null ? workId : WorkKey(workflowRunId, workId);
-        if (!_workToWorkflow.TryGetValue(lookupKey, out var wfId)
-            && !_workToWorkflow.TryGetValue(workId, out wfId))
-            wfId = workflowRunId;
-        if (string.IsNullOrWhiteSpace(wfId))
-            return null;
-        RemoveWorkTracking(wfId, workId);
-
-        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(wfId);
-        await workflow.ReportResultAsync(RunnerId, workId, result);
-
-        return wfId;
     }
 
     public Task<bool> IsAvailableAsync()
@@ -209,15 +171,14 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
-        await CleanupInactiveWorkAsync();
-        var activeWork = _workById.Values
-            .GroupBy(work => WorkKey(work.WorkflowRunId, work.WorkId), StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToList();
+        await SweepStaleWorkAsync();
         return new RunnerRuntimeState(
             _status,
             _lastHeartbeat,
-            activeWork);
+            _trackedWork.Values
+                .Select(w => w.WorkflowRunId)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray());
     }
 
     private async Task CheckHeartbeatAsync()
@@ -234,53 +195,11 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task HandleTimeoutAsync()
     {
-        var timedOutWork = _workToWorkflow.ToList();
-        var timedOutAgentWork = timedOutWork.Where(kv => IsAgentWork(kv.Key)).ToList();
-        var workProjects = new Dictionary<string, string>(_workToProject, StringComparer.Ordinal);
-        var timedOutAgentSessions = timedOutAgentWork.Select(kv =>
-        {
-            var sessionName = _workById.TryGetValue(kv.Key, out var work) ? AgentSessionName(work) : kv.Key;
-            return (WorkId: kv.Key, WorkflowRunId: kv.Value, SessionName: sessionName);
-        }).ToList();
         _pendingWorks.Clear();
-        _workToWorkflow.Clear();
-        _workById.Clear();
-        _workToProject.Clear();
+        _trackedWork.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
-
-        foreach (var (workId, workflowRunId, sessionName) in timedOutAgentSessions)
-        {
-            if (!workProjects.TryGetValue(workId, out var projectId)) continue;
-            var session = GrainFactory.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(projectId, workflowRunId, sessionName));
-            await session.FailIfRunningAsync($"Runner heartbeat timeout after {HeartbeatTimeout.TotalSeconds}s");
-        }
-    }
-
-    private bool IsAgentWork(string workId)
-    {
-        return _workById.TryGetValue(workId, out var work) && work.Uses == "mohist/acp-agent";
-    }
-
-    private static string AgentSessionName(WorkDispatch work)
-    {
-        if (string.IsNullOrWhiteSpace(work.With)) return work.WorkId;
-
-        try
-        {
-            using var document = JsonDocument.Parse(work.With);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("session", out var session)
-                && session.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(session.GetString()))
-                return session.GetString()!;
-        }
-        catch (JsonException)
-        {
-        }
-
-        return work.WorkId;
     }
 
     private string RunnerRegistryKey() => _projectId ?? RunnerRegistryKeys.Global;
@@ -341,114 +260,61 @@ public class RunnerGrain : Grain, IRunnerGrain
         return null;
     }
 
-    private void TrackWorkProject(WorkDispatch work, string? fallbackProjectId = null)
-    {
-        var projectId = work.Issue?.ProjectId ?? fallbackProjectId ?? _projectId;
-        if (!string.IsNullOrWhiteSpace(projectId))
-        {
-            _workToProject[work.WorkId] = projectId;
-            _workToProject[WorkKey(work.WorkflowRunId, work.WorkId)] = projectId;
-        }
-    }
-
-    private void TrackWork(string workflowRunId, WorkDispatch work)
-    {
-        _workToWorkflow[work.WorkId] = workflowRunId;
-        _workToWorkflow[WorkKey(workflowRunId, work.WorkId)] = workflowRunId;
-        _workById[work.WorkId] = work;
-        _workById[WorkKey(workflowRunId, work.WorkId)] = work;
-        TrackWorkProject(work);
-    }
-
     private async Task<WorkDispatch?> DequeuePendingWorkAsync()
     {
         while (_pendingWorks.Count > 0)
         {
             var work = _pendingWorks.Dequeue();
+            var key = WorkKey(work.WorkflowRunId, work.WorkId);
+
             if (string.IsNullOrWhiteSpace(work.WorkflowRunId) || string.IsNullOrWhiteSpace(work.WorkId))
                 continue;
 
-            var workflow = GrainFactory.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-            var current = await IsCurrentWorkAsync(work);
-            if (!current.Valid)
+            if (!_trackedWork.TryGetValue(key, out _))
+                continue;
+
+            if (!await IsTrackedWorkValidAsync(work))
             {
-                RemoveWorkTracking(work.WorkflowRunId, work.WorkId);
+                _trackedWork.Remove(key);
                 continue;
             }
 
-            if (!string.Equals(current.WorkId, work.WorkId, StringComparison.Ordinal))
-            {
-                RemoveWorkTracking(work.WorkflowRunId, work.WorkId);
-                await workflow.AssignRunnerAsync(RunnerId);
-                continue;
-            }
-
-            var key = WorkKey(work.WorkflowRunId, work.WorkId);
-            if (_workById.ContainsKey(key))
-                continue;
-
-            TrackWork(work.WorkflowRunId, work);
             return work;
         }
 
         return null;
     }
 
-    private async Task CleanupInactiveWorkAsync()
+    private async Task SweepStaleWorkAsync()
     {
-        var activeWork = _workById.Values
-            .GroupBy(work => WorkKey(work.WorkflowRunId, work.WorkId), StringComparer.Ordinal)
-            .Select(group => group.First())
-            .ToList();
-
-        foreach (var work in activeWork)
+        var pendingKeys = new HashSet<string>(
+            _pendingWorks.Select(p => WorkKey(p.WorkflowRunId, p.WorkId)),
+            StringComparer.Ordinal);
+        var stale = new List<string>();
+        foreach (var (key, work) in _trackedWork)
         {
-            var current = await IsCurrentWorkAsync(work);
-            if (current.Valid && string.Equals(current.WorkId, work.WorkId, StringComparison.Ordinal))
+            if (pendingKeys.Contains(key))
                 continue;
 
-            RemoveWorkTracking(work.WorkflowRunId, work.WorkId);
+            if (!await IsTrackedWorkValidAsync(work))
+                stale.Add(key);
         }
+
+        foreach (var key in stale)
+            _trackedWork.Remove(key);
     }
 
-    private async Task<(bool Valid, string? WorkId)> IsCurrentWorkAsync(WorkDispatch work)
+    private async Task<bool> IsTrackedWorkValidAsync(WorkDispatch work)
     {
-        if (string.IsNullOrWhiteSpace(work.WorkflowRunId) || string.IsNullOrWhiteSpace(work.WorkId))
-            return (false, null);
+        var wf = GrainFactory.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        var owner = await wf.GetClaimedRunnerIdAsync();
+        var status = await wf.GetRunStatusAsync();
+        if (owner != RunnerId || status != "Running")
+            return false;
 
-        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-        var owner = await workflow.GetClaimedRunnerIdAsync();
-        var status = await workflow.GetRunStatusAsync();
-        var currentWorkId = await workflow.GetCurrentWorkIdAsync();
-        if (!string.Equals(owner, RunnerId, StringComparison.Ordinal)
-            || !string.Equals(status, "Running", StringComparison.Ordinal))
-            return (false, currentWorkId);
-
-        return (true, currentWorkId);
+        var currentWorkId = await wf.GetCurrentWorkIdAsync();
+        return string.Equals(currentWorkId, work.WorkId, StringComparison.Ordinal);
     }
 
     private static string WorkKey(string workflowRunId, string workId) => $"{workflowRunId}\u001f{workId}";
-
-    private void RemoveWorkTracking(string workflowRunId, string workId)
-    {
-        RemoveWorkTrackingKey(workId);
-        RemoveWorkTrackingKey(WorkKey(workflowRunId, workId));
-    }
-
-    private void RemoveWorkflowTracking(string workflowRunId)
-    {
-        var keys = _workToWorkflow
-            .Where(kv => kv.Value == workflowRunId)
-            .Select(kv => kv.Key)
-            .ToList();
-        foreach (var key in keys)
-            RemoveWorkTrackingKey(key);
-    }
-
-    private void RemoveWorkTrackingKey(string key)
-    {
-        _workToWorkflow.Remove(key);
-        _workById.Remove(key);
-        _workToProject.Remove(key);
-    }
 }

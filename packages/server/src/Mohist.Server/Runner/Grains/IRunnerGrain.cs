@@ -8,7 +8,6 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatRepairAsync(RunnerInfo info);
     Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work);
     Task<WorkDispatch?> PollAsync();
-    Task<string?> ReportAsync(string workId, WorkDispatchResult result, string? workflowRunId = null);
     Task<bool> IsAvailableAsync();
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
 }
@@ -51,7 +50,7 @@ public record WorkIssueRef(
     int IssueNumber);
 
 [GenerateSerializer]
-public record WorkDispatchResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);
+public record WorkResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);
 
 [GenerateSerializer]
 public sealed record RunnerWorkAssignmentResult(
@@ -70,4 +69,4 @@ public enum RunnerStatus { Online, Offline }
 public record RunnerRuntimeState(
     RunnerStatus Status,
     DateTimeOffset LastHeartbeatAt,
-    IReadOnlyList<WorkDispatch> ActiveWork);
+    IReadOnlyList<string> ActiveWorkflowRunIds);

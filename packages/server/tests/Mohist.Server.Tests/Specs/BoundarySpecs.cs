@@ -48,7 +48,7 @@ public class BoundarySpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage());
 
         var (task, runnerId) = await PollWorkAnyAsync();
-        await workflow.ReportResultAsync(runnerId, "unknown-work", new WorkDispatchResult("failed", "wrong work"));
+        await workflow.ReportResultAsync(runnerId, "unknown-work", new WorkResult("failed", "wrong work"));
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());

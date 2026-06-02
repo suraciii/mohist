@@ -80,7 +80,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         var first = await runner.PollAsync();
         Assert.NotNull(first);
         Assert.StartsWith("task-1.", first.WorkId);
-        await runner.ReportAsync(first.WorkId, new WorkDispatchResult("completed"));
+        await workflow.ReportResultAsync(runnerId, first.WorkId, new WorkResult("completed"));
 
         var second = await runner.PollAsync();
         Assert.NotNull(second);
@@ -108,7 +108,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);
         Assert.Equal("wf-report-1", work1.WorkflowRunId);
-        await runner.ReportAsync(work1.WorkId, new WorkDispatchResult("completed"));
+        await wf1.ReportResultAsync(runnerId, work1.WorkId, new WorkResult("completed"));
 
         var nextPoll = await runner.PollAsync();
         Assert.NotNull(nextPoll);
