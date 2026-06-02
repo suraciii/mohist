@@ -221,17 +221,17 @@ public class IssueQueryService
             .ToArray();
         if (workflowRunIds.Length == 0) return [];
 
-var runRows = await db.WorkflowRuns
+        var runRows = await db.WorkflowRuns
             .AsNoTracking()
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
-        var leaseRows = await db.WorkflowLeases
+        var queueRows = await db.WorkflowQueue
             .AsNoTracking()
             .Where(row => workflowRunIds.Contains(row.WorkflowRunId))
             .ToListAsync();
 
-        var leases = leaseRows.ToDictionary(r => r.WorkflowRunId, r => DeserializeLease(r.StateJson), StringComparer.Ordinal);
+        var leases = queueRows.ToDictionary(r => r.WorkflowRunId, QueueLease, StringComparer.Ordinal);
 
         var workflows = new Dictionary<string, WorkflowStatusView>(StringComparer.Ordinal);
         foreach (var row in runRows)
@@ -244,6 +244,18 @@ var runRows = await db.WorkflowRuns
                 workflows[row.WorkflowRunId] = snapshot;
         }
         return workflows;
+    }
+
+    private static WorkLease? QueueLease(Workflow.Storage.WorkflowQueueRow row)
+    {
+        if (row.State != Workflow.Storage.WorkflowQueueStates.Leased
+            || string.IsNullOrWhiteSpace(row.WorkId)
+            || string.IsNullOrWhiteSpace(row.WorkType)
+            || string.IsNullOrWhiteSpace(row.Stage)
+            || string.IsNullOrWhiteSpace(row.LogicalId))
+            return null;
+
+        return new WorkLease(row.WorkId, row.WorkType, row.Stage, row.LogicalId, row.Title, row.RunnerId);
     }
 
     private void ApplyWorkflowProjections(IReadOnlyCollection<IssueReadModel> issues, IReadOnlyDictionary<string, WorkflowStatusView> workflows)
@@ -415,11 +427,4 @@ var runRows = await db.WorkflowRuns
         catch { return null; }
     }
 
-    private static readonly JsonSerializerOptions LeaseJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    private static WorkLease? DeserializeLease(string json) =>
-        json == "null" ? null : JsonSerializer.Deserialize<WorkLease>(json, LeaseJsonOptions);
 }

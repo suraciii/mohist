@@ -62,6 +62,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task TaskCompletes_NextTaskOnSameRunner()
     {
+        await ClearBacklogAsync();
         var runnerId = await RegisterRunnerAsync("sticky-runner");
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 

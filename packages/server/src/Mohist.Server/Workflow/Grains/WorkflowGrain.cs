@@ -11,13 +11,14 @@ using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Workflow.Scheduling;
+using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Workflow.Grains;
 
 public class WorkflowGrain : Grain, IWorkflowGrain
 {
-    private const string RunnerHeartbeatTimeoutReason = "Runner heartbeat timeout after 120s";
     private WorkflowRunProfile? _profile;
     private WorkflowRun? _run;
     private WorkLease? _lease;
@@ -27,7 +28,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IStateStore<WorkflowRunProfile> _profileStore;
     private readonly IWorkflowRunStore _runStore;
-    private readonly IStateStore<WorkLease> _leaseStore;
+    private readonly IWorkflowScheduler _scheduler;
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
@@ -37,7 +38,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public WorkflowGrain(
         IStateStore<WorkflowRunProfile> profileStore,
         IWorkflowRunStore runStore,
-        IStateStore<WorkLease> leaseStore,
+        IWorkflowScheduler scheduler,
         IStateStore<WorkflowExecutionContext> variablesStore,
         IEventBus eventBus,
         IEventStore events,
@@ -46,7 +47,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         _profileStore = profileStore;
         _runStore = runStore;
-        _leaseStore = leaseStore;
+        _scheduler = scheduler;
         _variablesStore = variablesStore;
         _eventBus = eventBus;
         _events = events;
@@ -60,24 +61,11 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         _profile = await _profileStore.LoadAsync(GrainKey);
         _run = await _runStore.LoadAsync(GrainKey);
-        _lease = await _leaseStore.LoadAsync(GrainKey);
+        _lease = null;
         _variables = await _variablesStore.LoadAsync(GrainKey);
 
-        _lastRunnerId = _lease?.RunnerId;
-
-        if (_lease is not null)
-        {
-            if (string.IsNullOrWhiteSpace(_lease.RunnerId) || string.IsNullOrWhiteSpace(_lease.WorkId))
-            {
-                _log.LogWarning("Workflow {Id} activated with incomplete lease (runner={Runner}, work={Work}). Workflow remains non-dispatchable.",
-                    GrainKey, _lease.RunnerId, _lease.WorkId);
-            }
-            else
-            {
-                _log.LogInformation("Workflow {Id} activated with existing lease for runner {Runner}, work {Work}",
-                    GrainKey, _lease.RunnerId, _lease.WorkId);
-            }
-        }
+        var queued = await _scheduler.GetAsync(GrainKey, ct);
+        _lastRunnerId = queued?.RunnerId;
     }
 
     public async Task StartAsync(WorkflowDefinition? definition = null, WorkflowStartInput? input = null)
@@ -255,6 +243,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run is null) return null;
         if (_run.Status is WorkflowRunStatus.Paused or WorkflowRunStatus.Stopped) return null;
 
+        var queued = await _scheduler.GetAsync(GrainKey);
+        if (queued is null
+            || queued.State != WorkflowQueueStates.Leased
+            || !string.Equals(queued.RunnerId, runnerId, StringComparison.Ordinal))
+            return null;
+
         var activeLease = await ReconcileLeaseAsync(runnerId);
         if (activeLease is not null)
         {
@@ -288,7 +282,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         var dispatch = PrepareWork(work, runnerId);
         if (dispatch is not null)
         {
-            await SaveLeaseAsync();
+            await AttachQueueLeaseAsync(dispatch, runnerId);
             await AppendWorkDispatchedEventAsync(dispatch, runnerId);
         }
         return dispatch;
@@ -296,7 +290,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task<WorkLease?> ReconcileLeaseAsync(string pollingRunnerId)
     {
-        var activeLease = await RestoreLeaseAsync();
+        var queued = await _scheduler.GetAsync(GrainKey);
+        if (queued is null || queued.State != WorkflowQueueStates.Leased)
+            return null;
+
+        var activeLease = _lease;
+        if (activeLease is null && !string.IsNullOrWhiteSpace(queued.RunnerId) && !string.IsNullOrWhiteSpace(queued.WorkId))
+            activeLease = new WorkLease(
+                queued.WorkId!,
+                queued.WorkType ?? "task",
+                queued.Stage ?? _run?.CurrentStageId ?? "",
+                queued.LogicalId ?? queued.WorkId!,
+                queued.Title ?? queued.LogicalId ?? queued.WorkId!,
+                queued.RunnerId!);
+
         if (activeLease is null) return null;
 
         if (string.IsNullOrWhiteSpace(activeLease.RunnerId) || string.IsNullOrWhiteSpace(activeLease.WorkId))
@@ -305,50 +312,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (string.Equals(activeLease.RunnerId, pollingRunnerId, StringComparison.Ordinal))
             return activeLease;
 
-        var projectId = GetProjectId();
-        if (string.IsNullOrWhiteSpace(projectId))
-        {
-            _log.LogWarning(
-                "Workflow {Id} cannot determine liveness for leased work {WorkId} owned by {Runner}; workflow remains recovery-blocked",
-                GrainKey,
-                activeLease.WorkId,
-                activeLease.RunnerId);
-            return activeLease;
-        }
-
-        var runner = GrainFactory.GetGrain<IRunnerGrain>(activeLease.RunnerId);
-        if (await runner.IsAvailableAsync())
-            return activeLease;
-
-        var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.ForProject(projectId));
-        var runnerIds = await registry.ListRunnerIdsAsync();
-        if (runnerIds.Count == 0)
-        {
-            _log.LogWarning(
-                "Workflow {Id} cannot reconcile leased work {WorkId} owned by {Runner}; no registered runners are visible yet, workflow remains recovery-blocked",
-                GrainKey,
-                activeLease.WorkId,
-                activeLease.RunnerId);
-            return activeLease;
-        }
-
-        if (runnerIds.Contains(activeLease.RunnerId, StringComparer.Ordinal))
-        {
-            _log.LogWarning(
-                "Workflow {Id} could not reconcile liveness for leased work {WorkId} owned by {Runner}; runner is still registered but unavailable, workflow remains recovery-blocked",
-                GrainKey,
-                activeLease.WorkId,
-                activeLease.RunnerId);
-            return activeLease;
-        }
-
-        _log.LogWarning(
-            "Workflow {Id} recovering stale lease for work {WorkId} from offline runner {Runner} through timeout abandonment path",
-            GrainKey,
-            activeLease.WorkId,
-            activeLease.RunnerId);
-        await AbandonCurrentWorkAsync(activeLease.RunnerId, RunnerHeartbeatTimeoutReason);
-        return _lease;
+        return activeLease;
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
@@ -394,7 +358,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
     {
-        var lease = _lease;
+        var lease = await RestoreReportLeaseAsync(runnerId, workId);
         if (lease is null || workId != lease.WorkId) return;
 
         if (lease.RunnerId != runnerId)
@@ -408,6 +372,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var phaseBefore = _run?.Status;
         await ClearAndDeleteLeaseAsync();
+        await _scheduler.ClearAsync(GrainKey);
 
         switch (lease.WorkType)
         {
@@ -425,6 +390,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await AppendTerminalEventIfNeededAsync();
         await ReleaseStageLocksIfDoneAsync(lease.Stage);
         await ReleaseFromBacklogIfTerminalAsync();
+        await RegisterToBacklogIfRunnableAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -444,6 +410,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             GrainKey, lease.WorkId, lease.WorkType, reason);
 
         await ClearAndDeleteLeaseAsync();
+        await RequeueInBacklogAsync();
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_work_abandoned", "abandoned", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
         await ReleaseStageLocksAsync(lease.Stage, "abandoned");
@@ -501,15 +468,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
     private async Task<string?> GetAssignedRunnerIdCoreAsync()
     {
-        await RestoreLeaseAsync();
-        var runnerId = _lease?.RunnerId ?? _lastRunnerId;
+        var queued = await _scheduler.GetAsync(GrainKey);
+        var runnerId = queued?.RunnerId ?? _lease?.RunnerId ?? _lastRunnerId;
         return runnerId;
     }
 
     public async Task<string?> GetAssignedWorkIdAsync()
     {
-        await RestoreLeaseAsync();
-        return _lease?.WorkId;
+        var queued = await _scheduler.GetAsync(GrainKey);
+        return queued?.WorkId ?? _lease?.WorkId;
     }
 
     private async Task ReleaseFromBacklogIfTerminalAsync()
@@ -619,23 +586,22 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
-        await backlog.RegisterAsync(GrainKey);
-        _log.LogInformation("Workflow {Id} registered to backlog", GrainKey);
+        await _scheduler.EnqueueAsync(GrainKey, projectId);
+        _log.LogInformation("Workflow {Id} registered to workflow queue", GrainKey);
     }
 
     private async Task RequeueInBacklogAsync()
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
+        await _scheduler.RequeueAsync(GrainKey, projectId);
         await RequeueWorkflowIdAsync(projectId, GrainKey);
-        _log.LogInformation("Workflow {Id} re-queued in backlog", GrainKey);
+        _log.LogInformation("Workflow {Id} re-queued in workflow queue", GrainKey);
     }
 
     private async Task RequeueWorkflowIdAsync(string projectId, string workflowId)
     {
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
-        await backlog.RequeueAsync(workflowId);
+        await _scheduler.RequeueAsync(workflowId, projectId);
     }
 
     private async Task RegisterToBacklogIfRunnableAsync()
@@ -730,7 +696,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private async Task ClearAndDeleteLeaseAsync()
     {
         _lease = null;
-        await _leaseStore.DeleteAsync(GrainKey);
+        await _scheduler.ClearAsync(GrainKey);
     }
 
     private async Task ReleaseClaimInternalAsync(string reason)
@@ -743,7 +709,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (lease is not null)
             await ClearAndDeleteLeaseAsync();
 
-        // 3. Release backlog slot
+        // 3. Release scheduler claim
         await ReleaseBacklogAsync();
 
         // 4. Emit observability event only when there was an in-flight claim to release.
@@ -767,32 +733,61 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
-        await backlog.ReleaseAsync(GrainKey);
+        await _scheduler.ClearAsync(GrainKey);
     }
 
     private async Task ReleaseFromBacklogOnlyAsync()
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
-        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(Mohist.Server.Infrastructure.Orleans.GrainKey.WorkflowBacklog(projectId));
-        await backlog.ReleaseAsync(GrainKey);
+        await _scheduler.ClearQueuedAsync(GrainKey);
     }
 
     private async Task<WorkLease?> RestoreLeaseAsync()
     {
-        if (_lease is not null)
-            return _lease;
-
-        var restored = await _leaseStore.LoadAsync(GrainKey);
-        if (restored is null)
-            return null;
-
-        _lease = restored;
-        _lastRunnerId = restored.RunnerId;
-        return restored;
+        await Task.CompletedTask;
+        return _lease;
     }
 
+    private async Task AttachQueueLeaseAsync(WorkDispatch dispatch, string runnerId)
+    {
+        if (_lease is null) return;
+        var projectId = dispatch.Issue?.ProjectId ?? GetProjectId();
+        if (string.IsNullOrWhiteSpace(projectId))
+        {
+            _log.LogWarning("Workflow {Id} cannot attach queue lease for work {WorkId}: missing project id", GrainKey, dispatch.WorkId);
+            return;
+        }
+
+        await _scheduler.AttachLeaseAsync(GrainKey, projectId, runnerId, _lease);
+    }
+
+    private async Task<WorkLease?> RestoreReportLeaseAsync(string runnerId, string workId)
+    {
+        var lease = await RestoreLeaseAsync();
+        if (lease is not null)
+            return lease;
+
+        var queued = await _scheduler.GetAsync(GrainKey);
+        if (queued is null
+            || queued.State != WorkflowQueueStates.Leased
+            || queued.WorkId != workId
+            || queued.RunnerId != runnerId
+            || string.IsNullOrWhiteSpace(queued.WorkType)
+            || string.IsNullOrWhiteSpace(queued.Stage)
+            || string.IsNullOrWhiteSpace(queued.LogicalId))
+            return null;
+
+        _lease = new WorkLease(
+            queued.WorkId!,
+            queued.WorkType!,
+            queued.Stage!,
+            queued.LogicalId!,
+            queued.Title ?? queued.LogicalId!,
+            queued.RunnerId!);
+        _lastRunnerId = queued.RunnerId;
+        return _lease;
+    }
 
     private void ProcessTaskResult(WorkDispatchResult result)
     {
@@ -1101,18 +1096,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_profile is not null) await _profileStore.SaveAsync(GrainKey, _profile);
         await SaveRunAsync();
-        await SaveLeaseAsync();
         await SaveVariablesAsync();
     }
 
     private Task SaveRunAsync() =>
         _run is not null
             ? _runStore.SaveAsync(_run)
-            : Task.CompletedTask;
-
-    private Task SaveLeaseAsync() =>
-        _lease is not null
-            ? _leaseStore.SaveAsync(GrainKey, _lease)
             : Task.CompletedTask;
 
     private Task SaveVariablesAsync() =>

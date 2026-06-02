@@ -6,6 +6,7 @@ using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Scheduling;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Orleans;
 using Orleans.TestingHost;
@@ -28,6 +29,7 @@ public class BacklogFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, InMemoryStateStore<WorkflowStageLockState>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
+            siloBuilder.Services.AddSingleton<IWorkflowScheduler, InMemoryWorkflowScheduler>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
@@ -81,6 +83,7 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, InMemoryStateStore<WorkflowStageLockState>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
+            siloBuilder.Services.AddSingleton<IWorkflowScheduler, InMemoryWorkflowScheduler>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, InMemoryWorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
