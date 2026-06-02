@@ -18,10 +18,14 @@ public class DatabaseInitializationSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        db.Database.Migrate();
+        MohistDatabaseMigrator.Migrate(db);
 
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessionEvents"));
+        Assert.True(await ColumnExistsAsync(connection, "workflow_runs", "ETag"));
+        Assert.True(await TableExistsAsync(connection, "OrleansQuery"));
+        Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
+        Assert.True(await OrleansQueryExistsAsync(connection, "UpsertReminderRowKey"));
         Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_SessionName"));
         Assert.False(await IndexIsUniqueAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_WorkId"));
         Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessionEvents_SessionId_Sequence"));
@@ -40,15 +44,16 @@ public class DatabaseInitializationSpecs
 
         await using (var db1 = new MohistDbContext(options))
         {
-            db1.Database.Migrate();
+            MohistDatabaseMigrator.Migrate(db1);
         }
 
         await using (var db2 = new MohistDbContext(options))
         {
-            db2.Database.Migrate();
+            MohistDatabaseMigrator.Migrate(db2);
         }
 
         Assert.True(await TableExistsAsync(connection, "Projects"));
+        Assert.True(await ColumnExistsAsync(connection, "workflow_runs", "ETag"));
     }
 
     [Fact]
@@ -82,6 +87,8 @@ public class DatabaseInitializationSpecs
 
         Assert.True(await TableExistsAsync(connection, "Projects"));
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
+        Assert.True(await ColumnExistsAsync(connection, "workflow_runs", "ETag"));
+        Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
         Assert.True(await MigrationRecordedAsync(connection, "20260530040459_InitialCreate"));
     }
 
@@ -108,6 +115,27 @@ public class DatabaseInitializationSpecs
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("$migrationId", migrationId);
+        return await command.ExecuteScalarAsync() is not null;
+    }
+
+    private static async Task<bool> ColumnExistsAsync(SqliteConnection connection, string tableName, string columnName)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""SELECT 1 FROM pragma_table_info('{tableName}') WHERE name = $columnName LIMIT 1;""";
+        command.Parameters.AddWithValue("$columnName", columnName);
+        return await command.ExecuteScalarAsync() is not null;
+    }
+
+    private static async Task<bool> OrleansQueryExistsAsync(SqliteConnection connection, string queryKey)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT 1
+            FROM OrleansQuery
+            WHERE QueryKey = $queryKey
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$queryKey", queryKey);
         return await command.ExecuteScalarAsync() is not null;
     }
 
