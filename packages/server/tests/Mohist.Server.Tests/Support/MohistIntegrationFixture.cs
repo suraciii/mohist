@@ -21,6 +21,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     private SqliteConnection _keeper = null!;
     private MohistWebApplicationFactory _factory = null!;
     private string? _runnerRoot;
+    private string? _systemUpdateStatePath;
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
@@ -38,8 +39,9 @@ public class MohistIntegrationFixture : IAsyncLifetime
         await _keeper.OpenAsync();
         _runnerRoot = Path.Combine(Path.GetTempPath(), $"mohist-runner-root-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_runnerRoot);
+        _systemUpdateStatePath = Path.Combine(Path.GetTempPath(), $"mohist-system-update-{Guid.NewGuid():N}.json");
 
-        _factory = new MohistWebApplicationFactory(ConnectionString, _eventBus, _runnerRoot);
+        _factory = new MohistWebApplicationFactory(ConnectionString, _eventBus, _runnerRoot, _systemUpdateStatePath);
         Client = _factory.CreateClient();
     }
 
@@ -51,6 +53,8 @@ public class MohistIntegrationFixture : IAsyncLifetime
             await _keeper.DisposeAsync();
         if (!string.IsNullOrWhiteSpace(_runnerRoot) && Directory.Exists(_runnerRoot))
             Directory.Delete(_runnerRoot, recursive: true);
+        if (!string.IsNullOrWhiteSpace(_systemUpdateStatePath) && File.Exists(_systemUpdateStatePath))
+            File.Delete(_systemUpdateStatePath);
     }
 }
 
@@ -59,14 +63,16 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly IEventBus _eventBus;
     private readonly string _runnerRoot;
+    private readonly string _systemUpdateStatePath;
     private readonly string _configPath;
     private string? _webRoot;
 
-    public MohistWebApplicationFactory(string connectionString, IEventBus eventBus, string runnerRoot)
+    public MohistWebApplicationFactory(string connectionString, IEventBus eventBus, string runnerRoot, string systemUpdateStatePath)
     {
         _connectionString = connectionString;
         _eventBus = eventBus;
         _runnerRoot = runnerRoot;
+        _systemUpdateStatePath = systemUpdateStatePath;
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
     }
 
@@ -76,6 +82,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseSetting("Mohist:SqliteConnectionString", _connectionString);
         builder.UseSetting("Mohist:WebRoot", _webRoot);
         builder.UseSetting("Mohist:RunnerRoot", _runnerRoot);
+        builder.UseSetting("Mohist:SystemUpdate:StatePath", _systemUpdateStatePath);
 
         builder.ConfigureAppConfiguration((_, config) =>
         {
@@ -84,6 +91,7 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:SqliteConnectionString"] = _connectionString,
                 ["Mohist:WebRoot"] = _webRoot,
                 ["Mohist:RunnerRoot"] = _runnerRoot,
+                ["Mohist:SystemUpdate:StatePath"] = _systemUpdateStatePath,
             });
         });
 
