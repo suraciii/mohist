@@ -805,6 +805,215 @@ describe('SessionTranscriptView', () => {
       })
       expect(screen.queryByText('Show full prompt')).not.toBeInTheDocument()
     })
+
+    it('legacy-missing turn does not use task title as prompt body and omits Show full prompt', async () => {
+      const shortTaskTitle = 'Cover backend projection and progress behavior'
+      const sessionIdLabel = 'T-005.1'
+      const turns = [makeTurn({
+        user: {
+          role: 'mohist',
+          text: 'Prompt was not recorded for this historical session',
+          kind: 'legacy-missing',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        incomplete: true,
+      })]
+
+      const { container } = renderWithQueryClient(
+        <SessionTranscriptView turns={turns} isRunning={false} />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/Missing Prompt/i)).toBeInTheDocument()
+      })
+
+      const promptBodies = screen.getAllByText(/Prompt was not recorded/i)
+      expect(promptBodies.length).toBeGreaterThanOrEqual(1)
+
+      const text = container.textContent ?? ''
+      expect(text).not.toContain(shortTaskTitle)
+      expect(text).not.toContain(sessionIdLabel)
+      expect(screen.queryByText('Show full prompt')).not.toBeInTheDocument()
+      expect(screen.queryByText(shortTaskTitle)).not.toBeInTheDocument()
+      expect(screen.queryByText(sessionIdLabel)).not.toBeInTheDocument()
+    })
+
+    it('renders two turns in event order when fed two mohist_prompt events', async () => {
+      const firstPrompt = 'First prompt for T-005.1 — initialize the transcript model'
+      const firstTitle = 'Initialize transcript'
+      const secondPrompt = 'Second prompt for T-005.1 — continue with the legacy fallback'
+      const secondTitle = 'Continue legacy fallback'
+
+      const turns: SessionTurn[] = [
+        makeTurn({
+          id: 'turn-1',
+          startedAt: '2024-01-01T10:00:00.000Z',
+          completedAt: '2024-01-01T10:00:30.000Z',
+          user: {
+            role: 'mohist',
+            text: firstPrompt,
+            kind: 'task',
+            sentAt: '2024-01-01T10:00:00.000Z',
+            summary: {
+              kind: 'task',
+              title: firstTitle,
+            },
+          },
+          assistant: [{
+            id: 'text-1',
+            type: 'text',
+            text: 'First assistant response',
+            startedAt: '2024-01-01T10:00:01.000Z',
+            completedAt: '2024-01-01T10:00:02.000Z',
+          } as TextPart],
+        }),
+        makeTurn({
+          id: 'turn-2',
+          startedAt: '2024-01-01T10:00:30.000Z',
+          completedAt: '2024-01-01T10:01:00.000Z',
+          user: {
+            role: 'mohist',
+            text: secondPrompt,
+            kind: 'task',
+            sentAt: '2024-01-01T10:00:30.000Z',
+            summary: {
+              kind: 'task',
+              title: secondTitle,
+            },
+          },
+          assistant: [{
+            id: 'text-2',
+            type: 'text',
+            text: 'Second assistant response',
+            startedAt: '2024-01-01T10:00:31.000Z',
+            completedAt: '2024-01-01T10:00:32.000Z',
+          } as TextPart],
+        }),
+      ]
+
+      const { container } = renderWithQueryClient(
+        <SessionTranscriptView turns={turns} isRunning={false} />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(firstTitle)).toBeInTheDocument()
+        expect(screen.getByText(secondTitle)).toBeInTheDocument()
+      })
+
+      const firstTitleEl = screen.getByText(firstTitle)
+      const secondTitleEl = screen.getByText(secondTitle)
+      const position = firstTitleEl.compareDocumentPosition(secondTitleEl)
+      expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+      const text = container.textContent ?? ''
+      const firstIdx = text.indexOf(firstTitle)
+      const secondIdx = text.indexOf(secondTitle)
+      expect(firstIdx).toBeGreaterThanOrEqual(0)
+      expect(secondIdx).toBeGreaterThan(firstIdx)
+
+      const allShowFull = screen.getAllByText('Show full prompt')
+      expect(allShowFull.length).toBe(2)
+
+      const allCoder = screen.getAllByText('Coder')
+      expect(allCoder.length).toBe(2)
+    })
+  })
+
+  describe('raw tool payload disclosure', () => {
+    it('exposes raw input, raw output, metadata, and details on a bash tool through the disclosure', async () => {
+      const rawInput = JSON.stringify({ command: 'npm test', cwd: '/project' })
+      const rawOutput = JSON.stringify({ stdout: 'ok', exitCode: 1 })
+      const metadata = { toolName: 'bash', childSessionId: null }
+      const details = { family: 'execution', cwd: '/project', exitCode: 1, outputPreview: 'ok' }
+
+      const turns: SessionTurn[] = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-1',
+            normalizedName: 'bash',
+            toolName: 'bash',
+            status: 'completed',
+            input: rawInput,
+            output: 'ok',
+            rawInput,
+            rawOutput,
+            metadata,
+            details,
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      const { container } = renderWithQueryClient(
+        <SessionTranscriptView turns={turns} isRunning={false} />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText(/npm test/)).toBeInTheDocument()
+      })
+
+      const text = container.textContent ?? ''
+      expect(text).toContain('npm test')
+      expect(text).toContain('ok')
+    })
+
+    it('exposes raw input, raw output, and details on an edit tool through the disclosure', async () => {
+      const rawInput = JSON.stringify({ file_path: 'src/app.ts', old_string: 'old', new_string: 'new' })
+      const rawOutput = 'old\nnew'
+      const metadata = { toolName: 'edit' }
+      const details = { family: 'mutation', files: [] }
+
+      const turns: SessionTurn[] = [makeTurn({
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-1',
+            normalizedName: 'edit',
+            toolName: 'edit',
+            displayTitle: 'app.ts',
+            status: 'completed',
+            input: rawInput,
+            output: rawOutput,
+            rawInput,
+            rawOutput,
+            metadata,
+            details,
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      })]
+
+      const { container } = renderWithQueryClient(
+        <SessionTranscriptView turns={turns} isRunning={false} />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('app.ts')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('app.ts'))
+
+      await waitFor(() => {
+        const text = container.textContent ?? ''
+        expect(text).toContain('app.ts')
+      })
+
+      const showRaw = screen.queryByText(/Show raw patch/i)
+      if (showRaw) {
+        fireEvent.click(showRaw)
+
+        await waitFor(() => {
+          const text = container.textContent ?? ''
+          expect(text).toContain(rawInput)
+          expect(text).toContain(rawOutput)
+        })
+      }
+    })
   })
 
   describe('context tool grouping', () => {

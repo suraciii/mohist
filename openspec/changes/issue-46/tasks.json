@@ -1,0 +1,129 @@
+{
+  "project": "mohist",
+  "description": "Replace issue-owned repository snapshots with project-owned repository references resolved at read and runtime boundaries.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Store issue repository references with legacy compatibility",
+      "spec": "specs/local-issue-store/spec.md#requirement-cli-可以创建和管理本地-issues",
+      "description": "Change the issue domain and persistence shape so new issues store only the selected or default project repository reference. Keep older issue rows readable by deriving a repository reference from embedded legacy snapshot data without continuing to treat path, remote, baseBranch, or isDefault as authoritative issue-owned fields.",
+      "acceptanceCriteria": [
+        "Creating an issue with an explicit repository persists only the repository reference and no mutable repository configuration snapshot fields as authority.",
+        "Creating an issue without a repository selection persists the current default project repository reference.",
+        "Older issue rows with embedded repository snapshots can still be loaded and yield a derived repository reference without reusing stale path, remote, baseBranch, or isDefault values as authority."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Issue storage/domain compatibility layer that reads legacy snapshots and writes repository references for new issues.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use the repository name as the stable reference for now, matching current project configuration and API inputs."
+    },
+    {
+      "id": "T-002",
+      "title": "Add shared issue repository resolver and problem model",
+      "spec": "specs/issue-repository-resolution/spec.md#requirement-issue-repository-references-resolve-from-current-project-configuration",
+      "description": "Introduce one shared resolver that takes project configuration plus an issue repository reference and returns either resolved repository context or a structured repository configuration problem. Centralize compatibility interpretation, missing-reference handling, and ambiguous-reference handling so every repository-dependent path uses the same source of truth.",
+      "acceptanceCriteria": [
+        "Resolver returns repository identity, path, remote, baseBranch, and default metadata from current project configuration when a single repository match exists.",
+        "Resolver ignores stale legacy snapshot fields once a project repository match is found.",
+        "Resolver returns a structured repository configuration problem for missing or ambiguous references and never falls back to another repository or implicit main branch."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Reusable repository resolution component and structured repository-problem contract used by issue, workflow, and workspace code.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Keep the abstraction narrow so a future repository id can replace repository name without rewriting every consumer."
+    },
+    {
+      "id": "T-003",
+      "title": "Bind issue create and issue reads to resolved project repositories",
+      "spec": "specs/http-api/spec.md#requirement-req-api-198-001-issue-create-accepts-model-with-existing-priority-support",
+      "description": "Refactor issue creation and issue read-model assembly so API responses expose repository details resolved from the current project configuration instead of issue-owned snapshots. Surface repository configuration problems on issue reads so the issue page stays trustworthy when a referenced repository is missing or ambiguous.",
+      "acceptanceCriteria": [
+        "POST /api/issues stores only the selected or default repository reference and returns repository details resolved from current project configuration.",
+        "Issue read models use resolved project repository path, remote, baseBranch, and default metadata after project repository configuration changes.",
+        "Issue read responses include an actionable repository configuration problem when the issue repository reference cannot be resolved."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Issue create/read API behavior that resolves repository data from project configuration and reports repository problems clearly.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Preserve API compatibility where practical by continuing to return repository details, but make them resolved runtime/read-time data."
+    },
+    {
+      "id": "T-004",
+      "title": "Resolve workflow repository context at start and variable build time",
+      "spec": "specs/workflow-run/spec.md#requirement-req-wr-001-starting-an-issue-creates-a-workflowrun",
+      "description": "Update workflow start-up so it loads the current project configuration, resolves the issue repository reference through the shared resolver, and passes the resolved repository context into workflow project context and runtime variables. Block or fail workflow start with a clear repository configuration problem when the reference cannot be resolved.",
+      "acceptanceCriteria": [
+        "Workflow start variables include resolved repository identity, path, remote, and baseBranch from the current project repository configuration.",
+        "Changing project repository configuration after issue creation changes the repository facts seen by later workflow starts.",
+        "Workflow start does not create worktree or dispatch task execution when repository resolution fails, and instead surfaces a repository configuration problem."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Workflow start and variable-construction path that consumes resolved repository context instead of issue snapshots.",
+      "dependsOn": [
+        "T-002",
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "This is the main trust boundary for downstream agent tasks and worktree creation."
+    },
+    {
+      "id": "T-005",
+      "title": "Normalize workspace, review, rebase, drift, and integrate repository lookups",
+      "spec": "specs/worktree-manager/spec.md#requirement-worktreemanager-管理每个-issue-的隔离工作区",
+      "description": "Refactor repository-dependent HTTP routes and workflow/service paths so diff, commits, file-content, worktree status, cleanup, archive, rebase, merge-ready, drift evaluation, and integrate all resolve repository path and base branch through the same shared project-owned repository source. This task implements the repository-resolution behavior required by both the worktree-manager and base-drift-awareness specs and removes scattered fallback behavior that still reads issue snapshots or defaults silently to main.",
+      "acceptanceCriteria": [
+        "Workspace and review endpoints use resolved current repository path and baseBranch for each request after project configuration changes.",
+        "Rebase, drift evaluation, merge-ready, and integrate use the resolved current project repository baseBranch and do not read stale issue-owned snapshot values.",
+        "Repository-dependent operations return a clear repository configuration problem when the issue repository reference cannot be resolved."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Unified repository resolution across workspace, review, rebase, drift-awareness, merge-ready, and integrate call sites.",
+      "dependsOn": [
+        "T-002",
+        "T-004"
+      ],
+      "passes": false,
+      "notes": "Covers the behavior described across worktree-manager, http-api review/rebase, and base-drift-awareness specs. Verification should include the drift scenarios in specs/base-drift-awareness/spec.md in addition to the worktree and API paths."
+    },
+    {
+      "id": "T-006",
+      "title": "Add regression coverage for repository reference resolution",
+      "spec": "specs/issue-repository-resolution/spec.md#requirement-issue-repository-references-resolve-from-current-project-configuration",
+      "description": "Add or update tests that prove issue read models, workflow variables, worktree/review routes, and rebase/drift behavior all use resolved project repository configuration rather than stale issue snapshots. Cover new-issue reference storage, legacy embedded snapshots, changed project repository metadata after issue creation, and missing or ambiguous repository reference failures across the modified specs.",
+      "acceptanceCriteria": [
+        "Tests prove issue reads and workflow/runtime consumers pick up changed project repository path or baseBranch after issue creation.",
+        "Tests prove legacy snapshot-based issues resolve by repository reference and ignore stale embedded path, remote, baseBranch, and isDefault metadata.",
+        "Tests prove missing or ambiguous repository references surface repository configuration problems instead of silently falling back."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Automated regression coverage for repository reference storage, resolution, and repository-dependent runtime/read behaviors.",
+      "dependsOn": [
+        "T-003",
+        "T-004",
+        "T-005"
+      ],
+      "passes": false,
+      "notes": "Include scenarios spanning local issue store, API reads, workflow start variables, worktree/review paths, drift/rebase decisions, and issue read-model repository-problem reporting so every modified spec has direct regression coverage."
+    }
+  ]
+}

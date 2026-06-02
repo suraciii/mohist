@@ -332,6 +332,94 @@ describe('SessionPage centered transcript layout', () => {
         expect(mockWriteText).toHaveBeenCalledWith('Copy me please')
       })
     })
+
+    it('expands to reveal the full real mohist_prompt text, not the short task title', async () => {
+      const fullPrompt = '<mohist-task>\n'.repeat(150) + '<role>Cover backend projection and progress behavior</role>\n<contract>details</contract>\n' + '</mohist-task>\n'.repeat(150)
+      const shortTitle = 'Cover backend projection and progress behavior'
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: fullPrompt,
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+          summary: {
+            kind: 'task',
+            title: shortTitle,
+          },
+        },
+        assistant: [],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      const { container } = renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText(shortTitle)).toBeInTheDocument()
+      })
+      expect(screen.getByText('Show full prompt')).toBeInTheDocument()
+      expect(container.textContent).not.toContain(fullPrompt.slice(0, 200))
+
+      fireEvent.click(screen.getByText('Show full prompt'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Show less')).toBeInTheDocument()
+      })
+
+      const expanded = container.querySelector('pre')
+      expect(expanded).not.toBeNull()
+      expect(expanded?.textContent).toBe(fullPrompt)
+      expect(expanded?.textContent?.length).toBeGreaterThanOrEqual(fullPrompt.length)
+      expect(expanded?.textContent?.includes(shortTitle)).toBe(true)
+    })
+
+    it('copies the full real mohist_prompt text via the copy action', async () => {
+      const mockWriteText = vi.fn().mockResolvedValue(undefined)
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: mockWriteText },
+        configurable: true,
+      })
+
+      const fullPrompt = 'A'.repeat(7500) + '\nThe actual agent prompt body is much longer than the title.'
+      const shortTitle = 'Cover backend projection and progress behavior'
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: fullPrompt,
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+          summary: {
+            kind: 'task',
+            title: shortTitle,
+          },
+        },
+        assistant: [],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText(shortTitle)).toBeInTheDocument()
+      })
+
+      const copyButtons = screen.getAllByText('Copy')
+      fireEvent.click(copyButtons[copyButtons.length - 1])
+
+      await waitFor(() => {
+        expect(mockWriteText).toHaveBeenCalledWith(fullPrompt)
+      })
+      expect(mockWriteText.mock.calls[0]?.[0]).not.toBe(shortTitle)
+    })
   })
 
   describe('assistant parts rendering', () => {
@@ -1471,6 +1559,125 @@ describe('SessionPage centered transcript layout', () => {
         expect(screen.getAllByText('src/app.ts').length).toBeGreaterThan(0)
         expect(screen.getByText(/-old/)).toBeInTheDocument()
         expect(screen.getByText(/\+new/)).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('raw tool payload disclosure', () => {
+    it('exposes rawInput, rawOutput, metadata, and details on a bash tool through the disclosure', async () => {
+      const rawInput = JSON.stringify({ command: 'npm test', cwd: '/project' })
+      const rawOutput = JSON.stringify({ stdout: 'ok', exitCode: 1 })
+      const metadata = { toolName: 'bash', childSessionId: null }
+      const details = { family: 'execution', cwd: '/project', exitCode: 1, outputPreview: 'ok' }
+
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: 'Run the build',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-1',
+            normalizedName: 'bash',
+            toolName: 'bash',
+            displayTitle: 'bash',
+            status: 'completed',
+            input: rawInput,
+            output: 'ok',
+            rawInput,
+            rawOutput,
+            metadata,
+            details,
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('bash')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('bash'))
+
+      await waitFor(() => {
+        expect(screen.getByText(/npm test/)).toBeInTheDocument()
+        expect(screen.getByText('/project')).toBeInTheDocument()
+        expect(screen.getByText('exit 1')).toBeInTheDocument()
+        expect(screen.getByText('ok')).toBeInTheDocument()
+      })
+    })
+
+    it('exposes rawInput, rawOutput, metadata, and details on a delegation tool through the disclosure', async () => {
+      const rawInput = JSON.stringify({ description: 'Inspect routes', subagent_type: 'explore' })
+      const rawOutput = JSON.stringify({ status: 'completed' })
+      const metadata = { childSessionId: 'child-session-123' }
+      const details = {
+        family: 'delegation',
+        description: 'Inspect routes',
+        subagentType: 'explore',
+        childSessionId: 'child-session-123',
+      }
+
+      const turns: SessionTurn[] = [{
+        id: 'turn-1',
+        startedAt: '2024-01-01T10:00:00.000Z',
+        completedAt: '2024-01-01T10:01:00.000Z',
+        user: {
+          role: 'mohist',
+          text: 'Delegate inspection',
+          kind: 'task',
+          sentAt: '2024-01-01T10:00:00.000Z',
+        },
+        assistant: [{
+          id: 'tool-1',
+          type: 'tool',
+          tool: {
+            toolCallId: 'tc-task',
+            normalizedName: 'task',
+            toolName: 'task',
+            displayTitle: 'task',
+            status: 'completed',
+            input: rawInput,
+            output: rawOutput,
+            rawInput,
+            rawOutput,
+            metadata,
+            details,
+            startedAt: '2024-01-01T10:00:02.000Z',
+            completedAt: '2024-01-01T10:00:03.000Z',
+          },
+        } as ToolPart],
+      }]
+
+      const detail = makeMockDetail({ turns })
+      setupSessionPage({ detail })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('task')).toBeInTheDocument()
+      })
+
+      fireEvent.click(screen.getByText('task'))
+
+      await waitFor(() => {
+        expect(screen.getByText('Delegation')).toBeInTheDocument()
+        expect(screen.getByText('Inspect routes')).toBeInTheDocument()
+        expect(screen.getByText('explore')).toBeInTheDocument()
+        expect(screen.getByText('child-session-123')).toBeInTheDocument()
       })
     })
   })

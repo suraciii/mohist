@@ -1,0 +1,147 @@
+{
+  "project": "mohist",
+  "description": "Make the session transcript page a faithful read-only projection of the real opencode / coder agent conversation by rebuilding turns from the canonical workflow_agent_session_events stream.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Split transcript into one turn per mohist_prompt event with full real prompt payload",
+      "spec": "specs/coder-session-tracking/spec.md#mohist_prompt-events-are-the-canonical-source-of-truth-for-the-user-prompt",
+      "description": "Rewrite WorkflowAgentSessionQueryService.BuildTranscriptAsync to iterate workflow_agent_session_events in Sequence order, open a new TranscriptTurn on every mohist_prompt event, and populate turn.user (role, text, kind, sentAt, title, outputPath, contextFiles) directly from the event payload. Extend WorkflowAgentSessionReadModels (turn.user and metadata) with the new fields, drop session.Title as a prompt source, and set metadata.turnCount to the actual count of mohist_prompt events.",
+      "acceptanceCriteria": [
+        "GET /api/issues/{number}/workflow/sessions/{sessionName} for a session with N>=1 mohist_prompt events returns exactly N turns in event order.",
+        "turns[i].user.text equals the full mohist_prompt.data.text of the i-th event (not session.Title, session.SessionName, or session.Id).",
+        "turns[i].user.sentAt equals the i-th mohist_prompt event's CreatedAt and turns[i].user.kind equals the payload's kind.",
+        "turn.user carries title, outputPath, and contextFiles when the payload contains them.",
+        "metadata.turnCount equals the number of mohist_prompt events (no longer hard-coded to 1)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Sessions/Queries/WorkflowAgentSessionQueryService.cs and WorkflowAgentSessionReadModels.cs updated; transcript JSON has per-prompt turns with full real text.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "See design D1 and D7. Each turn's completedAt is the next mohist_prompt.CreatedAt or session.CompletedAt or last event's CreatedAt."
+    },
+    {
+      "id": "T-002",
+      "title": "Preserve reasoning/text/tool interleaving inside each turn",
+      "spec": "specs/coder-session-tracking/spec.md#assistant-parts-preserve-natural-interleaving-between-reasoning-text-and-tools",
+      "description": "Replace the single-session text/reasoning accumulators in BuildAssistantParts with per-turn accumulators that close the active opposite stream part when a new chunk type arrives. A later chunk of the same type resumes the existing part; a switch (text<->reasoning<->tool) closes the active part at the new event's CreatedAt before appending the new part.",
+      "acceptanceCriteria": [
+        "A turn whose events arrive in the order thought -> tool -> thought -> text projects turn.assistant in that exact order.",
+        "Reasoning that arrives between two tool calls is rendered between those tools (not collapsed into a single block at the top of the turn).",
+        "A text part split across multiple agent_message_chunk events with no other type in between produces a single text part (chunks resume the open part).",
+        "When a tool_call arrives while a text or reasoning part is open, that open part is closed at the tool event's CreatedAt before the tool part is appended."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "BuildAssistantParts (or per-turn BuildTurnParts) closes active opposite stream part on chunk-type change; backend transcript reflects emitted interleaving.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "See design D2. Same-type chunks resume the part; different-type chunks close-and-append."
+    },
+    {
+      "id": "T-003",
+      "title": "Preserve tool first-observed position and raw payload through tool_call_update merges",
+      "spec": "specs/coder-session-tracking/spec.md#tool-parts-expose-raw-input-output-metadata-and-details",
+      "description": "Maintain a per-turn Dictionary<toolCallId, int> tool index. On the first tool_call within a turn append the tool part and record its index; on every later tool_call_update for the same id replace the element at that index with the merge result. Confirm MergeToolPart writes back rawInput, rawOutput, metadata, details, status, title, completedAt with the existing precedence rules and keeps the first event's id and CreatedAt as the part identity.",
+      "acceptanceCriteria": [
+        "When a tool_call opens a tool part at index K and a later tool_call_update for the same id arrives, the merged part stays at index K in turn.assistant.",
+        "Merged tool part exposes rawInput, rawOutput, metadata, details from either the tool_call or tool_call_update side verbatim (no field dropped unless the update explicitly supersedes it).",
+        "status, title, completedAt obey the existing precedence rules (pending update does not overwrite, terminal status sets completedAt).",
+        "The tool part keeps the first event's id and createdAt as its stable identity across merges."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Per-turn tool index map and MergeToolPart updates in WorkflowAgentSessionQueryService.cs; tool parts never jump position on update.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "See design D3. Tool index map is per-turn so resumed prompts do not collide with earlier turns."
+    },
+    {
+      "id": "T-004",
+      "title": "Project liveness, terminal, and recovery events as historical transcript parts",
+      "spec": "specs/coder-session-tracking/spec.md#historical-liveness-and-terminal-events-are-projected-into-the-transcript",
+      "description": "Stop filtering agent_liveness_status, agent_session_terminal, and coder_recovery_status out of LoadLatestEventsAsync. Project agent_liveness_status and coder_recovery_status into the current turn as an ErrorPart with kind 'recovery' (matching the live useSessionTranscript handler) and project agent_session_terminal as a closing ErrorPart with kind mapped from payload.status (failed/cancelled/timeout/completed) and message = payload.failureReason. Inserted at the event's CreatedAt, which also closes the turn's completedAt when no later event closes it.",
+      "acceptanceCriteria": [
+        "A session whose events include agent_session_terminal with status=failed and a failureReason produces a closing error part on the most recently opened turn carrying that failureReason.",
+        "agent_liveness_status transitions (e.g. probing -> running -> failed) appear as recovery/divider parts at the corresponding positions inside the turn's assistant list.",
+        "coder_recovery_status events appear as recovery parts using the live handler's status->label mapping (detected, recovering, recovered, failed).",
+        "Refreshing a session page after a terminal event returns the same closing part the live page rendered, without depending on an SSE stream.",
+        "LoadLatestEventsAsync no longer suppresses these event types from the transcript projection input."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Liveness/terminal/recovery events appear as recovery/error parts in turn.assistant in event order; LoadLatestEventsAsync no longer filters them.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "See design D4 and Open Question 1. Pick ErrorPart { kind: 'recovery', message } to match the live web handler; reserve ErrorPart kinds failed/cancelled/timeout/completed for agent_session_terminal."
+    },
+    {
+      "id": "T-005",
+      "title": "Render sessions without mohist_prompt as a legacy-missing turn",
+      "spec": "specs/coder-session-tracking/spec.md#sessions-without-mohist_prompt-produce-a-legacy-missing-turn",
+      "description": "When no mohist_prompt event exists in the session event stream, emit exactly one TranscriptTurn whose user.kind = 'legacy-missing', user.role = 'mohist', user.sentAt = session.StartedAt ?? session.CreatedAt, and user.text is a clearly labeled missing-prompt string. Never substitute session.Title, session.SessionName, or session.Id into user.text or user.summary.title. Every other event in the stream (reasoning, text, tool, liveness, terminal, recovery) is still projected as assistant parts inside this single legacy-missing turn.",
+      "acceptanceCriteria": [
+        "A session with zero mohist_prompt events returns exactly one turn.",
+        "That turn's user.kind = 'legacy-missing' and user.text is the explicit missing-prompt label (not session.Title, session.SessionName, or session.Id).",
+        "Reasoning, text, tool, liveness, terminal, and recovery events in the same session still appear in that turn's assistant list (interleaving and tool-merge rules from T-002/T-003/T-004 still apply).",
+        "metadata.turnCount = 1 for the legacy-missing case."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "BuildTranscriptAsync legacy-missing branch in WorkflowAgentSessionQueryService.cs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "See design D5. Guard against null/empty mohist_prompt.text by using a labeled missing-prompt string while still treating the event as a real turn opener (design Open Question 2)."
+    },
+    {
+      "id": "T-006",
+      "title": "Backend specs for transcript reconstruction, multi-turn, ordering, tool merge, terminal projection, and legacy-missing",
+      "spec": "specs/coder-session-tracking/spec.md#mohist_prompt-events-are-the-canonical-source-of-truth-for-the-user-prompt",
+      "description": "Extend WorkflowSessionSpecs.cs and AgentSessionSpecs.cs to cover the seven acceptance scenarios in the proposal: full prompt text equals mohist_prompt.data.text; short session.Title is not substituted; two mohist_prompt events produce two turns in event order; thought -> tool -> thought -> text interleaving is preserved; tool_call_update merges keep first-observed index and raw input/output/metadata/details/status; legacy-missing turn for sessions with no mohist_prompt; historical liveness/terminal events are visible in the projected transcript.",
+      "acceptanceCriteria": [
+        "Spec asserts turns[0].user.text equals the full mohist_prompt.data.text recorded in the fixture event.",
+        "Spec asserts a session whose Title is a short task title and whose mohist_prompt.text is a longer body returns turns[0].user.text equal to the longer body (and not the title).",
+        "Spec asserts two mohist_prompt events in one session produce two turns in event order, with assistant parts attributed to the turn whose prompt preceded them.",
+        "Spec asserts a thought -> tool -> thought -> text fixture produces turn.assistant in the same emitted order.",
+        "Spec asserts a tool_call followed by a tool_call_update keeps the merged tool part at the first-observed index and preserves rawInput, rawOutput, metadata, details, and status.",
+        "Spec asserts a session with zero mohist_prompt events returns one turn with user.kind = 'legacy-missing' whose user.text is not session.Title / session.SessionName / session.Id.",
+        "Spec asserts a session with an agent_session_terminal failed event has a closing error part on the open turn carrying the failureReason and that liveness transitions appear as recovery parts in event order.",
+        "dotnet test packages/server passes locally."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Updated packages/server/tests/Mohist.Server.Tests/Specs/WorkflowSessionSpecs.cs and AgentSessionSpecs.cs with the seven scenarios.",
+      "dependsOn": ["T-001", "T-002", "T-003", "T-004", "T-005"],
+      "passes": false,
+      "notes": "Prefer integration-shaped specs exercised through WorkflowAgentSessionQueryService and the HTTP route, matching the project's spec test conventions."
+    },
+    {
+      "id": "T-007",
+      "title": "Web tests for full real prompt expand/copy, multi-turn, legacy-missing, and raw tool payload",
+      "spec": "specs/agent-session-ui/spec.md#session-page-prompt-card-reflects-the-real-mohist_prompt",
+      "description": "Extend SessionPage.transcript.test.tsx, SessionPage.test.tsx, and session-transcript-display.test.ts with tests that feed the new transcript shape (multi-turn, full mohist_prompt.text, legacy-missing kind, tool parts with rawInput/rawOutput/metadata/details) and assert: the prompt card 'Show full prompt' disclosure reveals the full real text, the copy action copies that full text, two mohist_prompt events render as two turns, legacy-missing renders without a 'Show full prompt' button and never shows the task title as prompt body, and the tool card disclosure surfaces raw input, output, metadata, and details. Align any web component code only if a test reveals it is still passing session.Title or losing raw tool fields.",
+      "acceptanceCriteria": [
+        "Web test asserts the prompt card disclosure expands the full real mohist_prompt.text (length and content match the fixture, not the short task title).",
+        "Web test asserts the prompt card copy action writes the full mohist_prompt.text to the clipboard mock.",
+        "Web test asserts two mohist_prompt events render two distinct turn cards in event order.",
+        "Web test asserts a legacy-missing turn renders the explicit missing-prompt label, has no 'Show full prompt' control, and that the task title is not used as the prompt body.",
+        "Web test asserts a tool card with rawInput/rawOutput/metadata/details exposes those values through the existing disclosure surface.",
+        "npm run test (web package) passes locally."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Updated packages/web/tests/SessionPage.transcript.test.tsx, SessionPage.test.tsx, and session-transcript-display.test.ts.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Per design D6 the web components already accept the new payload; tests should mock the new transcript JSON shape directly. Any minor alignment (e.g. ensuring prompt.text not summary.title is what expands) is in-scope if a test reveals it."
+    }
+  ]
+}
