@@ -8,12 +8,15 @@ public class GitSourceInspectorSpecs
     [Fact]
     public async Task Inspect_CleanRepo_ReturnsPathBranchHeadAndNotDirty()
     {
-        var runner = new FakeGitRunner();
-        var inspector = new GitSourceInspector(runner.Run);
-        var repoDir = "/test/repo";
+        var fileSystem = new FakeFileSystem();
+        var repoDir = $"/fake-repo/{Guid.NewGuid():N}";
 
-        runner.Init(repoDir, "main", "abc123def456");
-        runner.SetDirty(repoDir, false);
+        fileSystem.AddDirectory(repoDir);
+        fileSystem.AddDirectory(Path.Combine(repoDir, ".git"));
+
+        var runner = new FakeGitRunner();
+        var inspector = new GitSourceInspector(fileSystem, runner.Run);
+        runner.SetRepo(repoDir, "main", "abc123def456", dirty: false);
 
         var state = await inspector.InspectAsync(repoDir);
 
@@ -26,12 +29,15 @@ public class GitSourceInspectorSpecs
     [Fact]
     public async Task Inspect_DirtyRepo_ReturnsDirtyTrue()
     {
-        var runner = new FakeGitRunner();
-        var inspector = new GitSourceInspector(runner.Run);
-        var repoDir = "/test/repo";
+        var fileSystem = new FakeFileSystem();
+        var repoDir = $"/fake-repo/{Guid.NewGuid():N}";
 
-        runner.Init(repoDir, "main", "abc123def456");
-        runner.SetDirty(repoDir, true);
+        fileSystem.AddDirectory(repoDir);
+        fileSystem.AddDirectory(Path.Combine(repoDir, ".git"));
+
+        var runner = new FakeGitRunner();
+        var inspector = new GitSourceInspector(fileSystem, runner.Run);
+        runner.SetRepo(repoDir, "main", "abc123def456", dirty: true);
 
         var state = await inspector.InspectAsync(repoDir);
 
@@ -42,11 +48,16 @@ public class GitSourceInspectorSpecs
     [Fact]
     public async Task Inspect_AfterNewCommit_SourceHeadDiffersFromCapturedHash()
     {
-        var runner = new FakeGitRunner();
-        var inspector = new GitSourceInspector(runner.Run);
-        var repoDir = "/test/repo";
+        var fileSystem = new FakeFileSystem();
+        var repoDir = $"/fake-repo/{Guid.NewGuid():N}";
 
-        runner.Init(repoDir, "main", "hash1");
+        fileSystem.AddDirectory(repoDir);
+        fileSystem.AddDirectory(Path.Combine(repoDir, ".git"));
+
+        var runner = new FakeGitRunner();
+        var inspector = new GitSourceInspector(fileSystem, runner.Run);
+        runner.SetRepo(repoDir, "main", "hash1", dirty: false);
+
         var firstState = await inspector.InspectAsync(repoDir);
         var capturedRunningHash = firstState.Head;
         Assert.NotNull(capturedRunningHash);
@@ -60,31 +71,13 @@ public class GitSourceInspectorSpecs
     [Fact]
     public async Task Inspect_NonGitDirectory_ReturnsNullBranchAndHead()
     {
-        var runner = new FakeGitRunner();
-        var inspector = new GitSourceInspector(runner.Run);
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-nogit-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        try
-        {
-            var state = await inspector.InspectAsync(dir);
+        var fileSystem = new FakeFileSystem();
+        var dir = $"/fake-nogit/{Guid.NewGuid():N}";
+        fileSystem.AddDirectory(dir);
+        // No .git subdirectory
 
-            Assert.Equal(dir, state.Path);
-            Assert.Null(state.Branch);
-            Assert.Null(state.Head);
-            Assert.False(state.Dirty);
-        }
-        finally
-        {
-            Directory.Delete(dir, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task Inspect_MissingDirectory_ReturnsNullBranchAndHead()
-    {
         var runner = new FakeGitRunner();
-        var inspector = new GitSourceInspector(runner.Run);
-        var dir = Path.Combine(Path.GetTempPath(), $"mohist-missing-{Guid.NewGuid():N}");
+        var inspector = new GitSourceInspector(fileSystem, runner.Run);
 
         var state = await inspector.InspectAsync(dir);
 
@@ -94,26 +87,47 @@ public class GitSourceInspectorSpecs
         Assert.False(state.Dirty);
     }
 
+    [Fact]
+    public async Task Inspect_MissingDirectory_ReturnsNullBranchAndHead()
+    {
+        var fileSystem = new FakeFileSystem();
+        var runner = new FakeGitRunner();
+        var inspector = new GitSourceInspector(fileSystem, runner.Run);
+        var dir = $"/fake-missing/{Guid.NewGuid():N}";
+
+        var state = await inspector.InspectAsync(dir);
+
+        Assert.Equal(dir, state.Path);
+        Assert.Null(state.Branch);
+        Assert.Null(state.Head);
+        Assert.False(state.Dirty);
+    }
+
+    private sealed class FakeFileSystem : IFileSystem
+    {
+        private readonly HashSet<string> _paths = new(StringComparer.Ordinal);
+
+        public void AddDirectory(string path) => _paths.Add(path);
+
+        public bool Exists(string path) => _paths.Contains(path);
+
+        public string ReadAllText(string path)
+            => throw new NotSupportedException("FakeFileSystem is in-memory; only Exists is exercised by these tests");
+    }
+
     private sealed class FakeGitRunner
     {
         private readonly Dictionary<string, RepoState> _repos = new(StringComparer.Ordinal);
 
-        public void Init(string repoDir, string branch, string head)
+        public void SetRepo(string repoDir, string branch, string head, bool dirty)
         {
-            _repos[repoDir] = new RepoState(branch, head, false);
-            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+            _repos[repoDir] = new RepoState(branch, head, dirty);
         }
 
         public void SetHead(string repoDir, string head)
         {
             if (_repos.TryGetValue(repoDir, out var state))
                 _repos[repoDir] = state with { Head = head };
-        }
-
-        public void SetDirty(string repoDir, bool dirty)
-        {
-            if (_repos.TryGetValue(repoDir, out var state))
-                _repos[repoDir] = state with { Dirty = dirty };
         }
 
         public Task<(string Output, int ExitCode)> Run(string workingDir, string command, string[] args)

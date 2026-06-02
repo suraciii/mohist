@@ -17,25 +17,29 @@ public sealed class GitSourceInspector : IGitSourceInspector
 {
     private static readonly TimeSpan GitCommandTimeout = TimeSpan.FromSeconds(10);
 
+    private readonly IFileSystem _fileSystem;
     private readonly Func<string, string, string[], Task<(string Output, int ExitCode)>> _runGit;
 
-    public GitSourceInspector()
-        : this(DefaultRunGit)
+    public GitSourceInspector(IFileSystem fileSystem)
+        : this(fileSystem, DefaultRunGit)
     {
     }
 
-    internal GitSourceInspector(Func<string, string, string[], Task<(string Output, int ExitCode)>> runGit)
+    internal GitSourceInspector(
+        IFileSystem fileSystem,
+        Func<string, string, string[], Task<(string Output, int ExitCode)>> runGit)
     {
+        _fileSystem = fileSystem;
         _runGit = runGit;
     }
 
     public async Task<SourceState> InspectAsync(string repoPath)
     {
-        if (!Directory.Exists(repoPath))
+        if (!_fileSystem.Exists(repoPath))
             return new SourceState(repoPath, null, null, false);
 
         var gitDir = Path.Combine(repoPath, ".git");
-        if (!Directory.Exists(gitDir))
+        if (!_fileSystem.Exists(gitDir))
             return new SourceState(repoPath, null, null, false);
 
         var branchTask = _runGit(repoPath, "rev-parse", ["--abbrev-ref", "HEAD"]);
