@@ -1,49 +1,40 @@
 ## ADDED Requirements
 
-### Requirement: Workflow scheduling state is authoritative and exclusive
-The workflow engine SHALL maintain exactly one scheduling state per workflow within a backlog: waiting without an active lease, running with an active lease, or absent when the workflow is not runnable. A workflow MUST NOT be persisted in both `Waiting` and `Running` buckets for the same backlog.
+### Requirement: Task artifact validation reports artifact marker failures
+The workflow engine SHALL validate task artifact expectations as file existence and optional neutral artifact marker or content requirements. Missing neutral artifact markers MUST produce artifact-specific diagnostics that identify the artifact file and marker without describing the failure as a check verdict failure.
 
-#### Scenario: Registering a waiting workflow removes stale running state
-- **WHEN** a runnable workflow is registered into a backlog
-- **AND** the same workflow already exists in that backlog's `Running` bucket
-- **THEN** the workflow engine SHALL remove the stale running claim before persisting the waiting entry
-- **AND** the persisted backlog state SHALL NOT contain the workflow in both `Waiting` and `Running`
+#### Scenario: Required task artifact file is missing
+- **WHEN** a task completes without producing a required artifact file
+- **THEN** task artifact validation SHALL fail the task
+- **AND** the diagnostic SHALL identify the missing artifact file requirement
 
-#### Scenario: Claiming a workflow removes waiting state
-- **WHEN** a runner claims a workflow from a backlog
-- **THEN** the workflow engine SHALL persist the workflow only in the `Running` bucket for that backlog
-- **AND** the workflow SHALL NOT remain in the `Waiting` bucket for the same backlog
+#### Scenario: Neutral task artifact marker is missing
+- **WHEN** a task produces a required artifact file
+- **AND** a neutral artifact marker declared for that file is missing
+- **THEN** task artifact validation SHALL fail the task
+- **AND** the diagnostic SHALL identify the missing artifact marker as an artifact requirement
 
-### Requirement: Startup recovery reconciles stale scheduling state
-Workflow backlog recovery SHALL reconcile persisted backlog and workflow lease state against authoritative WorkflowRun state before making work available to runners. Recovery MUST remove backlog entries and active leases for workflows that are paused, failed, completed, cancelled, missing, or unable to provide runnable work.
+#### Scenario: Task artifact validation ignores pass fail verdict semantics
+- **WHEN** a task produces an artifact containing a parseable PASS or FAIL verdict marker
+- **THEN** task artifact validation SHALL treat the file as present for artifact completion purposes
+- **AND** it SHALL NOT decide task success from whether the verdict is PASS or FAIL
 
-#### Scenario: Recovery removes paused workflow scheduling state
-- **WHEN** startup recovery inspects a persisted backlog entry or workflow lease
-- **AND** the referenced WorkflowRun has status `paused`
-- **THEN** recovery SHALL remove the workflow from all persisted waiting and running backlog buckets
-- **AND** recovery SHALL clear any active lease for that workflow
+### Requirement: Check verdict validation reports verdict marker failures
+The workflow engine SHALL validate required PASS/FAIL verdict markers only while executing checks. Missing, mismatched, or failing verdict markers MUST produce check-verdict diagnostics that identify the check and expected verdict marker rather than reporting a task artifact marker failure.
 
-#### Scenario: Recovery removes terminal workflow scheduling state
-- **WHEN** startup recovery inspects a persisted backlog entry or workflow lease
-- **AND** the referenced WorkflowRun has a terminal status such as `failed`, `completed`, or `cancelled`
-- **THEN** recovery SHALL remove the workflow from persisted backlog state
-- **AND** recovery SHALL clear any active lease for that workflow
+#### Scenario: Required pass verdict marker is missing
+- **WHEN** a check requires a pass verdict marker from an existing artifact
+- **AND** the artifact does not contain the required pass marker
+- **THEN** check verdict validation SHALL fail the check
+- **AND** the diagnostic SHALL identify the missing or mismatched verdict marker as check evidence
 
-#### Scenario: Recovery keeps only runnable workflows registered
-- **WHEN** startup recovery completes for a project backlog
-- **THEN** every persisted waiting workflow SHALL be runnable and have no active lease
-- **AND** every persisted running workflow SHALL have an active lease
-- **AND** no workflow SHALL appear in both waiting and running buckets for the same backlog
+#### Scenario: Fail verdict does not become missing artifact marker
+- **WHEN** `review.md` exists and contains `<promise>FAIL</promise>`
+- **AND** `review-passed` requires `<promise>PASS</promise>`
+- **THEN** `review-passed` SHALL fail as a check verdict failure
+- **AND** the runner error message SHALL NOT report `review.md` as missing an artifact marker for the `ai-review` task
 
-### Requirement: Terminal workflow transitions clean scheduling state
-When workflow execution reaches a terminal workflow state, the workflow engine SHALL remove that workflow from persisted backlog state and clear active workflow lease ownership before or with the terminal transition becoming observable.
-
-#### Scenario: Completed workflow releases scheduling state
-- **WHEN** a WorkflowRun transitions to completed
-- **THEN** the workflow engine SHALL remove the workflow from all waiting and running backlog buckets
-- **AND** the workflow engine SHALL clear any active lease for that workflow
-
-#### Scenario: Failed workflow releases scheduling state
-- **WHEN** a WorkflowRun transitions to failed
-- **THEN** the workflow engine SHALL remove the workflow from all waiting and running backlog buckets
-- **AND** the workflow engine SHALL clear any active lease for that workflow
+#### Scenario: Artifact marker and verdict marker tests remain separate
+- **WHEN** automated tests exercise workflow validation
+- **THEN** task file requirements, optional neutral task artifact markers, and check PASS marker validation SHALL be covered as separate behaviors
+- **AND** a passing task artifact validation test SHALL NOT require a PASS verdict marker unless it is executing a check
