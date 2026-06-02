@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
@@ -1070,10 +1071,23 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await SaveVariablesAsync();
     }
 
-    private Task SaveRunAsync() =>
-        _run is not null
-            ? _runStore.SaveAsync(_run)
-            : Task.CompletedTask;
+    private async Task SaveRunAsync()
+    {
+        if (_run is null) return;
+
+        try
+        {
+            await _runStore.SaveAsync(_run);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
+                GrainKey);
+            DeactivateOnIdle();
+            throw;
+        }
+    }
 
     private Task SaveLeaseAsync() =>
         _lease is not null

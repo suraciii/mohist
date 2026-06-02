@@ -15,7 +15,7 @@ public interface IWorkflowRunStore
 
 public class WorkflowRunStore : IWorkflowRunStore
 {
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly MohistDbContext _db;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -24,35 +24,34 @@ public class WorkflowRunStore : IWorkflowRunStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public WorkflowRunStore(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowRunStore(MohistDbContext db)
     {
-        _dbFactory = dbFactory;
+        _db = db;
     }
 
     public async Task SaveAsync(WorkflowRun run)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var entity = await db.WorkflowRuns.FindAsync(run.Id);
-
         var json = JsonSerializer.Serialize(run, JsonOptions);
+        var entity = await _db.WorkflowRuns.FindAsync(run.Id);
 
         if (entity is null)
         {
-            db.WorkflowRuns.Add(new WorkflowRunRow { WorkflowRunId = run.Id, State = json });
-        }
-        else
-        {
-            entity.State = json;
-            db.WorkflowRuns.Update(entity);
+            var newEntity = new WorkflowRunRow { WorkflowRunId = run.Id, State = json };
+            _db.WorkflowRuns.Add(newEntity);
+            _db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
+            await _db.SaveChangesAsync();
+            return;
         }
 
-        await db.SaveChangesAsync();
+        entity.State = json;
+        var entry = _db.Entry(entity);
+        entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
+        await _db.SaveChangesAsync();
     }
 
     public async Task<WorkflowRun?> LoadAsync(string workflowRunId)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var entity = await db.WorkflowRuns.FindAsync(workflowRunId);
+        var entity = await _db.WorkflowRuns.FindAsync(workflowRunId);
         if (entity is null) return null;
         return Deserialize(entity.State);
     }

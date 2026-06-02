@@ -172,6 +172,7 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(50);
             entity.Property(e => e.State).IsRequired();
+            entity.Property<long>("ETag").IsConcurrencyToken();
             entity.Property(e => e.MetadataProjectId)
                 .HasComputedColumnSql("json_extract(State, '$.Metadata.Annotations.projectId')", stored: true);
             entity.HasIndex(e => e.MetadataProjectId);
