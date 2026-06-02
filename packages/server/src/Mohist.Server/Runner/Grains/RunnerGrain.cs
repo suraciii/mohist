@@ -105,13 +105,9 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
-        await TouchPresenceAsync();
-
         var pending = await DequeuePendingWorkAsync();
         if (pending is not null)
             return pending;
-
-        await SweepStaleWorkAsync();
 
         if (ActiveWorkflowCount >= MaxWorkflowSlots)
             return null;
@@ -171,7 +167,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
-        await SweepStaleWorkAsync();
+        await DequeuePendingWorkAsync();
         return new RunnerRuntimeState(
             _status,
             _lastHeartbeat,
@@ -282,11 +278,6 @@ public class RunnerGrain : Grain, IRunnerGrain
             return work;
         }
 
-        return null;
-    }
-
-    private async Task SweepStaleWorkAsync()
-    {
         var pendingKeys = new HashSet<string>(
             _pendingWorks.Select(p => WorkKey(p.WorkflowRunId, p.WorkId)),
             StringComparer.Ordinal);
@@ -302,6 +293,8 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         foreach (var key in stale)
             _trackedWork.Remove(key);
+
+        return null;
     }
 
     private async Task<bool> IsTrackedWorkValidAsync(WorkDispatch work)

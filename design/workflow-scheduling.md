@@ -92,7 +92,7 @@ RunnerGrain                 WorkflowBacklogGrain              WorkflowGrain
     |                                |                               |
     | PollAsync()                    |                               |
     | drain pendingWorks             |                               |
-    | cleanup stale local work        |                               |
+    | (validates + sweeps stale)     |                               |
     |                                |                               |
     | if capacity full               |                               |
     |     return null                |                               |
@@ -209,17 +209,24 @@ activeWorkflowCount =
   distinct workflowRunId in pending/active work
 ```
 
-Before polling backlog or reporting runtime state, runner validates its local active cache against `WorkflowGrain`:
+`DequeuePendingWorkAsync` validates work against `WorkflowGrain` inline during dequeue. When no pending work remains, it also sweeps stale dispatched work from the cache with the same validation:
 
 ```text
-local active work
+DequeuePendingWorkAsync()
     |
-    |-- owner is this runner?
-    |-- workflow is Running?
-    |-- current workId still matches?
+    |-- drain _pendingWorks
+    |       |-- owner is this runner?
+    |       |-- workflow is Running?
+    |       |-- current workId still matches?
+    |       |-- no  -> remove from _trackedWork, skip
+    |       |-- yes -> return work
     |
-    |-- no  -> remove from local cache
-    |-- yes -> keep as active
+    |-- no pending work
+    |       sweep all dispatched entries in _trackedWork
+    |       |-- same validation as above
+    |       |-- stale -> remove
+    |
+    |-- return null
 ```
 
 ## Report
