@@ -3,7 +3,7 @@ import fuzzysort from 'fuzzysort'
 import { useAvailableModelIds, useOpencodeModel } from '../../../entities/settings'
 import { patchIssueWorkflowDefinitionVar, patchIssueWorkflowStageDefinitionVar, updateIssue } from '../../../entities/issue'
 import { useQueryClient } from '@tanstack/react-query'
-import { ModelSelect } from '../../../shared/ui/ModelSelect'
+import { ModelSelect, describeModel } from '../../../shared/ui/ModelSelect'
 import { useProject } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
@@ -68,7 +68,7 @@ function ChevronRightIcon({ className }: { className?: string }) {
 }
 
 function modelDisplayName(modelId: string): string {
-  return modelId.split('/').pop() || modelId
+  return describeModel(modelId).name
 }
 
 interface ModelListItemProps {
@@ -233,15 +233,17 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     setHighlightedIndex(0)
   }, [searchQuery])
 
-  const defaultModelName = opencodeModelData?.model
-    ? opencodeModelData.model.split('/').pop()!
-    : null
+  const defaultModelId = opencodeModelData?.model ?? null
 
   const configuredModel = localWorkflowModel ?? (typeof currentAgentConfig?.model === 'string' ? currentAgentConfig.model : currentModel)
 
-  const currentModelDisplay = configuredModel
-    ? modelDisplayName(configuredModel)
-    : defaultModelName || 'Use default'
+  const resolvedModelId = configuredModel ?? defaultModelId
+  const currentModelDisplay = resolvedModelId
+    ? describeModel(resolvedModelId).name
+    : 'Use default'
+  const currentModelFullId = resolvedModelId
+    ? describeModel(resolvedModelId).fullId
+    : null
 
   return (
     <div className="space-y-1">
@@ -261,7 +263,16 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
             />
           }
         >
-          <span className="truncate">{currentModelDisplay}</span>
+          {currentModelFullId ? (
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-0 text-left leading-tight">
+              <span className="w-full truncate font-medium">{currentModelDisplay}</span>
+              <span className="w-full truncate text-xs font-normal opacity-80" title={currentModelFullId}>
+                {currentModelFullId}
+              </span>
+            </div>
+          ) : (
+            <span className="truncate">{currentModelDisplay}</span>
+          )}
           <ChevronDownIcon />
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="end">
@@ -306,7 +317,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
                   onClick={handleClear}
                   className="w-full justify-start px-3 py-2 text-sm text-amber-700 hover:bg-amber-50 h-auto font-normal"
                 >
-                  <span className="font-medium">Use default{defaultModelName ? ` (${defaultModelName})` : ''}</span>
+                  <span className="font-medium">Use default{defaultModelId ? ` (${describeModel(defaultModelId).name})` : ''}</span>
                 </Button>
                 <div className="border-t my-1" />
               </div>

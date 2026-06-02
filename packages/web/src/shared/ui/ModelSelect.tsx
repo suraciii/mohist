@@ -10,6 +10,26 @@ export interface SelectableModel {
   contextWindow: number
 }
 
+export interface ModelDescriptor {
+  id: string
+  name: string
+  fullId: string
+  provider: string | null
+}
+
+export function describeModel(id: string): ModelDescriptor {
+  const slashIdx = id.indexOf('/')
+  if (slashIdx === -1) {
+    return { id, name: id, fullId: id, provider: null }
+  }
+  return {
+    id,
+    name: id.slice(slashIdx + 1),
+    fullId: id,
+    provider: id.slice(0, slashIdx),
+  }
+}
+
 function SearchIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 20 20" fill="currentColor">
@@ -47,12 +67,15 @@ export interface ModelSelectProps {
 function normalizeModels(models: SelectableModel[] | string[]): SelectableModel[] {
   if (models.length === 0) return []
   if (typeof models[0] === 'string') {
-    return (models as string[]).map((id): SelectableModel => ({
-      id,
-      name: id.split('/').pop() || id,
-      badges: [],
-      contextWindow: 0,
-    }))
+    return (models as string[]).map((id): SelectableModel => {
+      const described = describeModel(id)
+      return {
+        id,
+        name: described.name,
+        badges: [],
+        contextWindow: 0,
+      }
+    })
   }
   return models as SelectableModel[]
 }
@@ -79,9 +102,12 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
     setTimeout(() => searchRef.current?.focus(), 0)
   }, [open])
 
-  const displayText = value
-    ? normalizedModels.find((m) => m.id === value)?.name || value.split('/').pop() || value
-    : placeholder
+  const selectedModel = value ? normalizedModels.find((m) => m.id === value) : null
+  const selectedDescriptor: ModelDescriptor | null = value
+    ? selectedModel
+      ? { id: selectedModel.id, name: selectedModel.name, fullId: selectedModel.id, provider: describeModel(selectedModel.id).provider }
+      : describeModel(value)
+    : null
 
   const selectModel = useCallback((modelId: string) => {
     onChange(modelId)
@@ -135,7 +161,19 @@ export function ModelSelect({ value, placeholder, models, onChange, onClear, all
             />
           }
         >
-          <span className="truncate">{displayText}</span>
+          {selectedDescriptor ? (
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-0 text-left leading-tight">
+              <span className="w-full truncate font-medium">{selectedDescriptor.name}</span>
+              <span
+                className={`w-full truncate text-muted-foreground ${isCompact ? 'text-[10px]' : 'text-xs'}`}
+                title={selectedDescriptor.fullId}
+              >
+                {selectedDescriptor.fullId}
+              </span>
+            </div>
+          ) : (
+            <span className="truncate text-muted-foreground">{placeholder}</span>
+          )}
           <ChevronDownIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
         <PopoverContent className={`p-0 ${isCompact ? 'w-56' : 'w-72'}`} align="end">
