@@ -490,12 +490,36 @@ public class AgentSessionSpecs
     private async Task SaveLeaseAsync(string workflowRunId, WorkLease lease)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var row = await db.WorkflowLeases.FindAsync(workflowRunId);
-        var json = JsonSerializer.Serialize(lease, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var row = await db.WorkflowQueue.FindAsync(workflowRunId);
         if (row is null)
-            db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow { WorkflowRunId = workflowRunId, StateJson = json });
+        {
+            db.WorkflowQueue.Add(new Mohist.Server.Workflow.Storage.WorkflowQueueRow
+            {
+                WorkflowRunId = workflowRunId,
+                ProjectId = "test-project",
+                State = Mohist.Server.Workflow.Storage.WorkflowQueueStates.Leased,
+                RunnerId = lease.RunnerId,
+                WorkId = lease.WorkId,
+                WorkType = lease.WorkType,
+                Stage = lease.Stage,
+                LogicalId = lease.LogicalId,
+                Title = lease.Title,
+                LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2),
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+        }
         else
-            row.StateJson = json;
+        {
+            row.State = Mohist.Server.Workflow.Storage.WorkflowQueueStates.Leased;
+            row.RunnerId = lease.RunnerId;
+            row.WorkId = lease.WorkId;
+            row.WorkType = lease.WorkType;
+            row.Stage = lease.Stage;
+            row.LogicalId = lease.LogicalId;
+            row.Title = lease.Title;
+            row.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2);
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+        }
         await db.SaveChangesAsync();
     }
 

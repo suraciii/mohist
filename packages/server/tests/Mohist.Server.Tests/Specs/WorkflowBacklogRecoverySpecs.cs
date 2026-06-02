@@ -68,7 +68,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.True(backlog is null || !backlog.All.Contains(workflowId));
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueueSchedulerSpecs.Maintain_* specs; persisted WorkflowLeases/BacklogStates are no longer authoritative.")]
     public async Task Recovery_ReconcilesStalePausedAndTerminalRows_AndKeepsConsistentRunnableState()
     {
         var pausedWorkflowId = $"wf-paused-{Guid.NewGuid():N}";
@@ -148,7 +148,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.Null(await LoadLeaseJsonAsync(workflowId));
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueueSchedulerSpecs.Maintain_ClearsLeasedQueueRow_WhenWorkflowHasNoRunnableWork; persisted WorkflowLeases/BacklogStates are no longer authoritative.")]
     public async Task Recovery_RemovesLeasedRunningClaim_WhenRecoveredWorkflowCannotDispatchWork()
     {
         var workflowId = $"wf-no-work-{Guid.NewGuid():N}";
@@ -172,7 +172,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.Null(await runner.PollAsync());
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueueSchedulerSpecs.Maintain_PreservesLeasedQueueRow_WhenWorkflowIsRunnable; mismatched lease work details no longer trigger a backlog scrub in the new authority.")]
     public async Task Recovery_RemovesLeasedRunningClaim_WhenPersistedLeaseDoesNotMatchDispatchableWork()
     {
         var workflowId = $"wf-mismatch-{Guid.NewGuid():N}";
@@ -521,7 +521,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.Null(await runner.PollAsync());
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by WorkflowQueueSchedulerSpecs.Maintain_ClearsLeasedQueueRow_WhenWorkflowRunIsMissing and the runner-poll path through RunnerGrain; persisted WorkflowLeases/BacklogStates are no longer authoritative.")]
     public async Task PollClaimNoWork_RepairsClaim_ClearsLease_AndDoesNotConsumeCapacity()
     {
         var runnerId = await RegisterRunnerAsync("repair-runner", maxWorkflowSlots: 1);
@@ -561,7 +561,7 @@ public class WorkflowBacklogRecoverySpecs : WorkflowGrainSpecs, IAsyncLifetime
         Assert.Null(await runner.PollAsync());
     }
 
-    [Fact]
+    [Fact(Skip = "Replaced by the terminal-transition path in WorkflowGrain.ReportResultAsync (which calls ReleaseClaimAsync → scheduler.ClearAsync); persisted WorkflowLeases/BacklogStates are no longer authoritative.")]
     public async Task CompletedWorkflow_ClearsBacklogAndLease_OnTerminalTransition()
     {
         var workflow = await StartWorkflowAsync(SingleStage());
