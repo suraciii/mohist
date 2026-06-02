@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Storage;
 using System.Text.Json;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -216,7 +217,11 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        var row = await db.WorkflowLeases.FindAsync(workflowRunId);
-        return row?.StateJson;
+        var queue = await db.WorkflowQueue.FindAsync(workflowRunId);
+        if (queue is null || string.IsNullOrWhiteSpace(queue.WorkId))
+            return null;
+
+        var lease = new WorkLease(queue.WorkId, queue.WorkType ?? "task", queue.Stage ?? "", queue.LogicalId ?? queue.WorkId, queue.Title ?? queue.LogicalId ?? queue.WorkId, queue.RunnerId ?? "");
+        return JsonSerializer.Serialize(lease);
     }
 }
