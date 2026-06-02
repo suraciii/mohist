@@ -28,12 +28,12 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         var wf1 = Grains.GetGrain<IWorkflowGrain>(workflow1Id);
         var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
-        await runner1.AssignWorkflowAsync(workflow1Id);
-        await runner2.AssignWorkflowAsync(workflow2Id);
 
         definition = IntegrateWorkflow(resource);
         await wf1.StartAsync(definition, ProjectInput(projectId));
         await wf2.StartAsync(definition, ProjectInput(projectId));
+        await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
+        await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
         var wf1Plan = await runner1.PollAsync();
         Assert.NotNull(wf1Plan);
@@ -110,11 +110,11 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         var wf1 = Grains.GetGrain<IWorkflowGrain>(workflow1Id);
         var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
-        await runner1.AssignWorkflowAsync(workflow1Id);
-        await runner2.AssignWorkflowAsync(workflow2Id);
 
         await wf1.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
         await wf2.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
+        await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
+        await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
         var wf1Plan = await runner1.PollAsync();
         Assert.NotNull(wf1Plan);
@@ -140,25 +140,25 @@ public class StageLockSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task AbandonedIntegrateWork_ReleasesSequentialLock()
+    public async Task StoppedIntegrateWorkflow_ReleasesSequentialLock()
     {
         var suffix = Guid.NewGuid().ToString("N");
-        var projectId = $"stage-lock-abandon-project-{suffix}";
-        var resource = $"project-integration-abandon-{suffix}";
-        var workflow1Id = $"wf-stage-lock-abandon-1-{suffix}";
-        var workflow2Id = $"wf-stage-lock-abandon-2-{suffix}";
-        var runner1Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-abandon-runner-1-{suffix}");
-        var runner2Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-abandon-runner-2-{suffix}");
+        var projectId = $"stage-lock-stop-project-{suffix}";
+        var resource = $"project-integration-stop-{suffix}";
+        var workflow1Id = $"wf-stage-lock-stop-1-{suffix}";
+        var workflow2Id = $"wf-stage-lock-stop-2-{suffix}";
+        var runner1Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-stop-runner-1-{suffix}");
+        var runner2Id = await RegisterRunnerForProjectAsync(projectId, $"stage-lock-stop-runner-2-{suffix}");
         var runner1 = Grains.GetGrain<IRunnerGrain>(runner1Id);
         var runner2 = Grains.GetGrain<IRunnerGrain>(runner2Id);
 
         var wf1 = Grains.GetGrain<IWorkflowGrain>(workflow1Id);
         var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
-        await runner1.AssignWorkflowAsync(workflow1Id);
-        await runner2.AssignWorkflowAsync(workflow2Id);
 
         await wf1.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
         await wf2.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
+        await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
+        await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
         var wf1Build = await runner1.PollAsync();
         Assert.NotNull(wf1Build);
@@ -172,7 +172,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
         Assert.NotNull(wf1Integrate);
         Assert.Equal("integrate", wf1Integrate.Stage);
 
-        await wf1.AbandonCurrentWorkAsync(runner1Id, "runner lost");
+        await wf1.StopAsync("stopped by test");
 
         var wf2Integrate = await runner2.PollAsync();
         Assert.NotNull(wf2Integrate);

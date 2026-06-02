@@ -207,22 +207,10 @@ public class WorkflowProjectionService
     {
         if (workflowIds.Length == 0) return [];
 
-        var rows = await db.WorkflowQueue.AsNoTracking()
+        var rows = await db.WorkflowLeases.AsNoTracking()
             .Where(row => workflowIds.Contains(row.WorkflowRunId))
             .ToListAsync(ct);
-        return rows.ToDictionary(row => row.WorkflowRunId, QueueLease, StringComparer.Ordinal);
-    }
-
-    private static WorkLease? QueueLease(WorkflowQueueRow row)
-    {
-        if (row.State != WorkflowQueueStates.Leased
-            || string.IsNullOrWhiteSpace(row.WorkId)
-            || string.IsNullOrWhiteSpace(row.WorkType)
-            || string.IsNullOrWhiteSpace(row.Stage)
-            || string.IsNullOrWhiteSpace(row.LogicalId))
-            return null;
-
-        return new WorkLease(row.WorkId, row.WorkType, row.Stage, row.LogicalId, row.Title, row.RunnerId);
+        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.StateJson), StringComparer.Ordinal);
     }
 
     private static bool IsLeaseOwnedActiveSession(WorkflowAgentSession session, IReadOnlyDictionary<string, WorkLease?> leases)

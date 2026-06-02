@@ -12,7 +12,6 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Queries;
-using Mohist.Server.Workflow.Scheduling;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Storage;
 using Microsoft.Extensions.Hosting;
@@ -46,13 +45,13 @@ public class WorkflowGrainFixture : IAsyncLifetime
         var builder = new InProcessTestClusterBuilder();
         builder.ConfigureSilo((_, siloBuilder) =>
         {
+            siloBuilder.UseInMemoryReminderService();
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
             siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
-            siloBuilder.Services.AddSingleton<IWorkflowScheduler, WorkflowScheduler>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
@@ -191,38 +190,6 @@ public abstract class WorkflowGrainSpecs
             row.StateJson = json;
         }
 
-        var queue = await db.WorkflowQueue.FindAsync(workflowId);
-        if (queue is null)
-        {
-            db.WorkflowQueue.Add(new WorkflowQueueRow
-            {
-                WorkflowRunId = workflowId,
-                ProjectId = "test-project",
-                State = WorkflowQueueStates.Leased,
-                RunnerId = lease.RunnerId,
-                WorkId = lease.WorkId,
-                WorkType = lease.WorkType,
-                Stage = lease.Stage,
-                LogicalId = lease.LogicalId,
-                Title = lease.Title,
-                LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2),
-                UpdatedAt = DateTimeOffset.UtcNow
-            });
-        }
-        else
-        {
-            queue.ProjectId = "test-project";
-            queue.State = WorkflowQueueStates.Leased;
-            queue.RunnerId = lease.RunnerId;
-            queue.WorkId = lease.WorkId;
-            queue.WorkType = lease.WorkType;
-            queue.Stage = lease.Stage;
-            queue.LogicalId = lease.LogicalId;
-            queue.Title = lease.Title;
-            queue.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2);
-            queue.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
         await db.SaveChangesAsync();
     }
 
@@ -255,47 +222,42 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         await using var db = new MohistDbContext(options);
-        db.WorkflowQueue.RemoveRange(db.WorkflowQueue);
         db.WorkflowLeases.RemoveRange(db.WorkflowLeases);
         db.BacklogStates.RemoveRange(db.BacklogStates);
         await db.SaveChangesAsync();
 
-        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject("test-project"));
-        while (await backlog.ClaimAsync($"cleanup-{Guid.NewGuid():N}") is not null) { }
+        var management = Grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
     }
 
     protected async Task EnqueueWorkflowForTestAsync(string workflowId, string projectId = "test-project")
     {
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(_fixture.ConnectionString)
-            .Options;
-        await using var db = new MohistDbContext(options);
-        var row = await db.WorkflowQueue.FindAsync(workflowId);
-        if (row is null)
-        {
-            db.WorkflowQueue.Add(new WorkflowQueueRow
-            {
-                WorkflowRunId = workflowId,
-                ProjectId = projectId,
-                State = WorkflowQueueStates.Queued,
-                UpdatedAt = DateTimeOffset.UtcNow
-            });
-        }
-        else
-        {
-            row.ProjectId = projectId;
-            row.State = WorkflowQueueStates.Queued;
-            row.RunnerId = null;
-            row.WorkId = null;
-            row.WorkType = null;
-            row.Stage = null;
-            row.LogicalId = null;
-            row.Title = null;
-            row.LeaseExpiresAt = null;
-            row.UpdatedAt = DateTimeOffset.UtcNow;
-        }
+        var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
+        await backlog.EnqueueAsync(workflowId);
+    }
 
-        await db.SaveChangesAsync();
+    protected async Task AssignWorkflowToRunnerAsync(string workflowId, string runnerId)
+    {
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.AssignRunnerAsync(runnerId);
+    }
+
+    protected async Task AssignActiveWorkForTestAsync(
+        string runnerId,
+        string workflowId,
+        string workId = "task-1.1",
+        string workType = "task",
+        string stage = "build",
+        string? title = "Task 1")
+    {
+        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.StartAsync(SingleStage(
+            tasks: [new("task-1", title ?? "Task 1", "spec/task")],
+            checks: []), TestInput());
+        await workflow.AssignRunnerAsync(runnerId);
+
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.NotNull(await runner.PollAsync());
     }
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAnyAsync()

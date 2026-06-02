@@ -11,25 +11,30 @@ using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
-using Mohist.Server.Workflow.Scheduling;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
+using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
-public class WorkflowGrain : Grain, IWorkflowGrain
+public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 {
+    private const string RecoveryReminderName = "workflow-scheduling-recovery";
+    private static readonly TimeSpan RecoveryReminderDueTime = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RecoveryReminderPeriod = TimeSpan.FromMinutes(1);
     private WorkflowRunProfile? _profile;
     private WorkflowRun? _run;
     private WorkLease? _lease;
     private WorkflowExecutionContext? _variables;
     private string? _lastRunnerId;
+    private IGrainReminder? _recoveryReminder;
     private readonly HashSet<string> _announcedWaitingLocks = [];
     private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IStateStore<WorkflowRunProfile> _profileStore;
     private readonly IWorkflowRunStore _runStore;
-    private readonly IWorkflowScheduler _scheduler;
+    private readonly IStateStore<WorkLease> _leaseStore;
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
+    private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
     private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
@@ -38,8 +43,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     public WorkflowGrain(
         IStateStore<WorkflowRunProfile> profileStore,
         IWorkflowRunStore runStore,
-        IWorkflowScheduler scheduler,
+        IStateStore<WorkLease> leaseStore,
         IStateStore<WorkflowExecutionContext> variablesStore,
+        IWorkflowBacklogDirectory backlogs,
         IEventBus eventBus,
         IEventStore events,
         IEnumerable<IWorkflowCompletionHook> completionHooks,
@@ -47,8 +53,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         _profileStore = profileStore;
         _runStore = runStore;
-        _scheduler = scheduler;
+        _leaseStore = leaseStore;
         _variablesStore = variablesStore;
+        _backlogs = backlogs;
         _eventBus = eventBus;
         _events = events;
         _completionHooks = completionHooks;
@@ -61,11 +68,24 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         _profile = await _profileStore.LoadAsync(GrainKey);
         _run = await _runStore.LoadAsync(GrainKey);
-        _lease = null;
+        _lease = await _leaseStore.LoadAsync(GrainKey);
         _variables = await _variablesStore.LoadAsync(GrainKey);
 
-        var queued = await _scheduler.GetAsync(GrainKey, ct);
-        _lastRunnerId = queued?.RunnerId;
+        _lastRunnerId = _run?.Claim?.RunnerId ?? _lease?.RunnerId;
+        await EnsureSchedulingRecoveryAsync();
+    }
+
+    public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
+    {
+        return Task.CompletedTask;
+    }
+
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
+            return;
+
+        await EnsureSchedulingRecoveryAsync();
     }
 
     public async Task StartAsync(WorkflowDefinition? definition = null, WorkflowStartInput? input = null)
@@ -93,7 +113,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("started");
         await SaveAllAsync();
         await AppendWorkflowEventAsync("workflow_started", "started", "Workflow started");
-        await RegisterToBacklogAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -106,7 +126,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("resumed");
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed");
-        await RegisterToBacklogIfRunnableAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -118,8 +138,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} paused: {Reason}", GrainKey, reason);
         EmitStageChanged("paused", reason);
         await SaveRunAsync();
-        await ReleaseFromBacklogOnlyAsync();
         await AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused");
+        await DisableSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -131,20 +151,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         if (_run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
             throw new WorkflowDomainException($"Cannot stop workflow in {_run.Status} state");
 
-        await ReleaseClaimAsync(reason ?? "stopped");
+        await ClearExecutableStateAsync(reason ?? "stopped");
         _run.Stop();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
         EmitStageChanged("stopped", reason);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_stopped", "stopped", reason ?? "Workflow stopped");
+        await DisableSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
-    }
-
-    public Task ReleaseClaimAsync(string reason)
-    {
-        EnsureRun();
-        return ReleaseClaimInternalAsync(reason);
     }
 
     public async Task ApproveAsync()
@@ -156,8 +171,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("approved");
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved");
-        await RegisterToBacklogIfRunnableAsync();
-        await ReleaseFromBacklogIfTerminalAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -170,8 +184,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         EmitStageChanged("rejected", reason);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", reason ?? "Workflow approval rejected");
-        await RegisterToBacklogIfRunnableAsync();
-        await ReleaseFromBacklogIfTerminalAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -186,7 +199,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
-        await RegisterToBacklogAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -200,7 +213,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
-        await RegisterToBacklogAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -213,6 +226,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             throw new InvalidOperationException("Runtime task requires title");
 
         var phaseBefore = _run.Status;
+        await ClearChecksLeaseAsync();
         var with = ParseWith(task.With);
         _run.AddRuntimeTask(new TaskDefinition(task.Id, task.Title, task.Uses, with), task.Stage, task.InvalidateChecks);
 
@@ -221,7 +235,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_task_added", "added", $"Workflow task added: {task.Title}", TaskId: task.Id, Payload: task);
-        await RegisterToBacklogAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
         return new RuntimeTaskAddedResult(GrainKey, stage, task.Id);
     }
@@ -238,81 +252,101 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.FromResult(_run.HasIncompleteTaskById(id));
     }
 
-    public async Task<WorkDispatch?> GetWorkAsync(string runnerId)
+    public async Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId)
     {
-        if (_run is null) return null;
-        if (_run.Status is WorkflowRunStatus.Paused or WorkflowRunStatus.Stopped) return null;
+        if (_run is null) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "missing");
+        if (_run.Status != WorkflowRunStatus.Running) return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, Reason: "not-runnable");
+        if (_run.Claim is not null)
+        {
+            if (!string.Equals(_run.Claim.RunnerId, runnerId, StringComparison.Ordinal))
+                return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Rejected, _run.Claim.RunnerId, "already-assigned");
+        }
+        else
+        {
+            _run.ClaimBy(runnerId, DateTimeOffset.UtcNow);
+            _lastRunnerId = runnerId;
+            await SaveRunAsync();
+            await AppendWorkflowEventAsync("workflow_claimed", "claimed", $"Workflow assigned to runner {runnerId}", RunnerId: runnerId);
+        }
 
-        var queued = await _scheduler.GetAsync(GrainKey);
-        if (queued is null
-            || queued.State != WorkflowQueueStates.Leased
-            || !string.Equals(queued.RunnerId, runnerId, StringComparison.Ordinal))
-            return null;
+        await RunCoreAsync();
+        return new WorkflowAssignmentResult(WorkflowAssignmentStatus.Assigned, runnerId);
+    }
 
-        var activeLease = await ReconcileLeaseAsync(runnerId);
+    private async Task RunCoreAsync()
+    {
+        if (_run is null || _run.Status != WorkflowRunStatus.Running)
+            return;
+
+        var runnerId = _run.Claim?.RunnerId;
+        if (string.IsNullOrWhiteSpace(runnerId))
+        {
+            if (_run.NextWork() is not null)
+                await RegisterToBacklogAsync();
+            return;
+        }
+
+        var activeLease = await RestoreLeaseAsync();
         if (activeLease is not null)
         {
             if (!string.Equals(activeLease.RunnerId, runnerId, StringComparison.Ordinal))
-            {
-                _log.LogInformation(
-                    "Workflow {Id} dispatch blocked for runner {Runner} by active lease owned by {Owner} for work {WorkId}",
-                    GrainKey,
-                    runnerId,
-                    activeLease.RunnerId,
-                    activeLease.WorkId);
-            }
-            else
-            {
-                _log.LogDebug(
-                    "Workflow {Id} runner {Runner} polled while lease for work {WorkId} is still active; no duplicate assignment created",
-                    GrainKey,
-                    runnerId,
-                    activeLease.WorkId);
-            }
+                return;
 
-            return null;
+            var restoredDispatch = RestoreDispatch(activeLease);
+            if (restoredDispatch is not null)
+                await AssignRunnerWorkAsync(runnerId, restoredDispatch);
+            return;
         }
 
         var work = _run.NextWork();
-        if (work is null) return null;
+        if (work is null)
+            return;
 
         if (!await AcquireStageLocksIfNeededAsync(work.Stage))
-            return null;
+            return;
 
         var dispatch = PrepareWork(work, runnerId);
-        if (dispatch is not null)
-        {
-            await AttachQueueLeaseAsync(dispatch, runnerId);
-            await AppendWorkDispatchedEventAsync(dispatch, runnerId);
-        }
-        return dispatch;
+        if (dispatch is null)
+            return;
+
+        await SaveLeaseAsync();
+        await AppendWorkDispatchedEventAsync(dispatch, runnerId);
+        await AssignRunnerWorkAsync(runnerId, dispatch);
     }
 
-    private async Task<WorkLease?> ReconcileLeaseAsync(string pollingRunnerId)
+    private async Task EnsureSchedulingRecoveryAsync()
     {
-        var queued = await _scheduler.GetAsync(GrainKey);
-        if (queued is null || queued.State != WorkflowQueueStates.Leased)
-            return null;
+        if (IsRunnable())
+        {
+            _recoveryReminder ??= await this.RegisterOrUpdateReminder(
+                RecoveryReminderName,
+                RecoveryReminderDueTime,
+                RecoveryReminderPeriod);
+            await RunCoreAsync();
+            return;
+        }
 
-        var activeLease = _lease;
-        if (activeLease is null && !string.IsNullOrWhiteSpace(queued.RunnerId) && !string.IsNullOrWhiteSpace(queued.WorkId))
-            activeLease = new WorkLease(
-                queued.WorkId!,
-                queued.WorkType ?? "task",
-                queued.Stage ?? _run?.CurrentStageId ?? "",
-                queued.LogicalId ?? queued.WorkId!,
-                queued.Title ?? queued.LogicalId ?? queued.WorkId!,
-                queued.RunnerId!);
+        await DisableSchedulingRecoveryAsync();
+    }
 
-        if (activeLease is null) return null;
+    private async Task DisableSchedulingRecoveryAsync()
+    {
+        if (_recoveryReminder is null)
+            return;
 
-        if (string.IsNullOrWhiteSpace(activeLease.RunnerId) || string.IsNullOrWhiteSpace(activeLease.WorkId))
-            return activeLease;
+        await this.UnregisterReminder(_recoveryReminder);
+        _recoveryReminder = null;
+    }
 
-        if (string.Equals(activeLease.RunnerId, pollingRunnerId, StringComparison.Ordinal))
-            return activeLease;
+    private bool IsRunnable()
+    {
+        if (_run?.Status != WorkflowRunStatus.Running)
+            return false;
 
-        return activeLease;
+        if (_run.IsClaimed)
+            return true;
+
+        return _run.NextWork() is not null;
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)
@@ -323,6 +357,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         if (_run.CurrentStageId is null)
             throw new InvalidOperationException("Workflow has no current stage");
+
+        await ClearChecksLeaseAsync();
 
         var current = _run.CurrentStage();
         if (!current.Initialized)
@@ -351,13 +387,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             $"Added {tasksToInsert.Count} tasks to workflow stage {current.Id}",
             Payload: new { Count = tasksToInsert.Count });
 
-        await RegisterToBacklogAsync();
+        await EnsureSchedulingRecoveryAsync();
 
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
 
     public async Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result)
     {
+        if (_run is null || !_run.IsClaimedBy(runnerId)) return;
         var lease = await RestoreReportLeaseAsync(runnerId, workId);
         if (lease is null || workId != lease.WorkId) return;
 
@@ -372,7 +409,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain
 
         var phaseBefore = _run?.Status;
         await ClearAndDeleteLeaseAsync();
-        await _scheduler.ClearAsync(GrainKey);
 
         switch (lease.WorkType)
         {
@@ -389,32 +425,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         await SaveRunAsync();
         await AppendTerminalEventIfNeededAsync();
         await ReleaseStageLocksIfDoneAsync(lease.Stage);
-        await ReleaseFromBacklogIfTerminalAsync();
-        await RegisterToBacklogIfRunnableAsync();
+        await EnsureSchedulingRecoveryAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
-    }
-
-    public async Task AbandonCurrentWorkAsync(string runnerId, string reason)
-    {
-        var lease = _lease;
-        if (lease is null) return;
-
-        if (lease.RunnerId != runnerId)
-        {
-            _log.LogWarning("Workflow {Id} ignoring abandon from runner {Caller} — lease owned by {Owner}",
-                GrainKey, runnerId, lease.RunnerId);
-            return;
-        }
-
-        _log.LogWarning("Workflow {Id} abandoning in-flight work {WorkId} ({WorkType}): {Reason}",
-            GrainKey, lease.WorkId, lease.WorkType, reason);
-
-        await ClearAndDeleteLeaseAsync();
-        await RequeueInBacklogAsync();
-        await SaveRunAsync();
-        await AppendWorkflowEventAsync("workflow_work_abandoned", "abandoned", reason, TaskId: lease.LogicalId, RunnerId: runnerId, Payload: new { lease.WorkId, lease.WorkType });
-        await ReleaseStageLocksAsync(lease.Stage, "abandoned");
-        await RegisterToBacklogIfRunnableAsync();
     }
 
     public async Task PatchVariablesAsync(string section, string patchJson)
@@ -461,32 +473,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain
         return Task.FromResult(_run?.Status.ToString());
     }
 
-    public Task<string?> GetAssignedRunnerIdAsync()
+    public Task<string?> GetClaimedRunnerIdAsync()
     {
-        return GetAssignedRunnerIdCoreAsync();
+        return Task.FromResult(_run?.Claim?.RunnerId ?? _lastRunnerId);
     }
 
-    private async Task<string?> GetAssignedRunnerIdCoreAsync()
+    public async Task<string?> GetCurrentWorkIdAsync()
     {
-        var queued = await _scheduler.GetAsync(GrainKey);
-        var runnerId = queued?.RunnerId ?? _lease?.RunnerId ?? _lastRunnerId;
-        return runnerId;
-    }
-
-    public async Task<string?> GetAssignedWorkIdAsync()
-    {
-        var queued = await _scheduler.GetAsync(GrainKey);
-        return queued?.WorkId ?? _lease?.WorkId;
-    }
-
-    private async Task ReleaseFromBacklogIfTerminalAsync()
-    {
-        if (_run is null) return;
-        if (_run.Status is WorkflowRunStatus.Completed or WorkflowRunStatus.Failed)
-        {
-            await ReleaseClaimAsync($"Workflow {_run.Status.ToString().ToLowerInvariant()}");
-            _log.LogInformation("Workflow {Id} released from scheduling state (status={Status})", GrainKey, _run.Status);
-        }
+        var lease = await RestoreLeaseAsync();
+        return lease?.WorkId;
     }
 
     private async Task<bool> AcquireStageLocksIfNeededAsync(string stage)
@@ -586,31 +581,25 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
-        await _scheduler.EnqueueAsync(GrainKey, projectId);
-        _log.LogInformation("Workflow {Id} registered to workflow queue", GrainKey);
+        _backlogs.RegisterProject(projectId);
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
+        await backlog.EnqueueAsync(GrainKey);
+        _log.LogInformation("Workflow {Id} registered to workflow backlog", GrainKey);
     }
 
     private async Task RequeueInBacklogAsync()
     {
         var projectId = GetProjectId();
         if (string.IsNullOrWhiteSpace(projectId)) return;
-        await _scheduler.RequeueAsync(GrainKey, projectId);
         await RequeueWorkflowIdAsync(projectId, GrainKey);
-        _log.LogInformation("Workflow {Id} re-queued in workflow queue", GrainKey);
+        _log.LogInformation("Workflow {Id} re-queued in workflow backlog", GrainKey);
     }
 
-    private async Task RequeueWorkflowIdAsync(string projectId, string workflowId)
+    private async Task RequeueWorkflowIdAsync(string projectId, string workflowRunId)
     {
-        await _scheduler.RequeueAsync(workflowId, projectId);
-    }
-
-    private async Task RegisterToBacklogIfRunnableAsync()
-    {
-        if (_run?.Status != WorkflowRunStatus.Running) return;
-        var projectId = GetProjectId();
-        if (string.IsNullOrWhiteSpace(projectId)) return;
-        if (_run.NextWork() is null) return;
-        await RequeueInBacklogAsync();
+        _backlogs.RegisterProject(projectId);
+        var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
+        await backlog.EnqueueAsync(workflowRunId);
     }
 
     private WorkDispatch? PrepareWork(WorkflowWork work, string runnerId)
@@ -675,9 +664,36 @@ public class WorkflowGrain : Grain, IWorkflowGrain
             Stage: stage,
             Title: title,
             Issue: issueRef);
-        _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId);
+        _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch);
         _lastRunnerId = runnerId;
         return dispatch;
+    }
+
+    private WorkDispatch? RestoreDispatch(WorkLease lease)
+    {
+        if (lease.Dispatch is not null)
+            return lease.Dispatch;
+
+        if (string.IsNullOrWhiteSpace(lease.WorkId))
+            return null;
+
+        return new WorkDispatch(
+            WorkflowRunId: GrainKey,
+            WorkId: lease.WorkId,
+            WorkType: lease.WorkType,
+            Stage: lease.Stage,
+            Title: lease.Title);
+    }
+
+    private async Task AssignRunnerWorkAsync(string runnerId, WorkDispatch dispatch)
+    {
+        var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
+        var result = await runner.AssignWorkAsync(dispatch);
+        if (result.Status == RunnerWorkAssignmentStatus.Rejected)
+        {
+            _log.LogWarning("Runner {RunnerId} rejected work {WorkId} for workflow {WorkflowId}: {Reason}",
+                runnerId, dispatch.WorkId, GrainKey, result.Reason);
+        }
     }
 
     private static int TaskAttempt(string taskRunId)
@@ -696,97 +712,43 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     private async Task ClearAndDeleteLeaseAsync()
     {
         _lease = null;
-        await _scheduler.ClearAsync(GrainKey);
+        await _leaseStore.DeleteAsync(GrainKey);
     }
 
-    private async Task ReleaseClaimInternalAsync(string reason)
+    private async Task ClearChecksLeaseAsync()
     {
-        // 1. Release stage lock (the workflow's held exclusive resource)
+        var lease = await RestoreLeaseAsync();
+        if (lease?.WorkType is "check" or "checks")
+            await ClearAndDeleteLeaseAsync();
+    }
+
+    private async Task ClearExecutableStateAsync(string reason)
+    {
         await ReleaseCurrentStageLocksAsync(reason);
 
-        // 2. Clear the workflow's own lease record (do NOT command the runner)
         var lease = await RestoreLeaseAsync();
         if (lease is not null)
             await ClearAndDeleteLeaseAsync();
-
-        // 3. Release scheduler claim
-        await ReleaseBacklogAsync();
-
-        // 4. Emit observability event only when there was an in-flight claim to release.
-        //    This keeps the call idempotent: a no-op second call does not emit a duplicate.
-        if (lease is not null)
-        {
-            await AppendWorkflowEventAsync(
-                "workflow_claim_released",
-                "released",
-                reason,
-                RunnerId: lease.RunnerId,
-                Payload: new
-                {
-                    Stage = _run?.CurrentStageId,
-                    Resource = GetSequentialLockResource(_run?.CurrentStageId ?? ""),
-                });
-        }
-    }
-
-    private async Task ReleaseBacklogAsync()
-    {
-        var projectId = GetProjectId();
-        if (string.IsNullOrWhiteSpace(projectId)) return;
-        await _scheduler.ClearAsync(GrainKey);
-    }
-
-    private async Task ReleaseFromBacklogOnlyAsync()
-    {
-        var projectId = GetProjectId();
-        if (string.IsNullOrWhiteSpace(projectId)) return;
-        await _scheduler.ClearQueuedAsync(GrainKey);
     }
 
     private async Task<WorkLease?> RestoreLeaseAsync()
     {
-        await Task.CompletedTask;
+        if (_lease is not null)
+            return _lease;
+
+        _lease = await _leaseStore.LoadAsync(GrainKey);
+        _lastRunnerId = _lease?.RunnerId;
         return _lease;
-    }
-
-    private async Task AttachQueueLeaseAsync(WorkDispatch dispatch, string runnerId)
-    {
-        if (_lease is null) return;
-        var projectId = dispatch.Issue?.ProjectId ?? GetProjectId();
-        if (string.IsNullOrWhiteSpace(projectId))
-        {
-            _log.LogWarning("Workflow {Id} cannot attach queue lease for work {WorkId}: missing project id", GrainKey, dispatch.WorkId);
-            return;
-        }
-
-        await _scheduler.AttachLeaseAsync(GrainKey, projectId, runnerId, _lease);
     }
 
     private async Task<WorkLease?> RestoreReportLeaseAsync(string runnerId, string workId)
     {
         var lease = await RestoreLeaseAsync();
-        if (lease is not null)
-            return lease;
-
-        var queued = await _scheduler.GetAsync(GrainKey);
-        if (queued is null
-            || queued.State != WorkflowQueueStates.Leased
-            || queued.WorkId != workId
-            || queued.RunnerId != runnerId
-            || string.IsNullOrWhiteSpace(queued.WorkType)
-            || string.IsNullOrWhiteSpace(queued.Stage)
-            || string.IsNullOrWhiteSpace(queued.LogicalId))
+        if (lease is null
+            || !string.Equals(lease.WorkId, workId, StringComparison.Ordinal)
+            || !string.Equals(lease.RunnerId, runnerId, StringComparison.Ordinal))
             return null;
-
-        _lease = new WorkLease(
-            queued.WorkId!,
-            queued.WorkType!,
-            queued.Stage!,
-            queued.LogicalId!,
-            queued.Title ?? queued.LogicalId!,
-            queued.RunnerId!);
-        _lastRunnerId = queued.RunnerId;
-        return _lease;
+        return lease;
     }
 
     private void ProcessTaskResult(WorkDispatchResult result)
@@ -1096,12 +1058,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain
     {
         if (_profile is not null) await _profileStore.SaveAsync(GrainKey, _profile);
         await SaveRunAsync();
+        await SaveLeaseAsync();
         await SaveVariablesAsync();
     }
 
     private Task SaveRunAsync() =>
         _run is not null
             ? _runStore.SaveAsync(_run)
+            : Task.CompletedTask;
+
+    private Task SaveLeaseAsync() =>
+        _lease is not null
+            ? _leaseStore.SaveAsync(GrainKey, _lease)
             : Task.CompletedTask;
 
     private Task SaveVariablesAsync() =>

@@ -21,9 +21,11 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 
         workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        Assert.Equal(runnerId, await workflow.GetAssignedRunnerIdAsync());
-        Assert.Equal(task.WorkId, await workflow.GetAssignedWorkIdAsync());
-        Assert.Null(await workflow.GetWorkAsync("different-runner"));
+        Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(task.WorkId, await workflow.GetCurrentWorkIdAsync());
+        var differentRunner = await workflow.AssignRunnerAsync("different-runner");
+        Assert.Equal(WorkflowAssignmentStatus.Rejected, differentRunner.Status);
+        Assert.Equal("already-assigned", differentRunner.Reason);
     }
 
     [Fact]
@@ -31,6 +33,7 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
     {
         var workflow = await StartWorkflowWithoutRunnerAsync(SingleStage(checks: []));
         var workflowId = _workflowId!;
+        await workflow.AssignRunnerAsync("runner-restored");
 
         await SeedLeaseAsync(workflowId, new WorkLease(
             WorkId: "",
@@ -44,9 +47,13 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 
         workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        Assert.Equal("runner-restored", await workflow.GetAssignedRunnerIdAsync());
-        Assert.Equal(string.Empty, await workflow.GetAssignedWorkIdAsync());
-        Assert.Null(await workflow.GetWorkAsync("runner-other"));
+        Assert.Equal("runner-restored", await workflow.GetClaimedRunnerIdAsync());
+        Assert.Equal(string.Empty, await workflow.GetCurrentWorkIdAsync());
+        var otherRunner = await workflow.AssignRunnerAsync("runner-other");
+        Assert.Equal(WorkflowAssignmentStatus.Rejected, otherRunner.Status);
+        Assert.Equal("already-assigned", otherRunner.Reason);
+        var sameRunner = await workflow.AssignRunnerAsync("runner-restored");
+        Assert.Equal(WorkflowAssignmentStatus.Assigned, sameRunner.Status);
 
         var runnerId = await RegisterRunnerAsync();
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);

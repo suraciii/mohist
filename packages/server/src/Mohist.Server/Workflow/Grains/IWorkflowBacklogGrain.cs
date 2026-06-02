@@ -1,12 +1,11 @@
+using Mohist.Server.Runner.Grains;
+
 namespace Mohist.Server.Workflow.Grains;
 
 public interface IWorkflowBacklogGrain : IGrainWithStringKey
 {
-    Task RegisterAsync(string workflowId);
-    Task RequeueAsync(string workflowId);
-    Task RestoreRunningAsync(string workflowId, string runnerId);
+    Task EnqueueAsync(string workflowRunId);
     Task<string?> ClaimAsync(string runnerId);
-    Task ReleaseAsync(string workflowId);
 }
 
 public static class WorkflowBacklogKeys
@@ -17,5 +16,4 @@ public static class WorkflowBacklogKeys
 [GenerateSerializer]
 public sealed record WorkflowBacklogState(
     [property: Id(0)] List<string> Waiting,
-    [property: Id(1)] Dictionary<string, string> Running,
-    [property: Id(2)] HashSet<string> All);
+    [property: Id(1)] HashSet<string> All);

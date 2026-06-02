@@ -12,13 +12,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task PauseAsync(string? reason = null);
     Task StopAsync(string? reason = null);
 
-    /// <summary>
-    /// Releases the workflow's in-flight claim: stage lock, lease record, and backlog slot.
-    /// Does NOT change workflow status, does NOT command the runner. The runner manages its own state.
-    /// Used for stale claim recovery and terminal workflow cleanup.
-    /// </summary>
-    Task ReleaseClaimAsync(string reason);
-
     Task ApproveAsync();
     Task RejectAsync(string? reason = null);
     Task RetryAsync();
@@ -27,15 +20,14 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request);
     Task<bool> HasIncompleteTaskWithUsesAsync(string uses);
     Task<bool> HasIncompleteTaskByIdAsync(string id);
-    Task<WorkDispatch?> GetWorkAsync(string runnerId);
+    Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkDispatchResult result);
-    Task AbandonCurrentWorkAsync(string runnerId, string reason);
     Task PatchVariablesAsync(string section, string patchJson);
     Task PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task UpdateProfileDefinitionAsync(WorkflowDefinition definition);
     Task<string?> GetRunStatusAsync();
-    Task<string?> GetAssignedRunnerIdAsync();
-    Task<string?> GetAssignedWorkIdAsync();
+    Task<string?> GetClaimedRunnerIdAsync();
+    Task<string?> GetCurrentWorkIdAsync();
     Task DeactivateForTestAsync();
 }
 
@@ -78,3 +70,15 @@ public sealed record AddTasksBatchResult(
     [property: Id(0)] string WorkflowRunId,
     [property: Id(1)] string Stage,
     [property: Id(2)] int AddedCount);
+
+[GenerateSerializer]
+public sealed record WorkflowAssignmentResult(
+    [property: Id(0)] WorkflowAssignmentStatus Status,
+    [property: Id(1)] string? OwnerRunnerId = null,
+    [property: Id(2)] string? Reason = null);
+
+public enum WorkflowAssignmentStatus
+{
+    Assigned,
+    Rejected
+}

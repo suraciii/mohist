@@ -94,7 +94,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "busy-host", "test-project"));
 
         var workflowId = $"wf-{Guid.NewGuid():N}";
-        await runner.AssignWorkflowAsync(workflowId);
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
         var result = await service.GetRunnersAsync("test-project");
@@ -195,7 +195,7 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         await runner.HeartbeatAsync();
 
         var workflowId = $"wf-{Guid.NewGuid():N}";
-        await runner.AssignWorkflowAsync(workflowId);
+        await AssignActiveWorkForTestAsync(runnerId, workflowId, "task-1.1", "task", "build", "Task 1");
 
         var service = CreateService(Grains, new RunnerConnectionTracker(), TimeAt(DateTimeOffset.UtcNow));
         var result = await service.GetRunnersAsync("test-project");

@@ -451,7 +451,7 @@ public static class WorkspaceRoutes
         string runId, IGrainFactory grains, RunnerConnectionTracker tracker)
     {
         var workflowGrain = grains.GetGrain<IWorkflowGrain>(runId);
-        var runnerId = await workflowGrain.GetAssignedRunnerIdAsync();
+        var runnerId = await workflowGrain.GetClaimedRunnerIdAsync();
         if (string.IsNullOrEmpty(runnerId))
             return (null, null);
 

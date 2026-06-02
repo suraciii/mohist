@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Infrastructure.Persistence.Db;
@@ -10,6 +11,7 @@ using Mohist.Server.Tests.Support;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -490,35 +492,19 @@ public class AgentSessionSpecs
     private async Task SaveLeaseAsync(string workflowRunId, WorkLease lease)
     {
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var row = await db.WorkflowQueue.FindAsync(workflowRunId);
+        var row = await db.WorkflowLeases.FindAsync(workflowRunId);
+        var json = JsonSerializer.Serialize(lease, WorkflowStorageJson.Options);
         if (row is null)
         {
-            db.WorkflowQueue.Add(new Mohist.Server.Workflow.Storage.WorkflowQueueRow
+            db.WorkflowLeases.Add(new WorkflowLeaseRow
             {
                 WorkflowRunId = workflowRunId,
-                ProjectId = "test-project",
-                State = Mohist.Server.Workflow.Storage.WorkflowQueueStates.Leased,
-                RunnerId = lease.RunnerId,
-                WorkId = lease.WorkId,
-                WorkType = lease.WorkType,
-                Stage = lease.Stage,
-                LogicalId = lease.LogicalId,
-                Title = lease.Title,
-                LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2),
-                UpdatedAt = DateTimeOffset.UtcNow
+                StateJson = json
             });
         }
         else
         {
-            row.State = Mohist.Server.Workflow.Storage.WorkflowQueueStates.Leased;
-            row.RunnerId = lease.RunnerId;
-            row.WorkId = lease.WorkId;
-            row.WorkType = lease.WorkType;
-            row.Stage = lease.Stage;
-            row.LogicalId = lease.LogicalId;
-            row.Title = lease.Title;
-            row.LeaseExpiresAt = DateTimeOffset.UtcNow.AddMinutes(2);
-            row.UpdatedAt = DateTimeOffset.UtcNow;
+            row.StateJson = json;
         }
         await db.SaveChangesAsync();
     }

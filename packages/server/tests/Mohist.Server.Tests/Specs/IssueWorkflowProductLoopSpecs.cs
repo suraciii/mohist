@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Net.Http.Json;
-using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
@@ -10,7 +9,7 @@ using Xunit;
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("MohistIntegration")]
-public class IssueWorkflowProductLoopSpecs
+public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
     private readonly HttpClient _client;
@@ -24,6 +23,16 @@ public class IssueWorkflowProductLoopSpecs
         _client = fixture.Client;
     }
 
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_projectId) || _issueNumber <= 0)
+            return;
+
+        using var _ = await _client.PostAsync($"/api/issues/{_issueNumber}/stop?projectId={_projectId}", null);
+    }
+
     [Fact]
     public async Task IssueStart_RunnerCompletesWorkflow_IssueBecomesDone()
     {
@@ -34,11 +43,10 @@ public class IssueWorkflowProductLoopSpecs
         _issueNumber = issue.Number;
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
-        _runnerId = "product-loop-runner";
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        _runnerId = $"product-loop-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
-        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).AssignWorkflowAsync(startedIssue.WorkflowRunId!);
 
         var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
         Assert.Contains(startEvents, e => e.Type == "issue_created");
@@ -93,10 +101,9 @@ public class IssueWorkflowProductLoopSpecs
         _issueNumber = issue.Number;
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
-        _runnerId = "variable-patch-runner";
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        _runnerId = $"variable-patch-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
-        await _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId).AssignWorkflowAsync(startedIssue.WorkflowRunId!);
 
         var patched = await _client.PatchDataAsync<WorkflowVariablesDto>(
             $"/api/issues/{issue.Number}/workflow/vars/agent?projectId={project.Id}",
@@ -116,15 +123,13 @@ public class IssueWorkflowProductLoopSpecs
     [Fact]
     public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
     {
-        await ClearKnownBacklogsAsync();
-
         var projectName = $"global-runner-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-global-runner", baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
         var runnerId = $"global-runner-{Guid.NewGuid():N}";
-        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
+        await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", maxWorkflowSlots = 16 });
 
         for (var attempt = 0; attempt < 100; attempt++)
         {
@@ -142,7 +147,7 @@ public class IssueWorkflowProductLoopSpecs
             {
                 await _client.PostOkAsync(
                     $"/api/runner/{runnerId}/report",
-                    new { workId = work.WorkId, status = work.WorkType == "checks" ? "pass" : "completed", projectId = work.ProjectId });
+                    new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = work.WorkType == "checks" ? "pass" : "completed", projectId = work.ProjectId });
                 continue;
             }
 
@@ -153,17 +158,6 @@ public class IssueWorkflowProductLoopSpecs
         }
 
         Assert.Fail("Global runner did not claim project backlog work");
-    }
-
-    private async Task ClearKnownBacklogsAsync()
-    {
-        var directory = _fixture.Services.GetRequiredService<IWorkflowBacklogDirectory>();
-        foreach (var projectId in directory.ListProjects())
-        {
-            var backlog = _fixture.Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
-            while (await backlog.ClaimAsync($"cleanup-{Guid.NewGuid():N}") is { } workflowId)
-                await backlog.ReleaseAsync(workflowId);
-        }
     }
 
     [Fact]
@@ -224,14 +218,14 @@ public class IssueWorkflowProductLoopSpecs
                         new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
                     ]));
                 }
-                await ReportAsync(work.WorkId, "completed");
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
                 break;
             case "checks":
                 var checkNames = ParseCheckNames(work.With);
-                await ReportAsync(work.WorkId, "pass", output: JsonSerializer.Serialize(checkNames.Select(name => new { name, status = "pass" })));
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "pass", output: JsonSerializer.Serialize(checkNames.Select(name => new { name, status = "pass" })));
                 break;
             default:
-                await ReportAsync(work.WorkId, "completed");
+                await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
                 break;
         }
     }
@@ -253,13 +247,13 @@ public class IssueWorkflowProductLoopSpecs
             {
                 if (!IsCurrentIssueWork(work))
                 {
-                    await ReportAsync(work.WorkId, "completed");
+                    await ReportAsync(work.WorkflowRunId, work.WorkId, "completed");
                     continue;
                 }
             }
             else if (!IsCurrentIssueWork(work))
             {
-                await ReportAsync(work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
+                await ReportAsync(work.WorkflowRunId, work.WorkId, work.WorkType == "checks" ? "pass" : "completed");
                 continue;
             }
             return work;
@@ -274,8 +268,8 @@ public class IssueWorkflowProductLoopSpecs
         return work.ProjectId == _projectId && work.IssueNumber == _issueNumber;
     }
 
-    private Task ReportAsync(string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
-        _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId, status, message, output, exitCode });
+    private Task ReportAsync(string workflowRunId, string workId, string status, string? message = null, string? output = null, int? exitCode = null) =>
+        _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workflowRunId, workId, status, message, output, exitCode });
 
     private static string[] ParseCheckNames(string? with)
     {

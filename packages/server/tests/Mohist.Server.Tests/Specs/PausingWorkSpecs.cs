@@ -109,7 +109,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 
         await workflow.StopAsync("user-stop");
 
-        Assert.Null(await workflow.GetAssignedWorkIdAsync());
+        Assert.Null(await workflow.GetCurrentWorkIdAsync());
     }
 
     [Fact]

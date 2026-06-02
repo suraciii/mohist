@@ -231,7 +231,7 @@ public class IssueCreationSpecs
         Assert.Equal("cancelled", info.Health);
 
         var backlog = await LoadBacklogStateAsync(project.Id);
-        Assert.True(backlog is null || (!backlog.Waiting.Contains(workflowRunId) && !backlog.Running.ContainsKey(workflowRunId) && !backlog.All.Contains(workflowRunId)));
+        Assert.True(backlog is null || (!backlog.Waiting.Contains(workflowRunId) && !backlog.All.Contains(workflowRunId)));
         Assert.Null(await LoadLeaseJsonAsync(workflowRunId));
         Assert.Null(await runner.PollAsync());
 

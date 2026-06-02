@@ -171,8 +171,9 @@ public class ApiContractSpecs
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;
 
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(wrId);
+        await workflow.AssignRunnerAsync(runnerId);
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.AssignWorkflowAsync(wrId);
         await runner.PollAsync();
 
         using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });

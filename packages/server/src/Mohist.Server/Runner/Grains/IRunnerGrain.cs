@@ -6,14 +6,10 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task UnregisterAsync();
     Task HeartbeatAsync();
     Task HeartbeatRepairAsync(RunnerInfo info);
-    Task<WorkDispatch?> PeekAsync();
-    Task<IReadOnlyList<WorkDispatch>> PeekAllAsync();
+    Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work);
     Task<WorkDispatch?> PollAsync();
     Task<string?> ReportAsync(string workId, WorkDispatchResult result, string? workflowRunId = null);
     Task<bool> IsAvailableAsync();
-    Task AssignWorkflowAsync(string workflowRunId);
-    Task RestoreLeasedWorkAsync(string workflowRunId, string workId, string workType, string stage, string? title);
-    Task ReleaseAsync(string? workflowRunId = null);
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
 }
 
@@ -57,11 +53,21 @@ public record WorkIssueRef(
 [GenerateSerializer]
 public record WorkDispatchResult(string Status, string? Message = null, string? Output = null, int? ExitCode = null);
 
+[GenerateSerializer]
+public sealed record RunnerWorkAssignmentResult(
+    [property: Id(0)] RunnerWorkAssignmentStatus Status,
+    [property: Id(1)] string? Reason = null);
+
+public enum RunnerWorkAssignmentStatus
+{
+    Assigned,
+    Rejected
+}
+
 public enum RunnerStatus { Online, Offline }
 
 [GenerateSerializer]
 public record RunnerRuntimeState(
     RunnerStatus Status,
     DateTimeOffset LastHeartbeatAt,
-    IReadOnlyList<string> AssignedWorkflows,
     IReadOnlyList<WorkDispatch> ActiveWork);

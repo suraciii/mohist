@@ -1,3 +1,5 @@
+using Mohist.Server.Runner.Grains;
+
 namespace Mohist.Server.Workflow.Domain.Run;
 
 public enum FailureReason { TaskFailed, CheckUnrepaired, ApprovalRejected }
@@ -15,7 +17,8 @@ public sealed record WorkLease(
     string Stage,
     string LogicalId,
     string? Title = null,
-    string? RunnerId = null);
+    string? RunnerId = null,
+    WorkDispatch? Dispatch = null);
 
 public sealed record TaskResult(
     string Status,

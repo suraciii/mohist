@@ -522,63 +522,6 @@ namespace Mohist.Server.Migrations
                     b.ToTable("WorkflowLeases");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowQueueRow", b =>
-                {
-                    b.Property<string>("WorkflowRunId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("LeaseExpiresAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("LogicalId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RunnerId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Stage")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Title")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkType")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("WorkflowRunId");
-
-                    b.HasIndex("LeaseExpiresAt");
-
-                    b.HasIndex("RunnerId", "State");
-
-                    b.HasIndex("ProjectId", "State", "UpdatedAt");
-
-                    b.ToTable("WorkflowQueue");
-                });
-
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowRunProfileRow", b =>
                 {
                     b.Property<string>("Key")

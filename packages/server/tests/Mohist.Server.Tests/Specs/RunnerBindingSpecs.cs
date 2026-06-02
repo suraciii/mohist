@@ -16,12 +16,11 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
 
         _workflowId = "wf-1";
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-1");
-        await runner.AssignWorkflowAsync("wf-1");
         await wf1.StartAsync(SingleStage(checks: []), TestInput());
+        await AssignWorkflowToRunnerAsync("wf-1", runnerId);
 
         _workflowId = "wf-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-2");
-        await runner.AssignWorkflowAsync("wf-2");
         await wf2.StartAsync(SingleStage(checks: []), TestInput());
 
         var work1 = await runner.PollAsync();
@@ -40,12 +39,11 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
 
         _workflowId = "wf-capacity-1";
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-1");
-        await runner.AssignWorkflowAsync("wf-capacity-1");
         await wf1.StartAsync(SingleStage(checks: []), TestInput());
+        await AssignWorkflowToRunnerAsync("wf-capacity-1", runnerId);
 
         _workflowId = "wf-capacity-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-2");
-        await runner.AssignWorkflowAsync("wf-capacity-2");
         await wf2.StartAsync(SingleStage(checks: []), TestInput());
 
         var work1 = await runner.PollAsync();
@@ -70,7 +68,6 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         _runnerId = runnerId;
 
         var workflow = Grains.GetGrain<IWorkflowGrain>("wf-sticky");
-        await runner.AssignWorkflowAsync("wf-sticky");
         await workflow.StartAsync(SingleStage(
             tasks:
             [
@@ -78,6 +75,7 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
                 new("task-2", "Task 2", "spec/task")
             ],
             checks: []), TestInput());
+        await AssignWorkflowToRunnerAsync("wf-sticky", runnerId);
 
         var first = await runner.PollAsync();
         Assert.NotNull(first);
@@ -99,13 +97,13 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         _runnerId = runnerId;
 
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-report-1");
-        await runner.AssignWorkflowAsync("wf-report-1");
         await wf1.StartAsync(SingleStage(checks: []), TestInput());
+        await AssignWorkflowToRunnerAsync("wf-report-1", runnerId);
 
         _workflowId = "wf-report-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-report-2");
-        await runner.AssignWorkflowAsync("wf-report-2");
         await wf2.StartAsync(SingleStage(checks: []), TestInput());
+        await AssignWorkflowToRunnerAsync("wf-report-2", runnerId);
 
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);
