@@ -16,7 +16,7 @@ if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]) &&
     builder.WebHost.UseUrls($"http://{host}:{port}");
 }
 
-builder.Host.UseOrleans(silo => silo.ConfigureMohistSilo());
+builder.Host.UseOrleans(silo => silo.ConfigureMohistSilo(builder.Configuration));
 
 builder.Services.AddMohistServerCore(builder.Configuration);
 
