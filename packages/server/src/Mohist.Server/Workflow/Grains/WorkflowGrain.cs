@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Persistence;
@@ -940,16 +941,57 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private Dictionary<string, JsonElement?>? ApplyStageAgentDefault(Dictionary<string, JsonElement?>? with, string stage)
     {
-        if (with is not null && with.TryGetValue("agent", out var existingAgent) && existingAgent.HasValue)
-            return with;
+        var latestAgent = _variables?.StageNestedSection(stage, "vars", "agent")
+                          ?? _variables?.NestedSection("vars", "agent");
 
-        var agent = _variables?.StageNestedSection(stage, "vars", "agent") ?? _variables?.NestedSection("vars", "agent");
-        if (!agent.HasValue)
+        if (with is not null && with.TryGetValue("agent", out var existingAgent) && existingAgent.HasValue)
+        {
+            // Existing agent is set. If it's a rendered object, deep-merge with the
+            // latest agent from workflow variables so per-task customizations
+            // (timeoutMs, etc.) are preserved but the user-controlled model is
+            // always fresh. If it's a template string (e.g. "${{ vars.agent }}"),
+            // leave it alone — the runner's renderTemplate will expand it at
+            // execution time using the dispatch's variables.
+            if (existingAgent.Value.ValueKind == JsonValueKind.Object
+                && latestAgent.HasValue
+                && latestAgent.Value.ValueKind == JsonValueKind.Object)
+            {
+                var merged = DeepMergeAgentObject(existingAgent.Value, latestAgent.Value);
+                if (merged.HasValue)
+                    with["agent"] = merged.Value;
+            }
+            return with;
+        }
+
+        if (!latestAgent.HasValue)
             return with;
 
         with ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        with["agent"] = agent.Value;
+        with["agent"] = latestAgent.Value;
         return with;
+    }
+
+    private static JsonElement? DeepMergeAgentObject(JsonElement existing, JsonElement latest)
+    {
+        try
+        {
+            if (existing.ValueKind != JsonValueKind.Object || latest.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var merged = JsonNode.Parse(existing.GetRawText())?.AsObject();
+            var latestObj = JsonNode.Parse(latest.GetRawText())?.AsObject();
+            if (merged is null || latestObj is null)
+                return null;
+
+            foreach (var property in latestObj)
+                merged[property.Key] = property.Value?.DeepClone();
+
+            return JsonSerializer.Deserialize<JsonElement>(merged.ToJsonString(), WorkflowVariableJson.Options);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void EmitStageChanged(string action, string? reason = null)
