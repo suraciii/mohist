@@ -210,6 +210,40 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task StageAgentVariableUpdate_DispatchedTaskInheritsLatestModelOverRenderedAgent()
+    {
+        var initialAgent = new { type = "opencode", model = "old-coding/legacy" };
+        var workflow = await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(
+                "build",
+                [new("T-001", "Implement feature", "mohist/acp-agent", new Dictionary<string, JsonElement?>
+                {
+                    ["prompt"] = JsonSerializer.SerializeToElement("Implement feature"),
+                    ["agent"] = JsonSerializer.SerializeToElement(initialAgent)
+                })],
+                [],
+                Variables: new Dictionary<string, JsonElement?>
+                {
+                    ["agent"] = JsonSerializer.SerializeToElement(initialAgent)
+                })
+        ]));
+
+        var updatedAgent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" };
+        await workflow.PatchStageVariablesAsync("build", "vars",
+            JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
+            {
+                ["agent"] = JsonSerializer.SerializeToElement(updatedAgent)
+            }));
+
+        var (task, _) = await PollWorkAnyAsync();
+
+        Assert.StartsWith("T-001.", task.WorkId);
+        Assert.Contains("minimax-coding-plan/MiniMax-M3", task.With);
+        Assert.DoesNotContain("old-coding/legacy", task.With);
+    }
+
+    [Fact]
     public async Task StageWithStaticAndDynamicTasks_LoadTaskThenDynamicThenStaticBeforeChecks()
     {
         await StartWorkflowAsync(new WorkflowDefinition("spec/workflow",
