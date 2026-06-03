@@ -126,6 +126,51 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-variable-patch", baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Patch project variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        _runnerId = $"project-variable-patch-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+
+        var proposal = await PollWorkAnyAsync();
+        Assert.StartsWith("proposal", proposal.WorkId);
+        await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
+
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/variables/vars/agent",
+            new { type = "opencode", model = "project/model-new", timeout = 1500 });
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/variables/stages/build/vars/agent",
+            new { model = "project/build-model" });
+
+        await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        var tasks = await PollWorkAnyAsync();
+        Assert.Equal("mohist/openspec-tasks", tasks.Uses);
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
+        await workflow.AddTasksAsync(new AddTasksBatchRequest([
+            new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+        ]));
+        await ReportAsync(tasks.WorkflowRunId, tasks.WorkId, "completed");
+
+        var build = await PollWorkAnyAsync();
+        Assert.Equal("build", build.Stage);
+        Assert.StartsWith("build-1", build.WorkId);
+        Assert.NotNull(build.Variables);
+
+        using var doc = JsonDocument.Parse(build.Variables!);
+        var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("project/build-model", agent.GetProperty("model").GetString());
+        Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
+    }
+
+    [Fact]
     public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
     {
         var projectName = $"global-runner-{Guid.NewGuid():N}";
@@ -293,6 +338,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
+    private sealed record ProjectVariablesDto(JsonElement? Vars, Dictionary<string, ProjectStageVariablesDto?>? Stages);
+    private sealed record ProjectStageVariablesDto(JsonElement? Vars);
     private sealed record IssueDto(int Number, string Title, string Status, string Health, ApprovalStateDto? ApprovalState, AttentionDto? Attention, string? WorkflowRunId, string? WorkflowStage, string? WorkflowStatus);
     private sealed record ApprovalStateDto(string Stage, string Status);
     private sealed record AttentionDto(string Reason);

@@ -62,6 +62,7 @@ public class ProjectQueryService
         Path = e.Path,
         BaseBranch = e.BaseBranch,
         Repositories = JsonSerializer.Deserialize<List<RepositoryInfo>>(e.RepositoriesJson) ?? [],
+        Variables = ProjectVariablesBag.FromJson(e.VariablesJson),
         CreatedAt = e.CreatedAt.ToString("o"),
         UpdatedAt = e.UpdatedAt.ToString("o"),
     };

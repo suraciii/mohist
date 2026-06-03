@@ -45,6 +45,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Id).HasMaxLength(256);
             entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
             entity.Property(e => e.RepositoriesJson).IsRequired();
+            entity.Property(e => e.VariablesJson).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
         });
 

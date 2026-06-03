@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
 
@@ -13,4 +14,9 @@ public interface IProjectGrain : IGrainWithStringKey
     Task<ProjectInfo?> AddRepositoryAsync(string repoName, string? path, string? remote, string? baseBranch);
     Task<ProjectInfo?> RemoveRepositoryAsync(string repoName);
     Task<ProjectInfo?> SetDefaultRepositoryAsync(string repoName);
+    Task<ProjectVariablesBag?> GetVariablesAsync();
+    Task<ProjectVariablesBag?> PatchVariableAsync(string name, JsonElement value);
+    Task<ProjectVariablesBag?> DeleteVariableAsync(string name);
+    Task<ProjectVariablesBag?> PatchStageVariableAsync(string stage, string name, JsonElement value);
+    Task<ProjectVariablesBag?> DeleteStageVariableAsync(string stage, string name);
 }
