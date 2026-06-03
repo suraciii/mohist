@@ -113,20 +113,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadVariables_ReturnsEmpty_WhenRunMissing()
+    public async Task LoadVariables_ReturnsRunLayer_WhenOnlyRunExists()
     {
-        var result = await _manager.LoadVariablesAsync("missing");
-
-        Assert.Same(VariableBundle.Empty, result);
-    }
-
-    [Fact]
-    public async Task LoadVariables_ReturnsEmpty_WhenOnlyRunExists()
-    {
-        // Contract change (Step 7): LoadVariablesAsync now only merges project + issue
-        // layers. Run-level variables are applied separately by MakeDispatchAsync to
-        // preserve legacy ordering (legacy StageVariables applied BEFORE combinedVars
-        // so that project stage overrides workflow stage).
         var runId = "wr_vars01";
         var runVars = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { a = 1, b = 2 })));
@@ -135,15 +123,17 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         var result = await _manager.LoadVariablesAsync(runId);
 
-        // Run-only → project + issue are empty → merged result is empty
-        Assert.Same(VariableBundle.Empty, result);
+        // Run-only → only run layer contributes; project + issue are empty
+        Assert.NotNull(result.Vars);
+        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
+        Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());
+        Assert.Equal(2, doc.RootElement.GetProperty("b").GetInt32());
     }
 
     [Fact]
-    public async Task LoadVariables_MergesTwoLayersByPriority()
+    public async Task LoadVariables_MergesThreeLayersByPriority()
     {
-        // Contract change (Step 7): LoadVariablesAsync now only merges project + issue
-        // (run layer is applied separately by MakeDispatchAsync).
+        // Design: project → issue → run (run has highest priority among independent layers)
         var runId = "wr_merge01";
         var proj = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -163,7 +153,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
         Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());           // from project
         Assert.Equal("issue-b", doc.RootElement.GetProperty("b").GetString());  // issue overrides project
-        Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());  // issue overrides project (run layer NOT merged here)
+        Assert.Equal("run-c", doc.RootElement.GetProperty("c").GetString());    // run overrides issue
     }
 
     [Fact]

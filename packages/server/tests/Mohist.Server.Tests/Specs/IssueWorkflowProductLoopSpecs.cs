@@ -212,13 +212,12 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal("build", build.Stage);
         Assert.NotNull(build.Variables);
         Assert.NotNull(build.With);
-        Assert.Contains("minimax-coding-plan/MiniMax-M3", build.With);
-        Assert.DoesNotContain("opencode-go/minimax-m3", build.With);
+        Assert.Contains("opencode-go/minimax-m3", build.With);
 
         using var doc = JsonDocument.Parse(build.Variables!);
         var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
+        Assert.Equal("opencode-go/minimax-m3", agent.GetProperty("model").GetString());
         Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
