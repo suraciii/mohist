@@ -42,14 +42,36 @@ function renderString(value: string, variables: JsonObject): JsonValue {
   for (let pass = 0; pass < MAX_TEMPLATE_PASSES; pass += 1) {
     const full = current.match(/^\s*\$\{\{\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$/)
     if (full) {
-      const resolved = resolveRequired(variables, full[1])
+      const resolved = resolvePath(variables, full[1])
+      if (resolved === undefined) {
+        // Whole-string reference and unresolvable — this is the workflow author's
+        // typo / missing-key case, surface it as a hard error. (Embedded
+        // unresolved references are handled in the else branch below.)
+        throw new Error(`Template variable '${full[1]}' was not found`)
+      }
       if (typeof resolved !== "string") return resolved
       current = resolved
     } else {
-      const next = current.replace(REFERENCE_PATTERN, (_, path: string) => templateString(resolveRequired(variables, path)))
-      if (next === current) {
-        // Restore the escape sentinel to a literal ${{.
-        return current.split(ESCAPE_SENTINEL).join("${{")
+      let resolvedAny = false
+      const next = current.replace(REFERENCE_PATTERN, (match, path: string) => {
+        const resolved = resolvePath(variables, path)
+        if (resolved === undefined) {
+          // Embedded reference that does not resolve: leave the literal
+          // `${{ path }}` text in place. This matches the server-side
+          // `PromptTemplateEngine` semantics and lets task descriptions,
+          // documentation, and code samples that legitimately mention the
+          // `${{ ... }}` syntax survive rendering. Use `\${{ ... }}` in
+          // source to suppress this same behavior (it consumes the escape
+          // sentinel and restores `${{` byte-identically).
+          return match
+        }
+        resolvedAny = true
+        return templateString(resolved)
+      })
+      if (next === current || !resolvedAny) {
+        // No progress — every remaining reference is unresolvable. Stop
+        // expanding to avoid the 5-pass cap eating unrelated resolution.
+        return next.split(ESCAPE_SENTINEL).join("${{")
       }
       current = next
     }
@@ -59,15 +81,6 @@ function renderString(value: string, variables: JsonObject): JsonValue {
     throw new Error("Template variable expansion exceeded maximum depth")
   }
   return current.split(ESCAPE_SENTINEL).join("${{")
-}
-
-function resolveRequired(variables: JsonObject, path: string): JsonValue {
-  const found = path.split(".").reduce<JsonValue | undefined>((current, part) => {
-    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
-    return current[part]
-  }, variables)
-  if (found === undefined) throw new Error(`Template variable '${path}' was not found`)
-  return found
 }
 
 function templateString(value: JsonValue) {
@@ -121,6 +134,44 @@ function walkForReferences(value: JsonValue, currentPath: string, refs: Set<stri
 export function unresolvedReferences(input: JsonValue | null | undefined, variables: JsonObject): string[] {
   const refs = findTemplateReferences(input)
   return refs.filter((path) => resolvePath(variables, path) === undefined)
+}
+
+// Returns only those unresolved references that occupy the entire value of a
+// string field. Embedded references (`... ${{ unknown }} ...`) are tolerated
+// by `renderTemplate` (left as literal text) and are intentionally excluded
+// from this list so legitimate documentation, code samples, and task
+// descriptions that mention the `${{ ... }}` syntax do not fail dispatch.
+export function wholeStringUnresolvedReferences(input: JsonValue | null | undefined, variables: JsonObject): string[] {
+  const unresolved = new Set<string>()
+  if (input === null || input === undefined) return []
+  walkForWholeStringUnresolved(input, "", variables, unresolved)
+  return [...unresolved]
+}
+
+function walkForWholeStringUnresolved(
+  value: JsonValue,
+  currentPath: string,
+  variables: JsonObject,
+  unresolved: Set<string>,
+) {
+  if (isLiteralFieldPath(currentPath)) return
+  if (typeof value === "string") {
+    const unescaped = value.replace(ESCAPE_PATTERN, "")
+    const full = unescaped.match(/^\s*\$\{\{\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*\}\}\s*$/)
+    if (full && resolvePath(variables, full[1]) === undefined) {
+      unresolved.add(full[1])
+    }
+    return
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => walkForWholeStringUnresolved(item, appendPath(currentPath, String(index)), variables, unresolved))
+    return
+  }
+  if (typeof value === "object" && value !== null) {
+    for (const [key, child] of Object.entries(value)) {
+      walkForWholeStringUnresolved(child, appendPath(currentPath, key), variables, unresolved)
+    }
+  }
 }
 
 function resolvePath(variables: JsonObject, path: string): JsonValue | undefined {

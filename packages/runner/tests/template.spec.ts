@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findTemplateReferences, renderTemplate, unresolvedReferences } from "../src/core/template.js"
+import { findTemplateReferences, renderTemplate, unresolvedReferences, wholeStringUnresolvedReferences } from "../src/core/template.js"
 
 describe("renderTemplate", () => {
   it("VariableValueContainsTemplate_RendersNestedVariables", () => {
@@ -47,6 +47,43 @@ describe("renderTemplate", () => {
 
   it("UnresolvedReference_Throws", () => {
     expect(() => renderTemplate({ prompt: "${{ unknown.var }}" }, {})).toThrow("Template variable 'unknown.var' was not found")
+  })
+
+  it("UnresolvedEmbeddedReference_LeavesLiteral", () => {
+    // Mirrors the T-001.6 scenario in #49 where the agent task description
+    // embeds the literal text "${{ prompts.xxx }}" (a documentation example
+    // the agent should read, not a template reference). The embedded form
+    // must NOT fail the dispatch — the unresolved reference is preserved
+    // verbatim so the agent sees the example.
+    const rendered = renderTemplate(
+      {
+        prompt:
+          "Read the proposal and implement it. The runner's ${{ prompts.xxx }} " +
+          "resolution should remain byte-identical. Now ${{ openspecChangeDir }} please.",
+      },
+      { openspecChangeDir: "openspec/changes/issue-49" },
+    )
+
+    expect(rendered?.prompt).toBe(
+      "Read the proposal and implement it. The runner's ${{ prompts.xxx }} " +
+      "resolution should remain byte-identical. Now openspec/changes/issue-49 please.",
+    )
+  })
+
+  it("UnresolvedEmbeddedReference_MixedWithResolved_ResolvesResolvables", () => {
+    const rendered = renderTemplate(
+      { prompt: "Start ${{ known }} then ${{ unknown }} end" },
+      { known: "X" },
+    )
+    expect(rendered?.prompt).toBe("Start X then ${{ unknown }} end")
+  })
+
+  it("UnresolvedEmbeddedReference_OnlyUnresolvable_NoProgress", () => {
+    const rendered = renderTemplate(
+      { prompt: "${{ a }} and ${{ b }}" },
+      {},
+    )
+    expect(rendered?.prompt).toBe("${{ a }} and ${{ b }}")
   })
 
   it("LiteralFieldPath_SkipsRendering", () => {
@@ -141,5 +178,47 @@ describe("unresolvedReferences", () => {
       { a: { b: "value" } }
     )
     expect(unresolved).toEqual([])
+  })
+})
+
+describe("wholeStringUnresolvedReferences", () => {
+  it("ReturnsWholeStringReferences", () => {
+    const unresolved = wholeStringUnresolvedReferences(
+      { prompt: "${{ known }} and ${{ unknown.a }} and ${{ known }}" },
+      { known: "value" }
+    )
+    expect(unresolved).toEqual([])
+  })
+
+  it("ReturnsOnlyEmbeddedUnresolved_AsEmpty", () => {
+    // The T-001.6 case: a description embeds the literal text "${{ prompts.xxx }}"
+    // alongside other resolvable variables. The whole-string check should NOT
+    // flag it because the unresolved reference is not the entire value of any
+    // string field.
+    const unresolved = wholeStringUnresolvedReferences(
+      {
+        description:
+          "The runner's ${{ prompts.xxx }} resolution should be unaffected. " +
+          "Write to ${{ openspecChangeDir }}.",
+      },
+      { openspecChangeDir: "openspec/changes/issue-49" },
+    )
+    expect(unresolved).toEqual([])
+  })
+
+  it("FlagsWholeStringUnresolved_AndIgnoresEmbedded", () => {
+    const unresolved = wholeStringUnresolvedReferences(
+      {
+        title: "${{ typo }}",
+        description: "Embedded ${{ typo }} does not fail this field.",
+      },
+      {},
+    )
+    expect(unresolved).toEqual(["typo"])
+  })
+
+  it("ReturnsEmptyForNullOrUndefined", () => {
+    expect(wholeStringUnresolvedReferences(null, {})).toEqual([])
+    expect(wholeStringUnresolvedReferences(undefined, {})).toEqual([])
   })
 })
