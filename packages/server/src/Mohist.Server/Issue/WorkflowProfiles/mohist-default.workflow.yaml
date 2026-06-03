@@ -197,6 +197,17 @@ stages:
       - name: merge-ready
         title: Merge ready
         uses: mohist/merge-ready
+        repairLimit: 1
+        repairTask:
+          id: rebase-onto-base
+          title: Rebase onto base branch
+          uses: mohist/rebase
+          with:
+            baseBranch: ${{ project.baseBranch }}
+            conflictResolver:
+              title: Resolve rebase conflicts
+              with:
+                description: "Resolve git rebase conflicts, stage resolved files, and continue the rebase until it completes."
 
   - stage: integrate
     lockBehavior: sequential
