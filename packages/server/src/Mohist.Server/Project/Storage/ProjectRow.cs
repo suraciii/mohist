@@ -7,6 +7,7 @@ public class ProjectRow
     public string Path { get; set; } = "";
     public string BaseBranch { get; set; } = "main";
     public string RepositoriesJson { get; set; } = "[]";
+    public string VariablesJson { get; set; } = "{}";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

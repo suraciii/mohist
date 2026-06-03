@@ -5,6 +5,7 @@ namespace Mohist.Server.Infrastructure.Persistence.Db;
 public static class MohistDatabaseMigrator
 {
     private const string InitialCreateMigrationId = "20260530040459_InitialCreate";
+    private const string ProjectVariablesBagMigrationId = "20260603090000_AddProjectVariablesBag";
     private const string InitialCreateProductVersion = "10.0.8";
 
     public static void Migrate(MohistDbContext db)
@@ -31,6 +32,7 @@ public static class MohistDatabaseMigrator
 
             CreateMissingInitialSchemaObjects(db);
             RecordInitialCreate(db);
+            RecordMigration(db, ProjectVariablesBagMigrationId, InitialCreateProductVersion);
         }
         finally
         {
@@ -56,13 +58,18 @@ public static class MohistDatabaseMigrator
 
     private static void RecordInitialCreate(MohistDbContext db)
     {
+        RecordMigration(db, InitialCreateMigrationId, InitialCreateProductVersion);
+    }
+
+    private static void RecordMigration(MohistDbContext db, string migrationId, string productVersion)
+    {
         using var command = db.Database.GetDbConnection().CreateCommand();
         command.CommandText = """
             INSERT OR IGNORE INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
             VALUES ($migrationId, $productVersion);
             """;
-        AddParameter(command, "$migrationId", InitialCreateMigrationId);
-        AddParameter(command, "$productVersion", InitialCreateProductVersion);
+        AddParameter(command, "$migrationId", migrationId);
+        AddParameter(command, "$productVersion", productVersion);
         command.ExecuteNonQuery();
     }
 

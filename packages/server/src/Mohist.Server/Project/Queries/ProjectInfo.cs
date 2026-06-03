@@ -12,6 +12,7 @@ public class ProjectInfo
     [Id(4)] public string CreatedAt { get; set; } = DateTime.UtcNow.ToString("o");
     [Id(5)] public string UpdatedAt { get; set; } = DateTime.UtcNow.ToString("o");
     [Id(6)] public List<RepositoryInfo> Repositories { get; set; } = [];
+    [Id(7)] public ProjectVariablesBag Variables { get; set; } = ProjectVariablesBag.Empty;
 
     public RepositoryInfo? DefaultRepository
     {

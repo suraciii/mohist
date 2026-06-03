@@ -1,5 +1,6 @@
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Queries;
+using System.Text.Json;
 
 namespace Mohist.Server.Api;
 
@@ -109,6 +110,42 @@ public static class ProjectRoutes
             var projectGrain = grains.GetGrain<IProjectGrain>(id);
             var updated = await projectGrain.RemoveRepositoryAsync(repoName);
             return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
+        });
+
+        group.MapGet("/{id}/variables", async (string id, IGrainFactory grains) =>
+        {
+            var variables = await grains.GetGrain<IProjectGrain>(id).GetVariablesAsync();
+            return variables is not null ? ApiResults.Ok(variables) : ApiResults.NotFound("Project not found");
+        });
+
+        group.MapPatch("/{id}/variables/vars/{name}", async (string id, string name, JsonElement value, IGrainFactory grains) =>
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return ApiResults.BadRequest("name is required");
+
+            var variables = await grains.GetGrain<IProjectGrain>(id).PatchVariableAsync(name, value);
+            return variables is not null ? ApiResults.Ok(variables) : ApiResults.NotFound("Project not found");
+        });
+
+        group.MapDelete("/{id}/variables/vars/{name}", async (string id, string name, IGrainFactory grains) =>
+        {
+            var variables = await grains.GetGrain<IProjectGrain>(id).DeleteVariableAsync(name);
+            return variables is not null ? ApiResults.Ok(variables) : ApiResults.NotFound("Project not found");
+        });
+
+        group.MapPatch("/{id}/variables/stages/{stage}/vars/{name}", async (string id, string stage, string name, JsonElement value, IGrainFactory grains) =>
+        {
+            if (string.IsNullOrWhiteSpace(stage) || string.IsNullOrWhiteSpace(name))
+                return ApiResults.BadRequest("stage and name are required");
+
+            var variables = await grains.GetGrain<IProjectGrain>(id).PatchStageVariableAsync(stage, name, value);
+            return variables is not null ? ApiResults.Ok(variables) : ApiResults.NotFound("Project not found");
+        });
+
+        group.MapDelete("/{id}/variables/stages/{stage}/vars/{name}", async (string id, string stage, string name, IGrainFactory grains) =>
+        {
+            var variables = await grains.GetGrain<IProjectGrain>(id).DeleteStageVariableAsync(stage, name);
+            return variables is not null ? ApiResults.Ok(variables) : ApiResults.NotFound("Project not found");
         });
 
         return app;

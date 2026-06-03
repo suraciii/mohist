@@ -11,6 +11,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Infrastructure.Workflow;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Storage;
@@ -40,6 +41,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
     private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
+    private readonly WorkflowVariableResolver _variablesResolver;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
@@ -51,6 +53,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IEventBus eventBus,
         IEventStore events,
         IEnumerable<IWorkflowCompletionHook> completionHooks,
+        WorkflowVariableResolver variablesResolver,
         ILogger<WorkflowGrain> log)
     {
         _profileStore = profileStore;
@@ -61,6 +64,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _eventBus = eventBus;
         _events = events;
         _completionHooks = completionHooks;
+        _variablesResolver = variablesResolver;
         _log = log;
     }
 
@@ -315,7 +319,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (!await AcquireStageLocksIfNeededAsync(work.Stage))
             return;
 
-        var dispatch = PrepareWork(work, runnerId);
+        var dispatch = await PrepareWorkAsync(work, runnerId);
         if (dispatch is null)
             return;
 
@@ -382,8 +386,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (string.IsNullOrWhiteSpace(t.Title))
                 throw new InvalidOperationException("Task title is required");
 
-            var with = ApplyStageAgentDefault(ParseWith(t.With), current.Id);
-            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, with));
+            tasksToInsert.Add(new TaskDefinition(t.Id, t.Title, t.Uses, ParseWith(t.With)));
         }
 
         _run.InsertRuntimeTasksAfter(tasksToInsert);
@@ -612,7 +615,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await backlog.EnqueueAsync(workflowRunId);
     }
 
-    private WorkDispatch? PrepareWork(WorkflowWork work, string runnerId)
+    private async Task<WorkDispatch?> PrepareWorkAsync(WorkflowWork work, string runnerId)
     {
         switch (work.WorkType)
         {
@@ -621,14 +624,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                     ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no definition for stage '{work.Stage}'");
                 _run!.InitializeStage(stageDef.Tasks, stageDef.Checks);
                 var nextWork = _run!.NextWork();
-                return nextWork is not null ? PrepareWork(nextWork, runnerId) : null;
+                return nextWork is not null ? await PrepareWorkAsync(nextWork, runnerId) : null;
 
             case "task":
                 var t = (WorkflowWork.TaskData)work.Data;
                 var taskWith = t.With is not null
                     ? new Dictionary<string, JsonElement?>(t.With) { ["title"] = JsonSerializer.SerializeToElement(t.Title) }
                     : new Dictionary<string, JsonElement?> { ["title"] = JsonSerializer.SerializeToElement(t.Title) };
-                return MakeDispatch(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId);
+                return await MakeDispatchAsync(work.Stage, t.Id, "task", t.Title, t.Uses, taskWith, runnerId);
 
             case "checks":
                 var ch = (WorkflowWork.ChecksData)work.Data;
@@ -639,29 +642,31 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                     ["uses"] = i.Uses is not null ? JsonSerializer.SerializeToElement(i.Uses) : null,
                     ["with"] = i.With is not null ? JsonSerializer.SerializeToElement(i.With) : null,
                 }).ToList();
-                return MakeDispatch(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
+                return await MakeDispatchAsync(work.Stage, $"checks-{work.Stage}", "checks", $"Stage checks", uses: null, with: new Dictionary<string, JsonElement?> { ["checks"] = JsonSerializer.SerializeToElement(checksPayload) }, runnerId);
 
             default:
                 return null;
         }
     }
 
-    private WorkDispatch MakeDispatch(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId)
+    private async Task<WorkDispatch> MakeDispatchAsync(string stage, string logicalId, string workType, string title, string? uses, Dictionary<string, JsonElement?>? with, string runnerId)
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
+        var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
+        var dispatchContext = new WorkflowDispatchContext(GrainKey, workId, workType, stage, title, attempt);
+        var resolved = await _variablesResolver.ResolveForDispatchAsync(GrainKey, _variables, dispatchContext);
         var dispatchWith = with is not null
             ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
             : null;
-        var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
         if (workType == "task")
         {
-            dispatchWith = ApplyStageAgentDefault(dispatchWith, stage);
+            dispatchWith = ApplyStageAgentDefault(dispatchWith, resolved);
         }
         var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
-        var variables = _variables?.ToDispatchJson(new WorkflowDispatchContext(GrainKey, workId, workType, stage, title, attempt));
-        var projectId = _variables?.String("project", "id");
-        var issueId = _variables?.String("issue", "id");
-        var numberStr = _variables?.String("issue", "number");
+        var variables = resolved.Json;
+        var projectId = resolved.String("project", "id");
+        var issueId = resolved.String("issue", "id");
+        var numberStr = resolved.String("issue", "number");
         WorkIssueRef? issueRef = projectId is not null && issueId is not null && numberStr is not null && int.TryParse(numberStr, out var num)
             ? new WorkIssueRef(projectId, issueId, num) : null;
         var dispatch = new WorkDispatch(
@@ -939,10 +944,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return result.Count == 0 ? null : result;
     }
 
-    private Dictionary<string, JsonElement?>? ApplyStageAgentDefault(Dictionary<string, JsonElement?>? with, string stage)
+    private static Dictionary<string, JsonElement?>? ApplyStageAgentDefault(Dictionary<string, JsonElement?>? with, ResolvedWorkflowVariables resolved)
     {
-        var latestAgent = _variables?.StageNestedSection(stage, "vars", "agent")
-                          ?? _variables?.NestedSection("vars", "agent");
+        var latestAgent = resolved.NestedSection("vars", "agent");
 
         if (with is not null && with.TryGetValue("agent", out var existingAgent) && existingAgent.HasValue)
         {

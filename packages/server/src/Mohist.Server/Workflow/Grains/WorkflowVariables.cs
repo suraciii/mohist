@@ -33,42 +33,22 @@ public sealed record WorkflowExecutionContext(
     }
 
     public string ToDispatchJson(WorkflowDispatchContext dispatch)
+        => ToDispatchJson(dispatch, null);
+
+    public string ToDispatchJson(WorkflowDispatchContext dispatch, string? projectVariablesJson)
     {
         var payload = ParseObject(Json);
-
-        // Merge stage-level variable overrides with deep merge support
-        if (StageVariables is not null
-            && !string.IsNullOrWhiteSpace(dispatch.Stage)
-            && StageVariables.TryGetValue(dispatch.Stage, out var stageOverrides))
-        {
-            foreach (var (section, value) in stageOverrides)
-            {
-                if (payload.TryGetValue(section, out var existing) && existing.HasValue)
-                {
-                    // Deep merge: try to parse both as objects and merge
-                    var merged = DeepMerge(existing.Value, value);
-                    if (merged is not null)
-                    {
-                        payload[section] = merged;
-                        continue;
-                    }
-                }
-                // Fallback: full replacement
-                payload[section] = JsonSerializer.SerializeToElement(value);
-            }
-        }
-
-        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = dispatch.WorkflowRunId }, WorkflowVariableJson.Options);
-        payload["stage"] = JsonSerializer.SerializeToElement(new { name = dispatch.Stage }, WorkflowVariableJson.Options);
-        payload["work"] = JsonSerializer.SerializeToElement(new { id = dispatch.WorkId, type = dispatch.WorkType, title = dispatch.Title, attempt = dispatch.Attempt }, WorkflowVariableJson.Options);
-
+        ApplyProjectVariables(payload, projectVariablesJson);
+        ApplyProjectStageVariables(payload, projectVariablesJson, dispatch.Stage);
+        ApplyStageVariables(payload, dispatch.Stage);
+        ApplyDispatchVariables(payload, dispatch);
         return JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
     }
 
     /// <summary>
     /// Deep merge a JSON element with a JSON string. Returns null if merge is not possible.
     /// </summary>
-    private static JsonElement? DeepMerge(JsonElement existing, string overrideJson)
+    public static JsonElement? DeepMerge(JsonElement existing, string overrideJson)
     {
         try
         {
@@ -106,7 +86,7 @@ public sealed record WorkflowExecutionContext(
         return JsonNode.Parse(patch.GetRawText());
     }
 
-    private static JsonElement MergeSection(JsonElement? existing, string patchJson)
+    public static JsonElement MergeSection(JsonElement? existing, string patchJson)
     {
         if (existing.HasValue)
         {
@@ -203,7 +183,7 @@ public sealed record WorkflowExecutionContext(
         return propertyValue.Clone();
     }
 
-    private static Dictionary<string, JsonElement?> ParseObject(string json)
+    public static Dictionary<string, JsonElement?> ParseObject(string json)
     {
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
         if (document.RootElement.ValueKind != JsonValueKind.Object)
@@ -213,6 +193,74 @@ public sealed record WorkflowExecutionContext(
             property => property.Name,
             property => (JsonElement?)property.Value.Clone(),
             StringComparer.Ordinal);
+    }
+
+    private void ApplyStageVariables(Dictionary<string, JsonElement?> payload, string? stage)
+    {
+        if (StageVariables is null
+            || string.IsNullOrWhiteSpace(stage)
+            || !StageVariables.TryGetValue(stage, out var stageOverrides))
+            return;
+
+        foreach (var (section, value) in stageOverrides)
+        {
+            if (payload.TryGetValue(section, out var existing) && existing.HasValue)
+            {
+                var merged = DeepMerge(existing.Value, value);
+                if (merged is not null)
+                {
+                    payload[section] = merged;
+                    continue;
+                }
+            }
+
+            payload[section] = JsonSerializer.Deserialize<JsonElement>(value).Clone();
+        }
+    }
+
+    private static void ApplyDispatchVariables(Dictionary<string, JsonElement?> payload, WorkflowDispatchContext dispatch)
+    {
+        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = dispatch.WorkflowRunId }, WorkflowVariableJson.Options);
+        payload["stage"] = JsonSerializer.SerializeToElement(new { name = dispatch.Stage }, WorkflowVariableJson.Options);
+        payload["work"] = JsonSerializer.SerializeToElement(new { id = dispatch.WorkId, type = dispatch.WorkType, title = dispatch.Title, attempt = dispatch.Attempt }, WorkflowVariableJson.Options);
+    }
+
+    private static void ApplyProjectVariables(Dictionary<string, JsonElement?> payload, string? projectVariablesJson)
+    {
+        if (string.IsNullOrWhiteSpace(projectVariablesJson))
+            return;
+
+        using var document = JsonDocument.Parse(projectVariablesJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            return;
+
+        if (document.RootElement.TryGetProperty("vars", out var vars)
+            && vars.ValueKind == JsonValueKind.Object)
+        {
+            payload["vars"] = payload.TryGetValue("vars", out var existing) && existing.HasValue
+                ? MergeSection(existing.Value, vars.GetRawText())
+                : vars.Clone();
+        }
+    }
+
+    private static void ApplyProjectStageVariables(Dictionary<string, JsonElement?> payload, string? projectVariablesJson, string? stage)
+    {
+        if (string.IsNullOrWhiteSpace(projectVariablesJson) || string.IsNullOrWhiteSpace(stage))
+            return;
+
+        using var document = JsonDocument.Parse(projectVariablesJson);
+        if (document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("stages", out var stages)
+            || stages.ValueKind != JsonValueKind.Object
+            || !stages.TryGetProperty(stage, out var stageVars)
+            || stageVars.ValueKind != JsonValueKind.Object
+            || !stageVars.TryGetProperty("vars", out var vars)
+            || vars.ValueKind != JsonValueKind.Object)
+            return;
+
+        payload["vars"] = payload.TryGetValue("vars", out var existing) && existing.HasValue
+            ? MergeSection(existing.Value, vars.GetRawText())
+            : vars.Clone();
     }
 }
 

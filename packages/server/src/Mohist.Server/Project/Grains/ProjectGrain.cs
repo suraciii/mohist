@@ -55,6 +55,7 @@ public class ProjectGrain : Grain, IProjectGrain
             Path = path,
             BaseBranch = branch,
             RepositoriesJson = JsonSerializer.Serialize(repos),
+            VariablesJson = ProjectVariablesBag.Empty.ToJson(),
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -68,6 +69,7 @@ public class ProjectGrain : Grain, IProjectGrain
             Path = path,
             BaseBranch = branch,
             Repositories = repos,
+            Variables = ProjectVariablesBag.Empty,
         };
 
         _log.LogInformation("Project {Name} created at {Path}", name, path);
@@ -184,6 +186,56 @@ public class ProjectGrain : Grain, IProjectGrain
         if (entry is null) return;
 
         entry.RepositoriesJson = JsonSerializer.Serialize(_project!.Repositories);
+        entry.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    public Task<ProjectVariablesBag?> GetVariablesAsync()
+    {
+        return Task.FromResult(_project?.Variables);
+    }
+
+    public async Task<ProjectVariablesBag?> PatchVariableAsync(string name, JsonElement value)
+    {
+        if (_project is null) return null;
+        _project.Variables = _project.Variables.PatchVar(name, value);
+        await PersistVariablesAsync();
+        return _project.Variables;
+    }
+
+    public async Task<ProjectVariablesBag?> DeleteVariableAsync(string name)
+    {
+        if (_project is null) return null;
+        _project.Variables = _project.Variables.DeleteVar(name);
+        await PersistVariablesAsync();
+        return _project.Variables;
+    }
+
+    public async Task<ProjectVariablesBag?> PatchStageVariableAsync(string stage, string name, JsonElement value)
+    {
+        if (_project is null) return null;
+        _project.Variables = _project.Variables.PatchStageVar(stage, name, value);
+        await PersistVariablesAsync();
+        return _project.Variables;
+    }
+
+    public async Task<ProjectVariablesBag?> DeleteStageVariableAsync(string stage, string name)
+    {
+        if (_project is null) return null;
+        _project.Variables = _project.Variables.DeleteStageVar(stage, name);
+        await PersistVariablesAsync();
+        return _project.Variables;
+    }
+
+    private async Task PersistVariablesAsync()
+    {
+        _project!.UpdatedAt = DateTime.UtcNow.ToString("o");
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var entry = await db.Projects.FindAsync(GrainKey);
+        if (entry is null) return;
+
+        entry.VariablesJson = _project.Variables.ToJson();
         entry.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
     }
