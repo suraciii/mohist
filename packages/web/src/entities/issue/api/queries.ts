@@ -64,12 +64,11 @@ export function useWorkflowTimeline(issueNumber: number, enabled: boolean = true
   })
 }
 
-export function useWorkflowYaml(issueNumber: number, enabled: boolean = true) {
-  const { projectId } = useProject()
+export function useWorkflowYaml(workflowRunId: string | null | undefined, enabled: boolean = true) {
   return useQuery({
-    queryKey: ['issues', issueNumber, projectId, 'workflow-yaml'],
-    queryFn: () => getWorkflowYaml(issueNumber, projectId),
-    enabled: enabled && issueNumber > 0 && !!projectId,
+    queryKey: ['workflow-runs', workflowRunId, 'yaml'],
+    queryFn: () => getWorkflowYaml(workflowRunId!),
+    enabled: enabled && !!workflowRunId,
   })
 }
 
@@ -114,7 +113,7 @@ export function useIssueWorkflowProfileYaml(issueNumber: number, enabled: boolea
   const { projectId } = useProject()
   return useQuery({
     queryKey: ['issues', issueNumber, projectId, 'workflow-profile-yaml'],
-    queryFn: () => getIssueWorkflowProfileYaml(issueNumber, projectId),
+    queryFn: () => getIssueWorkflowProfileYaml(issueNumber, projectId!),
     enabled: enabled && issueNumber > 0 && !!projectId,
   })
 }
@@ -124,7 +123,7 @@ export function useUpdateIssueWorkflowProfileYaml() {
   const { projectId } = useProject()
   return useMutation({
     mutationFn: ({ issueNumber, yaml }: { issueNumber: number; yaml: string }) =>
-      updateIssueWorkflowProfileYaml(issueNumber, yaml, projectId),
+      updateIssueWorkflowProfileYaml(issueNumber, yaml, projectId!),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
     },

@@ -104,14 +104,13 @@ public class IssueApiSpecs
     }
 
     [Fact]
-    public async Task WorkflowProfiles_ReturnDefaultProfileMetadata()
+    public async Task SystemWorkflowTemplates_ReturnDefaultTemplateMetadata()
     {
-        var profiles = await _client.GetDataAsync<WorkflowProfileDto[]>("/api/workflow-profiles");
+        var profiles = await _client.GetDataAsync<WorkflowProfileDto[]>("/api/workflow-templates/system");
 
         var profile = Assert.Single(profiles);
         Assert.Equal("mohist/default", profile.Id);
-        Assert.Equal("Mohist Default", profile.DisplayName);
-        Assert.True(profile.IsDefault);
+        Assert.Equal("Mohist Default", profile.Name);
         Assert.Contains("OpenSpec", profile.Description);
     }
 
@@ -207,7 +206,7 @@ public class IssueApiSpecs
     }
 
     private sealed record IssueDto(int Number, string Id, CommentDto[] Comments, PrerequisiteDto[] Prerequisites, StartEligibilityDto StartEligibility, PrimaryEpicDto? PrimaryEpic, string WorkflowProfileId);
-    private sealed record WorkflowProfileDto(string Id, string DisplayName, string Description, bool IsDefault);
+    private sealed record WorkflowProfileDto(string Id, string Name, string Description);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body);
     private sealed record PrerequisiteDto(int Number, bool Completed);

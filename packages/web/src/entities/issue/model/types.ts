@@ -644,9 +644,13 @@ export interface WorkflowRun {
 export interface IssueWorkflowProfileYamlResponse {
   issueNumber: number
   projectId: string
+  issueKey: string
+  sourceTemplateId?: string | null
+  hasCustomTemplate: boolean
   yaml: string | null
   workflowRunId: string | null
   profileId: string
   updateMode: string
+  variables: unknown
   updatedAt: string
 }

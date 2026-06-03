@@ -153,6 +153,36 @@ public class WorkflowProfileManager
         return VariableBundle.MergeAll(projectBundle, issueBundle, runBundle);
     }
 
+    public async Task<VariableBundle> GetRunVariablesAsync(string runId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var runProfile = await db.WorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        return VariableBundle.FromJson(runProfile?.VariablesJson);
+    }
+
+    public async Task<VariableBundle> SetRunVariablesAsync(string runId, VariableBundle bundle)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        row ??= EnsureRunProfileRow(db, runId);
+
+        row.VariablesJson = bundle.ToJson();
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        return bundle;
+    }
+
+    public async Task<VariableBundle> PatchRunVariablesAsync(string runId, VariableBundle patch)
+    {
+        var current = await GetRunVariablesAsync(runId);
+        var merged = VariableBundle.Patch(current, patch);
+        return await SetRunVariablesAsync(runId, merged);
+    }
+
+    public Task<VariableBundle> ClearRunVariablesAsync(string runId) =>
+        SetRunVariablesAsync(runId, VariableBundle.Empty);
+
     private async Task<VariableBundle> LoadProjectLayerAsync(MohistDbContext db, string? projectId)
     {
         if (projectId is null) return VariableBundle.Empty;

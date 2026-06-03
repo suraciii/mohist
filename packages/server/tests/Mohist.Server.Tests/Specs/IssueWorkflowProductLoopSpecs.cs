@@ -110,10 +110,10 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
         var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
 
-        var patched = await _client.PatchDataAsync<WorkflowVariablesDto>(
-            $"/api/issues/{issue.Number}/workflow/vars/agent?projectId={project.Id}",
-            new { type = "opencode", model = "kimi/k2", timeout = 1200 });
-        Assert.Equal("future-dispatches", patched.Affected);
+        var patched = await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
+            new { vars = new { agent = new { type = "opencode", model = "kimi/k2", timeout = 1200 } } });
+        Assert.NotNull(patched.Vars);
 
         var firstWork = await PollWorkAnyAsync();
 
@@ -142,11 +142,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
 
         await _client.PatchDataAsync<ProjectVariablesDto>(
-            $"/api/projects/{project.Id}/variables/vars/agent",
-            new { type = "opencode", model = "project/model-new", timeout = 1500 });
+            $"/api/projects/{project.Id}/workflow-profile/variables",
+            new { vars = new { agent = new { type = "opencode", model = "project/model-new", timeout = 1500 } } });
         await _client.PatchDataAsync<ProjectVariablesDto>(
-            $"/api/projects/{project.Id}/variables/stages/build/vars/agent",
-            new { model = "project/build-model" });
+            $"/api/projects/{project.Id}/workflow-profile/variables",
+            new { stages = new { build = new { vars = new { agent = new { model = "project/build-model" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
         await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
@@ -193,11 +193,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
         await _client.PatchDataAsync<ProjectVariablesDto>(
-            $"/api/projects/{project.Id}/variables/vars/agent",
-            new { type = "opencode", model = "project/default-model", timeout = 1500 });
+            $"/api/projects/{project.Id}/workflow-profile/variables",
+            new { vars = new { agent = new { type = "opencode", model = "project/default-model", timeout = 1500 } } });
         await _client.PatchDataAsync<ProjectVariablesDto>(
-            $"/api/projects/{project.Id}/variables/stages/build/vars/agent",
-            new { model = "minimax-coding-plan/MiniMax-M3" });
+            $"/api/projects/{project.Id}/workflow-profile/variables",
+            new { stages = new { build = new { vars = new { agent = new { model = "minimax-coding-plan/MiniMax-M3" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
         await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
@@ -273,9 +273,10 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
 
-        var response = await _client.GetDataAsync<WorkflowYamlDto>($"/api/issues/{issue.Number}/workflow/yaml?projectId={project.Id}");
+        var current = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        Assert.False(string.IsNullOrWhiteSpace(current.WorkflowRunId));
+        var response = await _client.GetDataAsync<WorkflowYamlDto>($"/api/workflow-runs/{current.WorkflowRunId}/yaml");
 
-        Assert.Equal(issue.Number, response.IssueNumber);
         Assert.False(string.IsNullOrWhiteSpace(response.WorkflowRunId));
         Assert.Contains("stages:", response.Yaml);
         Assert.Contains("agent: ${{ vars.agent }}", response.Yaml);
@@ -399,8 +400,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     private sealed record EventDto(string Id, string Type, string Category, string? Status, string CreatedAt);
     private sealed record WorkflowLogDto(string Id, string EventType, string CreatedAt);
     private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
-    private sealed record WorkflowVariablesDto(int IssueNumber, string WorkflowRunId, string Affected);
-    private sealed record WorkflowYamlDto(int IssueNumber, string WorkflowRunId, string Yaml);
+    private sealed record WorkflowYamlDto(string WorkflowRunId, string Yaml);
     private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? ApprovalStatus);
     private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
     private sealed record ApprovalDto(string? Result);

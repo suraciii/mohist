@@ -1,5 +1,5 @@
 import { request, withProject } from '../../../shared/api/client'
-import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail, WorkflowProfileInfo } from '../model/types'
+import type { AgentRuntimeConfig, GeneralConfig, SystemInfo, SystemUpdateStartResponse, SystemUpdateStatusEnvelope, WorkflowProfileDetail } from '../model/types'
 
 export function getConfig() {
   return request<GeneralConfig>('/config')
@@ -87,11 +87,17 @@ export function setStageModels(stageModels: Record<string, string> | null) {
 }
 
 export function getWorkflowProfiles() {
-  return request<WorkflowProfileInfo[]>('/workflow-profiles')
+  return request<Array<{ id: string; name: string; description: string }>>('/workflow-templates/system')
+    .then((templates) => templates.map((template) => ({
+      id: template.id,
+      displayName: template.name,
+      description: template.description,
+      isDefault: template.id === 'mohist/default',
+    })))
 }
 
 export function getWorkflowProfile(id: string) {
-  return request<WorkflowProfileDetail>(`/workflow-profiles/${id}`)
+  return request<WorkflowProfileDetail>(`/workflow-templates/system/${encodeURIComponent(id)}`)
 }
 
 export function getSystemInfo() {

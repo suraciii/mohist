@@ -236,7 +236,7 @@ export function useSystemInfo() {
 
 export function useWorkflowProfiles() {
   return useQuery<WorkflowProfileInfo[]>({
-    queryKey: ['workflow-profiles'],
+    queryKey: ['workflow-templates', 'system'],
     queryFn: () => getWorkflowProfiles(),
   })
 }

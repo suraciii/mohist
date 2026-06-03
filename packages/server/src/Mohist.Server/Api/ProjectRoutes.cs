@@ -115,16 +115,16 @@ public static class ProjectRoutes
         });
 
         // =======================================================================
-        // Project Templates CRUD
+        // Project workflow templates CRUD
         // =======================================================================
 
-        group.MapGet("/{id}/templates", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{id}/workflow-templates", async (string id, ProjectWorkflowProfileManager manager) =>
         {
             var templates = await manager.ListTemplatesAsync(id);
             return ApiResults.Ok(templates);
         });
 
-        group.MapPost("/{id}/templates", async (string id, CreateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        group.MapPost("/{id}/workflow-templates", async (string id, CreateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Yaml))
                 return ApiResults.BadRequest("yaml is required");
@@ -140,7 +140,7 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapGet("/{id}/templates/{tid}", async (string id, string tid, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{id}/workflow-templates/{tid}", async (string id, string tid, ProjectWorkflowProfileManager manager) =>
         {
             var def = await manager.GetTemplateAsync(id, tid);
             return def is not null
@@ -148,7 +148,7 @@ public static class ProjectRoutes
                 : ApiResults.NotFound("Project template not found");
         });
 
-        group.MapPut("/{id}/templates/{tid}", async (string id, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{id}/workflow-templates/{tid}", async (string id, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
         {
             if (string.IsNullOrWhiteSpace(req.Yaml))
                 return ApiResults.BadRequest("yaml is required");
@@ -166,23 +166,24 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapDelete("/{id}/templates/{tid}", async (string id, string tid, ProjectWorkflowProfileManager manager) =>
+        group.MapDelete("/{id}/workflow-templates/{tid}", async (string id, string tid, ProjectWorkflowProfileManager manager) =>
         {
             var deleted = await manager.DeleteTemplateAsync(id, tid);
             return deleted ? ApiResults.Ok(new { deleted = true }) : ApiResults.NotFound("Project template not found");
         });
 
         // =======================================================================
-        // Project Default Template
+        // Project workflow profile
         // =======================================================================
 
-        group.MapGet("/{id}/default-template", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{id}/workflow-profile", async (string id, ProjectWorkflowProfileManager manager) =>
         {
             var templateId = await manager.GetDefaultTemplateAsync(id);
-            return ApiResults.Ok(new { projectId = id, defaultTemplateId = templateId });
+            var variables = await manager.GetVariablesAsync(id);
+            return ApiResults.Ok(new { projectId = id, defaultTemplateId = templateId, variables });
         });
 
-        group.MapPut("/{id}/default-template", async (string id, SetDefaultTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{id}/workflow-profile/default-template", async (string id, SetDefaultTemplateRequest req, ProjectWorkflowProfileManager manager) =>
         {
             if (string.IsNullOrWhiteSpace(req.TemplateId))
                 return ApiResults.BadRequest("templateId is required");
@@ -190,71 +191,31 @@ public static class ProjectRoutes
             var updated = await manager.SetDefaultTemplateAsync(id, req.TemplateId);
             return updated is not null
                 ? ApiResults.Ok(new { projectId = id, defaultTemplateId = updated })
-                : ApiResults.NotFound("Project workflow profile not found. Create one first via PUT/PATCH /api/projects/{id}/variables");
+                : ApiResults.NotFound("Project workflow profile not found");
         });
 
-        // =======================================================================
-        // Project Variables
-        // =======================================================================
+        group.MapDelete("/{id}/workflow-profile/default-template", async (string id, ProjectWorkflowProfileManager manager) =>
+        {
+            await manager.SetDefaultTemplateAsync(id, null);
+            return ApiResults.Ok(new { projectId = id, defaultTemplateId = (string?)null });
+        });
 
-        group.MapGet("/{id}/variables", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{id}/workflow-profile/variables", async (string id, ProjectWorkflowProfileManager manager) =>
         {
             var variables = await manager.GetVariablesAsync(id);
             return ApiResults.Ok(variables);
         });
 
-        group.MapPut("/{id}/variables", async (string id, VariableBundle bundle, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{id}/workflow-profile/variables", async (string id, VariableBundle bundle, ProjectWorkflowProfileManager manager) =>
         {
             var result = await manager.SetVariablesAsync(id, bundle);
             return ApiResults.Ok(result);
         });
 
-        group.MapPatch("/{id}/variables", async (string id, VariableBundle patch, ProjectWorkflowProfileManager manager) =>
+        group.MapPatch("/{id}/workflow-profile/variables", async (string id, VariableBundle patch, ProjectWorkflowProfileManager manager) =>
         {
             var result = await manager.PatchVariablesAsync(id, patch);
             return ApiResults.Ok(result);
-        });
-
-        group.MapPatch("/{id}/variables/vars/{name}", async (string id, string name, JsonElement value, IGrainFactory grains, ProjectWorkflowProfileManager manager) =>
-        {
-            if (string.IsNullOrWhiteSpace(name))
-                return ApiResults.BadRequest("name is required");
-
-            await grains.GetGrain<IProjectGrain>(id).PatchVariableAsync(name, value);
-            var result = await manager.PatchVariablesAsync(id, new VariableBundle(
-                Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new Dictionary<string, JsonElement?> { [name] = value }))));
-            return ApiResults.Ok(result);
-        });
-
-        group.MapDelete("/{id}/variables/vars/{name}", async (string id, string name, IGrainFactory grains, ProjectWorkflowProfileManager manager) =>
-        {
-            var result = await grains.GetGrain<IProjectGrain>(id).DeleteVariableAsync(name);
-            return result is not null
-                ? ApiResults.Ok(await manager.GetVariablesAsync(id))
-                : ApiResults.NotFound("Project not found");
-        });
-
-        group.MapPatch("/{id}/variables/stages/{stage}/vars/{name}", async (string id, string stage, string name, JsonElement value, IGrainFactory grains, ProjectWorkflowProfileManager manager) =>
-        {
-            if (string.IsNullOrWhiteSpace(stage) || string.IsNullOrWhiteSpace(name))
-                return ApiResults.BadRequest("stage and name are required");
-
-            await grains.GetGrain<IProjectGrain>(id).PatchStageVariableAsync(stage, name, value);
-            var result = await manager.PatchVariablesAsync(id, new VariableBundle(
-                Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [stage] = new StageVariables(JsonSerializer.Deserialize<JsonElement>(
-                        JsonSerializer.Serialize(new Dictionary<string, JsonElement?> { [name] = value })))
-                }));
-            return ApiResults.Ok(result);
-        });
-
-        group.MapDelete("/{id}/variables/stages/{stage}/vars/{name}", async (string id, string stage, string name, IGrainFactory grains, ProjectWorkflowProfileManager manager) =>
-        {
-            var result = await grains.GetGrain<IProjectGrain>(id).DeleteStageVariableAsync(stage, name);
-            return result is not null
-                ? ApiResults.Ok(await manager.GetVariablesAsync(id))
-                : ApiResults.NotFound("Project not found");
         });
 
         return app;

@@ -33,7 +33,7 @@ public static class WorkflowEventRoutes
             }));
         });
 
-        app.MapGet("/api/workflows/{workflowRunId}/events", async (string workflowRunId, int? limit, IEventStore events) =>
+        app.MapGet("/api/workflow-runs/{workflowRunId}/events", async (string workflowRunId, int? limit, IEventStore events) =>
         {
             var list = await events.ListWorkflowEventsAsync(workflowRunId, limit ?? 200);
             return ApiResults.Ok(list);

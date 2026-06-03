@@ -47,6 +47,23 @@ public class IssueWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.IssueKey == issueKey);
     }
 
+    public async Task<IssueWorkflowProfileState> GetStateAsync(string issueKey)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.IssueWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.IssueKey == issueKey);
+
+        return row is null
+            ? new IssueWorkflowProfileState(issueKey, null, false, null, VariableBundle.Empty, null)
+            : new IssueWorkflowProfileState(
+                row.IssueKey,
+                row.SourceTemplateId,
+                !string.IsNullOrWhiteSpace(row.TemplateJson),
+                string.IsNullOrWhiteSpace(row.TemplateJson) ? null : DeserializeDefinition(row.TemplateJson),
+                VariableBundle.FromJson(row.VariablesJson),
+                row.UpdatedAt);
+    }
+
     /// <summary>
     /// Update issue template choice.
     /// - request.ProjectTemplateId set:  reference a project template, clear custom
@@ -170,3 +187,11 @@ public class IssueWorkflowProfileManager
 public sealed record IssueTemplateUpdateRequest(
     string? ProjectTemplateId = null,
     string? Template = null);
+
+public sealed record IssueWorkflowProfileState(
+    string IssueKey,
+    string? SourceTemplateId,
+    bool HasCustomTemplate,
+    WorkflowDefinition? Template,
+    VariableBundle Variables,
+    DateTimeOffset? UpdatedAt);

@@ -63,7 +63,7 @@ public class WorkflowSessionSpecs
             },
         });
 
-        var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflows/{workflowRunId}/sessions/{sessionName}");
+        var detail = await _client.GetDataAsync<WorkflowSessionDetailDto>($"/api/workflow-runs/{workflowRunId}/sessions/{sessionName}");
 
         Assert.Equal(workflowRunId, ensured.WorkflowRunId);
         Assert.Equal(sessionName, detail.Session.SessionName);
