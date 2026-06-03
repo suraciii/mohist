@@ -141,9 +141,12 @@ API:
 - [x] Step 4: ProjectWorkflowProfileManager ✅ (17/17 ProjectWorkflowProfileManagerSpecs 通过)
 - [x] Step 5: IssueWorkflowProfileManager ✅ (10/10 IssueWorkflowProfileManagerSpecs 通过)
 - [x] Step 6: DI Registration ✅ (WorkflowProfileManager + Project + Issue 都已注册)
-- [ ] Step 7: WorkflowGrain Dispatch 切换 (关键切换点)
-- [ ] Step 8: IssueGrain 启动流程改造
-- [ ] Step 9: API 层改造
+- [x] Step 7: WorkflowGrain Dispatch 切换 ✅ (已提交)
+- [x] Step 8: IssueGrain 启动流程 ✅ (已提交)
+- [x] Step 9: API 层改造 ✅ (已提交)
+- [x] Step 10: Runner 侧确认 ✅ (WorkDispatch 结构不变, 无需修改)
+- [x] Step 12: 删除旧代码 ✅ (WorkflowVariableResolver + ToDispatchJson 子系统 ~230行)
+- [ ] Step 13: 删除旧表 (延后 — legacy 表仍被 ProjectVariablesBag / WorkflowExecutionContext 使用)
 - [ ] Step 10: Runner 侧确认
 - [ ] Step 11: 数据迁移工具 (可选)
 - [ ] Step 12: 删除旧代码
