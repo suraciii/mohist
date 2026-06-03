@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Storage;
@@ -9,12 +10,9 @@ using Mohist.Server.Workflow.Storage;
 namespace Mohist.Server.Workflow.Infrastructure;
 
 /// <summary>
-/// Workflow 数据唯一读写入口。
-///
-/// SaveProfile: 写入 workflow run-level 的 ProfileRow (ProjectId/IssueKey + run variables)
-/// LoadTemplate: 选定生效模板 (issue custom > issue-ref-template > project default)
-/// LoadVariables: 合并 3 层独立变量 (project + issue + workflow-run)
-/// ExpandTaskWith: 处理 task.with (保留 ${{ }} 给 runner 展开, 对象 deep merge)
+/// Workflow template/variable resolution entrypoint.
+/// Template resolution never depends on a workflow-run profile snapshot:
+/// issue custom > issue referenced template > project default > system default.
 /// </summary>
 public class WorkflowProfileManager
 {
@@ -25,167 +23,158 @@ public class WorkflowProfileManager
         _dbFactory = dbFactory;
     }
 
-    /// <summary>
-    /// 创建或更新 workflow run 级别的 ProfileRow。
-    /// Workflow 启动时调用, 记录关联的 project/issue 供后续 LoadTemplate/LoadVariables 使用。
-    /// </summary>
-    public async Task<WorkflowProfileRow> SaveProfileAsync(
+    public async Task<ResolvedTemplate> LoadTemplateAsync(
         string runId,
-        string? projectId,
-        string? issueKey)
+        string? projectId = null,
+        string? issueKey = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var existing = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        var resolvedContext = await ResolveRunContextAsync(db, runId);
+        var context = new RunContext(
+            string.IsNullOrWhiteSpace(projectId) ? resolvedContext.ProjectId : projectId,
+            string.IsNullOrWhiteSpace(issueKey) ? resolvedContext.IssueKey : issueKey);
 
-        if (existing is null)
-        {
-            existing = new WorkflowProfileRow
-            {
-                WorkflowRunId = runId,
-                ProjectId = projectId ?? "",
-                IssueKey = issueKey ?? "",
-                VariablesJson = VariableBundle.Empty.ToJson(),
-            };
-            db.WorkflowProfiles.Add(existing);
-        }
-        else
-        {
-            existing.ProjectId = projectId ?? existing.ProjectId;
-            existing.IssueKey = issueKey ?? existing.IssueKey;
-            existing.UpdatedAt = DateTimeOffset.UtcNow;
-        }
+        var issueProfile = !string.IsNullOrWhiteSpace(context.IssueKey)
+            ? await db.IssueWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.IssueKey == context.IssueKey)
+            : null;
 
-        await db.SaveChangesAsync();
-        return existing;
-    }
-
-    /// <summary>
-    /// 选定生效模板。
-    /// 优先级: issue_workflow_profile.Template (custom) >
-    ///         project_templates/system[issue.SourceTemplateId] >
-    ///         project_templates/system[project.DefaultTemplateId]
-    /// </summary>
-    public async Task<ResolvedTemplate> LoadTemplateAsync(string runId)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-
-        var runProfile = await db.WorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-
-        if (runProfile is null)
-            return ResolvedTemplate.None;
-
-        var issueProfile = await db.IssueWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IssueKey == runProfile.IssueKey);
-
-        // Priority 2: issue 自定义模板 (TemplateJson 不为 null)
         if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.TemplateJson))
         {
             var issueDef = DeserializeDefinition(issueProfile.TemplateJson);
             if (issueDef is not null && !string.IsNullOrWhiteSpace(issueDef.Id))
-                return ResolvedTemplate.FromDefinition($"issue-custom:{runProfile.IssueKey}", issueDef);
+                return ResolvedTemplate.FromDefinition($"issue-custom:{context.IssueKey}", issueDef);
         }
 
-        // Priority 3: issue 引用的项目模板
-        if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.SourceTemplateId))
+        if (issueProfile is not null
+            && !string.IsNullOrWhiteSpace(issueProfile.SourceTemplateId)
+            && !string.IsNullOrWhiteSpace(context.ProjectId))
         {
-            var template = await LoadTemplateReferenceAsync(db, runProfile.ProjectId, issueProfile.SourceTemplateId);
+            var template = await LoadTemplateReferenceAsync(db, context.ProjectId, issueProfile.SourceTemplateId);
             if (template is not null)
                 return template;
         }
 
-        // Priority 4: 项目默认模板
-        var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == runProfile.ProjectId);
-        if (projectProfile is not null && !string.IsNullOrWhiteSpace(projectProfile.DefaultTemplateId))
+        if (!string.IsNullOrWhiteSpace(context.ProjectId))
         {
-            var template = await LoadTemplateReferenceAsync(db, runProfile.ProjectId, projectProfile.DefaultTemplateId);
-            if (template is not null)
-                return template;
+            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProjectId == context.ProjectId);
+            if (projectProfile is not null && !string.IsNullOrWhiteSpace(projectProfile.DefaultTemplateId))
+            {
+                var template = await LoadTemplateReferenceAsync(db, context.ProjectId, projectProfile.DefaultTemplateId);
+                if (template is not null)
+                    return template;
+            }
         }
 
-        return ResolvedTemplate.None;
+        return ResolvedTemplate.FromDefinition(
+            $"system-template:{IssueWorkflowProfiles.DefaultId}",
+            ProjectWorkflowProfileManager.GetSystemTemplateDefinition(IssueWorkflowProfiles.DefaultId));
     }
 
-    /// <summary>
-    /// 合并 3 层独立变量 (project + issue + workflow-run)。
-    /// 
-    /// 对齐 design/workflow-template-variables.md 设计:
-    ///   project_workflow_profile.Variables  ─┐
-    ///   issue_workflow_profile.Variables   ─┤  deepMerge  ─→ independent
-    ///   workflow_profile.Variables         ─┘
-    /// 
-    /// projectId / issueKey 从 WorkflowProfileRow 自动发现 (由 StartAsync.SaveProfileAsync 写入)。
-    /// 兼容: 新表为空时回退读取旧表 (projects.VariablesJson / workflow_variables.StateJson 等)。
-    /// </summary>
-    /// <param name="runId">WorkflowRunId (必传)</param>
     public async Task<VariableBundle> LoadVariablesAsync(string runId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
+        var context = await ResolveRunContextAsync(db, runId);
 
-        var runProfile = await db.WorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-
-        string? projectId = runProfile?.ProjectId;
-        string? issueKey = runProfile?.IssueKey;
-
-        if (string.IsNullOrEmpty(projectId))
-        {
-            var legacyRun = await db.WorkflowRuns.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-            projectId = legacyRun?.MetadataProjectId;
-        }
-
-        var projectBundle = await LoadProjectLayerAsync(db, projectId);
-        var issueBundle = await LoadIssueLayerAsync(db, issueKey);
-        var runBundle = await LoadRunLayerAsync(db, runProfile, runId);
+        var projectBundle = await LoadProjectLayerAsync(db, context.ProjectId);
+        var issueBundle = await LoadIssueLayerAsync(db, context.IssueKey);
 
         if (!projectBundle.Vars.HasValue
             && (projectBundle.Stages is null || projectBundle.Stages.Count == 0)
             && !issueBundle.Vars.HasValue
-            && (issueBundle.Stages is null || issueBundle.Stages.Count == 0)
-            && !runBundle.Vars.HasValue
-            && (runBundle.Stages is null || runBundle.Stages.Count == 0))
+            && (issueBundle.Stages is null || issueBundle.Stages.Count == 0))
         {
             return VariableBundle.Empty;
         }
 
-        return VariableBundle.MergeAll(projectBundle, issueBundle, runBundle);
+        return VariableBundle.MergeAll(projectBundle, issueBundle);
     }
 
-    public async Task<VariableBundle> GetRunVariablesAsync(string runId)
+    private static async Task<RunContext> ResolveRunContextAsync(MohistDbContext db, string runId)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var runProfile = await db.WorkflowProfiles.AsNoTracking()
+        var workflowRun = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-        return VariableBundle.FromJson(runProfile?.VariablesJson);
+
+        var projectId = workflowRun?.MetadataProjectId;
+        var issueKey = TryReadAnnotation(workflowRun?.State, "issueKey");
+        var issue = await FindIssueForRunAsync(db, runId);
+        projectId = string.IsNullOrWhiteSpace(projectId) ? issue?.ProjectId : projectId;
+        issueKey = string.IsNullOrWhiteSpace(issueKey) && issue is not null
+            ? $"{issue.ProjectId}:{issue.Number}"
+            : issueKey;
+
+        return new RunContext(projectId, issueKey);
     }
 
-    public async Task<VariableBundle> SetRunVariablesAsync(string runId, VariableBundle bundle)
+    private static string? TryReadAnnotation(string? stateJson, string key)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-        row ??= EnsureRunProfileRow(db, runId);
+        if (string.IsNullOrWhiteSpace(stateJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(stateJson);
+            if (!doc.RootElement.TryGetProperty("Metadata", out var metadata)
+                || metadata.ValueKind != JsonValueKind.Object
+                || !metadata.TryGetProperty("Annotations", out var annotations)
+                || annotations.ValueKind != JsonValueKind.Object
+                || !annotations.TryGetProperty(key, out var value)
+                || value.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
 
-        row.VariablesJson = bundle.ToJson();
-        row.UpdatedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync();
-        return bundle;
+            return value.GetString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
-    public async Task<VariableBundle> PatchRunVariablesAsync(string runId, VariableBundle patch)
+    private static async Task<IssueRunRef?> FindIssueForRunAsync(MohistDbContext db, string runId)
     {
-        var current = await GetRunVariablesAsync(runId);
-        var merged = VariableBundle.Patch(current, patch);
-        return await SetRunVariablesAsync(runId, merged);
+        var rows = await db.IssueStates.AsNoTracking()
+            .Where(x => x.StateJson.Contains(runId))
+            .ToListAsync();
+
+        foreach (var row in rows)
+        {
+            var issue = TryParseIssueRunRef(row.StateJson, runId);
+            if (issue is not null)
+                return issue;
+        }
+
+        return null;
     }
 
-    public Task<VariableBundle> ClearRunVariablesAsync(string runId) =>
-        SetRunVariablesAsync(runId, VariableBundle.Empty);
+    private static IssueRunRef? TryParseIssueRunRef(string json, string runId)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            if (!root.TryGetProperty("WorkflowRunId", out var workflowRunId)
+                || workflowRunId.GetString() != runId)
+                return null;
+            if (!root.TryGetProperty("ProjectId", out var projectIdEl)
+                || string.IsNullOrWhiteSpace(projectIdEl.GetString()))
+                return null;
+            if (!root.TryGetProperty("Number", out var numberEl)
+                || !numberEl.TryGetInt32(out var number))
+                return null;
+
+            return new IssueRunRef(projectIdEl.GetString()!, number);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     private async Task<VariableBundle> LoadProjectLayerAsync(MohistDbContext db, string? projectId)
     {
-        if (projectId is null) return VariableBundle.Empty;
+        if (string.IsNullOrWhiteSpace(projectId)) return VariableBundle.Empty;
         var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
         var bundle = VariableBundle.FromJson(projectProfile?.VariablesJson);
@@ -200,29 +189,16 @@ public class WorkflowProfileManager
 
     private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, string? issueKey)
     {
-        if (issueKey is null) return VariableBundle.Empty;
+        if (string.IsNullOrWhiteSpace(issueKey)) return VariableBundle.Empty;
         var issueProfile = await db.IssueWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.IssueKey == issueKey);
         return VariableBundle.FromJson(issueProfile?.VariablesJson);
     }
 
-    private static async Task<VariableBundle> LoadRunLayerAsync(
-        MohistDbContext db, WorkflowProfileRow? runProfile, string runId)
-    {
-        var runBundle = VariableBundle.FromJson(runProfile?.VariablesJson);
-        if (!runBundle.Vars.HasValue && runBundle.Stages is null)
-        {
-            var legacyBundle = await LoadLegacyRunVariablesAsync(db, runId);
-            if (legacyBundle is not null)
-                return legacyBundle;
-        }
-        return runBundle;
-    }
-
     /// <summary>
-    /// 处理 task.with: 
-    ///   - value 是 JSON 对象 且 effectiveVars 中有同名 key → deep merge (vars 覆盖)
-    ///   - 其他 (包括 ${{ }} 模板字符串) → 保留原值, 由 runner 端展开
+    /// 处理 task.with:
+    ///   - value 是 JSON 对象 且 effectiveVars 中有同名 key: deep merge (vars 覆盖)
+    ///   - 其他 (包括 ${{ }} 模板字符串): 保留原值, 由 runner 端展开
     /// </summary>
     public static Dictionary<string, JsonElement?>? ExpandTaskWith(
         VariableBundle? effectiveVars,
@@ -246,7 +222,6 @@ public class WorkflowProfileManager
 
             var v = value.Value;
 
-            // 对象 且 vars 中有同名 key → deep merge
             if (v.ValueKind == JsonValueKind.Object
                 && varsRoot.ValueKind == JsonValueKind.Object
                 && varsRoot.TryGetProperty(key, out var varsOverride)
@@ -257,25 +232,10 @@ public class WorkflowProfileManager
                 continue;
             }
 
-            // 其他 (包括 ${{ }} 模板字符串): 保留原值, 由 runner 端展开
             result[key] = v.Clone();
         }
 
         return result;
-    }
-
-    private static WorkflowProfileRow EnsureRunProfileRow(MohistDbContext db, string runId)
-    {
-        var row = new WorkflowProfileRow
-        {
-            WorkflowRunId = runId,
-            ProjectId = "",
-            IssueKey = "",
-            TemplateJson = "{}",
-            VariablesJson = VariableBundle.Empty.ToJson(),
-        };
-        db.WorkflowProfiles.Add(row);
-        return row;
     }
 
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(
@@ -301,10 +261,6 @@ public class WorkflowProfileManager
             ? null
             : ResolvedTemplate.FromDefinition($"system-template:{templateId}", systemDefinition);
     }
-
-    // =======================================================================
-    // Legacy fallbacks (Step 7 compatibility)
-    // =======================================================================
 
     private static readonly JsonSerializerOptions LegacyJsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -333,74 +289,6 @@ public class WorkflowProfileManager
         try
         {
             return JsonSerializer.Deserialize<LegacyProjectVars>(json, LegacyJsonOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static async Task<VariableBundle?> LoadLegacyRunVariablesAsync(
-        MohistDbContext db, string runId)
-    {
-        var row = await db.WorkflowVariables.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-        if (row is null) return null;
-
-        try
-        {
-            // Legacy WorkflowExecutionContext: { Json: string (inner JSON), StageVariables: object }
-            // StageVariables layout: { stageName: { sectionName: jsonString } }
-            using var doc = JsonDocument.Parse(row.StateJson ?? "{}");
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
-
-            JsonElement? varsEl = null;
-            if (doc.RootElement.TryGetProperty("Json", out var jsonEl)
-                && jsonEl.ValueKind == JsonValueKind.String)
-            {
-                var innerJson = jsonEl.GetString();
-                if (!string.IsNullOrWhiteSpace(innerJson))
-                {
-                    using var innerDoc = JsonDocument.Parse(innerJson);
-                    if (innerDoc.RootElement.ValueKind == JsonValueKind.Object
-                        && innerDoc.RootElement.TryGetProperty("vars", out var innerVars)
-                        && innerVars.ValueKind == JsonValueKind.Object)
-                    {
-                        varsEl = innerVars.Clone();
-                    }
-                }
-            }
-
-            Dictionary<string, StageVariables>? stages = null;
-            if (doc.RootElement.TryGetProperty("StageVariables", out var svEl)
-                && svEl.ValueKind == JsonValueKind.Object)
-            {
-                stages = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
-                foreach (var stageProp in svEl.EnumerateObject())
-                {
-                    if (stageProp.Value.ValueKind != JsonValueKind.Object) continue;
-
-                    // Each stage value is a Dict<sectionName, jsonString>
-                    foreach (var sectionProp in stageProp.Value.EnumerateObject())
-                    {
-                        // Only collect "vars" sections into our StageVariables
-                        if (!string.Equals(sectionProp.Name, "vars", StringComparison.Ordinal))
-                            continue;
-                        if (sectionProp.Value.ValueKind != JsonValueKind.String)
-                            continue;
-                        var sectionJson = sectionProp.Value.GetString();
-                        if (string.IsNullOrWhiteSpace(sectionJson))
-                            continue;
-                        var sectionElement = JsonSerializer.Deserialize<JsonElement>(sectionJson);
-                        if (sectionElement.ValueKind == JsonValueKind.Object)
-                            stages[stageProp.Name] = new StageVariables(sectionElement);
-                    }
-                }
-                if (stages.Count == 0) stages = null;
-            }
-
-            if (!varsEl.HasValue && stages is null) return null;
-            return new VariableBundle(varsEl, stages);
         }
         catch
         {
@@ -453,6 +341,8 @@ public class WorkflowProfileManager
         }
     }
 
+    private sealed record RunContext(string? ProjectId, string? IssueKey);
+    private sealed record IssueRunRef(string ProjectId, int Number);
     private sealed record LegacyProjectVars(
         Dictionary<string, JsonElement?>? Vars = null,
         Dictionary<string, LegacyProjectStageVars?>? Stages = null);

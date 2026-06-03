@@ -18,15 +18,15 @@ namespace Mohist.Server.Workflow.Grains;
 
 public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 {
-    private const string RecoveryReminderName = "workflow-scheduling-recovery";
-    private static readonly TimeSpan RecoveryReminderDueTime = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan RecoveryReminderPeriod = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan StaleLeaseThreshold = TimeSpan.FromMinutes(5);
+    private const string LegacyRecoveryReminderName = "workflow-scheduling-recovery";
+    private const string WorkHeartbeatReminderName = "heartbeat";
+    private static readonly TimeSpan WorkHeartbeatReminderDueTime = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan WorkHeartbeatReminderPeriod = TimeSpan.FromMinutes(1);
     private WorkflowRun? _run;
     private WorkLease? _lease;
     private WorkflowExecutionContext? _variables;
     private string? _lastRunnerId;
-    private IGrainReminder? _recoveryReminder;
+    private IGrainReminder? _workHeartbeatReminder;
     private readonly HashSet<string> _announcedWaitingLocks = [];
     private readonly HashSet<string> _announcedAcquiredLocks = [];
     private readonly IWorkflowRunStore _runStore;
@@ -70,7 +70,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _variables = await _variablesStore.LoadAsync(GrainKey);
 
         _lastRunnerId = _run?.Claim?.RunnerId ?? _lease?.RunnerId;
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -80,42 +80,52 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
-        if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
+        if (string.Equals(reminderName, LegacyRecoveryReminderName, StringComparison.Ordinal))
+        {
+            await DisableLegacyRecoveryReminderAsync();
+            return;
+        }
+
+        if (!string.Equals(reminderName, WorkHeartbeatReminderName, StringComparison.Ordinal))
             return;
 
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
     }
 
     public async Task StartAsync(WorkflowStartInput? input = null)
     {
         var phaseBefore = _run?.Status;
+        var pendingVariables = !string.IsNullOrWhiteSpace(input?.Variables)
+            ? new WorkflowExecutionContext(input.Variables!, input?.StageVariables)
+            : null;
 
         if (_run is null)
         {
-            await _profileManager.SaveProfileAsync(GrainKey, input?.ProjectId, input?.IssueKey);
-            var effectiveDefinition = await LoadEffectiveDefinitionAsync();
+            _variables = pendingVariables;
+            var effectiveDefinition = await LoadEffectiveDefinitionAsync(
+                input?.ProjectId ?? GetProjectId(),
+                input?.IssueKey ?? GetIssueKey());
             _run = WorkflowRun.Create(GrainKey, effectiveDefinition,
-                input is not null ? new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, input.Annotations) : null);
+                BuildRunMetadata(input));
         }
 
         _run.Start();
-        await _profileManager.SaveProfileAsync(GrainKey, input?.ProjectId, input?.IssueKey);
-        if (!string.IsNullOrWhiteSpace(input?.Variables))
-            _variables = new WorkflowExecutionContext(
-                input.Variables!,
-                input?.StageVariables);
+        if (pendingVariables is not null)
+            _variables = pendingVariables;
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         EmitStageChanged("started");
         await SaveAllAsync();
         await AppendWorkflowEventAsync("workflow_started", "started", "Workflow started");
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
-    private async Task<WorkflowDefinition> LoadEffectiveDefinitionAsync()
+    private async Task<WorkflowDefinition> LoadEffectiveDefinitionAsync(
+        string? projectId = null,
+        string? issueKey = null)
     {
-        var template = await _profileManager.LoadTemplateAsync(GrainKey);
+        var template = await _profileManager.LoadTemplateAsync(GrainKey, projectId, issueKey);
         return template.Structure
             ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no effective workflow template");
     }
@@ -129,7 +139,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EmitStageChanged("resumed");
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed");
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -142,7 +152,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EmitStageChanged("paused", reason);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused");
-        await DisableSchedulingRecoveryAsync();
+        await DisableWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -161,7 +171,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EmitStageChanged("stopped", reason);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_stopped", "stopped", reason ?? "Workflow stopped");
-        await DisableSchedulingRecoveryAsync();
+        await DisableWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -174,7 +184,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EmitStageChanged("approved");
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved");
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -187,7 +197,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         EmitStageChanged("rejected", reason);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", reason ?? "Workflow approval rejected");
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -202,7 +212,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -224,7 +234,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -246,7 +256,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         await SaveRunAsync();
         await AppendWorkflowEventAsync("workflow_task_added", "added", $"Workflow task added: {task.Title}", TaskId: task.Id, Payload: task);
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
         return new RuntimeTaskAddedResult(GrainKey, stage, task.Id);
     }
@@ -303,18 +313,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (!string.Equals(activeLease.RunnerId, runnerId, StringComparison.Ordinal))
                 return;
 
-            if (IsStaleLease(activeLease))
-            {
-                _log.LogWarning("Workflow {Id} stale lease detected for {WorkId} (dispatched {Age:N0}s ago), clearing",
-                    GrainKey, activeLease.WorkId, (DateTime.UtcNow - activeLease.DispatchedAt!.Value).TotalSeconds);
-                await ClearAndDeleteLeaseAsync();
-            }
-            else
-            {
-                var restoredDispatch = RestoreDispatch(activeLease);
-                if (restoredDispatch is not null)
-                    await AssignRunnerWorkAsync(runnerId, restoredDispatch);
-            }
+            var restoredDispatch = RestoreDispatch(activeLease);
+            if (restoredDispatch is not null)
+                await AssignRunnerWorkAsync(runnerId, restoredDispatch);
             return;
         }
 
@@ -334,28 +335,35 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await AssignRunnerWorkAsync(runnerId, dispatch);
     }
 
-    private async Task EnsureSchedulingRecoveryAsync()
+    private async Task EnsureWorkHeartbeatAsync()
     {
         if (IsRunnable())
         {
-            _recoveryReminder ??= await this.RegisterOrUpdateReminder(
-                RecoveryReminderName,
-                RecoveryReminderDueTime,
-                RecoveryReminderPeriod);
+            _workHeartbeatReminder ??= await this.RegisterOrUpdateReminder(
+                WorkHeartbeatReminderName,
+                WorkHeartbeatReminderDueTime,
+                WorkHeartbeatReminderPeriod);
             await RunCoreAsync();
             return;
         }
 
-        await DisableSchedulingRecoveryAsync();
+        await DisableWorkHeartbeatAsync();
     }
 
-    private async Task DisableSchedulingRecoveryAsync()
+    private async Task DisableWorkHeartbeatAsync()
     {
-        if (_recoveryReminder is null)
+        if (_workHeartbeatReminder is null)
             return;
 
-        await this.UnregisterReminder(_recoveryReminder);
-        _recoveryReminder = null;
+        await this.UnregisterReminder(_workHeartbeatReminder);
+        _workHeartbeatReminder = null;
+    }
+
+    private async Task DisableLegacyRecoveryReminderAsync()
+    {
+        var legacyReminder = await this.GetReminder(LegacyRecoveryReminderName);
+        if (legacyReminder is not null)
+            await this.UnregisterReminder(legacyReminder);
     }
 
     private bool IsRunnable()
@@ -406,7 +414,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             $"Added {tasksToInsert.Count} tasks to workflow stage {current.Id}",
             Payload: new { Count = tasksToInsert.Count });
 
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
 
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
@@ -444,7 +452,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await SaveRunAsync();
         await AppendTerminalEventIfNeededAsync();
         await ReleaseStageLocksIfDoneAsync(lease.Stage);
-        await EnsureSchedulingRecoveryAsync();
+        await EnsureWorkHeartbeatAsync();
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
@@ -776,15 +784,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             await ClearAndDeleteLeaseAsync();
     }
 
-    private bool IsStaleLease(WorkLease lease)
-    {
-        var dispatchedAt = lease.DispatchedAt;
-        if (dispatchedAt is null)
-            return false;
-
-        return DateTime.UtcNow - dispatchedAt.Value > StaleLeaseThreshold;
-    }
-
     private async Task<WorkLease?> RestoreLeaseAsync()
     {
         if (_lease is not null)
@@ -1087,6 +1086,40 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     }
 
     private string GetProjectId() => _variables?.String("project", "id") ?? "";
+
+    private string? GetIssueKey()
+    {
+        var projectId = GetProjectId();
+        var number = _variables?.String("issue", "number");
+        return string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(number)
+            ? null
+            : $"{projectId}:{number}";
+    }
+
+    private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
+    {
+        if (input is null) return null;
+
+        Dictionary<string, string>? annotations = input.Annotations is not null
+            ? new Dictionary<string, string>(input.Annotations, StringComparer.Ordinal)
+            : null;
+
+        var projectId = input.ProjectId ?? GetProjectId();
+        if (!string.IsNullOrWhiteSpace(projectId))
+        {
+            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            annotations["projectId"] = projectId;
+        }
+
+        var issueKey = input.IssueKey ?? GetIssueKey();
+        if (!string.IsNullOrWhiteSpace(issueKey))
+        {
+            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            annotations["issueKey"] = issueKey;
+        }
+
+        return new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, annotations);
+    }
 
     private (string ProjectId, int? IssueNumber) GetHookContext()
     {

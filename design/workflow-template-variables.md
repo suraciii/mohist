@@ -83,10 +83,6 @@ VariableBundle {
   └──────────┬───────────┘
              ▼
   ┌──────────────────────┐
-  │ workflow run vars    │  workflow_profile.Variables
-  └──────────┬───────────┘
-             ▼
-  ┌──────────────────────┐
   │ dispatch injection   │  (仅 dispatch 时) workflow.runId, stage.name, work.id/type/title
   └──────────┬───────────┘
              ▼
@@ -111,20 +107,19 @@ cover: { vars: { agent: { model: "gpt-4o" } } }
 ```
 WorkflowProfileManager.LoadTemplate(runId) -> ResolvedTemplate { id, structure, embeddedVariables }
 
-  workflow_profile.Template?            ─→ return it           (快照)
   issue_workflow_profile.Template?      ─→ return parsed       (自定义)
   issue_workflow_profile.SourceTemplateId ─→ load from project_templates
   project_workflow_profile.DefaultTemplateId ─→ load from project_templates
+  mohist/default system template        ─→ fallback
 ```
 
-### 2. 加载独立变量（内部 merge 3 层）
+### 2. 加载独立变量（内部 merge 2 层）
 
 ```
 WorkflowProfileManager.LoadVariables(runId) -> VariableBundle
 
   project_workflow_profile.Variables     ─┐
-  issue_workflow_profile.Variables      ─┤  deepMerge ─→ independent
-  workflow_profile.Variables            ─┘
+  issue_workflow_profile.Variables      ─┘  deepMerge ─→ independent
 ```
 
 ### 3. 调用方合并并 dispatch
@@ -161,9 +156,6 @@ project_workflow_profile       key: projectId
 project_templates              ProjectId, TemplateId, Template
 
 issue_workflow_profile         SourceTemplateId, Template, Variables
-
-workflow_profile               WorkflowRunId, ProjectId, IssueKey
-                               Variables (rare runtime overrides)
 ```
 
 ## Write API
@@ -193,11 +185,8 @@ Issue Profile:      GET    /projects/:projectId/issues/:number/workflow-profile
 
 Run:                GET    /workflow-runs/:workflowRunId/yaml
                     GET    /workflow-runs/:workflowRunId/variables/effective
-                    GET    /workflow-runs/:workflowRunId/variable-overrides
-                    PATCH  /workflow-runs/:workflowRunId/variable-overrides
-                    DELETE /workflow-runs/:workflowRunId/variable-overrides
 ```
 
 前端 "Install" → `GET /workflow-templates/system` → 选一个 → `POST /projects/:projectId/workflow-templates { yaml }`
 
-普通用户调整变量时更新 project/issue workflow profile。workflow run variable-overrides 仅用于调试或少数运行时干预场景。
+普通用户调整变量时更新 project/issue workflow profile。workflow run 不保存 template 快照，也不作为常规变量配置入口。

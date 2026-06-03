@@ -126,7 +126,8 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
-        return await RegisterRunnerForProjectAsync("test-project", runnerId, maxWorkflowSlots);
+        var projectId = _workflowId is null ? "test-project" : TestProjectId(_workflowId);
+        return await RegisterRunnerForProjectAsync(projectId, runnerId, maxWorkflowSlots);
     }
 
     protected async Task<string> RegisterRunnerForProjectAsync(string projectId, string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
@@ -150,14 +151,15 @@ public abstract class WorkflowGrainSpecs
         int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
     {
         await ClearBacklogAsync();
-        var runnerId = await RegisterRunnerAsync(maxWorkflowSlots: maxWorkflowSlots);
-        _runnerId = runnerId;
         var workflowId = id ?? $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
+        var projectId = TestProjectId(workflowId);
+        var runnerId = await RegisterRunnerAsync(maxWorkflowSlots: maxWorkflowSlots);
+        _runnerId = runnerId;
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await SeedWorkflowTemplateAsync(workflowId, definition);
-        await workflow.StartAsync(TestInput());
+        await SeedWorkflowTemplateAsync(workflowId, definition, projectId);
+        await workflow.StartAsync(TestInput(projectId));
         return workflow;
     }
 
@@ -165,13 +167,20 @@ public abstract class WorkflowGrainSpecs
     {
         await ClearBacklogAsync();
         var workflow = await CreateWorkflowAsync(id);
-        await SeedWorkflowTemplateAsync(_workflowId!, definition);
-        await workflow.StartAsync(TestInput());
+        var projectId = TestProjectId(_workflowId!);
+        await SeedWorkflowTemplateAsync(_workflowId!, definition, projectId);
+        await workflow.StartAsync(TestInput(projectId));
         return workflow;
     }
 
-    protected static WorkflowStartInput TestInput() =>
-        new(Variables: """{"project":{"id":"test-project"}}""");
+    protected WorkflowStartInput TestInput(string? projectId = null)
+    {
+        projectId ??= _workflowId is null ? "test-project" : TestProjectId(_workflowId);
+        var json = JsonSerializer.Serialize(new { project = new { id = projectId } }, WorkflowVariableJson.Options);
+        return new WorkflowStartInput(json, ProjectId: projectId);
+    }
+
+    protected static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
 
     protected async Task SeedLeaseAsync(string workflowId, WorkLease lease)
     {
@@ -236,8 +245,9 @@ public abstract class WorkflowGrainSpecs
         await management.ForceActivationCollection(TimeSpan.Zero);
     }
 
-    protected async Task EnqueueWorkflowForTestAsync(string workflowId, string projectId = "test-project")
+    protected async Task EnqueueWorkflowForTestAsync(string workflowId, string? projectId = null)
     {
+        projectId ??= TestProjectId(workflowId);
         var backlog = Grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
         await backlog.EnqueueAsync(workflowId);
     }
@@ -257,10 +267,11 @@ public abstract class WorkflowGrainSpecs
         string? title = "Task 1")
     {
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
+        var projectId = TestProjectId(workflowId);
         await SeedWorkflowTemplateAsync(workflowId, SingleStage(
             tasks: [new("task-1", title ?? "Task 1", "spec/task")],
-            checks: []));
-        await workflow.StartAsync(TestInput());
+            checks: []), projectId);
+        await workflow.StartAsync(TestInput(projectId));
         await workflow.AssignRunnerAsync(runnerId);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -274,6 +285,7 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(string runnerId)
     {
+        await EnsureRunnerForCurrentWorkflowAsync(runnerId);
         for (var attempt = 0; attempt < 100; attempt++)
         {
             var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -286,6 +298,18 @@ public abstract class WorkflowGrainSpecs
 
         Assert.Fail($"Runner '{runnerId}' has no work for workflow '{_workflowId}'");
         return default;
+    }
+
+    private async Task EnsureRunnerForCurrentWorkflowAsync(string runnerId)
+    {
+        if (string.IsNullOrWhiteSpace(_workflowId)) return;
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            TestProjectId(_workflowId),
+            MaxWorkflowSlots: RunnerCapacity.DefaultMaxWorkflowSlots));
     }
 
     protected async Task ReportAsync(string runnerId, string workId, string status, string? message = null)
@@ -357,8 +381,9 @@ public abstract class WorkflowGrainSpecs
     protected static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
 
-    protected async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string projectId = "test-project")
+    protected async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string? projectId = null)
     {
+        projectId ??= TestProjectId(workflowId);
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
             .Options;
@@ -398,33 +423,17 @@ public abstract class WorkflowGrainSpecs
             projectProfile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        var runProfile = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == workflowId);
-        if (runProfile is null)
-        {
-            db.WorkflowProfiles.Add(new WorkflowProfileRow
-            {
-                WorkflowRunId = workflowId,
-                ProjectId = projectId,
-                IssueKey = "",
-            });
-        }
-        else
-        {
-            runProfile.ProjectId = projectId;
-            runProfile.UpdatedAt = DateTimeOffset.UtcNow;
-        }
-
         await db.SaveChangesAsync();
     }
 
-    protected async Task PatchRunVariablesAsync(string workflowId, VariableBundle patch)
+    protected async Task PatchProjectVariablesAsync(string projectId, VariableBundle patch)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new WorkflowProfileManager(factory);
-        await manager.PatchRunVariablesAsync(workflowId, patch);
+        var manager = new ProjectWorkflowProfileManager(factory);
+        await manager.PatchVariablesAsync(projectId, patch);
     }
 
     protected static WorkflowDefinition TwoStages()

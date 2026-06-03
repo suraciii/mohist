@@ -36,19 +36,20 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task CapacityTwoRunner_TwoWorkflows_BothGetInFlightWork()
     {
-        var runnerId = await RegisterRunnerAsync("shared-runner-capacity-2", maxWorkflowSlots: 2);
+        var projectId = "test-project-capacity";
+        var runnerId = await RegisterRunnerForProjectAsync(projectId, "shared-runner-capacity-2", maxWorkflowSlots: 2);
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
         _workflowId = "wf-capacity-1";
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-1");
-        await SeedWorkflowTemplateAsync("wf-capacity-1", SingleStage(checks: []));
-        await wf1.StartAsync(TestInput());
+        await SeedWorkflowTemplateAsync("wf-capacity-1", SingleStage(checks: []), projectId);
+        await wf1.StartAsync(TestInput(projectId));
         await AssignWorkflowToRunnerAsync("wf-capacity-1", runnerId);
 
         _workflowId = "wf-capacity-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-2");
-        await SeedWorkflowTemplateAsync("wf-capacity-2", SingleStage(checks: []));
-        await wf2.StartAsync(TestInput());
+        await SeedWorkflowTemplateAsync("wf-capacity-2", SingleStage(checks: []), projectId);
+        await wf2.StartAsync(TestInput(projectId));
 
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);

@@ -656,44 +656,6 @@ namespace Mohist.Server.Migrations
                     b.ToTable("IssueWorkflowProfiles");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowProfileRow", b =>
-                {
-                    b.Property<string>("WorkflowRunId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("IssueKey")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TemplateJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("VariablesJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("WorkflowRunId");
-
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("IssueKey");
-
-                    b.ToTable("WorkflowProfiles");
-                });
 #pragma warning restore 612, 618
         }
     }

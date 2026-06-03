@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Infrastructure;
@@ -39,19 +40,19 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadTemplate_ReturnsNone_WhenRunProfileMissing()
+    public async Task LoadTemplate_FallsBackToSystemDefault_WhenRunContextMissing()
     {
         var result = await _manager.LoadTemplateAsync("unknown-run-id");
 
-        Assert.Null(result.Structure);
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/default", result.Id ?? "");
     }
 
     [Fact]
-    public async Task LoadTemplate_IgnoresRunTemplateSnapshot()
+    public async Task LoadTemplate_UsesIssueCustomWithoutRunProfileBinding()
     {
         var runId = "wr_snap01";
         await SeedAsync(projectId: "proj1", issueKey: "proj1:1", runId: runId,
-            runTemplateJson: SerializeDefinition("snapshot-def", stageCount: 1),
             issueTemplateJson: SerializeDefinition("issue-custom", stageCount: 2),
             projectTemplateJson: SerializeDefinition("project-tmpl", stageCount: 3));
 
@@ -67,7 +68,6 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     {
         var runId = "wr_issue01";
         await SeedAsync(projectId: "proj2", issueKey: "proj2:1", runId: runId,
-            runTemplateJson: null,
             issueTemplateJson: SerializeDefinition("issue-custom", stageCount: 2),
             projectTemplateJson: SerializeDefinition("project-tmpl", stageCount: 3));
 
@@ -83,7 +83,6 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     {
         var runId = "wr_ref01";
         await SeedAsync(projectId: "proj3", issueKey: "proj3:1", runId: runId,
-            runTemplateJson: null,
             issueTemplateJson: null,
             issueSourceTemplateId: "my-tmpl",
             projectTemplateJson: SerializeDefinition("my-tmpl", stageCount: 4));
@@ -100,7 +99,6 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     {
         var runId = "wr_default01";
         await SeedAsync(projectId: "proj4", issueKey: "proj4:1", runId: runId,
-            runTemplateJson: null,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "default-tmpl",
@@ -117,7 +115,6 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     {
         var runId = "wr_system_default01";
         await SeedAsync(projectId: "proj-sys", issueKey: "proj-sys:1", runId: runId,
-            runTemplateJson: null,
             issueTemplateJson: null,
             issueSourceTemplateId: null,
             projectDefaultTemplateId: "mohist/default");
@@ -130,27 +127,20 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadVariables_ReturnsRunLayer_WhenOnlyRunExists()
+    public async Task LoadVariables_ReturnsEmpty_WhenOnlyRunExists()
     {
         var runId = "wr_vars01";
-        var runVars = new VariableBundle(
-            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { a = 1, b = 2 })));
-
-        await SeedRunOnlyAsync("proj5", "proj5:1", runId, runVars);
+        await SeedRunOnlyAsync("proj5", "proj5:1", runId);
 
         var result = await _manager.LoadVariablesAsync(runId);
 
-        // Run-only → only run layer contributes; project + issue are empty
-        Assert.NotNull(result.Vars);
-        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());
-        Assert.Equal(2, doc.RootElement.GetProperty("b").GetInt32());
+        Assert.False(result.Vars.HasValue);
+        Assert.Null(result.Stages);
     }
 
     [Fact]
-    public async Task LoadVariables_MergesThreeLayersByPriority()
+    public async Task LoadVariables_MergesProjectAndIssueByPriority()
     {
-        // Design: project → issue → run (run has highest priority among independent layers)
         var runId = "wr_merge01";
         var proj = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -158,11 +148,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var issue = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
             { b = "issue-b", c = "issue-c" })));
-        var run = new VariableBundle(
-            Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
-            { c = "run-c" })));
 
-        await SeedAllLayersAsync("proj6", "proj6:1", runId, proj, issue, run);
+        await SeedAllLayersAsync("proj6", "proj6:1", runId, proj, issue);
 
         var result = await _manager.LoadVariablesAsync(runId);
 
@@ -170,7 +157,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
         Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());           // from project
         Assert.Equal("issue-b", doc.RootElement.GetProperty("b").GetString());  // issue overrides project
-        Assert.Equal("run-c", doc.RootElement.GetProperty("c").GetString());    // run overrides issue
+        Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());  // issue overrides project
     }
 
     [Fact]
@@ -282,13 +269,13 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
     private async Task SeedAsync(
         string projectId, string issueKey, string runId,
-        string? runTemplateJson,
         string? issueTemplateJson,
         string? issueSourceTemplateId = null,
         string? projectDefaultTemplateId = null,
         string? projectTemplateJson = null)
     {
         await using var db = new MohistDbContext(_options);
+        SeedRunContext(db, projectId, issueKey, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
         {
@@ -324,22 +311,14 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             VariablesJson = "{}",
         });
 
-        db.WorkflowProfiles.Add(new WorkflowProfileRow
-        {
-            WorkflowRunId = runId,
-            ProjectId = projectId,
-            IssueKey = issueKey,
-            TemplateJson = runTemplateJson ?? "{}",
-            VariablesJson = "{}",
-        });
-
         await db.SaveChangesAsync();
     }
 
     private async Task SeedRunOnlyAsync(
-        string projectId, string issueKey, string runId, VariableBundle runVars)
+        string projectId, string issueKey, string runId)
     {
         await using var db = new MohistDbContext(_options);
+        SeedRunContext(db, projectId, issueKey, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
         {
@@ -351,23 +330,16 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             IssueKey = issueKey,
             VariablesJson = "{}",
         });
-        db.WorkflowProfiles.Add(new WorkflowProfileRow
-        {
-            WorkflowRunId = runId,
-            ProjectId = projectId,
-            IssueKey = issueKey,
-            TemplateJson = "{}",
-            VariablesJson = runVars.ToJson(),
-        });
 
         await db.SaveChangesAsync();
     }
 
     private async Task SeedAllLayersAsync(
         string projectId, string issueKey, string runId,
-        VariableBundle project, VariableBundle issue, VariableBundle run)
+        VariableBundle project, VariableBundle issue)
     {
         await using var db = new MohistDbContext(_options);
+        SeedRunContext(db, projectId, issueKey, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
         {
@@ -379,16 +351,34 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             IssueKey = issueKey,
             VariablesJson = issue.ToJson(),
         });
-        db.WorkflowProfiles.Add(new WorkflowProfileRow
-        {
-            WorkflowRunId = runId,
-            ProjectId = projectId,
-            IssueKey = issueKey,
-            TemplateJson = "{}",
-            VariablesJson = run.ToJson(),
-        });
 
         await db.SaveChangesAsync();
+    }
+
+    private static void SeedRunContext(MohistDbContext db, string projectId, string issueKey, string runId)
+    {
+        var number = int.Parse(issueKey.Split(':')[1]);
+        db.WorkflowRuns.Add(new WorkflowRunRow
+        {
+            WorkflowRunId = runId,
+            State = JsonSerializer.Serialize(new
+            {
+                Id = runId,
+                Metadata = new { CreatedAt = DateTimeOffset.UtcNow },
+                Status = "Failed",
+                Stages = Array.Empty<object>(),
+            }),
+        });
+        db.IssueStates.Add(new IssueStateRow
+        {
+            Key = issueKey,
+            StateJson = JsonSerializer.Serialize(new
+            {
+                ProjectId = projectId,
+                Number = number,
+                WorkflowRunId = runId,
+            }),
+        });
     }
 
     private class TestDbContextFactory : IDbContextFactory<MohistDbContext>
