@@ -6,6 +6,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Infrastructure;
@@ -542,6 +543,68 @@ public static class IssueRoutes
         });
 
         // Issue-scoped active workflow definition vars. Mohist does not expose workflow runs as standalone product resources.
+
+        // =======================================================================
+        // Issue Template
+        // =======================================================================
+
+        issues.MapPut("/{number:int}/template", async (int number, string projectId, IssueTemplateRequest req, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var issueKey = $"{pid}:{number}";
+
+            if (string.IsNullOrWhiteSpace(req.ProjectTemplateId) && string.IsNullOrWhiteSpace(req.Template))
+                return ApiResults.BadRequest("Specify either projectTemplateId or template YAML");
+
+            try
+            {
+                var row = await issueProfileManager.UpdateTemplateAsync(issueKey, new IssueTemplateUpdateRequest(
+                    ProjectTemplateId: req.ProjectTemplateId,
+                    Template: req.Template));
+                return ApiResults.Ok(new
+                {
+                    issueKey,
+                    sourceTemplateId = row.SourceTemplateId,
+                    hasCustomTemplate = !string.IsNullOrWhiteSpace(row.TemplateJson)
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
+            }
+        });
+
+        // =======================================================================
+        // Issue Variables (GET / PUT / PATCH)
+        // =======================================================================
+
+        issues.MapGet("/{number:int}/variables", async (int number, string projectId, IssueWorkflowProfileManager issueProfileManager) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var issueKey = $"{pid}:{number}";
+            var variables = await issueProfileManager.GetVariablesAsync(issueKey);
+            return ApiResults.Ok(variables);
+        });
+
+        issues.MapPut("/{number:int}/variables", async (int number, string projectId, VariableBundle bundle, IssueWorkflowProfileManager issueProfileManager) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var issueKey = $"{pid}:{number}";
+            var result = await issueProfileManager.SetVariablesAsync(issueKey, bundle);
+            return ApiResults.Ok(result);
+        });
+
+        issues.MapPatch("/{number:int}/variables", async (int number, string projectId, VariableBundle patch, IssueWorkflowProfileManager issueProfileManager) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+            var issueKey = $"{pid}:{number}";
+            var result = await issueProfileManager.PatchVariablesAsync(issueKey, patch);
+            return ApiResults.Ok(result);
+        });
         issues.MapGet("/{number:int}/workflow/yaml", async (int number, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
         {
             var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
@@ -835,6 +898,7 @@ public record UpdateWorkflowProfileApiRequest(
     string? DefinitionYaml = null);
 
 public record UpdateIssueWorkflowProfileYamlRequest(string Yaml);
+public record IssueTemplateRequest(string? ProjectTemplateId = null, string? Template = null);
 
 public sealed record IssueWorkflowProfileYamlResponse(
     int IssueNumber,
