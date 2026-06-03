@@ -1,4 +1,5 @@
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Infrastructure;
 
 namespace Mohist.Server.Api;
 
@@ -8,6 +9,9 @@ public static class SystemRoutes
     {
         app.MapGet("/api/system/info", async (SystemInfoService systemInfo, CancellationToken ct) =>
             ApiResults.Ok(await systemInfo.GetSystemInfoAsync()));
+
+        app.MapGet("/api/system/templates", async (ProjectWorkflowProfileManager profileManager) =>
+            ApiResults.Ok(await profileManager.ListSystemTemplatesAsync()));
 
         app.MapPost("/api/system/update", async (SystemUpdateRequest? request, SystemUpdateService updates, CancellationToken ct) =>
         {
