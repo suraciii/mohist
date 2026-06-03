@@ -87,6 +87,63 @@ public class MohistDefaultWorkflowProfileSpecs
     }
 
     [Fact]
+    public void DefaultWorkflowDefinition_BuildStageTaskTemplateUsesAcpAgentWithPromptLoaderSpec()
+    {
+        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[0];
+        var withJson = JsonSerializer.Serialize(loadTask.With);
+
+        Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
+        Assert.Contains("\"uses\":\"mohist/acp-agent\"", withJson);
+        Assert.Contains("\"prompt\":", withJson);
+        Assert.Contains("\"uses\":\"mohist/openspec-task-prompt\"", withJson);
+        Assert.Contains("${{ openspecChangeDir }}/tasks.json", withJson);
+        Assert.Contains("\"items\":\"tasks\"", withJson);
+        Assert.Contains("\"base\":\"${{ prompts.build }}\"", withJson);
+    }
+
+    [Fact]
+    public void DefaultWorkflowDefinition_BuildStagePromptLoaderConfigExposesFileItemsAndBase()
+    {
+        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[0];
+        var with = loadTask.With ?? throw new InvalidOperationException("load-tasks must have a with map");
+        var taskElement = with["task"] ?? throw new InvalidOperationException("load-tasks with must contain 'task'");
+        var taskTemplate = taskElement.GetProperty("with");
+        var promptSpec = taskTemplate.GetProperty("prompt");
+        var promptWith = promptSpec.GetProperty("with");
+
+        Assert.Equal("mohist/openspec-task-prompt", promptSpec.GetProperty("uses").GetString());
+        Assert.Contains("tasks.json", promptWith.GetProperty("file").GetString());
+        Assert.Equal("tasks", promptWith.GetProperty("items").GetString());
+        Assert.Equal("${{ prompts.build }}", promptWith.GetProperty("base").GetString());
+    }
+
+    [Fact]
+    public void DefaultWorkflowDefinition_BuildStageRetainsExistingLoaderKeys()
+    {
+        var loadTask = MohistWorkflow.Definition.Stages[1].Tasks[0];
+        var with = loadTask.With ?? throw new InvalidOperationException("load-tasks must have a with map");
+        var pathElement = with["path"] ?? throw new InvalidOperationException("load-tasks with must contain 'path'");
+
+        Assert.Equal("mohist/openspec-tasks", loadTask.Uses);
+        Assert.Equal("load-tasks", loadTask.Id);
+        Assert.Equal("${{ openspecChangeDir }}/tasks.json", pathElement.GetString());
+    }
+
+    [Fact]
+    public void DefaultWorkflowDefinition_PlanCheckIntegrateStagesAreUnchanged()
+    {
+        var yaml = WorkflowYamlSerializer.ToYaml(MohistWorkflow.Definition);
+        var reparsed = WorkflowYamlSerializer.FromYaml(yaml);
+
+        Assert.Equal(MohistWorkflow.Definition.Stages[0].Tasks.Select(t => t.Id), reparsed.Stages[0].Tasks.Select(t => t.Id));
+        Assert.Equal(MohistWorkflow.Definition.Stages[0].Tasks.Select(t => t.Uses), reparsed.Stages[0].Tasks.Select(t => t.Uses));
+        Assert.Equal(MohistWorkflow.Definition.Stages[2].Tasks.Select(t => t.Id), reparsed.Stages[2].Tasks.Select(t => t.Id));
+        Assert.Equal(MohistWorkflow.Definition.Stages[3].Tasks.Select(t => t.Id), reparsed.Stages[3].Tasks.Select(t => t.Id));
+        Assert.True(reparsed.Stages[0].RequiresApproval);
+        Assert.True(reparsed.Stages[2].RequiresApproval);
+    }
+
+    [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
         var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());

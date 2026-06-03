@@ -1,12 +1,21 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import { acpAgentAction, buildPromptWithMohistContext, setAcpProcessFactoryForTest, type AcpProcessHandle } from "../src/actions/acp-agent.js"
 import type { ActionContext } from "../src/core/types.js"
 import { AcpSessionManager, type SharedAcpConnection } from "../src/runtime/acp-connection.js"
 import { ServerConnection } from "../src/server/connection.js"
+import {
+  PromptLoaderRegistry,
+  setPromptLoaderRegistryForTest,
+  type PromptLoader,
+  type PromptLoaderContext,
+} from "../src/core/prompt.js"
 
-afterEach(() => setAcpProcessFactoryForTest(null))
+afterEach(() => {
+  setAcpProcessFactoryForTest(null)
+  setPromptLoaderRegistryForTest(null)
+})
 
 describe("mohist/acp-agent", () => {
   it("ValidAcpAgentWork_ActionRuns_SpawnsAcpAndInitializesSessionBeforePrompt", async () => {
@@ -326,6 +335,176 @@ describe("mohist/acp-agent", () => {
     expect(result.status).toBe("failure")
     expect(result.message ?? "").toMatch(/stopped by user/i)
     expect(fixture.agent.calls.some((entry) => entry.event === "cancel")).toBe(true)
+  })
+
+  it("StringPrompt_ActionSendsPromptVerbatimBeforeMohistContextWrapper", async () => {
+    const fixture = createFixture("basic")
+
+    const literal = "Fix the build-stage health failure reported by `git diff --check`."
+    const result = await acpAgentAction(fixture.context({ prompt: literal }))
+
+    expect(result.status).toBe("success")
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(sentText).toContain("## Task Prompt")
+    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
+    expect(taskPromptSection).toBe(literal)
+  })
+
+  it("StringPromptContainingLiteralTemplateSyntax_IsNotTemplateRenderedBeforeMohistContextWrapper", async () => {
+    const fixture = createFixture("basic")
+
+    const literal = "literal ${{ prompts.xxx }} should stay intact"
+    const result = await acpAgentAction(fixture.context({ prompt: literal }))
+
+    expect(result.status).toBe("success")
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(sentText).toContain(literal)
+    expect(sentText).not.toContain("prompts.xxx".replace("xxx", "build"))
+  })
+
+  it("ObjectPrompt_ActionRendersThroughDefaultRendererBeforeMohistContextWrapper", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: {
+        artifact: {
+          attrs: { id: "build-task" },
+          task: "Complete exactly one implementation task.",
+          instruction: "Follow acceptance criteria.",
+        },
+      },
+    }))
+
+    expect(result.status).toBe("success")
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(sentText).toContain("## Task Prompt")
+    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
+    expect(taskPromptSection).toBe([
+      `<artifact id="build-task">`,
+      ``,
+      `  <task>Complete exactly one implementation task.</task>`,
+      ``,
+      `  <instruction>Follow acceptance criteria.</instruction>`,
+      ``,
+      `</artifact>`,
+    ].join("\n"))
+  })
+
+  it("UsesFormPrompt_ActionResolvesThroughRegisteredLoaderBeforeMohistContextWrapper", async () => {
+    const fixture = createFixture("basic")
+    const loader = vi.fn<PromptLoader>(async () => "loader produced task prompt")
+    const registry = new PromptLoaderRegistry()
+    registry.register("fake/loader", loader)
+    setPromptLoaderRegistryForTest(registry)
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: { uses: "fake/loader", with: { file: "tasks.json", taskId: "T-001" } },
+    }))
+
+    expect(result.status).toBe("success")
+    expect(loader).toHaveBeenCalledTimes(1)
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
+    expect(taskPromptSection).toBe("loader produced task prompt")
+  })
+
+  it("UsesFormPrompt_LoaderReturningObject_IsRenderedThroughDefaultRenderer", async () => {
+    const fixture = createFixture("basic")
+    const registry = new PromptLoaderRegistry()
+    registry.register("fake/object-loader", async () => ({
+      artifact: { task: "rendered from loader" },
+    }))
+    setPromptLoaderRegistryForTest(registry)
+
+    const result = await acpAgentAction(fixture.context({ prompt: { uses: "fake/object-loader" } }))
+
+    expect(result.status).toBe("success")
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    const taskPromptSection = sentText.slice(sentText.indexOf("## Task Prompt") + "## Task Prompt".length).trim()
+    expect(taskPromptSection).toBe([
+      `<artifact>`,
+      ``,
+      `  <task>rendered from loader</task>`,
+      ``,
+      `</artifact>`,
+    ].join("\n"))
+  })
+
+  it("UsesFormPrompt_LoaderReceivesContextWithWorkflowVariablesWorkDirWorkIdTitleStageAndIssueNumber", async () => {
+    const fixture = createFixture("basic")
+    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const registry = new PromptLoaderRegistry()
+    registry.register("fake/echo-loader", loader)
+    setPromptLoaderRegistryForTest(registry)
+
+    const variables = {
+      workflow: { name: "build" },
+      project: { path: "D:/fake/work" },
+    }
+    await acpAgentAction(fixture.context({
+      prompt: { uses: "fake/echo-loader", with: { file: "tasks.json", taskId: "T-001" } },
+    }, new AbortController().signal, {
+      variables: variables as never,
+      stage: "build",
+      title: "Build task",
+      issueNumber: 59,
+    }))
+
+    expect(loader).toHaveBeenCalledTimes(1)
+    const received = loader.mock.calls[0][0] as PromptLoaderContext
+    expect(received.with).toEqual({ file: "tasks.json", taskId: "T-001" })
+    expect(received.variables).toEqual(variables)
+    expect(received.workDir).toBe("D:/fake/work")
+    expect(received.workId).toBe("work-1")
+    expect(received.title).toBe("Build task")
+    expect(received.stage).toBe("build")
+    expect(received.issueNumber).toBe(59)
+  })
+
+  it("UsesFormPrompt_LoaderReceivesContextWithNullTitleStageAndIssueNumberWhenAbsent", async () => {
+    const fixture = createFixture("basic")
+    const loader = vi.fn<PromptLoader>(async () => "ok")
+    const registry = new PromptLoaderRegistry()
+    registry.register("fake/echo-loader", loader)
+    setPromptLoaderRegistryForTest(registry)
+
+    await acpAgentAction(fixture.context({ prompt: { uses: "fake/echo-loader" } }, new AbortController().signal, {
+      title: null,
+      stage: null,
+      issueNumber: null,
+    }))
+
+    expect(loader).toHaveBeenCalledTimes(1)
+    const received = loader.mock.calls[0][0] as PromptLoaderContext
+    expect(received.title).toBeNull()
+    expect(received.stage).toBeNull()
+    expect(received.issueNumber).toBeNull()
+  })
+
+  it("MissingPrompt_ActionStillUsesLegacyFallbackPrompt", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({
+      description: "Requeue runnable workflows on server startup.",
+      acceptanceCriteria: ["runner can claim recovered work"],
+    }))
+
+    expect(result.status).toBe("success")
+    const sentText = fixture.agent.calls.find((entry) => entry.event === "prompt")?.text ?? ""
+    expect(sentText).toContain("Implement this task: Build task")
+    expect(sentText).toContain("Requeue runnable workflows on server startup.")
+    expect(sentText).toContain("runner can claim recovered work")
+  })
+
+  it("UnknownPromptLoader_ActionFailsWithClearErrorBeforeAnyAcpInteraction", async () => {
+    const fixture = createFixture("basic")
+    setPromptLoaderRegistryForTest(new PromptLoaderRegistry())
+
+    const result = await acpAgentAction(fixture.context({ prompt: { uses: "no/such-loader" } }))
+
+    expect(result.status).toBe("failure")
+    expect(result.message ?? "").toContain("Unknown prompt loader: 'no/such-loader'")
+    expect(fixture.agent.calls.find((entry) => entry.event === "initialize")).toBeUndefined()
   })
 })
 
