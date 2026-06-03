@@ -1,9 +1,12 @@
 import { dirname, join, resolve } from "node:path"
 import { mkdir, readFile, rename } from "node:fs/promises"
 import { exists, copyDirectory } from "../system/process.js"
-import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
+import type { ActionContext, ActionResult, JsonObject, JsonValue } from "../core/types.js"
 import { isObject, objectInput, stringInput } from "../core/json.js"
 import { resolveActionPath } from "./expectations.js"
+import { OPENSPEC_TASK_PROMPT_LOADER_NAME } from "./openspec-task-prompt.js"
+
+const DEFAULT_OPENSPEC_ITEMS_PATH = "tasks"
 
 export async function openspecTasksAction(context: ActionContext): Promise<ActionResult> {
   const path = resolveActionPath(context, stringInput(context.with, "path"))
@@ -17,12 +20,13 @@ export async function openspecTasksAction(context: ActionContext): Promise<Actio
   const taskDefaults = objectInput(context.with, "task")
   const defaultUses = stringInput(taskDefaults, "uses") ?? "mohist/acp-agent"
   const defaultWith = objectInput(taskDefaults, "with")
+  const itemsPath = stringInput(context.with, "items") ?? DEFAULT_OPENSPEC_ITEMS_PATH
   const tasks = sourceTasks.flatMap((task) => {
     const id = stringInput(task, "id") ?? stringInput(task, "taskId")
     if (!id?.trim()) return []
     const title = stringInput(task, "title") ?? id
     const uses = stringInput(task, "uses") ?? defaultUses
-    const mergedWith = mergeTaskWith(defaultWith, task, context.variables)
+    const mergedWith = mergeTaskWith(defaultWith, task, id, { file: path, items: itemsPath }, context.variables)
     return [{ id, title, uses, with: mergedWith ? JSON.stringify(mergedWith) : null }]
   })
 
@@ -55,40 +59,49 @@ export async function archiveChangeAction(context: ActionContext): Promise<Actio
   return { status: "success", message: "Change archived", output: JSON.stringify({ kind: "archive-change", source: changeDir, destination }) }
 }
 
-function mergeTaskWith(defaultWith: JsonObject | undefined, task: JsonObject, variables?: JsonObject) {
+function mergeTaskWith(
+  defaultWith: JsonObject | undefined,
+  task: JsonObject,
+  taskId: string | undefined,
+  loaderConfig: { file: string; items: string },
+  variables?: JsonObject,
+) {
   const merged: JsonObject = { ...(defaultWith ?? {}) }
-  const title = stringInput(task, "title") ?? stringInput(task, "id") ?? stringInput(task, "taskId") ?? "OpenSpec task"
   const taskWith = objectInput(task, "with")
   if (taskWith) Object.assign(merged, taskWith)
-  if (!stringInput(merged, "prompt")?.trim()) {
-    merged.prompt = buildOpenSpecTaskPrompt(title, task, variables)
+  if (merged.prompt === undefined) {
+    merged.prompt = buildOpenSpecTaskPromptSpec(taskId, loaderConfig, variables)
+  } else {
+    merged.prompt = injectOpenSpecTaskPromptSelector(merged.prompt, taskId)
   }
   return Object.keys(merged).length === 0 ? null : merged
 }
 
-function buildOpenSpecTaskPrompt(title: string, task: JsonObject, variables?: JsonObject) {
-  const buildPrompt = resolveBuildPrompt(variables)
-  const taskSections = [
-    stringSection("Task Title", title),
-    stringSection("Description", stringInput(task, "description")),
-    valueSection("Acceptance Criteria", task.acceptanceCriteria),
-    valueSection("Depends On", task.dependsOn),
-    stringSection("Output", stringInput(task, "output")),
-    stringSection("Notes", stringInput(task, "notes")),
-  ].filter(Boolean)
+function injectOpenSpecTaskPromptSelector(prompt: JsonValue, taskId: string | undefined): JsonValue {
+  if (!isObject(prompt)) return prompt
+  if (prompt["uses"] !== OPENSPEC_TASK_PROMPT_LOADER_NAME) return prompt
+  const existingWith = objectInput(prompt, "with")
+  const nextWith: JsonObject = { ...(existingWith ?? {}) }
+  if (taskId?.trim()) nextWith["taskId"] = taskId
+  return { ...prompt, with: nextWith }
+}
 
-  if (buildPrompt) {
-    // Use the full build.md prompt as the base, appending task-specific details
-    return [buildPrompt, ...taskSections].join("\n\n")
+function buildOpenSpecTaskPromptSpec(
+  taskId: string | undefined,
+  loaderConfig: { file: string; items: string },
+  variables?: JsonObject,
+): JsonObject {
+  const loaderWith: JsonObject = {
+    file: loaderConfig.file,
+    items: loaderConfig.items,
   }
-
-  // Fallback to the simple prompt when no build.md is available
-  const sections = [
-    `Implement this OpenSpec task: ${title}`,
-    ...taskSections,
-    "Follow the repository conventions. Make the smallest complete change that satisfies the task, and run the relevant verification before reporting completion.",
-  ].filter(Boolean)
-  return sections.join("\n\n")
+  const base = resolveBuildPrompt(variables)
+  if (base !== undefined) loaderWith["base"] = base
+  if (taskId?.trim()) loaderWith["taskId"] = taskId
+  return {
+    uses: OPENSPEC_TASK_PROMPT_LOADER_NAME,
+    with: loaderWith,
+  }
 }
 
 function resolveBuildPrompt(variables?: JsonObject): string | undefined {
@@ -97,22 +110,6 @@ function resolveBuildPrompt(variables?: JsonObject): string | undefined {
   if (typeof prompts !== "object" || prompts === null || Array.isArray(prompts)) return undefined
   const build = (prompts as JsonObject)["build"]
   return typeof build === "string" ? build : undefined
-}
-
-function stringSection(title: string, value: string | undefined) {
-  return value?.trim() ? `## ${title}\n${value.trim()}` : ""
-}
-
-function valueSection(title: string, value: unknown) {
-  if (value === undefined || value === null) return ""
-  if (Array.isArray(value) && value.length === 0) return ""
-  return `## ${title}\n${formatValue(value)}`
-}
-
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) return value.map((item) => `- ${String(item)}`).join("\n")
-  if (typeof value === "object") return JSON.stringify(value, null, 2)
-  return String(value)
 }
 
 function resolveChangeDir(context: ActionContext) {

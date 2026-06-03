@@ -109,8 +109,15 @@ stages:
         with:
           path: ${{ openspecChangeDir }}/tasks.json
           task:
+            uses: mohist/acp-agent
             with:
               agent: ${{ vars.agent }}
+              prompt:
+                uses: mohist/openspec-task-prompt
+                with:
+                  file: ${{ openspecChangeDir }}/tasks.json
+                  items: tasks
+                  base: ${{ prompts.build }}
     checks:
       - name: health
         title: Health

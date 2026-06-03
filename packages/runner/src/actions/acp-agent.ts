@@ -4,6 +4,7 @@ import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from "@agentclie
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
 import type { ActionContext, ActionResult, JsonObject } from "../core/types.js"
 import { numberInput, objectInput, stringInput } from "../core/json.js"
+import { resolvePrompt, type PromptLoaderContext } from "../core/prompt.js"
 import { killProcess, runCommand, sanitizedEnvironment } from "../system/process.js"
 import { verifyExpectations } from "./expectations.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../runtime/acp-connection.js"
@@ -233,7 +234,9 @@ interface AcpSessionResult {
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
-  const prompt = buildPromptWithMohistContext(context, stringInput(context.with, "prompt") ?? buildFallbackPrompt(context))
+  const resolved = await resolveActionPrompt(context)
+  if (resolved.error) return { status: "failure", message: resolved.error }
+  const prompt = buildPromptWithMohistContext(context, resolved.prompt)
   if (!prompt?.trim()) return { status: "failure", message: "ACP agent requires 'prompt'" }
 
   const result = await runAcpWorkflowAgentSession(context, prompt)
@@ -323,6 +326,30 @@ function buildFallbackPrompt(context: ActionContext) {
     "Follow the repository conventions. Make the smallest complete change that satisfies the task, and run the relevant verification before reporting completion.",
   ].filter(Boolean)
   return sections.join("\n\n")
+}
+
+async function resolveActionPrompt(context: ActionContext): Promise<{ prompt?: string; error?: string }> {
+  const promptSpec = context.with?.["prompt"]
+  if (promptSpec === undefined || promptSpec === null) {
+    return { prompt: buildFallbackPrompt(context) }
+  }
+  try {
+    return { prompt: await resolvePrompt(promptSpec, buildPromptLoaderContext(context)) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function buildPromptLoaderContext(context: ActionContext): PromptLoaderContext {
+  return {
+    with: {},
+    variables: context.variables ?? {},
+    workDir: context.workDir,
+    workId: context.workId,
+    title: context.title ?? null,
+    stage: context.stage ?? null,
+    issueNumber: context.issueNumber ?? null,
+  }
 }
 
 function valueSection(title: string, value: unknown) {
