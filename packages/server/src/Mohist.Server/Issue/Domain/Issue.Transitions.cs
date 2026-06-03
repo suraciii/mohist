@@ -1,5 +1,3 @@
-using Mohist.Server.Project.Domain;
-
 namespace Mohist.Server.Issue.Domain;
 
 public static partial class IssueExtensions
@@ -14,7 +12,7 @@ public static partial class IssueExtensions
             string? body = null,
             string[]? labels = null,
             string priority = "p2",
-            RepositoryInfo? repository = null)
+            string? repositoryRef = null)
         {
             return new Issue
             {
@@ -25,7 +23,7 @@ public static partial class IssueExtensions
                 Body = body,
                 Labels = labels ?? [],
                 Priority = priority,
-                Repository = repository,
+                RepositoryRef = string.IsNullOrWhiteSpace(repositoryRef) ? null : repositoryRef,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
             };

@@ -41,5 +41,6 @@ public class IssueReadModel
     public IssuePrerequisiteSummary[] Prerequisites { get; set; } = [];
     public IssueStartEligibility StartEligibility { get; set; } = IssueStartEligibility.Ready();
     public RepositoryInfo? Repository { get; set; }
+    public IssueRepositoryProblem? RepositoryProblem { get; set; }
     public IssuePrimaryEpic? PrimaryEpic { get; set; }
 }

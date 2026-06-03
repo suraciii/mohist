@@ -2,6 +2,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
@@ -54,7 +55,7 @@ public static class IssueRoutes
             return ApiResults.Ok(list);
         });
 
-        issues.MapPost("/", async (CreateIssueRequest req, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPost("/", async (CreateIssueRequest req, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery, IssueRepositoryResolver repositoryResolver) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
@@ -65,13 +66,15 @@ public static class IssueRoutes
             var project = await projectsQuery.GetByIdAsync(pid);
             if (project is null) return ApiResults.NotFound("Project not found");
 
-            var repository = project.GetRepository(req.RepositoryName);
+            var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
+            if (resolution.HasProblem)
+                return ApiResults.BadRequest(resolution.Problem!.Message, IssueRepositoryResolutionHelpers.RepositoryProblemCodeToApiCode(resolution.Problem.Code));
 
             var counter = grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(pid));
             var number = await counter.NextAsync();
             var issueGrain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
-            await issueGrain.CreateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, repository);
-            var issue = await issuesQuery.GetAsync(pid, number);
+            await issueGrain.CreateAsync(pid, number, req.Title, req.Body, req.Labels, req.Priority, resolution.Repository!.Name);
+            var issue = await issuesQuery.GetAsync(pid, number, project);
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
 
@@ -244,8 +247,9 @@ public static class IssueRoutes
 
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError) return repoError;
 
-            var repoPath = issue.Repository?.Path ?? ".";
+            var repoPath = issue.Repository!.Path ?? IssueRepositoryResolutionHelpers.DefaultRepoPath;
             var projectName = issue.ProjectName ?? "project";
 
             var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
@@ -300,7 +304,12 @@ public static class IssueRoutes
                 var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, issue.Number));
                 try
                 {
-                    var repoPath = issue.Repository?.Path ?? ".";
+                    if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is not null)
+                    {
+                        cleanupFailed++;
+                        continue;
+                    }
+                    var repoPath = issue.Repository!.Path ?? IssueRepositoryResolutionHelpers.DefaultRepoPath;
                     var projectName = issue.ProjectName ?? "project";
                     await grain.ArchiveAsync();
                     var cleanup = await git.RemoveWorktreeAsync(repoPath, projectName, issue.Number);
@@ -387,18 +396,21 @@ public static class IssueRoutes
 
             var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue) is { } repoError) return repoError;
 
             var workflow = grains.GetGrain<IWorkflowGrain>(wrId);
             if (await workflow.HasIncompleteTaskWithUsesAsync("mohist/rebase"))
                 return ApiResults.Conflict("Rebase task is already pending", "rebase_already_pending");
 
-            var baseBranch = string.IsNullOrWhiteSpace(req?.BaseBranch) ? issue.Repository?.BaseBranch ?? "main" : req!.BaseBranch!;
+            var baseBranch = !string.IsNullOrWhiteSpace(req?.BaseBranch)
+                ? req!.BaseBranch!
+                : (string.IsNullOrWhiteSpace(issue.Repository!.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : issue.Repository.BaseBranch);
             var taskId = $"rebase-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             var task = new RuntimeTaskInput(
                 taskId,
                 $"Rebase onto {baseBranch}",
                 "mohist/rebase",
-                BuildRebaseTaskWith(baseBranch, req?.ConflictResolver),
+                BuildRebaseTaskWith(baseBranch, issue.Repository!, req?.ConflictResolver),
                 InvalidateChecks: true);
 
             var added = await workflow.AddTaskAsync(task);
@@ -669,11 +681,18 @@ public static class IssueRoutes
          return app;
     }
 
-    private static string BuildRebaseTaskWith(string baseBranch, RuntimeTaskRequest? conflictResolver)
+    private static string BuildRebaseTaskWith(string baseBranch, RepositoryInfo repository, RuntimeTaskRequest? conflictResolver)
     {
         var with = new Dictionary<string, object?>
         {
             ["baseBranch"] = baseBranch,
+            ["repository"] = new Dictionary<string, object?>
+            {
+                ["name"] = repository.Name,
+                ["path"] = repository.Path,
+                ["remote"] = repository.Remote,
+                ["baseBranch"] = repository.BaseBranch,
+            },
         };
 
         if (conflictResolver?.With is not null || conflictResolver?.Uses is not null)
