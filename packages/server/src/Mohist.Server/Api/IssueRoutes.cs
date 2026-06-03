@@ -4,14 +4,12 @@ using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Queries;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Projection;
-using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Workspace;
 using System.Text.Json;
@@ -24,6 +22,77 @@ public static class IssueRoutes
     public static WebApplication MapIssueRoutes(this WebApplication app)
     {
         var issues = app.MapGroup("/api/issues");
+        var projectIssues = app.MapGroup("/api/projects/{projectId}/issues");
+
+        projectIssues.MapGet("/{number:int}/workflow-profile", async (string projectId, int number, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var response = await BuildIssueWorkflowProfileResponseAsync(projectId, number, issueProfileManager, issuesQuery, projectsQuery);
+            return response is null ? ApiResults.NotFound($"Issue #{number} not found") : ApiResults.Ok(response);
+        });
+
+        projectIssues.MapPut("/{number:int}/workflow-profile/template", async (string projectId, int number, IssueTemplateRequest req, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var yaml = req.Yaml ?? req.Template;
+            if (!string.IsNullOrWhiteSpace(req.ProjectTemplateId) && !string.IsNullOrWhiteSpace(yaml))
+                return ApiResults.BadRequest("Specify either projectTemplateId or yaml, not both");
+            if (string.IsNullOrWhiteSpace(req.ProjectTemplateId) && string.IsNullOrWhiteSpace(yaml))
+                return ApiResults.BadRequest("Specify either projectTemplateId or yaml");
+
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            try
+            {
+                await issueProfileManager.UpdateTemplateAsync($"{projectId}:{number}", new IssueTemplateUpdateRequest(
+                    ProjectTemplateId: req.ProjectTemplateId,
+                    Template: yaml));
+            }
+            catch (YamlException ex)
+            {
+                return ApiResults.Fail("YAML syntax error: " + ex.Message, 400, "yaml_syntax");
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Fail("Workflow definition error: " + ex.Message, 400, "workflow_shape");
+            }
+
+            var response = await BuildIssueWorkflowProfileResponseAsync(projectId, number, issueProfileManager, issuesQuery, projectsQuery);
+            return ApiResults.Ok(response!);
+        });
+
+        projectIssues.MapDelete("/{number:int}/workflow-profile/template", async (string projectId, int number, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            await issueProfileManager.UpdateTemplateAsync($"{projectId}:{number}", new IssueTemplateUpdateRequest());
+            var response = await BuildIssueWorkflowProfileResponseAsync(projectId, number, issueProfileManager, issuesQuery, projectsQuery);
+            return ApiResults.Ok(response!);
+        });
+
+        projectIssues.MapGet("/{number:int}/workflow-profile/variables", async (string projectId, int number, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            return ApiResults.Ok(await issueProfileManager.GetVariablesAsync($"{projectId}:{number}"));
+        });
+
+        projectIssues.MapPut("/{number:int}/workflow-profile/variables", async (string projectId, int number, VariableBundle bundle, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            return ApiResults.Ok(await issueProfileManager.SetVariablesAsync($"{projectId}:{number}", bundle));
+        });
+
+        projectIssues.MapPatch("/{number:int}/workflow-profile/variables", async (string projectId, int number, VariableBundle patch, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        {
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync($"{projectId}:{number}", patch));
+        });
 
         issues.MapGet("/", async (
             string? projectId,
@@ -106,27 +175,6 @@ public static class IssueRoutes
             catch (InvalidOperationException)
             {
                 return ApiResults.NotFound($"Issue #{number} not found");
-            }
-        });
-
-        issues.MapPut("/{number:int}/workflow-profile", async (int number, string projectId, UpdateWorkflowProfileApiRequest req, IGrainFactory grains) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-
-            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
-            try
-            {
-                await grain.UpdateWorkflowProfileAsync(new WorkflowProfileUpdateRequest(req.ProfileId, req.DefinitionYaml));
-                return ApiResults.Ok(new { updated = true });
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
             }
         });
 
@@ -492,256 +540,6 @@ public static class IssueRoutes
             }
         });
 
-        // Stage-level variable overrides
-        issues.MapGet("/{number:int}/stage-variables", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var info = await issuesQuery.GetInfoAsync(pid, number);
-            if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
-            return ApiResults.Ok(new { stageVariables = info.StageVariables });
-        });
-
-        issues.MapPut("/{number:int}/stage-variables/{stage}", async (int number, string stage, SetStageVariablesRequest req, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-
-            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
-            try
-            {
-                var info = await issuesQuery.GetInfoAsync(pid, number);
-                if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-                await grain.UpdateFullAsync(new UpdateIssueData());
-                return ApiResults.Ok(new { stage, variables = req.Variables, note = "Stage variables are now managed via workflow profile" });
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
-        });
-
-        issues.MapDelete("/{number:int}/stage-variables/{stage}", async (int number, string stage, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-
-            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number));
-            try
-            {
-                var info = await issuesQuery.GetInfoAsync(pid, number);
-                if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-                await grain.UpdateFullAsync(new UpdateIssueData());
-                return ApiResults.Ok(new { stage, removed = true, note = "Stage variables are now managed via workflow profile" });
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
-        });
-
-        // Issue-scoped active workflow definition vars. Mohist does not expose workflow runs as standalone product resources.
-
-        // =======================================================================
-        // Issue Template
-        // =======================================================================
-
-        issues.MapPut("/{number:int}/template", async (int number, string projectId, IssueTemplateRequest req, IssueWorkflowProfileManager issueProfileManager, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var issueKey = $"{pid}:{number}";
-
-            if (string.IsNullOrWhiteSpace(req.ProjectTemplateId) && string.IsNullOrWhiteSpace(req.Template))
-                return ApiResults.BadRequest("Specify either projectTemplateId or template YAML");
-
-            try
-            {
-                var row = await issueProfileManager.UpdateTemplateAsync(issueKey, new IssueTemplateUpdateRequest(
-                    ProjectTemplateId: req.ProjectTemplateId,
-                    Template: req.Template));
-                return ApiResults.Ok(new
-                {
-                    issueKey,
-                    sourceTemplateId = row.SourceTemplateId,
-                    hasCustomTemplate = !string.IsNullOrWhiteSpace(row.TemplateJson)
-                });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
-        });
-
-        // =======================================================================
-        // Issue Variables (GET / PUT / PATCH)
-        // =======================================================================
-
-        issues.MapGet("/{number:int}/variables", async (int number, string projectId, IssueWorkflowProfileManager issueProfileManager) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var issueKey = $"{pid}:{number}";
-            var variables = await issueProfileManager.GetVariablesAsync(issueKey);
-            return ApiResults.Ok(variables);
-        });
-
-        issues.MapPut("/{number:int}/variables", async (int number, string projectId, VariableBundle bundle, IssueWorkflowProfileManager issueProfileManager) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var issueKey = $"{pid}:{number}";
-            var result = await issueProfileManager.SetVariablesAsync(issueKey, bundle);
-            return ApiResults.Ok(result);
-        });
-
-        issues.MapPatch("/{number:int}/variables", async (int number, string projectId, VariableBundle patch, IssueWorkflowProfileManager issueProfileManager) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var issueKey = $"{pid}:{number}";
-            var result = await issueProfileManager.PatchVariablesAsync(issueKey, patch);
-            return ApiResults.Ok(result);
-        });
-        issues.MapGet("/{number:int}/workflow/yaml", async (int number, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
-
-            var yaml = await reader.GetDefinitionYamlAsync(wrId);
-            return yaml is null
-                ? ApiResults.NotFound("Workflow definition not found")
-                : ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, yaml });
-        });
-
-        issues.MapGet("/{number:int}/workflow/vars", async (int number, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
-
-            var snapshot = await reader.GetVariablesAsync(wrId);
-            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, vars = SectionValue(snapshot?.Variables, "vars") });
-        });
-
-        issues.MapGet("/{number:int}/workflow/vars/{name}", async (int number, string name, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
-
-            var snapshot = await reader.GetVariablesAsync(wrId);
-            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, name, value = VarValue(snapshot?.Variables, name) });
-        });
-
-        issues.MapPatch("/{number:int}/workflow/vars/{name}", async (int number, string name, JsonElement patch, string projectId, IGrainFactory grains, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
-
-            await grains.GetGrain<IWorkflowGrain>(wrId).PatchVariablesAsync("vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
-            var snapshot = await reader.GetVariablesAsync(wrId);
-            return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
-        });
-
-        issues.MapGet("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, string projectId, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
-
-            var snapshot = await reader.GetVariablesAsync(wrId);
-            return ApiResults.Ok(new { issueNumber = number, workflowRunId = wrId, stage, name, value = StageVarValue(snapshot?.StageVariables, stage, name) });
-        });
-
-        issues.MapPatch("/{number:int}/workflow/stages/{stage}/vars/{name}", async (int number, string stage, string name, JsonElement patch, string projectId, IGrainFactory grains, WorkflowQueryService reader, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            if (wrId is null) return ApiResults.Conflict("Issue has no active workflow", "no_active_workflow");
-
-            await grains.GetGrain<IWorkflowGrain>(wrId).PatchStageVariablesAsync(stage, "vars", JsonSerializer.Serialize(new Dictionary<string, JsonElement> { [name] = patch }));
-            var snapshot = await reader.GetVariablesAsync(wrId);
-            return ApiResults.Ok(WorkflowVarsResponse(number, wrId, snapshot));
-        });
-
-         issues.MapGet("/{number:int}/workflow/profile/yaml", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-
-            var info = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
-            if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-            var key = $"{pid}:{number}";
-            var profileRow = await issuesQuery.LoadIssueProfileAsync(key);
-            var profile = profileRow is null ? null : IssueWorkflowProfileSnapshot.Deserialize(profileRow.StateJson);
-
-            string? yaml = null;
-            if (profile is not null)
-            {
-                yaml = WorkflowYamlSerializer.ToYaml(profile.Definition);
-            }
-
-            return ApiResults.Ok(new IssueWorkflowProfileYamlResponse(
-                number,
-                pid,
-                yaml,
-                info.WorkflowRunId,
-                profile?.SourceProfileId ?? IssueWorkflowProfiles.DefaultId,
-                profile?.UpdateMode.ToString() ?? "reference",
-                info.UpdatedAt));
-        });
-
-        issues.MapPut("/{number:int}/workflow/profile/yaml", async (int number, string projectId, UpdateIssueWorkflowProfileYamlRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery, IssueWorkflowProfileManager issueProfileManager) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-
-            var info = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
-            if (info is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-            Workflow.Domain.Definition.WorkflowDefinition definition;
-            try
-            {
-                definition = WorkflowYamlSerializer.FromYaml(req.Yaml);
-            }
-            catch (YamlException ex)
-            {
-                return ApiResults.Fail("YAML syntax error: " + ex.Message, 400, "yaml_syntax");
-            }
-            catch (InvalidOperationException ex)
-            {
-                return ApiResults.Fail("Workflow definition error: " + ex.Message, 400, "workflow_shape");
-            }
-
-            var normalizedYaml = WorkflowYamlSerializer.ToYaml(definition);
-            var key = $"{pid}:{number}";
-
-            await grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number))
-                .UpdateWorkflowProfileAsync(new WorkflowProfileUpdateRequest(DefinitionYaml: normalizedYaml));
-            await issueProfileManager.UpdateTemplateAsync(key, new IssueTemplateUpdateRequest(Template: normalizedYaml));
-
-            var updatedInfo = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
-            if (updatedInfo is null) return ApiResults.NotFound($"Issue #{number} not found");
-
-            var updatedProfileRow = await issuesQuery.LoadIssueProfileAsync(key);
-            var updatedProfile = updatedProfileRow is null ? null : IssueWorkflowProfileSnapshot.Deserialize(updatedProfileRow.StateJson);
-
-            return ApiResults.Ok(new IssueWorkflowProfileYamlResponse(
-                number,
-                pid,
-                normalizedYaml,
-                updatedInfo.WorkflowRunId,
-                updatedProfile?.SourceProfileId ?? IssueWorkflowProfiles.DefaultId,
-                updatedProfile?.UpdateMode.ToString() ?? "reference",
-                updatedInfo.UpdatedAt));
-        });
-
          return app;
     }
 
@@ -779,75 +577,36 @@ public static class IssueRoutes
         return JsonSerializer.Serialize(with, WorkflowVariableJson.Options);
     }
 
-    private static object WorkflowVarsResponse(int issueNumber, string workflowRunId, WorkflowVariablesView? snapshot) => new
+    private static async Task<IssueWorkflowProfileResponse?> BuildIssueWorkflowProfileResponseAsync(
+        string projectId,
+        int number,
+        IssueWorkflowProfileManager issueProfileManager,
+        IssueQueryService issuesQuery,
+        ProjectQueryService projectsQuery)
     {
-        issueNumber,
-        workflowRunId,
-        affected = "future-dispatches",
-        vars = SectionValue(snapshot?.Variables, "vars"),
-        stageVars = StageVarsValues(snapshot?.StageVariables),
-    };
+        var info = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+        if (info is null) return null;
 
-    private static JsonElement? SectionValue(string? variables, string section)
-    {
-        if (string.IsNullOrWhiteSpace(variables)) return null;
-        using var document = JsonDocument.Parse(variables);
-        return document.RootElement.ValueKind == JsonValueKind.Object
-            && document.RootElement.TryGetProperty(section, out var value)
-            ? value.Clone()
-            : null;
-    }
+        var issueKey = $"{projectId}:{number}";
+        var state = await issueProfileManager.GetStateAsync(issueKey);
+        var variables = state.Variables;
+        var template = state.Template;
+        var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
+        var profileId = template?.Id ?? state.SourceTemplateId ?? "mohist/default";
+        var updateMode = template is not null ? "Custom" : "Reference";
 
-    private static JsonElement? VarValue(string? variables, string name)
-    {
-        var vars = SectionValue(variables, "vars");
-        return vars is { ValueKind: JsonValueKind.Object }
-            && vars.Value.TryGetProperty(name, out var value)
-            ? value.Clone()
-            : null;
-    }
-
-    private static JsonElement? StageSectionValue(Dictionary<string, Dictionary<string, string>>? stageVariables, string stage, string section) =>
-        stageVariables is not null
-        && stageVariables.TryGetValue(stage, out var sections)
-        && sections.TryGetValue(section, out var value)
-            ? JsonValue(value)
-            : null;
-
-    private static JsonElement? StageVarValue(Dictionary<string, Dictionary<string, string>>? stageVariables, string stage, string name)
-    {
-        var vars = StageSectionValue(stageVariables, stage, "vars");
-        return vars is { ValueKind: JsonValueKind.Object }
-            && vars.Value.TryGetProperty(name, out var value)
-            ? value.Clone()
-            : null;
-    }
-
-    private static JsonElement? JsonValue(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        using var document = JsonDocument.Parse(json);
-        return document.RootElement.Clone();
-    }
-
-    private static Dictionary<string, Dictionary<string, JsonElement?>>? StageVariableValues(Dictionary<string, Dictionary<string, string>>? stageVariables)
-    {
-        if (stageVariables is null || stageVariables.Count == 0) return null;
-
-        return stageVariables.ToDictionary(
-            stage => stage.Key,
-            stage => stage.Value.ToDictionary(section => section.Key, section => JsonValue(section.Value), StringComparer.Ordinal),
-            StringComparer.OrdinalIgnoreCase);
-    }
-
-    private static Dictionary<string, JsonElement?>? StageVarsValues(Dictionary<string, Dictionary<string, string>>? stageVariables)
-    {
-        if (stageVariables is null || stageVariables.Count == 0) return null;
-
-        return stageVariables
-            .Select(stage => (stage.Key, Vars: StageSectionValue(stageVariables, stage.Key, "vars")))
-            .Where(stage => stage.Vars is not null)
-            .ToDictionary(stage => stage.Key, stage => stage.Vars, StringComparer.OrdinalIgnoreCase);
+        return new IssueWorkflowProfileResponse(
+            IssueNumber: number,
+            ProjectId: projectId,
+            IssueKey: issueKey,
+            SourceTemplateId: state.SourceTemplateId,
+            HasCustomTemplate: state.HasCustomTemplate,
+            Yaml: yaml,
+            WorkflowRunId: info.WorkflowRunId,
+            ProfileId: profileId,
+            UpdateMode: updateMode,
+            Variables: variables,
+            UpdatedAt: state.UpdatedAt?.ToString("O") ?? info.UpdatedAt);
     }
 
     private static Dictionary<string, object?> DefaultConflictResolverWith() => new()
@@ -878,8 +637,6 @@ public record UpdateIssueRequest(
     Dictionary<string, string>? StageModels = null,
     Dictionary<string, Dictionary<string, string>>? StageVariables = null);
 
-public record SetStageVariablesRequest(Dictionary<string, string> Variables);
-
 public record RejectRequest(string? Reason);
 
 public sealed record RebaseRequest(string? BaseBranch = null, RuntimeTaskRequest? ConflictResolver = null);
@@ -894,28 +651,17 @@ public record AddPrerequisiteRequest(int PrerequisiteNumber);
 
 public record AddCommentRequest(string Body);
 
-public record UpdateWorkflowProfileApiRequest(
-    string? ProfileId = null,
-    string? DefinitionYaml = null);
+public record IssueTemplateRequest(string? ProjectTemplateId = null, string? Yaml = null, string? Template = null);
 
-public record UpdateIssueWorkflowProfileYamlRequest(string Yaml);
-public record IssueTemplateRequest(string? ProjectTemplateId = null, string? Template = null);
-
-public sealed record IssueWorkflowProfileYamlResponse(
+public sealed record IssueWorkflowProfileResponse(
     int IssueNumber,
     string ProjectId,
+    string IssueKey,
+    string? SourceTemplateId,
+    bool HasCustomTemplate,
     string? Yaml,
     string? WorkflowRunId,
     string ProfileId,
     string UpdateMode,
+    VariableBundle Variables,
     string UpdatedAt);
-
-public record ValidationError(string Code, string Message)
-{
-    public ApiResponse<object> ToApiResponse() => new(false, Error: Message, Code: Code);
-}
-
-public static class IssueWorkflowProfiles
-{
-    public const string DefaultId = "mohist/default";
-}

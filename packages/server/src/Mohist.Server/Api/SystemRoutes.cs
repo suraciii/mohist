@@ -1,4 +1,5 @@
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Infrastructure;
 
 namespace Mohist.Server.Api;
@@ -10,8 +11,27 @@ public static class SystemRoutes
         app.MapGet("/api/system/info", async (SystemInfoService systemInfo, CancellationToken ct) =>
             ApiResults.Ok(await systemInfo.GetSystemInfoAsync()));
 
-        app.MapGet("/api/system/templates", async (ProjectWorkflowProfileManager profileManager) =>
+        app.MapGet("/api/workflow-templates/system", async (ProjectWorkflowProfileManager profileManager) =>
             ApiResults.Ok(await profileManager.ListSystemTemplatesAsync()));
+
+        app.MapGet("/api/workflow-templates/system/{*id}", (string id) =>
+        {
+            var definition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(id);
+            if (definition is null)
+                return ApiResults.NotFound($"Workflow template '{id}' not found");
+
+            return ApiResults.Ok(new SystemWorkflowTemplateDetail(
+                id,
+                "Mohist Default",
+                "Plan, build, check, and integrate an issue using OpenSpec artifacts.",
+                true,
+                WorkflowYamlSerializer.ToYaml(definition),
+                definition.Stages.Select(s => new SystemWorkflowTemplateStageSummary(
+                    s.Stage,
+                    s.RequiresApproval,
+                    s.Tasks.Select(t => t.Id).ToList(),
+                    s.Checks.Select(c => c.Name).ToList())).ToList()));
+        });
 
         app.MapPost("/api/system/update", async (SystemUpdateRequest? request, SystemUpdateService updates, CancellationToken ct) =>
         {
@@ -38,3 +58,17 @@ public static class SystemRoutes
         return app;
     }
 }
+
+public sealed record SystemWorkflowTemplateDetail(
+    string Id,
+    string DisplayName,
+    string Description,
+    bool IsDefault,
+    string Yaml,
+    List<SystemWorkflowTemplateStageSummary> Stages);
+
+public sealed record SystemWorkflowTemplateStageSummary(
+    string Stage,
+    bool RequiresApproval,
+    List<string> Tasks,
+    List<string> Checks);

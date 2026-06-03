@@ -46,7 +46,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-get-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for profile get", projectId = project.Id });
 
-        var response = await _client.GetAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}");
+        var response = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -71,7 +71,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                     title: Custom Task
                 checks: []
             """;
-        var saveResponse = await _client.PutAsJsonAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+        var saveResponse = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
 
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
         var saved = await saveResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -83,20 +83,12 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.Equal("Custom", savedData.GetProperty("updateMode").GetString());
         Assert.Equal("custom-issue-workflow", savedData.GetProperty("profileId").GetString());
 
-        var projectProfilesResponse = await _client.GetAsync("/api/workflow-profiles");
+        var projectProfilesResponse = await _client.GetAsync("/api/workflow-templates/system");
         var projectProfilesJson = await projectProfilesResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectProfilesData = projectProfilesJson.GetProperty("data");
-        var projectProfiles = projectProfilesData.EnumerateArray()
-            .Select(p => new WorkflowProfileDto(
-                p.GetProperty("id").GetString()!,
-                p.GetProperty("displayName").GetString()!,
-                p.GetProperty("description").GetString()!,
-                p.GetProperty("isDefault").GetBoolean()))
-            .ToList();
-        var defaultProfile = projectProfiles?.FirstOrDefault(p => p.Id == "mohist/default");
-        Assert.NotNull(defaultProfile);
+        Assert.Contains(projectProfilesData.EnumerateArray(), p => p.GetProperty("id").GetString() == "mohist/default");
 
-        var getResponse = await _client.GetAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}");
+        var getResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var reloaded = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
         var reloadedData = reloaded.GetProperty("data");
         var reloadedYaml = reloadedData.GetProperty("yaml").GetString();
@@ -122,14 +114,14 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                     uses: spec/task
             invalid yaml structure here: [unclosed
             """;
-        var response = await _client.PutAsJsonAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = invalidYaml });
+        var response = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = invalidYaml });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("yaml_syntax", payload.GetProperty("code").GetString());
         Assert.Contains("YAML", payload.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
 
-        var getResponse = await _client.GetAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}");
+        var getResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var state = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
         var stateData = state.GetProperty("data");
         var yaml = stateData.GetProperty("yaml").GetString();
@@ -146,14 +138,14 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
             id: no-stages-workflow
             stages: []
             """;
-        var response = await _client.PutAsJsonAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = invalidShapeYaml });
+        var response = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = invalidShapeYaml });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("workflow_shape", payload.GetProperty("code").GetString());
         Assert.Contains("stage", payload.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
 
-        var getResponse = await _client.GetAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}");
+        var getResponse = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         var state = await getResponse.Content.ReadFromJsonAsync<JsonElement>();
         var stateData = state.GetProperty("data");
         Assert.Equal("Reference", stateData.GetProperty("updateMode").GetString());
@@ -196,7 +188,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                     title: New Build Check
                     uses: mohist/check-typecheck
             """;
-        var saveResponse = await _client.PutAsJsonAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+        var saveResponse = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
 
         var saved = await saveResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -211,7 +203,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         Assert.DoesNotContain(planStageAfterSave.Tasks, t => t.Id == "replacement-plan-task");
         Assert.DoesNotContain(planStageAfterSave.Checks, c => c.Name == "replacement-plan-check");
 
-        var updatedRunYamlResponse = await _client.GetAsync($"/api/issues/{issue.Number}/workflow/yaml?projectId={project.Id}");
+        var activeIssue = await _client.GetDataAsync<IssueWithWorkflowDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        Assert.False(string.IsNullOrWhiteSpace(activeIssue.WorkflowRunId));
+        var updatedRunYamlResponse = await _client.GetAsync($"/api/workflow-runs/{activeIssue.WorkflowRunId}/yaml");
         updatedRunYamlResponse.EnsureSuccessStatusCode();
         var updatedRunYaml = await updatedRunYamlResponse.Content.ReadFromJsonAsync<JsonElement>();
         var updatedRunData = updatedRunYaml.GetProperty("data");
@@ -251,7 +245,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
                     title: Build Definition Check
                     uses: mohist/check-typecheck
             """;
-        var saveResponse = await _client.PutAsJsonAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+        var saveResponse = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
@@ -380,7 +374,6 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     private sealed record ProjectDto(string Id);
     private sealed record IssueDto(int Number, string Id);
     private sealed record IssueWithWorkflowDto(int Number, string Id, string? WorkflowRunId);
-    private sealed record WorkflowProfileDto(string Id, string DisplayName, string Description, bool IsDefault);
     private sealed record IssueWorkflowEnvelopeDto(WorkflowStatusDto? Workflow);
     private sealed record WorkflowStatusDto(string Status, string? CurrentStage);
     private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);

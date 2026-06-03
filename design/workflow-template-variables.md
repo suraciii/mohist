@@ -162,20 +162,42 @@ project_templates              ProjectId, TemplateId, Template
 
 issue_workflow_profile         SourceTemplateId, Template, Variables
 
-workflow_profile               Template, Variables
-                               ProjectId, IssueId
+workflow_profile               WorkflowRunId, ProjectId, IssueKey
+                               Variables (rare runtime overrides)
 ```
 
 ## Write API
 
 ```text
-系统模板:           GET  /system/templates
-项目模板:           CRUD /projects/:id/templates[/:tid]
-                    PUT  /projects/:id/default-template
-项目变量:           PUT/PATCH /projects/:id/variables
-Issue:              PUT  /issues/:id/template
-                    PUT/PATCH /issues/:id/variables
-Run:                PUT/PATCH /workflow/:wrId/variables
+系统模板:           GET    /workflow-templates/system
+
+项目模板:           GET    /projects/:projectId/workflow-templates
+                    POST   /projects/:projectId/workflow-templates
+                    GET    /projects/:projectId/workflow-templates/:templateId
+                    PUT    /projects/:projectId/workflow-templates/:templateId
+                    DELETE /projects/:projectId/workflow-templates/:templateId
+
+项目 Profile:       GET    /projects/:projectId/workflow-profile
+                    PUT    /projects/:projectId/workflow-profile/default-template
+                    DELETE /projects/:projectId/workflow-profile/default-template
+                    GET    /projects/:projectId/workflow-profile/variables
+                    PUT    /projects/:projectId/workflow-profile/variables
+                    PATCH  /projects/:projectId/workflow-profile/variables
+
+Issue Profile:      GET    /projects/:projectId/issues/:number/workflow-profile
+                    PUT    /projects/:projectId/issues/:number/workflow-profile/template
+                    DELETE /projects/:projectId/issues/:number/workflow-profile/template
+                    GET    /projects/:projectId/issues/:number/workflow-profile/variables
+                    PUT    /projects/:projectId/issues/:number/workflow-profile/variables
+                    PATCH  /projects/:projectId/issues/:number/workflow-profile/variables
+
+Run:                GET    /workflow-runs/:workflowRunId/yaml
+                    GET    /workflow-runs/:workflowRunId/variables/effective
+                    GET    /workflow-runs/:workflowRunId/variable-overrides
+                    PATCH  /workflow-runs/:workflowRunId/variable-overrides
+                    DELETE /workflow-runs/:workflowRunId/variable-overrides
 ```
 
-前端 "Install" → `GET /system/templates` → 选一个 → `POST /projects/:id/templates { yaml }`
+前端 "Install" → `GET /workflow-templates/system` → 选一个 → `POST /projects/:projectId/workflow-templates { yaml }`
+
+普通用户调整变量时更新 project/issue workflow profile。workflow run variable-overrides 仅用于调试或少数运行时干预场景。

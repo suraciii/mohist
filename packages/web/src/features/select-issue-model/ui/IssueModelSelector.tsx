@@ -134,6 +134,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async (modelId: string) => {
       try {
         if (currentWorkflowRunId) {
+          if (!projectId) throw new Error('Project is required')
           await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { type: 'opencode', model: modelId }, projectId)
           setLocalWorkflowModel(modelId)
         } else {
@@ -154,6 +155,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
     async () => {
       try {
         if (currentWorkflowRunId) {
+          if (!projectId) throw new Error('Project is required')
           await patchIssueWorkflowDefinitionVar(issueNumber, 'agent', { model: null }, projectId)
           setLocalWorkflowModel(null)
         } else {
@@ -176,6 +178,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
       try {
         const updated = { ...localStageModels, [stage]: modelId }
         if (currentWorkflowRunId) {
+          if (!projectId) throw new Error('Project is required')
           await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { type: 'opencode', model: modelId }, projectId)
         } else {
           await updateIssue(issueNumber, { stageModels: updated }, projectId)
@@ -196,6 +199,7 @@ export function IssueModelSelector({ issueNumber, currentWorkflowRunId, currentM
         const updated = { ...localStageModels }
         delete updated[stage]
         if (currentWorkflowRunId) {
+          if (!projectId) throw new Error('Project is required')
           await patchIssueWorkflowStageDefinitionVar(issueNumber, stage, 'agent', { model: null }, projectId)
         } else {
           const stageModelsValue = Object.keys(updated).length > 0 ? updated : null

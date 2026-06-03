@@ -1,4 +1,7 @@
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Queries;
 
 namespace Mohist.Server.Api;
 
@@ -6,7 +9,55 @@ public static class WorkflowRoutes
 {
     public static WebApplication MapWorkflowTaskRoutes(this WebApplication app)
     {
-        app.MapPost("/api/workflows/{workflowRunId}/tasks", async (
+        app.MapGet("/api/workflow-runs/{workflowRunId}/yaml", async (
+            string workflowRunId,
+            WorkflowQueryService reader) =>
+        {
+            var yaml = await reader.GetDefinitionYamlAsync(workflowRunId);
+            return yaml is null
+                ? ApiResults.NotFound("Workflow definition not found")
+                : ApiResults.Ok(new { workflowRunId, yaml });
+        });
+
+        app.MapGet("/api/workflow-runs/{workflowRunId}/variables/effective", async (
+            string workflowRunId,
+            WorkflowQueryService reader,
+            WorkflowProfileManager profileManager) =>
+        {
+            var snapshot = await reader.GetVariablesAsync(workflowRunId);
+            var merged = await profileManager.LoadVariablesAsync(workflowRunId);
+            return ApiResults.Ok(new
+            {
+                workflowRunId,
+                variables = snapshot?.Variables,
+                stageVariables = snapshot?.StageVariables,
+                profileVariables = merged,
+            });
+        });
+
+        app.MapGet("/api/workflow-runs/{workflowRunId}/variable-overrides", async (
+            string workflowRunId,
+            WorkflowProfileManager profileManager) =>
+        {
+            return ApiResults.Ok(await profileManager.GetRunVariablesAsync(workflowRunId));
+        });
+
+        app.MapPatch("/api/workflow-runs/{workflowRunId}/variable-overrides", async (
+            string workflowRunId,
+            VariableBundle patch,
+            WorkflowProfileManager profileManager) =>
+        {
+            return ApiResults.Ok(await profileManager.PatchRunVariablesAsync(workflowRunId, patch));
+        });
+
+        app.MapDelete("/api/workflow-runs/{workflowRunId}/variable-overrides", async (
+            string workflowRunId,
+            WorkflowProfileManager profileManager) =>
+        {
+            return ApiResults.Ok(await profileManager.ClearRunVariablesAsync(workflowRunId));
+        });
+
+        app.MapPost("/api/workflow-runs/{workflowRunId}/tasks", async (
             string workflowRunId,
             AddTaskRequestDto request,
             IGrainFactory grains) =>
@@ -28,7 +79,7 @@ public static class WorkflowRoutes
             return ApiResults.Ok(new { result.WorkflowRunId, result.Stage, result.TaskId });
         });
 
-        app.MapPost("/api/workflow/{workflowRunId}/tasks", async (
+        app.MapPost("/api/workflow-runs/{workflowRunId}/tasks/batch", async (
             string workflowRunId,
             AddTasksRequestDto request,
             IGrainFactory grains) =>

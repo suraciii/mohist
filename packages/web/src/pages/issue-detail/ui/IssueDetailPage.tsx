@@ -146,9 +146,9 @@ function formatStageName(stage: string | null | undefined): string {
     .join(' ')
 }
 
-function WorkflowYamlDialog({ issueNumber }: { issueNumber: number }) {
+function WorkflowYamlDialog({ workflowRunId }: { workflowRunId: string }) {
   const [open, setOpen] = useState(false)
-  const { data, isLoading } = useWorkflowYaml(issueNumber, open)
+  const { data, isLoading } = useWorkflowYaml(workflowRunId, open)
 
   return (
     <>
@@ -561,7 +561,7 @@ export function IssueDetailPage() {
               )}
 
               {issue.workflowRunId && (
-                <WorkflowYamlDialog issueNumber={issueNumber} />
+                <WorkflowYamlDialog workflowRunId={issue.workflowRunId} />
               )}
 
               {diffData?.available === true && (

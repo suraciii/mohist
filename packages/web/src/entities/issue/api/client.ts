@@ -92,41 +92,41 @@ export function getLabels() {
   return request<string[]>('/labels')
 }
 
-export function getWorkflowYaml(number: number, projectId?: string | null) {
-  return request<{ issueNumber: number; workflowRunId: string; yaml: string }>(`/issues/${number}/workflow/yaml`, withProject(undefined, projectId))
+export function getWorkflowYaml(workflowRunId: string) {
+  return request<{ workflowRunId: string; yaml: string }>(`/workflow-runs/${encodeURIComponent(workflowRunId)}/yaml`)
 }
 
-export function getIssueWorkflowProfileYaml(number: number, projectId?: string | null) {
-  return request<IssueWorkflowProfileYamlResponse>(`/issues/${number}/workflow/profile/yaml`, withProject(undefined, projectId))
+export function getIssueWorkflowProfileYaml(number: number, projectId: string) {
+  return request<IssueWorkflowProfileYamlResponse>(`/projects/${encodeURIComponent(projectId)}/issues/${number}/workflow-profile`)
 }
 
-export function updateIssueWorkflowProfileYaml(number: number, yaml: string, projectId?: string | null) {
-  return request<IssueWorkflowProfileYamlResponse>(`/issues/${number}/workflow/profile/yaml`, withProject({
+export function updateIssueWorkflowProfileYaml(number: number, yaml: string, projectId: string) {
+  return request<IssueWorkflowProfileYamlResponse>(`/projects/${encodeURIComponent(projectId)}/issues/${number}/workflow-profile/template`, {
     method: 'PUT',
     body: JSON.stringify({ yaml }),
-  }, projectId))
+  })
 }
 
 export function getWorkflowTimeline(number: number, projectId?: string | null) {
   return request<WorkflowTimeline>(`/issues/${number}/workflow/timeline`, withProject(undefined, projectId))
 }
 
-export function getIssueWorkflowDefinitionVar(number: number, name: string, projectId?: string | null) {
-  return request<{ issueNumber: number; workflowRunId: string; name: string; value: unknown }>(`/issues/${number}/workflow/vars/${encodeURIComponent(name)}`, withProject(undefined, projectId))
+export function getIssueWorkflowDefinitionVar(number: number, _name: string, projectId: string) {
+  return request<unknown>(`/projects/${encodeURIComponent(projectId)}/issues/${number}/workflow-profile/variables`)
 }
 
-export function patchIssueWorkflowDefinitionVar(number: number, name: string, value: unknown, projectId?: string | null) {
-  return request<{ issueNumber: number; workflowRunId: string; affected: string; vars: Record<string, unknown>; stageVars?: Record<string, unknown> | null }>(`/issues/${number}/workflow/vars/${encodeURIComponent(name)}`, withProject({
+export function patchIssueWorkflowDefinitionVar(number: number, name: string, value: unknown, projectId: string) {
+  return request<unknown>(`/projects/${encodeURIComponent(projectId)}/issues/${number}/workflow-profile/variables`, {
     method: 'PATCH',
-    body: JSON.stringify(value),
-  }, projectId))
+    body: JSON.stringify({ vars: { [name]: value } }),
+  })
 }
 
-export function patchIssueWorkflowStageDefinitionVar(number: number, stage: string, name: string, value: unknown, projectId?: string | null) {
-  return request<{ issueNumber: number; workflowRunId: string; affected: string; vars: Record<string, unknown>; stageVars?: Record<string, unknown> | null }>(`/issues/${number}/workflow/stages/${encodeURIComponent(stage)}/vars/${encodeURIComponent(name)}`, withProject({
+export function patchIssueWorkflowStageDefinitionVar(number: number, stage: string, name: string, value: unknown, projectId: string) {
+  return request<unknown>(`/projects/${encodeURIComponent(projectId)}/issues/${number}/workflow-profile/variables`, {
     method: 'PATCH',
-    body: JSON.stringify(value),
-  }, projectId))
+    body: JSON.stringify({ stages: { [stage]: { vars: { [name]: value } } } }),
+  })
 }
 
 export async function rebaseIssue(number: number, projectId?: string | null) {
