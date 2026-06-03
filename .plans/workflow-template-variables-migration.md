@@ -136,6 +136,15 @@ API:
 ## 进度跟踪
 
 - [x] Step 1: VariableBundle 核心类型 ✅ (17/17 VariableBundleSpecs 通过)
-- [x] Step 2: DB Schema ✅ (4 新表 + EF migration, 3/3 DatabaseInitializationSpecs 通过)
-- [ ] Step 3: WorkflowProfileManager
-- [ ] Step 4-13: 后续会话
+- [x] Step 2: DB Schema (新表) ✅ (4 新表 + EF migration, 3/3 DatabaseInitializationSpecs 通过)
+- [x] Step 3: WorkflowProfileManager ✅ (13/13 WorkflowProfileManagerSpecs 通过)
+- [x] Step 4: ProjectWorkflowProfileManager ✅ (17/17 ProjectWorkflowProfileManagerSpecs 通过)
+- [x] Step 5: IssueWorkflowProfileManager ✅ (10/10 IssueWorkflowProfileManagerSpecs 通过)
+- [x] Step 6: DI Registration ✅ (WorkflowProfileManager + Project + Issue 都已注册)
+- [ ] Step 7: WorkflowGrain Dispatch 切换 (关键切换点)
+- [ ] Step 8: IssueGrain 启动流程改造
+- [ ] Step 9: API 层改造
+- [ ] Step 10: Runner 侧确认
+- [ ] Step 11: 数据迁移工具 (可选)
+- [ ] Step 12: 删除旧代码
+- [ ] Step 13: 删除旧表
