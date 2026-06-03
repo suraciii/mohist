@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain;
@@ -9,10 +10,10 @@ namespace Mohist.Server.Workflow.Infrastructure;
 
 /// <summary>
 /// Workflow 数据唯一读入口。
-/// 
+///
 /// LoadTemplate: 选定生效模板 (snapshot > issue custom > issue-ref-template > project default)
 /// LoadVariables: 合并 3 层独立变量 (project + issue + workflow-run)
-/// ExpandTaskWith: 展开 task.with 中的 ${{ }} 模板表达式
+/// ExpandTaskWith: 处理 task.with (保留 ${{ }} 给 runner 展开, 对象 deep merge)
 /// </summary>
 public class WorkflowProfileManager
 {
@@ -80,47 +81,90 @@ public class WorkflowProfileManager
 
     /// <summary>
     /// 合并 3 层独立变量 (project + issue + workflow-run)。
-    /// 优先级: workflow-run > issue > project (深合并, 后者覆盖前者)。
+    /// 
+    /// 重要: 此方法只合并 project + issue 两层; workflow-run 层 (legacy StageVariables + 运行时
+    /// 补丁) 由 WorkflowGrain.MakeDispatchAsync 按以下 legacy 顺序单独应用:
+    ///   1. _variables.Json["vars"] (模板初始值)
+    ///   2. _variables.StageVariables[stage] (workflow 阶段补丁, 较早)
+    ///   3. combinedVars.Vars (project+issue 全局)
+    ///   4. combinedVars.Stages[stage] (project+issue 阶段)
+    ///   5. dispatch scope 注入
+    /// 
+    /// 这样保证 legacy 顺序: project stage > workflow-run stage。
+    /// 
+    /// 兼容: 当新表 (project_workflow_profile.Variables / issue_workflow_profile.Variables) 为空时,
+    /// 回退读取旧表 (projects.VariablesJson / issue_profiles.StateJson 等)。
     /// </summary>
-    public async Task<VariableBundle> LoadVariablesAsync(string runId)
+    /// <param name="runId">WorkflowRunId (必传)</param>
+    /// <param name="projectId">ProjectId (可选; 用于回退读取旧表)</param>
+    /// <param name="issueKey">IssueKey (可选; 用于回退读取旧表, 格式 projectId:issueNumber)</param>
+    public async Task<VariableBundle> LoadVariablesAsync(string runId, string? projectId = null, string? issueKey = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var runProfile = await db.WorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-        if (runProfile is null)
-            return VariableBundle.Empty;
 
-        var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == runProfile.ProjectId);
-        var issueProfile = await db.IssueWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IssueKey == runProfile.IssueKey);
+        // If new-table row missing, try to discover projectId/issueKey from legacy tables
+        if (runProfile is not null)
+        {
+            projectId ??= runProfile.ProjectId;
+            issueKey ??= runProfile.IssueKey;
+        }
+        else if (string.IsNullOrEmpty(projectId))
+        {
+            // Last resort: look up projectId from workflow_runs.MetadataProjectId
+            var legacyRun = await db.WorkflowRuns.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+            projectId = legacyRun?.MetadataProjectId;
+        }
 
+        var projectProfile = projectId is not null
+            ? await db.ProjectWorkflowProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.ProjectId == projectId)
+            : null;
+        var issueProfile = issueKey is not null
+            ? await db.IssueWorkflowProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.IssueKey == issueKey)
+            : null;
+
+        // Project layer: new table → fallback to old projects.VariablesJson
         var projectBundle = VariableBundle.FromJson(projectProfile?.VariablesJson);
-        var issueBundle = VariableBundle.FromJson(issueProfile?.VariablesJson);
-        var runBundle = VariableBundle.FromJson(runProfile.VariablesJson);
+        if (projectBundle.Stages is null && !projectBundle.Vars.HasValue && projectId is not null)
+        {
+            var legacyBag = await LoadLegacyProjectVariablesAsync(db, projectId);
+            if (legacyBag is not null)
+                projectBundle = ConvertProjectVariablesBag(legacyBag);
+        }
 
-        return VariableBundle.MergeAll(projectBundle, issueBundle, runBundle);
+        var issueBundle = VariableBundle.FromJson(issueProfile?.VariablesJson);
+
+        // Do NOT merge runBundle here — WorkflowGrain.MakeDispatchAsync applies legacy
+        // _variables.StageVariables BEFORE combinedVars so project stage wins over
+        // workflow stage (matching legacy ToDispatchJson order).
+        if ((projectBundle.Stages is null || projectBundle.Stages.Count == 0) && !projectBundle.Vars.HasValue
+            && (issueBundle.Stages is null || issueBundle.Stages.Count == 0) && !issueBundle.Vars.HasValue)
+        {
+            return VariableBundle.Empty;
+        }
+
+        return VariableBundle.MergeAll(projectBundle, issueBundle);
     }
 
     /// <summary>
-    /// 展开 task.with 中的模板表达式。
-    /// 
-    /// 规则:
-    ///   - value 是 "${{ path }}" 字符串 → 从 resolved 取值替换
-    ///   - value 是 JSON 对象 且 resolved.vars 中有同名 key → deep merge (vars 覆盖)
-    ///   - 其他 → 保留原值
+    /// 处理 task.with: 
+    ///   - value 是 JSON 对象 且 effectiveVars 中有同名 key → deep merge (vars 覆盖)
+    ///   - 其他 (包括 ${{ }} 模板字符串) → 保留原值, 由 runner 端展开
     /// </summary>
     public static Dictionary<string, JsonElement?>? ExpandTaskWith(
-        VariableBundle? resolved,
+        VariableBundle? effectiveVars,
         Dictionary<string, JsonElement?>? taskWith)
     {
         if (taskWith is null || taskWith.Count == 0) return taskWith;
-        if (resolved?.Vars is null) return taskWith;
+        if (effectiveVars?.Vars is null || effectiveVars.Vars.Value.ValueKind != JsonValueKind.Object) return taskWith;
+
+        using var varsDoc = JsonDocument.Parse(effectiveVars.Vars.Value.GetRawText());
+        var varsRoot = varsDoc.RootElement;
 
         var result = new Dictionary<string, JsonElement?>(taskWith.Count, StringComparer.Ordinal);
-        using var varsDoc = JsonDocument.Parse(resolved.Vars.Value.GetRawText());
-        var varsRoot = varsDoc.RootElement;
 
         foreach (var (key, value) in taskWith)
         {
@@ -131,20 +175,6 @@ public class WorkflowProfileManager
             }
 
             var v = value.Value;
-
-            // 模板字符串 "${{ ... }}"
-            if (v.ValueKind == JsonValueKind.String)
-            {
-                var template = v.GetString();
-                if (IsTemplateExpression(template, out var path))
-                {
-                    var expanded = ResolvePath(varsRoot, path);
-                    result[key] = expanded.HasValue ? expanded.Value.Clone() : (JsonElement?)null;
-                    continue;
-                }
-                result[key] = v.Clone();
-                continue;
-            }
 
             // 对象 且 vars 中有同名 key → deep merge
             if (v.ValueKind == JsonValueKind.Object
@@ -157,25 +187,11 @@ public class WorkflowProfileManager
                 continue;
             }
 
-            // 其他: 保留原值
+            // 其他 (包括 ${{ }} 模板字符串): 保留原值, 由 runner 端展开
             result[key] = v.Clone();
         }
 
         return result;
-    }
-
-    private static bool IsTemplateExpression(string? value, out string path)
-    {
-        if (!string.IsNullOrEmpty(value)
-            && value.StartsWith("${{", StringComparison.Ordinal)
-            && value.EndsWith("}}", StringComparison.Ordinal)
-            && value.Trim().Length == value.Length) // no whitespace around edges
-        {
-            path = value[3..^2].Trim();
-            return true;
-        }
-        path = string.Empty;
-        return false;
     }
 
     private static JsonElement? ResolvePath(JsonElement root, string path)
@@ -204,6 +220,138 @@ public class WorkflowProfileManager
         return def is null ? null : ResolvedTemplate.FromDefinition($"project-template:{projectId}/{templateId}", def);
     }
 
+    // =======================================================================
+    // Legacy fallbacks (Step 7 compatibility)
+    // =======================================================================
+
+    private static readonly JsonSerializerOptions LegacyJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    private static async Task<LegacyProjectVars?> LoadLegacyProjectVariablesAsync(
+        MohistDbContext db, string projectId)
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync();
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT VariablesJson FROM Projects WHERE Id = @id";
+
+        var param = cmd.CreateParameter();
+        param.ParameterName = "@id";
+        param.Value = projectId;
+        cmd.Parameters.Add(param);
+
+        var result = await cmd.ExecuteScalarAsync();
+        if (result is not string json || string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<LegacyProjectVars>(json, LegacyJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<VariableBundle?> LoadLegacyRunVariablesAsync(
+        MohistDbContext db, string runId)
+    {
+        var row = await db.WorkflowVariables.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        if (row is null) return null;
+
+        try
+        {
+            // Legacy WorkflowExecutionContext: { Json: string (inner JSON), StageVariables: object }
+            // StageVariables layout: { stageName: { sectionName: jsonString } }
+            using var doc = JsonDocument.Parse(row.StateJson ?? "{}");
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+
+            JsonElement? varsEl = null;
+            if (doc.RootElement.TryGetProperty("Json", out var jsonEl)
+                && jsonEl.ValueKind == JsonValueKind.String)
+            {
+                var innerJson = jsonEl.GetString();
+                if (!string.IsNullOrWhiteSpace(innerJson))
+                {
+                    using var innerDoc = JsonDocument.Parse(innerJson);
+                    if (innerDoc.RootElement.ValueKind == JsonValueKind.Object
+                        && innerDoc.RootElement.TryGetProperty("vars", out var innerVars)
+                        && innerVars.ValueKind == JsonValueKind.Object)
+                    {
+                        varsEl = innerVars.Clone();
+                    }
+                }
+            }
+
+            Dictionary<string, StageVariables>? stages = null;
+            if (doc.RootElement.TryGetProperty("StageVariables", out var svEl)
+                && svEl.ValueKind == JsonValueKind.Object)
+            {
+                stages = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
+                foreach (var stageProp in svEl.EnumerateObject())
+                {
+                    if (stageProp.Value.ValueKind != JsonValueKind.Object) continue;
+
+                    // Each stage value is a Dict<sectionName, jsonString>
+                    foreach (var sectionProp in stageProp.Value.EnumerateObject())
+                    {
+                        // Only collect "vars" sections into our StageVariables
+                        if (!string.Equals(sectionProp.Name, "vars", StringComparison.Ordinal))
+                            continue;
+                        if (sectionProp.Value.ValueKind != JsonValueKind.String)
+                            continue;
+                        var sectionJson = sectionProp.Value.GetString();
+                        if (string.IsNullOrWhiteSpace(sectionJson))
+                            continue;
+                        var sectionElement = JsonSerializer.Deserialize<JsonElement>(sectionJson);
+                        if (sectionElement.ValueKind == JsonValueKind.Object)
+                            stages[stageProp.Name] = new StageVariables(sectionElement);
+                    }
+                }
+                if (stages.Count == 0) stages = null;
+            }
+
+            if (!varsEl.HasValue && stages is null) return null;
+            return new VariableBundle(varsEl, stages);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static VariableBundle ConvertProjectVariablesBag(LegacyProjectVars bag)
+    {
+        JsonElement? varsEl = null;
+        if (bag.Vars is { Count: > 0 })
+        {
+            varsEl = JsonSerializer.Deserialize<JsonElement>(
+                JsonSerializer.Serialize(bag.Vars, LegacyJsonOptions));
+        }
+
+        Dictionary<string, StageVariables>? stages = null;
+        if (bag.Stages is { Count: > 0 })
+        {
+            stages = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (stage, sbag) in bag.Stages)
+            {
+                if (sbag is null || sbag.Vars is null || sbag.Vars.Count == 0) continue;
+                var stageEl = JsonSerializer.Deserialize<JsonElement>(
+                    JsonSerializer.Serialize(sbag.Vars, LegacyJsonOptions));
+                stages[stage] = new StageVariables(stageEl);
+            }
+            if (stages.Count == 0) stages = null;
+        }
+
+        return new VariableBundle(varsEl, stages);
+    }
+
     private static WorkflowDefinition? DeserializeDefinition(string json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
@@ -222,4 +370,11 @@ public class WorkflowProfileManager
             return null;
         }
     }
+
+    private sealed record LegacyProjectVars(
+        Dictionary<string, JsonElement?>? Vars = null,
+        Dictionary<string, LegacyProjectStageVars?>? Stages = null);
+
+    private sealed record LegacyProjectStageVars(
+        Dictionary<string, JsonElement?>? Vars = null);
 }

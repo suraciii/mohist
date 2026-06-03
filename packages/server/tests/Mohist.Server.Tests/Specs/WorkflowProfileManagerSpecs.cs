@@ -121,8 +121,12 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadVariables_ReturnsRunBundle_WhenOnlyRunExists()
+    public async Task LoadVariables_ReturnsEmpty_WhenOnlyRunExists()
     {
+        // Contract change (Step 7): LoadVariablesAsync now only merges project + issue
+        // layers. Run-level variables are applied separately by MakeDispatchAsync to
+        // preserve legacy ordering (legacy StageVariables applied BEFORE combinedVars
+        // so that project stage overrides workflow stage).
         var runId = "wr_vars01";
         var runVars = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new { a = 1, b = 2 })));
@@ -131,15 +135,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         var result = await _manager.LoadVariablesAsync(runId);
 
-        Assert.NotNull(result.Vars);
-        using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
-        Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());
-        Assert.Equal(2, doc.RootElement.GetProperty("b").GetInt32());
+        // Run-only → project + issue are empty → merged result is empty
+        Assert.Same(VariableBundle.Empty, result);
     }
 
     [Fact]
-    public async Task LoadVariables_MergesThreeLayersByPriority()
+    public async Task LoadVariables_MergesTwoLayersByPriority()
     {
+        // Contract change (Step 7): LoadVariablesAsync now only merges project + issue
+        // (run layer is applied separately by MakeDispatchAsync).
         var runId = "wr_merge01";
         var proj = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -159,7 +163,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         using var doc = JsonDocument.Parse(result.Vars.Value.GetRawText());
         Assert.Equal(1, doc.RootElement.GetProperty("a").GetInt32());           // from project
         Assert.Equal("issue-b", doc.RootElement.GetProperty("b").GetString());  // issue overrides project
-        Assert.Equal("run-c", doc.RootElement.GetProperty("c").GetString());    // run wins
+        Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());  // issue overrides project (run layer NOT merged here)
     }
 
     [Fact]
@@ -171,7 +175,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public void ExpandTaskWith_ExpandsTemplateString()
+    public void ExpandTaskWith_PreservesTemplateStrings()
     {
         var resolved = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -188,10 +192,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = WorkflowProfileManager.ExpandTaskWith(resolved, taskWith);
 
         Assert.NotNull(result);
-        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(result["agent"]));
-        Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
-        Assert.Equal("opencode", doc.RootElement.GetProperty("type").GetString());
-        Assert.Equal("sonnet-4", doc.RootElement.GetProperty("model").GetString());
+        // Template expression is PRESERVED, not expanded (runner expands later)
+        Assert.Equal("${{ agent }}", result["agent"]!.Value.GetString());
     }
 
     [Fact]
@@ -238,7 +240,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public void ExpandTaskWith_HandlesNestedTemplatePath()
+    public void ExpandTaskWith_PreservesNestedTemplatePath()
     {
         var resolved = new VariableBundle(
             Vars: JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(new
@@ -253,7 +255,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         var result = WorkflowProfileManager.ExpandTaskWith(resolved, taskWith);
 
-        Assert.Equal("found-it", result!["x"]!.Value.GetString());
+        // Template preserved (runner expands later)
+        Assert.Equal("${{ config.deep.value }}", result!["x"]!.Value.GetString());
     }
 
     // --- helpers ---
