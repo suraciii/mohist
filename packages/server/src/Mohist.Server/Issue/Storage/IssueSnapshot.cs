@@ -44,6 +44,10 @@ public sealed class IssueSnapshot
     public string? WorkflowRunId { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Backlog;
     public int[] PrerequisiteNumbers { get; set; } = [];
+
+    public string? RepositoryRef { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public RepositoryInfo? Repository { get; set; }
 
     public static IssueSnapshot FromDomain(Domain.Issue issue) => new()
@@ -61,7 +65,8 @@ public sealed class IssueSnapshot
         WorkflowRunId = issue.WorkflowRunId,
         Status = issue.Status,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
-        Repository = issue.Repository,
+        RepositoryRef = issue.RepositoryRef,
+        Repository = null,
     };
 
     public Domain.Issue ToDomain() => new Domain.Issue
@@ -79,7 +84,7 @@ public sealed class IssueSnapshot
         WorkflowRunId = WorkflowRunId,
         Status = Status,
         PrerequisiteNumbers = PrerequisiteNumbers,
-        Repository = Repository,
+        RepositoryRef = RepositoryRef ?? Repository?.Name,
     };
 
     public static Domain.Issue? DeserializeIssue(string json) =>

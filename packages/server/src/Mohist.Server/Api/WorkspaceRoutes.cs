@@ -31,6 +31,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var (repoPath, _) = ResolveRepo(issue);
             if (!await BranchExistsAsync(git, issue, repoPath))
@@ -78,6 +79,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var (repoPath, _) = ResolveRepo(issue);
             if (!await BranchExistsAsync(git, issue, repoPath))
@@ -127,6 +129,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var (repoPath, _) = ResolveRepo(issue);
             if (!await BranchExistsAsync(git, issue, repoPath))
@@ -161,6 +164,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -189,6 +193,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -216,6 +221,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -264,6 +270,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -312,6 +319,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -347,6 +355,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -381,6 +390,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             var runId = issue.WorkflowRunId;
             if (string.IsNullOrEmpty(runId))
@@ -411,6 +421,7 @@ public static class WorkspaceRoutes
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (issue is null) return ApiResults.NotFound("Issue not found");
+            if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
             try
             {
@@ -459,11 +470,16 @@ public static class WorkspaceRoutes
         return (runnerId, connId);
     }
 
+    private static IResult? CheckRepositoryConfig(IssueReadModel? issue) =>
+        IssueRepositoryResolutionHelpers.CheckRepositoryConfigured(issue);
+
     private static (string RepoPath, string BaseBranch) ResolveRepo(IssueReadModel issue)
     {
-        var repo = issue.Repository;
-        var repoPath = repo?.Path ?? ".";
-        var baseBranch = repo?.BaseBranch ?? "main";
+        var repo = issue.Repository
+            ?? throw new InvalidOperationException(
+                "Issue repository context is not resolved; check IssueRepositoryResolutionHelpers.CheckRepositoryConfigured first.");
+        var repoPath = string.IsNullOrWhiteSpace(repo.Path) ? IssueRepositoryResolutionHelpers.DefaultRepoPath : repo.Path;
+        var baseBranch = string.IsNullOrWhiteSpace(repo.BaseBranch) ? IssueRepositoryResolutionHelpers.DefaultBaseBranch : repo.BaseBranch;
         return (repoPath, baseBranch);
     }
 

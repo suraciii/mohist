@@ -1,0 +1,157 @@
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Queries;
+using Mohist.Server.Project.Grains;
+using Mohist.Server.Project.Queries;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Queries;
+using Xunit;
+
+namespace Mohist.Server.Tests.Specs;
+
+[Collection("MohistIntegration")]
+public class IssueWorkflowRepositoryResolutionSpecs
+{
+    private readonly MohistIntegrationFixture _fixture;
+    private readonly HttpClient _client;
+    private readonly IGrainFactory _grains;
+    private readonly IServiceProvider _services;
+
+    public IssueWorkflowRepositoryResolutionSpecs(MohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+        _client = fixture.Client;
+        _grains = fixture.Grains;
+        _services = fixture.Services;
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_ResolvesRepositoryFromCurrentProjectConfig_AndDispatchesRepositoryVariables()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.AddRepositoryAsync(
+            "secondary",
+            "/proj/secondary",
+            "git@secondary.example:repo.git",
+            "develop");
+
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
+        await issueGrain.CreateAsync(projectId, number, "Use secondary repo", body: null, labels: null, priority: null, "secondary");
+
+        var wrId = await issueGrain.StartWorkAsync();
+
+        var variables = await LoadWorkflowVariablesAsync(wrId);
+        var repository = variables.RootElement.GetProperty("repository");
+        Assert.Equal("secondary", repository.GetProperty("name").GetString());
+        Assert.Equal("/proj/secondary", repository.GetProperty("path").GetString());
+        Assert.Equal("git@secondary.example:repo.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("develop", repository.GetProperty("baseBranch").GetString());
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_AfterProjectRepositoryConfigChange_UsesLatestRepositoryMetadata()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.AddRepositoryAsync(
+            "secondary",
+            "/proj/secondary-old",
+            "git@secondary.example:repo-old.git",
+            "develop");
+
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
+        await issueGrain.CreateAsync(projectId, number, "Repo metadata drifts", body: null, labels: null, priority: null, "secondary");
+
+        await projectGrain.RemoveRepositoryAsync("secondary");
+        await projectGrain.AddRepositoryAsync(
+            "secondary",
+            "/proj/secondary-new",
+            "git@secondary.example:repo-new.git",
+            "release");
+
+        var wrId = await issueGrain.StartWorkAsync();
+
+        var variables = await LoadWorkflowVariablesAsync(wrId);
+        var repository = variables.RootElement.GetProperty("repository");
+        Assert.Equal("secondary", repository.GetProperty("name").GetString());
+        Assert.Equal("/proj/secondary-new", repository.GetProperty("path").GetString());
+        Assert.Equal("git@secondary.example:repo-new.git", repository.GetProperty("remote").GetString());
+        Assert.Equal("release", repository.GetProperty("baseBranch").GetString());
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_ReferencedRepositoryRemovedAfterIssueCreation_ThrowsRepositoryConfigurationProblem()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+        await projectGrain.AddRepositoryAsync(
+            "secondary",
+            "/proj/secondary",
+            "git@secondary.example:repo.git",
+            "develop");
+
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
+        await issueGrain.CreateAsync(projectId, number, "Repo gets removed", body: null, labels: null, priority: null, "secondary");
+
+        await projectGrain.RemoveRepositoryAsync("secondary");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Contains("secondary", ex.Message);
+        Assert.Contains("RepositoryNotFound", ex.Message);
+
+        using var scope = _services.CreateScope();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var info = await issueQuery.GetInfoAsync(projectId, number, await LoadProjectAsync(projectId));
+        Assert.NotNull(info);
+        Assert.Null(info.WorkflowRunId);
+        Assert.Null(info.Repository);
+        Assert.NotNull(info.RepositoryProblem);
+        Assert.Equal(IssueRepositoryProblemCode.RepositoryNotFound, info.RepositoryProblem!.Code);
+        Assert.Equal("secondary", info.RepositoryProblem.RepositoryRef);
+    }
+
+    [Fact]
+    public async Task StartWorkAsync_ResolutionFailure_DoesNotCreateWorkflowOrDispatchWork()
+    {
+        var projectId = $"proj_{Guid.NewGuid():N}";
+        var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
+        await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
+
+        var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
+        await issueGrain.CreateAsync(projectId, number, "Ghost repo", body: null, labels: null, priority: null, "ghost");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        Assert.Contains("RepositoryNotFound", ex.Message);
+
+        using var scope = _services.CreateScope();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var info = await issueQuery.GetInfoAsync(projectId, number, await LoadProjectAsync(projectId));
+        Assert.NotNull(info);
+        Assert.Null(info!.WorkflowRunId);
+    }
+
+    private async Task<ProjectInfo> LoadProjectAsync(string projectId)
+    {
+        return (await _grains.GetGrain<IProjectGrain>(projectId).GetAsync())!;
+    }
+
+    private async Task<JsonDocument> LoadWorkflowVariablesAsync(string workflowRunId)
+    {
+        using var scope = _services.CreateScope();
+        var query = scope.ServiceProvider.GetRequiredService<WorkflowQueryService>();
+        var snapshot = await query.GetVariablesAsync(workflowRunId);
+        Assert.NotNull(snapshot);
+        Assert.False(string.IsNullOrWhiteSpace(snapshot!.Variables));
+        return JsonDocument.Parse(snapshot.Variables);
+    }
+}

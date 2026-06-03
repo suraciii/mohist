@@ -7,6 +7,8 @@ using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
+using Mohist.Server.Project.Grains;
+using Mohist.Server.Project.Queries;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Grains;
@@ -26,6 +28,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly ConfigService _config;
     private readonly WorkflowQueryService _workflowReader;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -36,6 +39,7 @@ public class IssueGrain : Grain, IIssueGrain
         ConfigService config,
         WorkflowQueryService workflowReader,
         IDbContextFactory<MohistDbContext> dbFactory,
+        IssueRepositoryResolver repositoryResolver,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -45,6 +49,7 @@ public class IssueGrain : Grain, IIssueGrain
         _config = config;
         _workflowReader = workflowReader;
         _dbFactory = dbFactory;
+        _repositoryResolver = repositoryResolver;
         _log = log;
     }
 
@@ -56,6 +61,34 @@ public class IssueGrain : Grain, IIssueGrain
         _profile = await _profileStore.LoadAsync(GrainKey);
     }
 
+    public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
+    {
+        if (!string.IsNullOrWhiteSpace(repositoryRef))
+            return repositoryRef;
+
+        var projectGrain = GrainFactory.GetGrain<IProjectGrain>(projectId);
+        var project = await projectGrain.GetAsync();
+        return _repositoryResolver.Resolve(project, repositoryRef: null).Repository?.Name;
+    }
+
+    private async Task<IssueRepositoryResolution> ResolveIssueRepositoryAtStartAsync(Domain.Issue issue)
+    {
+        var projectGrain = GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId);
+        var project = await projectGrain.GetAsync();
+        return _repositoryResolver.Resolve(project, issue.RepositoryRef);
+    }
+
+    private static IssueRepositoryResolution RequireResolvedRepository(IssueRepositoryResolution resolution)
+    {
+        if (resolution.HasProblem)
+        {
+            var problem = resolution.Problem!;
+            throw new InvalidOperationException(
+                $"Cannot start workflow: {problem.Message} (code={problem.Code}, repositoryRef={problem.RepositoryRef ?? "<none>"})");
+        }
+        return resolution;
+    }
+
     public async Task<string> StartWorkAsync(WorkflowProjectContext? project = null)
     {
         EnsureIssue();
@@ -64,23 +97,16 @@ public class IssueGrain : Grain, IIssueGrain
             throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
 
         var issue = _issue!;
+
+        var resolution = RequireResolvedRepository(await ResolveIssueRepositoryAtStartAsync(issue));
+        var repo = resolution.Repository!;
+
         var wrId = $"wr_{Guid.NewGuid():N}";
         issue.StartWorkflow(wrId);
 
-        var repo = issue.Repository;
-        var projectId = project?.Id ?? issue.ProjectId;
-        var projectName = project?.Name ?? issue.ProjectId;
-        var projectPath = repo?.Path ?? project?.Path ?? ".";
-        var baseBranch = repo?.BaseBranch ?? project?.BaseBranch ?? "main";
-        var projectContext = new WorkflowProjectContext(
-            projectId,
-            projectName,
-            projectPath,
-            baseBranch,
-            repo?.Name,
-            repo?.Remote,
-            repo?.Path,
-            repo?.BaseBranch);
+        var projectGrain = GrainFactory.GetGrain<IProjectGrain>(issue.ProjectId);
+        var projectInfo = await projectGrain.GetAsync();
+        var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
 
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
         var definition = _profile?.Definition ?? defaultProfile.Definition;
@@ -97,6 +123,32 @@ public class IssueGrain : Grain, IIssueGrain
         await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
+    }
+
+    private static WorkflowProjectContext BuildWorkflowProjectContext(
+        Domain.Issue issue,
+        WorkflowProjectContext? overrideContext,
+        ProjectInfo? projectInfo,
+        RepositoryInfo repo)
+    {
+        var projectId = overrideContext?.Id ?? projectInfo?.Id ?? issue.ProjectId;
+        var projectName = overrideContext?.Name ?? projectInfo?.Name ?? issue.ProjectId;
+        var projectPath = overrideContext?.Path
+            ?? (string.IsNullOrWhiteSpace(repo.Path) ? projectInfo?.EffectivePath : repo.Path)
+            ?? ".";
+        var baseBranch = overrideContext?.BaseBranch
+            ?? (string.IsNullOrWhiteSpace(repo.BaseBranch) ? projectInfo?.BaseBranch : repo.BaseBranch)
+            ?? "main";
+
+        return new WorkflowProjectContext(
+            projectId,
+            projectName,
+            projectPath,
+            baseBranch,
+            repo.Name,
+            repo.Remote,
+            repo.Path,
+            repo.BaseBranch);
     }
 
     public async Task CancelAsync()
@@ -183,10 +235,12 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, RepositoryInfo? repository = null)
+    public async Task CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
+
+        var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
 
         var issue = Domain.Issue.Create(
             $"issue_{Guid.NewGuid():N}",
@@ -196,7 +250,7 @@ public class IssueGrain : Grain, IIssueGrain
             body,
             labels,
             priority ?? "p2",
-            repository);
+            resolvedRef);
 
         var globalAgentConfig = await _config.GetAgentConfigAsync();
         var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
@@ -258,13 +312,12 @@ public class IssueGrain : Grain, IIssueGrain
             ? defaultProfile.LoadPrompts()
             : new Dictionary<string, string>();
 
-        var repo = issue.Repository;
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
             ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
             ["issue"] = JsonSerializer.SerializeToElement(new { id = issue.Id, number = issue.Number, title = issue.Title, body = issue.Body ?? "" }, WorkflowVariableJson.Options),
             ["project"] = JsonSerializer.SerializeToElement(new { id = project.Id, name = project.Name, path = project.Path, baseBranch = project.BaseBranch, defaultBranch = project.BaseBranch }, WorkflowVariableJson.Options),
-            ["repository"] = JsonSerializer.SerializeToElement(new { name = repo?.Name, path = repo?.Path, remote = repo?.Remote, baseBranch = repo?.BaseBranch }, WorkflowVariableJson.Options),
+            ["repository"] = JsonSerializer.SerializeToElement(new { name = project.RepositoryName, path = project.RepositoryPath, remote = project.RepositoryRemote, baseBranch = project.RepositoryBaseBranch ?? project.BaseBranch }, WorkflowVariableJson.Options),
             ["openspecChangeName"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeName(issue.Number), WorkflowVariableJson.Options),
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
             ["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options),

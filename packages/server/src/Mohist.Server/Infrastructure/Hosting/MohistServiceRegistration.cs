@@ -48,6 +48,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
         services.AddScoped<IStateStore<WorkflowAgentSession>, WorkflowAgentSessionStore>();
         services.AddSingleton<ProjectQueryService>();
+        services.AddSingleton<IssueRepositoryResolver>();
         services.AddScoped<IssueQueryService>();
         services.AddScoped<EpicQueryService>();
         services.AddSingleton<Mohist.Server.Workflow.Prompts.IPromptLoader, Mohist.Server.Workflow.Prompts.FilePromptLoader>();

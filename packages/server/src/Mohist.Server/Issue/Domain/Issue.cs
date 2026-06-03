@@ -1,5 +1,3 @@
-using Mohist.Server.Project.Domain;
-
 namespace Mohist.Server.Issue.Domain;
 
 public class Issue
@@ -17,5 +15,6 @@ public class Issue
     public string? WorkflowRunId { get; set; }
     public IssueStatus Status { get; set; } = IssueStatus.Backlog;
     public int[] PrerequisiteNumbers { get; set; } = [];
-    public RepositoryInfo? Repository { get; set; }
+
+    public string? RepositoryRef { get; set; }
 }

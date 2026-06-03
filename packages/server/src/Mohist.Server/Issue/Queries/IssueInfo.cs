@@ -35,6 +35,7 @@ public class IssueInfo
     public string? WorkflowStage { get; set; }
     public string? WorkflowStatus { get; set; }
     public RepositoryInfo? Repository { get; set; }
+    public IssueRepositoryProblem? RepositoryProblem { get; set; }
 }
 
 [GenerateSerializer]

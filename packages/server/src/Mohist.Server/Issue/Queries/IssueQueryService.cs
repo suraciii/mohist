@@ -25,17 +25,24 @@ public class IssueQueryService
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
+    private readonly ProjectQueryService _projects;
+    private readonly IssueRepositoryResolver _resolver;
 
     public IssueQueryService(
         IDbContextFactory<MohistDbContext> dbFactory,
-        IssueWorkflowProfileRegistry profiles)
+        IssueWorkflowProfileRegistry profiles,
+        ProjectQueryService projects,
+        IssueRepositoryResolver resolver)
     {
         _dbFactory = dbFactory;
         _profiles = profiles;
+        _projects = projects;
+        _resolver = resolver;
     }
 
     public async Task<IssueReadModel?> GetAsync(string projectId, int number, ProjectInfo? project = null)
     {
+        project ??= await _projects.GetByIdAsync(projectId);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var issue = await LoadIssueAsync(db, projectId, number);
         return issue is null ? null : await EnrichAsync(db, await ToReadModelAsync(db, issue, project));
@@ -43,6 +50,7 @@ public class IssueQueryService
 
     public async Task<IssueInfo?> GetInfoAsync(string projectId, int number, ProjectInfo? project = null)
     {
+        project ??= await _projects.GetByIdAsync(projectId);
         await using var db = await _dbFactory.CreateDbContextAsync();
         var issue = await LoadIssueAsync(db, projectId, number);
         if (issue is null) return null;
@@ -113,6 +121,12 @@ public class IssueQueryService
 
     public static IssueInfo ToInfo(Domain.Issue issue, ProjectInfo? project = null)
     {
+        return ToInfo(new IssueRepositoryResolver(), issue, project);
+    }
+
+    public static IssueInfo ToInfo(IssueRepositoryResolver resolver, Domain.Issue issue, ProjectInfo? project = null)
+    {
+        var resolution = resolver.Resolve(project, issue.RepositoryRef);
         return new()
         {
             Id = issue.Id,
@@ -135,8 +149,14 @@ public class IssueQueryService
             WorkflowRunId = issue.WorkflowRunId,
             WorkflowProfileId = IssueWorkflowProfiles.DefaultId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
-            Repository = issue.Repository,
+            Repository = resolution.Repository,
+            RepositoryProblem = resolution.Problem,
         };
+    }
+
+    internal static RepositoryInfo? ResolveIssueRepository(IssueRepositoryResolver resolver, Domain.Issue issue, ProjectInfo? project)
+    {
+        return resolver.Resolve(project, issue.RepositoryRef).Repository;
     }
 
     public static IssueReadModel ToReadModel(IssueInfo issue) => new()
@@ -163,6 +183,7 @@ public class IssueQueryService
         WorkflowProfileMode = issue.WorkflowProfileMode,
         PrerequisiteNumbers = issue.PrerequisiteNumbers,
         Repository = issue.Repository,
+        RepositoryProblem = issue.RepositoryProblem,
     };
 
     private async Task PopulateProfileDataAsync(MohistDbContext db, List<IssueReadModel> issues)
