@@ -8,6 +8,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
@@ -49,7 +50,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
         {
             siloBuilder.UseInMemoryReminderService();
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, WorkflowRunProfileStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
@@ -156,7 +156,8 @@ public abstract class WorkflowGrainSpecs
         _workflowId = workflowId;
 
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.StartAsync(definition, TestInput());
+        await SeedWorkflowTemplateAsync(workflowId, definition);
+        await workflow.StartAsync(TestInput());
         return workflow;
     }
 
@@ -164,7 +165,8 @@ public abstract class WorkflowGrainSpecs
     {
         await ClearBacklogAsync();
         var workflow = await CreateWorkflowAsync(id);
-        await workflow.StartAsync(definition, TestInput());
+        await SeedWorkflowTemplateAsync(_workflowId!, definition);
+        await workflow.StartAsync(TestInput());
         return workflow;
     }
 
@@ -255,9 +257,10 @@ public abstract class WorkflowGrainSpecs
         string? title = "Task 1")
     {
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.StartAsync(SingleStage(
+        await SeedWorkflowTemplateAsync(workflowId, SingleStage(
             tasks: [new("task-1", title ?? "Task 1", "spec/task")],
-            checks: []), TestInput());
+            checks: []));
+        await workflow.StartAsync(TestInput());
         await workflow.AssignRunnerAsync(runnerId);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
@@ -353,6 +356,76 @@ public abstract class WorkflowGrainSpecs
 
     protected static Dictionary<string, JsonElement?> With(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
+
+    protected async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string projectId = "test-project")
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var templateId = definition.Id;
+        var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+
+        var existingTemplate = await db.ProjectTemplates.FindAsync(projectId, templateId);
+        if (existingTemplate is null)
+        {
+            db.ProjectTemplates.Add(new ProjectTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = templateId,
+                TemplateJson = templateJson,
+            });
+        }
+        else
+        {
+            existingTemplate.TemplateJson = templateJson;
+            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
+        if (projectProfile is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+            {
+                ProjectId = projectId,
+                DefaultTemplateId = templateId,
+            });
+        }
+        else
+        {
+            projectProfile.DefaultTemplateId = templateId;
+            projectProfile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var runProfile = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == workflowId);
+        if (runProfile is null)
+        {
+            db.WorkflowProfiles.Add(new WorkflowProfileRow
+            {
+                WorkflowRunId = workflowId,
+                ProjectId = projectId,
+                IssueKey = "",
+            });
+        }
+        else
+        {
+            runProfile.ProjectId = projectId;
+            runProfile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    protected async Task PatchRunVariablesAsync(string workflowId, VariableBundle patch)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+        var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        var manager = new WorkflowProfileManager(factory);
+        await manager.PatchRunVariablesAsync(workflowId, patch);
+    }
 
     protected static WorkflowDefinition TwoStages()
     {

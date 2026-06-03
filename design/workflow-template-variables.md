@@ -70,7 +70,7 @@ VariableBundle {
 
   ┌──────────────────────┐
   │ TEMPLATE embedded    │  YAML `variables:` 段, 来自选定模板
-  │ (base)               │  选择: run snapshot > issue custom > issue template > project default
+  │ (base)               │  选择: issue custom > issue template > project default
   └──────────┬───────────┘
              │  deepMerge(embedded, independent)
              ▼

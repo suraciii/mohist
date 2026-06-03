@@ -40,13 +40,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
             ["custom"] = JsonSerializer.SerializeToElement(new { answer = 42 }),
             ["vars"] = JsonSerializer.SerializeToElement(new Dictionary<string, string>()),
         });
-        await workflow.StartAsync(
-            new WorkflowDefinition("spec/workflow", [
-                new StageDefinition("build",
-                    [new("task-1", "Task 1", "spec/task")],
-                    [])
-            ]),
-            input: new WorkflowStartInput(variables));
+        await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition("spec/workflow", [
+            new StageDefinition("build",
+                [new("task-1", "Task 1", "spec/task")],
+                [])
+        ]));
+        await workflow.StartAsync(new WorkflowStartInput(variables));
 
         await EnqueueWorkflowForTestAsync(workflowId);
         var (work, _) = await PollWorkAnyAsync();
@@ -74,12 +73,12 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         _workflowId = workflowId;
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
-        await workflow.StartAsync(
-            new WorkflowDefinition("spec/workflow", [
-                new StageDefinition("release",
-                    [new("publish", "Publish", "spec/task")],
-                    [])
-            ]));
+        await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition("spec/workflow", [
+            new StageDefinition("release",
+                [new("publish", "Publish", "spec/task")],
+                [])
+        ]));
+        await workflow.StartAsync();
 
         await EnqueueWorkflowForTestAsync(workflowId);
         var (work, _) = await PollWorkAnyAsync();

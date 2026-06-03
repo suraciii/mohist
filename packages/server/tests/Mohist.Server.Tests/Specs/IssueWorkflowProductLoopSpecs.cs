@@ -184,12 +184,9 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
         var proposal = await PollWorkAnyAsync();
         Assert.StartsWith("proposal", proposal.WorkId);
-        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(proposal.WorkflowRunId);
-        await workflow.PatchStageVariablesAsync("build", "vars",
-            JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
-            {
-                ["agent"] = JsonSerializer.SerializeToElement(new { model = "opencode-go/minimax-m3" })
-            }));
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/workflow-runs/{proposal.WorkflowRunId}/variable-overrides",
+            new { stages = new { build = new { vars = new { agent = new { model = "opencode-go/minimax-m3" } } } } });
 
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
         await _client.PatchDataAsync<ProjectVariablesDto>(

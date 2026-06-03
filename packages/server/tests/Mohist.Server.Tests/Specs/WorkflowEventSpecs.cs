@@ -1,6 +1,10 @@
 using Mohist.Server.Infrastructure.Events;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Infrastructure;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -39,8 +43,10 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
 
         try
         {
-            var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistWorkflow.Definition, TestInput());
+            var workflowId = $"wf-{Guid.NewGuid():N}";
+            var wf = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId);
+            await SeedWorkflowTemplateAsync(workflowId, MohistWorkflow.Definition);
+            await wf.StartAsync(TestInput());
 
             Assert.Single(received);
             var json = System.Text.Json.JsonSerializer.Serialize(received[0]);
@@ -62,8 +68,10 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
 
         try
         {
-            var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistWorkflow.Definition, TestInput());
+            var workflowId = $"wf-{Guid.NewGuid():N}";
+            var wf = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId);
+            await SeedWorkflowTemplateAsync(workflowId, MohistWorkflow.Definition);
+            await wf.StartAsync(TestInput());
             received.Clear();
 
             await wf.PauseAsync("user-requested");
@@ -88,8 +96,10 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
 
         try
         {
-            var wf = _fixture.Grains.GetGrain<IWorkflowGrain>($"wf-{Guid.NewGuid():N}");
-            await wf.StartAsync(MohistWorkflow.Definition, TestInput());
+            var workflowId = $"wf-{Guid.NewGuid():N}";
+            var wf = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowId);
+            await SeedWorkflowTemplateAsync(workflowId, MohistWorkflow.Definition);
+            await wf.StartAsync(TestInput());
             await wf.PauseAsync();
             received.Clear();
 
@@ -103,5 +113,63 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         {
             _fixture.EventBus.Off("stage_changed", handler);
         }
+    }
+
+    private async Task SeedWorkflowTemplateAsync(string workflowId, Mohist.Server.Workflow.Domain.Definition.WorkflowDefinition definition)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var template = await db.ProjectTemplates.FindAsync("test-project", definition.Id);
+        if (template is null)
+        {
+            db.ProjectTemplates.Add(new ProjectTemplateRow
+            {
+                ProjectId = "test-project",
+                TemplateId = definition.Id,
+                TemplateJson = templateJson,
+            });
+        }
+        else
+        {
+            template.TemplateJson = templateJson;
+            template.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var profile = await db.ProjectWorkflowProfiles.FindAsync("test-project");
+        if (profile is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+            {
+                ProjectId = "test-project",
+                DefaultTemplateId = definition.Id,
+            });
+        }
+        else
+        {
+            profile.DefaultTemplateId = definition.Id;
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var runProfile = await db.WorkflowProfiles.FindAsync(workflowId);
+        if (runProfile is null)
+        {
+            db.WorkflowProfiles.Add(new WorkflowProfileRow
+            {
+                WorkflowRunId = workflowId,
+                ProjectId = "test-project",
+                IssueKey = "",
+            });
+        }
+        else
+        {
+            runProfile.ProjectId = "test-project";
+            runProfile.IssueKey = "";
+            runProfile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        await db.SaveChangesAsync();
     }
 }

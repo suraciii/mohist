@@ -526,21 +526,6 @@ namespace Mohist.Server.Migrations
                     b.ToTable("WorkflowLeases");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowRunProfileRow", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("StateJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Key");
-
-                    b.ToTable("WorkflowRunProfiles");
-                });
-
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowRunRow", b =>
                 {
                     b.Property<string>("WorkflowRunId")
