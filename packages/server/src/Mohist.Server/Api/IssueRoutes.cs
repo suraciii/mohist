@@ -697,7 +697,7 @@ public static class IssueRoutes
                 info.UpdatedAt));
         });
 
-        issues.MapPut("/{number:int}/workflow/profile/yaml", async (int number, string projectId, UpdateIssueWorkflowProfileYamlRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPut("/{number:int}/workflow/profile/yaml", async (int number, string projectId, UpdateIssueWorkflowProfileYamlRequest req, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery, IssueWorkflowProfileManager issueProfileManager) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -724,6 +724,7 @@ public static class IssueRoutes
 
             await grains.GetGrain<IIssueGrain>(GrainKey.Issue(pid, number))
                 .UpdateWorkflowProfileAsync(new WorkflowProfileUpdateRequest(DefinitionYaml: normalizedYaml));
+            await issueProfileManager.UpdateTemplateAsync(key, new IssueTemplateUpdateRequest(Template: normalizedYaml));
 
             var updatedInfo = await issuesQuery.GetInfoAsync(pid, number, await projectsQuery.GetByIdAsync(pid));
             if (updatedInfo is null) return ApiResults.NotFound($"Issue #{number} not found");

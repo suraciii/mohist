@@ -121,7 +121,7 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        return new WorkflowQueryService(factory);
+        return new WorkflowQueryService(factory, new Mohist.Server.Workflow.Infrastructure.WorkflowProfileManager(factory));
     }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)

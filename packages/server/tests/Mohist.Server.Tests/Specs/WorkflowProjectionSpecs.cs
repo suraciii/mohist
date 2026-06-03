@@ -158,7 +158,7 @@ public class WorkflowProjectionSpecs
             ]
         };
 
-        var result = WorkflowStatusMapper.MapTasks(stage, profile: null);
+        var result = WorkflowStatusMapper.MapTasks(stage, definition: null);
 
         var task = Assert.Single(result);
         Assert.NotNull(task.RequiredFiles);
@@ -178,7 +178,7 @@ public class WorkflowProjectionSpecs
             Tasks = []
         };
 
-        var result = WorkflowStatusMapper.MapTasks(stage, profile: null);
+        var result = WorkflowStatusMapper.MapTasks(stage, definition: null);
 
         Assert.Empty(result);
     }

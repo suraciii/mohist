@@ -12,6 +12,7 @@ namespace Mohist.Server.Workflow.Queries;
 public class WorkflowQueryService
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
+    private readonly WorkflowProfileManager _profileManager;
 
     private static readonly JsonSerializerOptions RunJsonOptions = new()
     {
@@ -26,9 +27,10 @@ public class WorkflowQueryService
         PropertyNameCaseInsensitive = true,
     };
 
-    public WorkflowQueryService(IDbContextFactory<MohistDbContext> db)
+    public WorkflowQueryService(IDbContextFactory<MohistDbContext> db, WorkflowProfileManager profileManager)
     {
         _db = db;
+        _profileManager = profileManager;
     }
 
     public async Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId)
@@ -44,13 +46,7 @@ public class WorkflowQueryService
         var run = JsonSerializer.Deserialize<WorkflowRun>(runJson, RunJsonOptions);
         if (run is null) return null;
 
-        var profileJson = await db.WorkflowRunProfiles.AsNoTracking()
-            .Where(e => e.Key == workflowRunId)
-            .Select(e => e.StateJson)
-            .FirstOrDefaultAsync();
-        var profile = profileJson is not null
-            ? JsonSerializer.Deserialize<WorkflowRunProfile>(profileJson)
-            : null;
+        var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
 
         var leaseJson = await db.WorkflowLeases.AsNoTracking()
             .Where(e => e.WorkflowRunId == workflowRunId)
@@ -60,7 +56,7 @@ public class WorkflowQueryService
             ? JsonSerializer.Deserialize<WorkLease>(leaseJson, StorageJsonOptions)
             : null;
 
-        return WorkflowStatusMapper.BuildStatusView(run, profile, lease);
+        return WorkflowStatusMapper.BuildStatusView(run, definition, lease);
     }
 
     public async Task<WorkflowVariablesView?> GetVariablesAsync(string workflowRunId)
@@ -81,19 +77,8 @@ public class WorkflowQueryService
 
     public async Task<string?> GetDefinitionYamlAsync(string workflowRunId)
     {
-        await using var db = await _db.CreateDbContextAsync();
-        var profileJson = await db.WorkflowRunProfiles.AsNoTracking()
-            .Where(e => e.Key == workflowRunId)
-            .Select(e => e.StateJson)
-            .FirstOrDefaultAsync();
-
-        if (profileJson is null) return null;
-
-        var profile = JsonSerializer.Deserialize<WorkflowRunProfile>(profileJson);
-        if (profile is null) return null;
-
-        var definition = new WorkflowDefinition(workflowRunId, profile.Definition.Stages);
-        return WorkflowYamlSerializer.ToYaml(definition);
+        var definition = (await _profileManager.LoadTemplateAsync(workflowRunId)).Structure;
+        return definition is null ? null : WorkflowYamlSerializer.ToYaml(definition);
     }
 
     public async Task<bool> HasIncompleteTaskWithUsesAsync(string workflowRunId, string uses)

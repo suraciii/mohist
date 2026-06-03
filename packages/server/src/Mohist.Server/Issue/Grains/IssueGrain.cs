@@ -30,6 +30,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
+    private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -42,6 +43,7 @@ public class IssueGrain : Grain, IIssueGrain
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueRepositoryResolver repositoryResolver,
         IssueWorkflowProfileManager issueProfileManager,
+        ProjectWorkflowProfileManager projectProfileManager,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -53,6 +55,7 @@ public class IssueGrain : Grain, IIssueGrain
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
         _issueProfileManager = issueProfileManager;
+        _projectProfileManager = projectProfileManager;
         _log = log;
     }
 
@@ -111,20 +114,14 @@ public class IssueGrain : Grain, IIssueGrain
         var projectInfo = await projectGrain.GetAsync();
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
 
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
-        var definition = _profile?.Definition ?? defaultProfile.Definition;
-        var stageVariables = BuildStageVariablesFromDefinition(definition);
-
         var issueKey = $"{issue.ProjectId}:{issue.Number}";
-        var templateYaml = WorkflowYamlSerializer.ToYaml(definition);
-        await _issueProfileManager.UpdateTemplateAsync(issueKey, new IssueTemplateUpdateRequest(Template: templateYaml));
+        if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
+            await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
 
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-        await wfGrain.StartAsync(
-            definition,
+        await wfGrain.StartAsync(input:
             new WorkflowStartInput(
-                BuildVariables(wrId, issue, projectContext, definition),
-                stageVariables,
+                BuildVariables(wrId, issue, projectContext),
                 ProjectId: projectContext.Id,
                 IssueKey: issueKey));
 
@@ -314,7 +311,7 @@ public class IssueGrain : Grain, IIssueGrain
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
-    private string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Workflow.Domain.Definition.WorkflowDefinition definition)
+    private string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project)
     {
         var profile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
         var prompts = profile is MohistDefaultIssueWorkflowProfile defaultProfile
@@ -331,11 +328,6 @@ public class IssueGrain : Grain, IIssueGrain
             ["openspecChangeDir"] = JsonSerializer.SerializeToElement(MohistDefaultWorkflowProjection.ChangeDir(issue.Number), WorkflowVariableJson.Options),
             ["prompts"] = JsonSerializer.SerializeToElement(prompts, WorkflowVariableJson.Options),
         };
-
-        if (definition.Variables is not null)
-            variables["vars"] = JsonSerializer.SerializeToElement(
-                definition.Variables.ToDictionary(kv => kv.Key, kv => kv.Value.HasValue ? JsonSerializer.Deserialize<object?>(kv.Value.Value.GetRawText(), WorkflowVariableJson.Options) : null),
-                WorkflowVariableJson.Options);
 
         return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
     }
@@ -463,12 +455,6 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         await SaveProfileAsync();
-
-        if (_issue!.WorkflowRunId is { } wrId)
-        {
-            var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
-            await wfGrain.UpdateProfileDefinitionAsync(_profile.Definition);
-        }
 
         await AppendIssueEventAsync(
             "workflow_profile_updated",
