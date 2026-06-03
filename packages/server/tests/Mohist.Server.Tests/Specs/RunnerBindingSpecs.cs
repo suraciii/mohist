@@ -86,7 +86,8 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         var first = await runner.PollAsync();
         Assert.NotNull(first);
         Assert.StartsWith("task-1.", first.WorkId);
-        await workflow.ReportResultAsync(runnerId, first.WorkId, new WorkResult("completed"));
+        var report = await runner.ReportResultAsync("wf-sticky", first.WorkId, new WorkResult("completed"));
+        Assert.True(report.Tracked);
 
         var second = await runner.PollAsync();
         Assert.NotNull(second);
@@ -116,12 +117,33 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);
         Assert.Equal("wf-report-1", work1.WorkflowRunId);
-        await wf1.ReportResultAsync(runnerId, work1.WorkId, new WorkResult("completed"));
+        var report = await runner.ReportResultAsync("wf-report-1", work1.WorkId, new WorkResult("completed"));
+        Assert.True(report.Tracked);
 
         var nextPoll = await runner.PollAsync();
         Assert.NotNull(nextPoll);
         Assert.Equal("wf-report-2", nextPoll.WorkflowRunId);
         Assert.StartsWith("task-1.", nextPoll.WorkId);
+    }
+
+    [Fact]
+    public async Task RuntimeState_DoesNotConsumeAssignedWork()
+    {
+        var runnerId = await RegisterRunnerAsync("runtime-read-runner");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+
+        _workflowId = "wf-runtime-read";
+        var workflow = Grains.GetGrain<IWorkflowGrain>("wf-runtime-read");
+        await SeedWorkflowTemplateAsync("wf-runtime-read", SingleStage(checks: []));
+        await workflow.StartAsync(TestInput());
+        await AssignWorkflowToRunnerAsync("wf-runtime-read", runnerId);
+
+        var runtime = await runner.GetRuntimeStateAsync();
+        Assert.Contains("wf-runtime-read", runtime.ActiveWorkflowRunIds);
+
+        var work = await runner.PollAsync();
+        Assert.NotNull(work);
+        Assert.Equal("wf-runtime-read", work.WorkflowRunId);
     }
 
     [Fact]

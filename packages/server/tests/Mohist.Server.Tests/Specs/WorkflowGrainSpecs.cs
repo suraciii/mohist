@@ -324,8 +324,8 @@ public abstract class WorkflowGrainSpecs
 
     protected async Task ReportAsync(string runnerId, string workflowRunId, string workId, WorkResult result)
     {
-        var workflow = Grains.GetGrain<IWorkflowGrain>(workflowRunId);
-        await workflow.ReportResultAsync(runnerId, workId, result);
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.ReportResultAsync(workflowRunId, workId, result);
     }
 
     protected async Task ReportAsync(string runnerId, WorkDispatch work, string status, string? message = null)

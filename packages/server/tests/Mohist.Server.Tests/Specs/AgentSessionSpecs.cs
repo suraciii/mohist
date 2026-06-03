@@ -1025,6 +1025,7 @@ public class AgentSessionSpecs
         await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
         {
             workId = work.WorkId,
+            workflowRunId = work.WorkflowRunId,
             status = "failed",
             projectId = project.Id,
             message = "ACP agent requires 'prompt'",
@@ -1065,6 +1066,7 @@ public class AgentSessionSpecs
                 await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new
                 {
                     workId = work.WorkId,
+                    workflowRunId = work.WorkflowRunId,
                     status = "completed",
                     projectId = work.ProjectId
                 });
@@ -1076,11 +1078,11 @@ public class AgentSessionSpecs
                 if (expectedIssueNumber is null || work.IssueNumber == expectedIssueNumber)
                     return work;
 
-                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, status = "completed", projectId = work.ProjectId });
+                await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
                 continue;
             }
 
-            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, status = "completed", projectId = work.ProjectId });
+            await _client.PostOkAsync($"/api/runner/{_runnerId}/report", new { workId = work.WorkId, workflowRunId = work.WorkflowRunId, status = "completed", projectId = work.ProjectId });
         }
 
         Assert.Fail("No agent work dispatched");

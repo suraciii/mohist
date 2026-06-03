@@ -3,7 +3,6 @@ using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
-using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
 
@@ -84,11 +83,10 @@ public static class RunnerRoutes
                 return Results.BadRequest(new { error = "workflowRunId is required" });
 
             var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode);
-            var workflow = grains.GetGrain<IWorkflowGrain>(req.WorkflowRunId);
-            await workflow.ReportResultAsync(runnerId, req.WorkId, result);
-            var workflowStatus = await workflow.GetRunStatusAsync();
+            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+            var report = await runner.ReportResultAsync(req.WorkflowRunId, req.WorkId, result);
 
-            return Results.Ok(new RunnerReportResponse(req.WorkflowRunId, workflowStatus));
+            return Results.Ok(new RunnerReportResponse(report.WorkflowRunId, report.WorkflowStatus, report.Tracked, report.Reason));
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/ensure", async (
@@ -129,7 +127,7 @@ public static class RunnerRoutes
 public record RunnerRegisterRequest(string[] Capabilities, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerHeartbeatRequest(string[]? Capabilities = null, string? ProjectId = null, string? Hostname = null, string[]? CoderModels = null, int? MaxWorkflowSlots = null);
 public record RunnerReportRequest(string WorkId, string Status, string WorkflowRunId, string? ProjectId = null, string? Message = null, string? Output = null, int? ExitCode = null);
-public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus);
+public record RunnerReportResponse(string WorkflowRunId, string? WorkflowStatus, bool Tracked, string? Reason = null);
 public record WorkflowAgentSessionEnsureRequest(string? WorkId = null, string? WorkType = null, string? Stage = null, string? Title = null, int? IssueNumber = null);
 public record WorkflowAgentSessionAttachRequest(string AgentSessionId, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
 public record WorkflowAgentSessionEventsRequest(string? WorkId, string? WorkType, string? Stage, IReadOnlyList<WorkflowAgentSessionEventRequest> Events);
