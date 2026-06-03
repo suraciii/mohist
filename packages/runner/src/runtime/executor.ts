@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import type { ActionContext, JsonObject, WorkItem, WorkItemResult } from "../core/types.js"
 import { stringInput } from "../core/json.js"
-import { renderTemplate, unresolvedReferences } from "../core/template.js"
+import { renderTemplate, wholeStringUnresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
 import { runnerVariables, WorkspaceManager } from "./workspace.js"
 import type { ActionRegistry } from "../actions/registry.js"
@@ -33,7 +33,7 @@ export class WorkExecutor {
 
     try {
       const variables = await this.variables(work, signal)
-      const unresolved = unresolvedReferences(work.with, variables)
+      const unresolved = wholeStringUnresolvedReferences(work.with, variables)
       if (unresolved.length > 0) {
         return failure(work, formatUnresolvedError(work, unresolved))
       }
@@ -54,7 +54,7 @@ export class WorkExecutor {
       const action = this.actions.resolve(check.uses)
       if (!action) return { name: check.name, status: "fail", message: `No action found for '${check.uses}'` }
       try {
-        const unresolved = unresolvedReferences(check.with ?? null, variables)
+        const unresolved = wholeStringUnresolvedReferences(check.with ?? null, variables)
         if (unresolved.length > 0) {
           return { name: check.name, status: "fail", message: formatCheckUnresolvedError(unresolved) }
         }
