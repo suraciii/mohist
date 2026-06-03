@@ -8,7 +8,7 @@ namespace Mohist.Server.Workflow.Infrastructure;
 
 public static class WorkflowYamlSerializer
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static WorkflowDefinition FromYaml(string yaml, string id = "workflow")
     {
