@@ -171,6 +171,58 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-stage-variable-patch", baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Patch project stage variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        _projectId = project.Id;
+        _issueNumber = issue.Number;
+
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        _runnerId = $"project-stage-variable-patch-runner-{Guid.NewGuid():N}";
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
+
+        var proposal = await PollWorkAnyAsync();
+        Assert.StartsWith("proposal", proposal.WorkId);
+        var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(proposal.WorkflowRunId);
+        await workflow.PatchStageVariablesAsync("build", "vars",
+            JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
+            {
+                ["agent"] = JsonSerializer.SerializeToElement(new { model = "opencode-go/minimax-m3" })
+            }));
+
+        await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/variables/vars/agent",
+            new { type = "opencode", model = "project/default-model", timeout = 1500 });
+        await _client.PatchDataAsync<ProjectVariablesDto>(
+            $"/api/projects/{project.Id}/variables/stages/build/vars/agent",
+            new { model = "minimax-coding-plan/MiniMax-M3" });
+
+        await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
+        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        var tasks = await PollWorkAnyAsync();
+        var tasksWorkflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
+        await tasksWorkflow.AddTasksAsync(new AddTasksBatchRequest([
+            new AddTasksBatchItem("build-1", "Build task", "mohist/acp-agent")
+        ]));
+        await ReportAsync(tasks.WorkflowRunId, tasks.WorkId, "completed");
+
+        var build = await PollWorkAnyAsync();
+        Assert.Equal("build", build.Stage);
+        Assert.NotNull(build.Variables);
+        Assert.NotNull(build.With);
+        Assert.Contains("minimax-coding-plan/MiniMax-M3", build.With);
+        Assert.DoesNotContain("opencode-go/minimax-m3", build.With);
+
+        using var doc = JsonDocument.Parse(build.Variables!);
+        var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("opencode", agent.GetProperty("type").GetString());
+        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
+        Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
+    }
+
+    [Fact]
     public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
     {
         var projectName = $"global-runner-{Guid.NewGuid():N}";
