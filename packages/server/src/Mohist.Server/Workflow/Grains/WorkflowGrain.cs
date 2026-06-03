@@ -12,7 +12,6 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Infrastructure.Workflow;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Storage;
@@ -43,7 +42,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IEventBus _eventBus;
     private readonly IEventStore _events;
     private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
-    private readonly WorkflowVariableResolver _variablesResolver;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
 
@@ -56,7 +54,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IEventBus eventBus,
         IEventStore events,
         IEnumerable<IWorkflowCompletionHook> completionHooks,
-        WorkflowVariableResolver variablesResolver,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
@@ -68,7 +65,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _eventBus = eventBus;
         _events = events;
         _completionHooks = completionHooks;
-        _variablesResolver = variablesResolver;
         _profileManager = profileManager;
         _log = log;
     }
