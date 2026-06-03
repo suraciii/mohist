@@ -13,8 +13,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private string? _projectId;
-    private readonly Queue<WorkDispatch> _pendingWorks = new();
-    private readonly Dictionary<string, WorkDispatch> _trackedWork = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RunnerTrackedWork> _works = new(StringComparer.Ordinal);
     private DateTime _lastHeartbeat;
     private int _nextProjectIndex;
     private IDisposable? _heartbeatTimer;
@@ -78,8 +77,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         _status = RunnerStatus.Offline;
         _info = null;
-        _pendingWorks.Clear();
-        _trackedWork.Clear();
+        _works.Clear();
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
     }
@@ -107,7 +105,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
         await TouchPresenceAsync();
 
-        var pending = await DequeuePendingWorkAsync();
+        var pending = await DequeueAssignedWorkAsync();
         if (pending is not null)
             return pending;
 
@@ -120,7 +118,7 @@ public class RunnerGrain : Grain, IRunnerGrain
             if (string.IsNullOrWhiteSpace(claimed))
                 break;
 
-            var claimedWork = await DequeuePendingWorkAsync();
+            var claimedWork = await DequeueAssignedWorkAsync();
             if (claimedWork is not null)
                 return claimedWork;
         }
@@ -131,7 +129,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private int MaxWorkflowSlots => RunnerCapacity.Normalize(_info?.MaxWorkflowSlots);
 
     private int ActiveWorkflowCount =>
-        _trackedWork.Values.Select(w => w.WorkflowRunId).Distinct(StringComparer.Ordinal).Count();
+        _works.Values.Select(w => w.Dispatch.WorkflowRunId).Distinct(StringComparer.Ordinal).Count();
 
     public Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work)
     {
@@ -142,24 +140,47 @@ public class RunnerGrain : Grain, IRunnerGrain
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Rejected, "invalid-work"));
 
         var key = WorkKey(work.WorkflowRunId, work.WorkId);
-        if (_trackedWork.ContainsKey(key))
+        if (_works.ContainsKey(key))
             return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
 
-        var staleKeys = _trackedWork.Keys
-            .Where(k => _trackedWork[k].WorkflowRunId == work.WorkflowRunId)
+        var staleKeys = _works.Keys
+            .Where(k => _works[k].Dispatch.WorkflowRunId == work.WorkflowRunId)
             .ToArray();
         if (staleKeys.Length > 0)
         {
             foreach (var sk in staleKeys)
-                _trackedWork.Remove(sk);
+                _works.Remove(sk);
             _log.LogDebug("Runner {Id} replaced {Count} stale work entries for workflow {WorkflowId}",
                 RunnerId, staleKeys.Length, work.WorkflowRunId);
         }
 
-        _trackedWork[key] = work;
-        _pendingWorks.Enqueue(work);
+        _works[key] = new RunnerTrackedWork(work, RunnerWorkState.Assigned, DateTimeOffset.UtcNow);
         _log.LogInformation("Runner {Id} assigned work {WorkId} for workflow {WorkflowId}", RunnerId, work.WorkId, work.WorkflowRunId);
         return Task.FromResult(new RunnerWorkAssignmentResult(RunnerWorkAssignmentStatus.Assigned));
+    }
+
+    public async Task<RunnerWorkReportResult> ReportResultAsync(string workflowRunId, string workId, WorkResult result)
+    {
+        if (string.IsNullOrWhiteSpace(workflowRunId))
+            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-workflow");
+        if (string.IsNullOrWhiteSpace(workId))
+            return new RunnerWorkReportResult(workflowRunId, null, false, "missing-work");
+
+        var key = WorkKey(workflowRunId, workId);
+        var tracked = _works.ContainsKey(key);
+
+        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(workflowRunId);
+        await workflow.ReportResultAsync(RunnerId, workId, result);
+        var workflowStatus = await workflow.GetRunStatusAsync();
+
+        if (tracked)
+            _works.Remove(key);
+
+        return new RunnerWorkReportResult(
+            workflowRunId,
+            workflowStatus,
+            tracked,
+            tracked ? "reported" : "untracked");
     }
 
     public Task<bool> IsAvailableAsync()
@@ -167,16 +188,15 @@ public class RunnerGrain : Grain, IRunnerGrain
         return Task.FromResult(_status == RunnerStatus.Online);
     }
 
-    public async Task<RunnerRuntimeState> GetRuntimeStateAsync()
+    public Task<RunnerRuntimeState> GetRuntimeStateAsync()
     {
-        await DequeuePendingWorkAsync();
-        return new RunnerRuntimeState(
+        return Task.FromResult(new RunnerRuntimeState(
             _status,
             _lastHeartbeat,
-            _trackedWork.Values
-                .Select(w => w.WorkflowRunId)
+            _works.Values
+                .Select(w => w.Dispatch.WorkflowRunId)
                 .Distinct(StringComparer.Ordinal)
-                .ToArray());
+                .ToArray()));
     }
 
     private async Task CheckHeartbeatAsync()
@@ -193,8 +213,7 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     private async Task HandleTimeoutAsync()
     {
-        _pendingWorks.Clear();
-        _trackedWork.Clear();
+        _works.Clear();
         _status = RunnerStatus.Offline;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKey());
         await registry.UnregisterAsync(RunnerId);
@@ -258,58 +277,67 @@ public class RunnerGrain : Grain, IRunnerGrain
         return null;
     }
 
-    private async Task<WorkDispatch?> DequeuePendingWorkAsync()
+    private async Task<WorkDispatch?> DequeueAssignedWorkAsync()
     {
-        while (_pendingWorks.Count > 0)
+        while (true)
         {
-            var work = _pendingWorks.Dequeue();
-            var key = WorkKey(work.WorkflowRunId, work.WorkId);
+            string? selectedKey = null;
+            RunnerTrackedWork? selectedWork = null;
 
-            if (string.IsNullOrWhiteSpace(work.WorkflowRunId) || string.IsNullOrWhiteSpace(work.WorkId))
-                continue;
-
-            if (!_trackedWork.TryGetValue(key, out _))
-                continue;
-
-            if (!await IsTrackedWorkValidAsync(work))
+            foreach (var (key, work) in _works)
             {
-                _trackedWork.Remove(key);
+                if (work.Status != RunnerWorkState.Assigned)
+                    continue;
+
+                selectedKey = key;
+                selectedWork = work;
+                break;
+            }
+
+            if (selectedKey is null || selectedWork is null)
+                return null;
+
+            if (!await IsWorkRunnableAsync(selectedWork.Dispatch))
+            {
+                _works.Remove(selectedKey);
                 continue;
             }
 
-            return work;
+            _works[selectedKey] = selectedWork.MarkRunning(DateTimeOffset.UtcNow);
+            return selectedWork.Dispatch;
         }
-
-        var pendingKeys = new HashSet<string>(
-            _pendingWorks.Select(p => WorkKey(p.WorkflowRunId, p.WorkId)),
-            StringComparer.Ordinal);
-        var stale = new List<string>();
-        foreach (var (key, work) in _trackedWork)
-        {
-            if (pendingKeys.Contains(key))
-                continue;
-
-            if (!await IsTrackedWorkValidAsync(work))
-                stale.Add(key);
-        }
-
-        foreach (var key in stale)
-            _trackedWork.Remove(key);
-
-        return null;
     }
 
-    private async Task<bool> IsTrackedWorkValidAsync(WorkDispatch work)
+    private async Task<bool> IsWorkRunnableAsync(WorkDispatch work)
     {
-        var wf = GrainFactory.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
-        var owner = await wf.GetClaimedRunnerIdAsync();
-        var status = await wf.GetRunStatusAsync();
-        if (owner != RunnerId || status != "Running")
+        var workflow = GrainFactory.GetGrain<IWorkflowGrain>(work.WorkflowRunId);
+        var owner = await workflow.GetClaimedRunnerIdAsync();
+        if (!string.Equals(owner, RunnerId, StringComparison.Ordinal))
             return false;
 
-        var currentWorkId = await wf.GetCurrentWorkIdAsync();
+        var status = await workflow.GetRunStatusAsync();
+        if (!string.Equals(status, "Running", StringComparison.Ordinal))
+            return false;
+
+        var currentWorkId = await workflow.GetCurrentWorkIdAsync();
         return string.Equals(currentWorkId, work.WorkId, StringComparison.Ordinal);
     }
 
     private static string WorkKey(string workflowRunId, string workId) => $"{workflowRunId}\u001f{workId}";
+}
+
+internal enum RunnerWorkState
+{
+    Assigned,
+    Running
+}
+
+internal sealed record RunnerTrackedWork(
+    WorkDispatch Dispatch,
+    RunnerWorkState Status,
+    DateTimeOffset AssignedAt,
+    DateTimeOffset? StartedAt = null)
+{
+    public RunnerTrackedWork MarkRunning(DateTimeOffset now) =>
+        this with { Status = RunnerWorkState.Running, StartedAt = StartedAt ?? now };
 }

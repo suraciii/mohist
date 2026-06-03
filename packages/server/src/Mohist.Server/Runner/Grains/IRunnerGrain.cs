@@ -8,6 +8,7 @@ public interface IRunnerGrain : IGrainWithStringKey
     Task HeartbeatRepairAsync(RunnerInfo info);
     Task<RunnerWorkAssignmentResult> AssignWorkAsync(WorkDispatch work);
     Task<WorkDispatch?> PollAsync();
+    Task<RunnerWorkReportResult> ReportResultAsync(string workflowRunId, string workId, WorkResult result);
     Task<bool> IsAvailableAsync();
     Task<RunnerRuntimeState> GetRuntimeStateAsync();
 }
@@ -62,6 +63,13 @@ public enum RunnerWorkAssignmentStatus
     Assigned,
     Rejected
 }
+
+[GenerateSerializer]
+public sealed record RunnerWorkReportResult(
+    [property: Id(0)] string WorkflowRunId,
+    [property: Id(1)] string? WorkflowStatus,
+    [property: Id(2)] bool Tracked,
+    [property: Id(3)] string? Reason = null);
 
 public enum RunnerStatus { Online, Offline }
 

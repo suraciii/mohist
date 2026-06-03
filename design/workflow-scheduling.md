@@ -30,7 +30,7 @@ WorkflowBacklogGrain
   stores workflowRunId candidates
 
 RunnerGrain
-  stores pendingWorks + active work only
+  stores a disposable work registry
   polls project backlogs with round-robin fairness
 ```
 
@@ -38,7 +38,7 @@ RunnerGrain
 
 ```text
 assignment truth = WorkflowGrain
-runner cache     = pending/active work
+runner cache     = assigned/running work registry
 ```
 
 ## Interfaces
@@ -57,6 +57,7 @@ IRunnerGrain
   HeartbeatAsync()
   AssignWorkAsync(work) -> Assigned | Rejected
   PollAsync() -> WorkDispatch?
+  ReportResultAsync(workflowRunId, workId, result) -> report response
 ```
 
 ## Project Scan
@@ -91,8 +92,8 @@ Global runners should not depend on a single in-memory directory as the only pro
 RunnerGrain                 WorkflowBacklogGrain              WorkflowGrain
     |                                |                               |
     | PollAsync()                    |                               |
-    | drain pendingWorks             |                               |
-    | (validates + sweeps stale)     |                               |
+    | find Assigned work             |                               |
+    | mark it Running                |                               |
     |                                |                               |
     | if capacity full               |                               |
     |     return null                |                               |
@@ -107,7 +108,7 @@ RunnerGrain                 WorkflowBacklogGrain              WorkflowGrain
     |                                |                               | if work needs delivery
     | AssignWorkAsync(work)          |                               |
     |<---------------------------------------------------------------|
-    | add pendingWorks               |                               |
+    | add/update registry as Assigned|                               |
     | return Assigned                |                               |
     |---------------------------------------------------------------->|
     |                                | return Assigned               |
@@ -115,7 +116,8 @@ RunnerGrain                 WorkflowBacklogGrain              WorkflowGrain
     |                                | remove candidate              |
     | return workflowRunId?          |                               |
     |<-------------------------------|                               |
-    | drain pendingWorks             |                               |
+    | find Assigned work             |                               |
+    | mark it Running                |                               |
     | return WorkDispatch?           |                               |
 ```
 
@@ -175,64 +177,74 @@ WorkflowGrain assignment
 
 RunnerGrain work cache
     |
-    |-- pendingWorks
-    |-- active work tracking
+    |-- work registry
+    |-- each work has Assigned or Running status
     |-- disposable
 ```
 
 ```text
 RunnerGrain.AssignWorkAsync(work)
     |
-    |-- same workflowRunId + workId already pending/active
+    |-- same workflowRunId + workId already in registry
     |       -> Assigned
     |
-    |-- same workflowRunId has different pending/active work
+    |-- same workflowRunId has different registry work
     |       -> replace old entries, accept new work
     |
     |-- runner offline / cannot accept
     |       -> Rejected
     |
     |-- otherwise
-            -> add to pendingWorks
+            -> add to registry as Assigned
             -> Assigned
 ```
 
-`pendingWorks` 是可丢的投递缓存；事实来源是 `WorkflowGrain` 的 assignment + lease。
+Runner registry 是可丢的投递/执行缓存；事实来源是 `WorkflowGrain` 的 assignment + lease。
 
-Capacity is based on pending/active work, not assigned workflow count.
+Capacity is based on registered work, not assigned workflow count.
 
 ```text
 can accept work when:
   activeWorkflowCount < maxWorkflowSlots
 
 activeWorkflowCount =
-  distinct workflowRunId in pending/active work
+  distinct workflowRunId in Assigned or Running work
 ```
 
-`DequeuePendingWorkAsync` validates work against `WorkflowGrain` inline during dequeue. When no pending work remains, it also sweeps stale dispatched work from the cache with the same validation:
+`PollAsync` mutates state only when it is actually handing valid work to the runner process.
+Before delivery it rechecks the authoritative workflow assignment/lease so stopped,
+completed, replaced, or stolen work is dropped instead of executed:
 
 ```text
-DequeuePendingWorkAsync()
+PollAsync()
     |
-    |-- drain _pendingWorks
+    |-- find first registry entry with Status = Assigned
+    |-- validate against WorkflowGrain
     |       |-- owner is this runner?
     |       |-- workflow is Running?
     |       |-- current workId still matches?
-    |       |-- no  -> remove from _trackedWork, skip
-    |       |-- yes -> return work
+    |       |-- no -> remove registry entry, scan next
+    |-- mark it Running
+    |-- return WorkDispatch
     |
-    |-- no pending work
-    |       sweep all dispatched entries in _trackedWork
-    |       |-- same validation as above
-    |       |-- stale -> remove
+    |-- no Assigned work -> return null
+```
+
+State queries are read-only:
+
+```text
+GetRuntimeStateAsync()
     |
-    |-- return null
+    |-- read registry
+    |-- return distinct workflowRunId values
+    |-- no dequeue
+    |-- no validation side effects
 ```
 
 ## Report
 
 ```text
-RunnerProcess                      WorkflowGrain
+RunnerProcess                      RunnerGrain                     WorkflowGrain
     |                                    |
     | PollAsync()                        |
     |-------------------------->         |
@@ -241,15 +253,21 @@ RunnerProcess                      WorkflowGrain
     |                                    |
     | execute work                       |
     |                                    |
-    | ReportResultAsync(runnerId, workId, result)
+    | ReportResultAsync(workflowRunId, workId, result)
     |----------------------------------->|
+    |                                    | check local registry
+    |                                    | call WorkflowGrain.ReportResultAsync(...)
+    |                                    | tracked -> remove registry work
+    |                                    | untracked -> keep response explicit
+    |                                    |----------------------------------->|
     |                                    | validate lease owner
     |                                    | advance workflow
-    | return                             |
+    |                                    |<-----------------------------------|
+    | return report response             |
     |<-----------------------------------|
 ```
 
-`workflowRunId` is required. Runner process calls `WorkflowGrain.ReportResultAsync` directly.
+`workflowRunId` is required. Runner process reports to `RunnerGrain`; `RunnerGrain` owns local work lifecycle and forwards the accepted fact to `WorkflowGrain`.
 
 ## Recovery Reminder
 
