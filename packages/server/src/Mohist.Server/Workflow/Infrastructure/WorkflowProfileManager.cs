@@ -11,8 +11,8 @@ namespace Mohist.Server.Workflow.Infrastructure;
 /// <summary>
 /// Workflow 数据唯一读写入口。
 ///
-/// SaveProfile: 写入 workflow run-level 的 ProfileRow (模板快照 + ProjectId/IssueKey)
-/// LoadTemplate: 选定生效模板 (snapshot > issue custom > issue-ref-template > project default)
+/// SaveProfile: 写入 workflow run-level 的 ProfileRow (ProjectId/IssueKey + run variables)
+/// LoadTemplate: 选定生效模板 (issue custom > issue-ref-template > project default)
 /// LoadVariables: 合并 3 层独立变量 (project + issue + workflow-run)
 /// ExpandTaskWith: 处理 task.with (保留 ${{ }} 给 runner 展开, 对象 deep merge)
 /// </summary>
@@ -26,18 +26,16 @@ public class WorkflowProfileManager
     }
 
     /// <summary>
-    /// 创建或更新 workflow run 级别的 ProfileRow (模板快照 + ProjectId/IssueKey)。
-    /// Workflow 启动时调用, 将模板冻结, 并记录关联的 project/issue 供后续 LoadVariables 使用。
+    /// 创建或更新 workflow run 级别的 ProfileRow。
+    /// Workflow 启动时调用, 记录关联的 project/issue 供后续 LoadTemplate/LoadVariables 使用。
     /// </summary>
     public async Task<WorkflowProfileRow> SaveProfileAsync(
         string runId,
-        WorkflowDefinition definition,
         string? projectId,
         string? issueKey)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var existing = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-        var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
 
         if (existing is null)
         {
@@ -46,7 +44,6 @@ public class WorkflowProfileManager
                 WorkflowRunId = runId,
                 ProjectId = projectId ?? "",
                 IssueKey = issueKey ?? "",
-                TemplateJson = templateJson,
                 VariablesJson = VariableBundle.Empty.ToJson(),
             };
             db.WorkflowProfiles.Add(existing);
@@ -55,7 +52,6 @@ public class WorkflowProfileManager
         {
             existing.ProjectId = projectId ?? existing.ProjectId;
             existing.IssueKey = issueKey ?? existing.IssueKey;
-            existing.TemplateJson = templateJson;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -65,8 +61,9 @@ public class WorkflowProfileManager
 
     /// <summary>
     /// 选定生效模板。
-    /// 优先级: workflow_profile.Template > issue_workflow_profile.Template (custom) >
-    ///         project_templates[issue.SourceTemplateId] > project_templates[project.DefaultTemplateId]
+    /// 优先级: issue_workflow_profile.Template (custom) >
+    ///         project_templates/system[issue.SourceTemplateId] >
+    ///         project_templates/system[project.DefaultTemplateId]
     /// </summary>
     public async Task<ResolvedTemplate> LoadTemplateAsync(string runId)
     {
@@ -74,14 +71,6 @@ public class WorkflowProfileManager
 
         var runProfile = await db.WorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
-
-        // Priority 1: run 快照
-        if (runProfile is not null && !string.IsNullOrWhiteSpace(runProfile.TemplateJson))
-        {
-            var runDef = DeserializeDefinition(runProfile.TemplateJson);
-            if (runDef is not null && !string.IsNullOrWhiteSpace(runDef.Id))
-                return ResolvedTemplate.FromDefinition($"run-snapshot:{runId}", runDef);
-        }
 
         if (runProfile is null)
             return ResolvedTemplate.None;
@@ -100,7 +89,7 @@ public class WorkflowProfileManager
         // Priority 3: issue 引用的项目模板
         if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.SourceTemplateId))
         {
-            var template = await LoadProjectTemplateAsync(db, runProfile.ProjectId, issueProfile.SourceTemplateId);
+            var template = await LoadTemplateReferenceAsync(db, runProfile.ProjectId, issueProfile.SourceTemplateId);
             if (template is not null)
                 return template;
         }
@@ -110,7 +99,7 @@ public class WorkflowProfileManager
             .FirstOrDefaultAsync(x => x.ProjectId == runProfile.ProjectId);
         if (projectProfile is not null && !string.IsNullOrWhiteSpace(projectProfile.DefaultTemplateId))
         {
-            var template = await LoadProjectTemplateAsync(db, runProfile.ProjectId, projectProfile.DefaultTemplateId);
+            var template = await LoadTemplateReferenceAsync(db, runProfile.ProjectId, projectProfile.DefaultTemplateId);
             if (template is not null)
                 return template;
         }
@@ -409,6 +398,19 @@ public class WorkflowProfileManager
 
         var def = DeserializeDefinition(row.TemplateJson);
         return def is null ? null : ResolvedTemplate.FromDefinition($"project-template:{projectId}/{templateId}", def);
+    }
+
+    private static async Task<ResolvedTemplate?> LoadTemplateReferenceAsync(
+        MohistDbContext db, string projectId, string templateId)
+    {
+        var projectTemplate = await LoadProjectTemplateAsync(db, projectId, templateId);
+        if (projectTemplate is not null)
+            return projectTemplate;
+
+        var systemDefinition = ProjectWorkflowProfileManager.GetSystemTemplateDefinition(templateId);
+        return systemDefinition is null
+            ? null
+            : ResolvedTemplate.FromDefinition($"system-template:{templateId}", systemDefinition);
     }
 
     // =======================================================================

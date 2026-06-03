@@ -8,7 +8,7 @@ public static class WorkflowStatusMapper
 {
     public static WorkflowStatusView? BuildStatusView(
         WorkflowRun? run,
-        WorkflowRunProfile? profile,
+        WorkflowDefinition? definition,
         WorkLease? lease)
     {
         if (run is null) return null;
@@ -28,8 +28,8 @@ public static class WorkflowStatusMapper
                 s.Id,
                 s.Status.ToString(),
                 i,
-                MapTasks(s, profile),
-                MapChecks(s, profile),
+                MapTasks(s, definition),
+                MapChecks(s, definition),
                 s.ApprovalStatus is not null
                     ? new ApprovalStatusView(s.ApprovalStatus.Result, s.ApprovalStatus.RequestedAt, s.ApprovalStatus.RespondedAt)
                     : null,
@@ -64,26 +64,26 @@ public static class WorkflowStatusMapper
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt));
     }
 
-    public static List<TaskStatusView> MapTasks(StageRun stage, WorkflowRunProfile? profile)
+    public static List<TaskStatusView> MapTasks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Tasks.Count > 0)
             return stage.Tasks.Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, t.Status.ToString(), t.RequiredFiles, t.Classification)).ToList();
 
-        var definition = profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.Id);
-        if (definition is null) return [];
-        return definition.Tasks
+        var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
+        if (stageDefinition is null) return [];
+        return stageDefinition.Tasks
             .Select(t => new TaskStatusView(t.Id, t.Title, t.Uses, "Pending", TaskRunExtensions.ExtractRequiredFiles(t.With), TaskRunExtensions.DeriveClassification(t.Uses, null)))
             .ToList();
     }
 
-    public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowRunProfile? profile)
+    public static List<CheckStatusView> MapChecks(StageRun stage, WorkflowDefinition? definition)
     {
         if (stage.Checks.Count > 0)
             return stage.Checks.Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, c.Status.ToString(), c.Message)).ToList();
 
-        var definition = profile?.Definition.Stages.FirstOrDefault(d => d.Stage == stage.Id);
-        if (definition is null) return [];
-        return definition.Checks
+        var stageDefinition = definition?.Stages.FirstOrDefault(d => d.Stage == stage.Id);
+        if (stageDefinition is null) return [];
+        return stageDefinition.Checks
             .Select(c => new CheckStatusView(c.Name, c.Title, c.Uses, "Pending", null))
             .ToList();
     }

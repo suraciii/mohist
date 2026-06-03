@@ -47,7 +47,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoadTemplate_Priority1_ReturnsRunSnapshot()
+    public async Task LoadTemplate_IgnoresRunTemplateSnapshot()
     {
         var runId = "wr_snap01";
         await SeedAsync(projectId: "proj1", issueKey: "proj1:1", runId: runId,
@@ -58,8 +58,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         var result = await _manager.LoadTemplateAsync(runId);
 
         Assert.NotNull(result.Structure);
-        Assert.Contains("run-snapshot", result.Id ?? "");
-        Assert.Single(result.Structure.Stages);
+        Assert.Contains("issue-custom", result.Id ?? "");
+        Assert.Equal(2, result.Structure.Stages.Count);
     }
 
     [Fact]
@@ -110,6 +110,23 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.NotNull(result.Structure);
         Assert.Equal(5, result.Structure.Stages.Count);
+    }
+
+    [Fact]
+    public async Task LoadTemplate_ProjectDefaultSystemTemplate_FallsBackToSystemTemplate()
+    {
+        var runId = "wr_system_default01";
+        await SeedAsync(projectId: "proj-sys", issueKey: "proj-sys:1", runId: runId,
+            runTemplateJson: null,
+            issueTemplateJson: null,
+            issueSourceTemplateId: null,
+            projectDefaultTemplateId: "mohist/default");
+
+        var result = await _manager.LoadTemplateAsync(runId);
+
+        Assert.NotNull(result.Structure);
+        Assert.Contains("system-template:mohist/default", result.Id ?? "");
+        Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
     }
 
     [Fact]
