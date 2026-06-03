@@ -25,6 +25,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private const string RecoveryReminderName = "workflow-scheduling-recovery";
     private static readonly TimeSpan RecoveryReminderDueTime = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RecoveryReminderPeriod = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan StaleLeaseThreshold = TimeSpan.FromMinutes(5);
     private WorkflowRunProfile? _profile;
     private WorkflowRun? _run;
     private WorkLease? _lease;
@@ -306,9 +307,18 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             if (!string.Equals(activeLease.RunnerId, runnerId, StringComparison.Ordinal))
                 return;
 
-            var restoredDispatch = RestoreDispatch(activeLease);
-            if (restoredDispatch is not null)
-                await AssignRunnerWorkAsync(runnerId, restoredDispatch);
+            if (IsStaleLease(activeLease))
+            {
+                _log.LogWarning("Workflow {Id} stale lease detected for {WorkId} (dispatched {Age:N0}s ago), clearing",
+                    GrainKey, activeLease.WorkId, (DateTime.UtcNow - activeLease.DispatchedAt!.Value).TotalSeconds);
+                await ClearAndDeleteLeaseAsync();
+            }
+            else
+            {
+                var restoredDispatch = RestoreDispatch(activeLease);
+                if (restoredDispatch is not null)
+                    await AssignRunnerWorkAsync(runnerId, restoredDispatch);
+            }
             return;
         }
 
@@ -679,7 +689,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             Stage: stage,
             Title: title,
             Issue: issueRef);
-        _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch);
+        _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
         _lastRunnerId = runnerId;
         return dispatch;
     }
@@ -744,6 +754,15 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var lease = await RestoreLeaseAsync();
         if (lease is not null)
             await ClearAndDeleteLeaseAsync();
+    }
+
+    private bool IsStaleLease(WorkLease lease)
+    {
+        var dispatchedAt = lease.DispatchedAt;
+        if (dispatchedAt is null)
+            return false;
+
+        return DateTime.UtcNow - dispatchedAt.Value > StaleLeaseThreshold;
     }
 
     private async Task<WorkLease?> RestoreLeaseAsync()
