@@ -92,7 +92,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     {
         var runnerId = $"runner-{Guid.NewGuid():N}";
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", "test-project", MaxWorkflowSlots: maxWorkflowSlots));
+        var projectId = _workflowId is null ? "test-project" : TestProjectId(_workflowId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, MaxWorkflowSlots: maxWorkflowSlots));
         return runnerId;
     }
 
@@ -120,20 +121,26 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         ]);
     }
 
-    private static WorkflowStartInput TestInput() => new(
-        Variables: """{"project":{"id":"test-project"}}""");
+    private static WorkflowStartInput TestInput(string projectId)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new { project = new { id = projectId } });
+        return new WorkflowStartInput(json, ProjectId: projectId);
+    }
+
+    private static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
 
     private async Task<IWorkflowGrain> CreateAndStartAsync(WorkflowDefinition definition)
     {
         var workflowId = $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
+        var projectId = TestProjectId(workflowId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await SeedWorkflowTemplateAsync(workflowId, definition);
-        await workflow.StartAsync(TestInput());
+        await SeedWorkflowTemplateAsync(workflowId, definition, projectId);
+        await workflow.StartAsync(TestInput(projectId));
         return workflow;
     }
 
-    private async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition)
+    private async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition, string projectId)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
@@ -141,12 +148,12 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         await using var db = new MohistDbContext(options);
         var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-        var template = await db.ProjectTemplates.FindAsync("test-project", definition.Id);
+        var template = await db.ProjectTemplates.FindAsync(projectId, definition.Id);
         if (template is null)
         {
             db.ProjectTemplates.Add(new ProjectTemplateRow
             {
-                ProjectId = "test-project",
+                ProjectId = projectId,
                 TemplateId = definition.Id,
                 TemplateJson = templateJson,
             });
@@ -157,12 +164,12 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             template.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        var profile = await db.ProjectWorkflowProfiles.FindAsync("test-project");
+        var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
         if (profile is null)
         {
             db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
             {
-                ProjectId = "test-project",
+                ProjectId = projectId,
                 DefaultTemplateId = definition.Id,
             });
         }
@@ -172,22 +179,6 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        var runProfile = await db.WorkflowProfiles.FindAsync(workflowId);
-        if (runProfile is null)
-        {
-            db.WorkflowProfiles.Add(new WorkflowProfileRow
-            {
-                WorkflowRunId = workflowId,
-                ProjectId = "test-project",
-                IssueKey = "",
-            });
-        }
-        else
-        {
-            runProfile.ProjectId = "test-project";
-            runProfile.IssueKey = "";
-            runProfile.UpdatedAt = DateTimeOffset.UtcNow;
-        }
         await db.SaveChangesAsync();
     }
 

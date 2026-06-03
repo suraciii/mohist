@@ -233,7 +233,7 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         ]));
 
         var updatedAgent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" };
-        await PatchRunVariablesAsync(_workflowId!, new VariableBundle(Stages: new Dictionary<string, StageVariables>
+        await PatchProjectVariablesAsync(TestProjectId(_workflowId!), new VariableBundle(Stages: new Dictionary<string, StageVariables>
         {
             ["build"] = new(JsonSerializer.SerializeToElement(new { agent = updatedAgent }))
         }));

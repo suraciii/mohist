@@ -184,16 +184,13 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
         var proposal = await PollWorkAnyAsync();
         Assert.StartsWith("proposal", proposal.WorkId);
-        await _client.PatchDataAsync<ProjectVariablesDto>(
-            $"/api/workflow-runs/{proposal.WorkflowRunId}/variable-overrides",
-            new { stages = new { build = new { vars = new { agent = new { model = "opencode-go/minimax-m3" } } } } });
 
         await ReportAsync(proposal.WorkflowRunId, proposal.WorkId, "completed");
         await _client.PatchDataAsync<ProjectVariablesDto>(
             $"/api/projects/{project.Id}/workflow-profile/variables",
             new { vars = new { agent = new { type = "opencode", model = "project/default-model", timeout = 1500 } } });
         await _client.PatchDataAsync<ProjectVariablesDto>(
-            $"/api/projects/{project.Id}/workflow-profile/variables",
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
             new { stages = new { build = new { vars = new { agent = new { model = "minimax-coding-plan/MiniMax-M3" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
@@ -209,12 +206,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal("build", build.Stage);
         Assert.NotNull(build.Variables);
         Assert.NotNull(build.With);
-        Assert.Contains("opencode-go/minimax-m3", build.With);
 
         using var doc = JsonDocument.Parse(build.Variables!);
         var agent = doc.RootElement.GetProperty("vars").GetProperty("agent");
         Assert.Equal("opencode", agent.GetProperty("type").GetString());
-        Assert.Equal("opencode-go/minimax-m3", agent.GetProperty("model").GetString());
+        Assert.Equal("minimax-coding-plan/MiniMax-M3", agent.GetProperty("model").GetString());
         Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 

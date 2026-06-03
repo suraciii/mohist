@@ -35,28 +35,6 @@ public static class WorkflowRoutes
             });
         });
 
-        app.MapGet("/api/workflow-runs/{workflowRunId}/variable-overrides", async (
-            string workflowRunId,
-            WorkflowProfileManager profileManager) =>
-        {
-            return ApiResults.Ok(await profileManager.GetRunVariablesAsync(workflowRunId));
-        });
-
-        app.MapPatch("/api/workflow-runs/{workflowRunId}/variable-overrides", async (
-            string workflowRunId,
-            VariableBundle patch,
-            WorkflowProfileManager profileManager) =>
-        {
-            return ApiResults.Ok(await profileManager.PatchRunVariablesAsync(workflowRunId, patch));
-        });
-
-        app.MapDelete("/api/workflow-runs/{workflowRunId}/variable-overrides", async (
-            string workflowRunId,
-            WorkflowProfileManager profileManager) =>
-        {
-            return ApiResults.Ok(await profileManager.ClearRunVariablesAsync(workflowRunId));
-        });
-
         app.MapPost("/api/workflow-runs/{workflowRunId}/tasks", async (
             string workflowRunId,
             AddTaskRequestDto request,

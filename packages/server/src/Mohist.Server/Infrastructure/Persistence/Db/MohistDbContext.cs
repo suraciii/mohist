@@ -29,7 +29,6 @@ public class MohistDbContext : DbContext
     public DbSet<IssueProfileRow> IssueProfiles { get; set; } = null!;
     public DbSet<IssueWorkflowProfileRow> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
-    public DbSet<WorkflowProfileRow> WorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
@@ -244,17 +243,5 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.VariablesJson).IsRequired();
         });
 
-        modelBuilder.Entity<WorkflowProfileRow>(entity =>
-        {
-            entity.ToTable("WorkflowProfiles");
-            entity.HasKey(e => e.WorkflowRunId);
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.IssueKey).HasMaxLength(512).IsRequired();
-            entity.Property(e => e.TemplateJson).IsRequired();
-            entity.Property(e => e.VariablesJson).IsRequired();
-            entity.HasIndex(e => e.ProjectId);
-            entity.HasIndex(e => e.IssueKey);
-        });
     }
 }

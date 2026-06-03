@@ -154,22 +154,6 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
             profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
-        var runProfile = await db.WorkflowProfiles.FindAsync(workflowId);
-        if (runProfile is null)
-        {
-            db.WorkflowProfiles.Add(new WorkflowProfileRow
-            {
-                WorkflowRunId = workflowId,
-                ProjectId = "test-project",
-                IssueKey = "",
-            });
-        }
-        else
-        {
-            runProfile.ProjectId = "test-project";
-            runProfile.IssueKey = "";
-            runProfile.UpdatedAt = DateTimeOffset.UtcNow;
-        }
         await db.SaveChangesAsync();
     }
 }

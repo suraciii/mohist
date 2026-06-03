@@ -31,9 +31,10 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     public async Task WorkflowDispatchPreservesOpaqueContextAndAddsRuntimeContext()
     {
         await ClearBacklogAsync();
-        _runnerId = await RegisterRunnerAsync();
         var workflowId = $"wr_{Guid.NewGuid():N}";
         _workflowId = workflowId;
+        _runnerId = await RegisterRunnerAsync();
+        var projectId = TestProjectId(workflowId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
         var variables = JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
         {
@@ -44,10 +45,10 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
             new StageDefinition("build",
                 [new("task-1", "Task 1", "spec/task")],
                 [])
-        ]));
-        await workflow.StartAsync(new WorkflowStartInput(variables));
+        ]), projectId);
+        await workflow.StartAsync(new WorkflowStartInput(variables, ProjectId: projectId));
 
-        await EnqueueWorkflowForTestAsync(workflowId);
+        await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();
 
         Assert.NotNull(work.Variables);
@@ -68,19 +69,20 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     public async Task GenericWorkflowCorrelationDoesNotCreateIssueDispatchReference()
     {
         await ClearBacklogAsync();
-        _runnerId = await RegisterRunnerAsync();
         var workflowId = $"wr_{Guid.NewGuid():N}";
         _workflowId = workflowId;
+        _runnerId = await RegisterRunnerAsync();
+        var projectId = TestProjectId(workflowId);
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
 
         await SeedWorkflowTemplateAsync(workflowId, new WorkflowDefinition("spec/workflow", [
             new StageDefinition("release",
                 [new("publish", "Publish", "spec/task")],
                 [])
-        ]));
-        await workflow.StartAsync();
+        ]), projectId);
+        await workflow.StartAsync(new WorkflowStartInput(ProjectId: projectId));
 
-        await EnqueueWorkflowForTestAsync(workflowId);
+        await EnqueueWorkflowForTestAsync(workflowId, projectId);
         var (work, _) = await PollWorkAnyAsync();
 
         Assert.Null(work.Issue);

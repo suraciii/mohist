@@ -99,9 +99,9 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
     public async Task StartedWorkflow_RunnerClaimsFromBacklog()
     {
         await ClearBacklogAsync();
-        var runnerId = await RegisterRunnerAsync();
         var workflowId = $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
+        var runnerId = await RegisterRunnerAsync();
         _runnerId = runnerId;
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
