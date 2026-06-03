@@ -60,6 +60,7 @@ public static class WorkflowStatusMapper
             pending,
             failure,
             actions,
+            run.ClaimedBy,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt));
     }
 

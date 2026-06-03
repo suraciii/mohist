@@ -61,6 +61,7 @@ public static class WorkflowStatusReader
             pending,
             failure,
             [],
+            run.ClaimedBy,
             run.Metadata is null ? null : new MetadataView(run.Metadata.Name, run.Metadata.Labels, run.Metadata.Annotations, run.Metadata.CreatedAt));
     }
 }
