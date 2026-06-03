@@ -710,22 +710,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         var variables = JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
 
-        // --- DIAGNOSTIC (remove after debug) ---
-        if (variables.Contains("project/build-model"))
-            File.WriteAllText($"C:\\temp\\diag-{GrainKey}.txt", variables);
-
-        // --- DIAGNOSTIC: log variable state for debugging ---
-        var buildStageJson = resolved.Stages is not null && resolved.Stages.TryGetValue(stage, out var buildStage)
-            ? (buildStage.Vars.HasValue ? buildStage.Vars.Value.GetRawText() : "<null>")
-            : "<no-stage>";
-        var diagMsg = $"[DIAG] MakeDispatchAsync run={GrainKey} stage={stage}\n" +
-                      $"  resolved.Vars: {(resolved.Vars.HasValue ? resolved.Vars.Value.GetRawText() : "<null>")}\n" +
-                      $"  resolved.Stages[{stage}]: {buildStageJson}\n" +
-                      $"  effectiveVarsJson: {(effectiveVarsJson.ValueKind == JsonValueKind.Object ? effectiveVarsJson.GetRawText() : $"kind:{effectiveVarsJson.ValueKind}")}\n" +
-                      $"  _variables.StageVariables: {(_variables?.StageVariables is null ? "<null>" : string.Join(",", _variables.StageVariables.Keys))}\n";
-        _log.LogInformation(diagMsg);
-        try { System.IO.File.AppendAllText("C:\\temp\\diag.txt", diagMsg); } catch { }
-
         // --- 3. Expand task.with (replaces the old ApplyStageAgentDefault) ---
         var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
             ? new VariableBundle(effectiveVarsJson)
