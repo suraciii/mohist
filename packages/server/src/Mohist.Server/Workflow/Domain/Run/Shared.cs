@@ -18,7 +18,8 @@ public sealed record WorkLease(
     string LogicalId,
     string? Title = null,
     string? RunnerId = null,
-    WorkDispatch? Dispatch = null);
+    WorkDispatch? Dispatch = null,
+    DateTime? DispatchedAt = null);
 
 public sealed record TaskResult(
     string Status,
