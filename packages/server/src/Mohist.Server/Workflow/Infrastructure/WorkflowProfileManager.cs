@@ -9,8 +9,9 @@ using Mohist.Server.Workflow.Storage;
 namespace Mohist.Server.Workflow.Infrastructure;
 
 /// <summary>
-/// Workflow 数据唯一读入口。
+/// Workflow 数据唯一读写入口。
 ///
+/// SaveProfile: 写入 workflow run-level 的 ProfileRow (模板快照 + ProjectId/IssueKey)
 /// LoadTemplate: 选定生效模板 (snapshot > issue custom > issue-ref-template > project default)
 /// LoadVariables: 合并 3 层独立变量 (project + issue + workflow-run)
 /// ExpandTaskWith: 处理 task.with (保留 ${{ }} 给 runner 展开, 对象 deep merge)
@@ -22,6 +23,44 @@ public class WorkflowProfileManager
     public WorkflowProfileManager(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
+    }
+
+    /// <summary>
+    /// 创建或更新 workflow run 级别的 ProfileRow (模板快照 + ProjectId/IssueKey)。
+    /// Workflow 启动时调用, 将模板冻结, 并记录关联的 project/issue 供后续 LoadVariables 使用。
+    /// </summary>
+    public async Task<WorkflowProfileRow> SaveProfileAsync(
+        string runId,
+        WorkflowDefinition definition,
+        string? projectId,
+        string? issueKey)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var existing = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+
+        if (existing is null)
+        {
+            existing = new WorkflowProfileRow
+            {
+                WorkflowRunId = runId,
+                ProjectId = projectId ?? "",
+                IssueKey = issueKey ?? "",
+                TemplateJson = templateJson,
+                VariablesJson = VariableBundle.Empty.ToJson(),
+            };
+            db.WorkflowProfiles.Add(existing);
+        }
+        else
+        {
+            existing.ProjectId = projectId ?? existing.ProjectId;
+            existing.IssueKey = issueKey ?? existing.IssueKey;
+            existing.TemplateJson = templateJson;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        return existing;
     }
 
     /// <summary>
@@ -82,71 +121,83 @@ public class WorkflowProfileManager
     /// <summary>
     /// 合并 3 层独立变量 (project + issue + workflow-run)。
     /// 
-    /// 重要: 此方法只合并 project + issue 两层; workflow-run 层 (legacy StageVariables + 运行时
-    /// 补丁) 由 WorkflowGrain.MakeDispatchAsync 按以下 legacy 顺序单独应用:
-    ///   1. _variables.Json["vars"] (模板初始值)
-    ///   2. _variables.StageVariables[stage] (workflow 阶段补丁, 较早)
-    ///   3. combinedVars.Vars (project+issue 全局)
-    ///   4. combinedVars.Stages[stage] (project+issue 阶段)
-    ///   5. dispatch scope 注入
+    /// 对齐 design/workflow-template-variables.md 设计:
+    ///   project_workflow_profile.Variables  ─┐
+    ///   issue_workflow_profile.Variables   ─┤  deepMerge  ─→ independent
+    ///   workflow_profile.Variables         ─┘
     /// 
-    /// 这样保证 legacy 顺序: project stage > workflow-run stage。
-    /// 
-    /// 兼容: 当新表 (project_workflow_profile.Variables / issue_workflow_profile.Variables) 为空时,
-    /// 回退读取旧表 (projects.VariablesJson / issue_profiles.StateJson 等)。
+    /// projectId / issueKey 从 WorkflowProfileRow 自动发现 (由 StartAsync.SaveProfileAsync 写入)。
+    /// 兼容: 新表为空时回退读取旧表 (projects.VariablesJson / workflow_variables.StateJson 等)。
     /// </summary>
     /// <param name="runId">WorkflowRunId (必传)</param>
-    /// <param name="projectId">ProjectId (可选; 用于回退读取旧表)</param>
-    /// <param name="issueKey">IssueKey (可选; 用于回退读取旧表, 格式 projectId:issueNumber)</param>
-    public async Task<VariableBundle> LoadVariablesAsync(string runId, string? projectId = null, string? issueKey = null)
+    public async Task<VariableBundle> LoadVariablesAsync(string runId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
 
         var runProfile = await db.WorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
 
-        // If new-table row missing, try to discover projectId/issueKey from legacy tables
-        if (runProfile is not null)
+        string? projectId = runProfile?.ProjectId;
+        string? issueKey = runProfile?.IssueKey;
+
+        if (string.IsNullOrEmpty(projectId))
         {
-            projectId ??= runProfile.ProjectId;
-            issueKey ??= runProfile.IssueKey;
-        }
-        else if (string.IsNullOrEmpty(projectId))
-        {
-            // Last resort: look up projectId from workflow_runs.MetadataProjectId
             var legacyRun = await db.WorkflowRuns.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
             projectId = legacyRun?.MetadataProjectId;
         }
 
-        var projectProfile = projectId is not null
-            ? await db.ProjectWorkflowProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.ProjectId == projectId)
-            : null;
-        var issueProfile = issueKey is not null
-            ? await db.IssueWorkflowProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.IssueKey == issueKey)
-            : null;
+        var projectBundle = await LoadProjectLayerAsync(db, projectId);
+        var issueBundle = await LoadIssueLayerAsync(db, issueKey);
+        var runBundle = await LoadRunLayerAsync(db, runProfile, runId);
 
-        // Project layer: new table → fallback to old projects.VariablesJson
-        var projectBundle = VariableBundle.FromJson(projectProfile?.VariablesJson);
-        if (projectBundle.Stages is null && !projectBundle.Vars.HasValue && projectId is not null)
-        {
-            var legacyBag = await LoadLegacyProjectVariablesAsync(db, projectId);
-            if (legacyBag is not null)
-                projectBundle = ConvertProjectVariablesBag(legacyBag);
-        }
-
-        var issueBundle = VariableBundle.FromJson(issueProfile?.VariablesJson);
-
-        // Do NOT merge runBundle here — WorkflowGrain.MakeDispatchAsync applies legacy
-        // _variables.StageVariables BEFORE combinedVars so project stage wins over
-        // workflow stage (matching legacy ToDispatchJson order).
-        if ((projectBundle.Stages is null || projectBundle.Stages.Count == 0) && !projectBundle.Vars.HasValue
-            && (issueBundle.Stages is null || issueBundle.Stages.Count == 0) && !issueBundle.Vars.HasValue)
+        if (!projectBundle.Vars.HasValue
+            && (projectBundle.Stages is null || projectBundle.Stages.Count == 0)
+            && !issueBundle.Vars.HasValue
+            && (issueBundle.Stages is null || issueBundle.Stages.Count == 0)
+            && !runBundle.Vars.HasValue
+            && (runBundle.Stages is null || runBundle.Stages.Count == 0))
         {
             return VariableBundle.Empty;
         }
 
-        return VariableBundle.MergeAll(projectBundle, issueBundle);
+        return VariableBundle.MergeAll(projectBundle, issueBundle, runBundle);
+    }
+
+    private async Task<VariableBundle> LoadProjectLayerAsync(MohistDbContext db, string? projectId)
+    {
+        if (projectId is null) return VariableBundle.Empty;
+        var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+        var bundle = VariableBundle.FromJson(projectProfile?.VariablesJson);
+        if (!bundle.Vars.HasValue && bundle.Stages is null)
+        {
+            var legacyBag = await LoadLegacyProjectVariablesAsync(db, projectId);
+            if (legacyBag is not null)
+                bundle = ConvertProjectVariablesBag(legacyBag);
+        }
+        return bundle;
+    }
+
+    private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, string? issueKey)
+    {
+        if (issueKey is null) return VariableBundle.Empty;
+        var issueProfile = await db.IssueWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.IssueKey == issueKey);
+        return VariableBundle.FromJson(issueProfile?.VariablesJson);
+    }
+
+    private static async Task<VariableBundle> LoadRunLayerAsync(
+        MohistDbContext db, WorkflowProfileRow? runProfile, string runId)
+    {
+        var runBundle = VariableBundle.FromJson(runProfile?.VariablesJson);
+        if (!runBundle.Vars.HasValue && runBundle.Stages is null)
+        {
+            var legacyBundle = await LoadLegacyRunVariablesAsync(db, runId);
+            if (legacyBundle is not null)
+                return legacyBundle;
+        }
+        return runBundle;
     }
 
     /// <summary>
@@ -192,6 +243,146 @@ public class WorkflowProfileManager
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 补丁 workflow-run 层变量 (section 粒度, e.g. "agent", "vars")。
+    /// PatchVariablesAsync(section, patchJson): deep merge patchJson 进 bundle.Vars[section]。
+    /// 仅写 workflow_profile.VariablesJson; legacy 路径由 WorkflowGrain 另行维持。
+    /// </summary>
+    public async Task<VariableBundle> PatchRunVariablesAsync(string runId, string section, string patchJson)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        row ??= EnsureRunProfileRow(db, runId);
+
+        var current = VariableBundle.FromJson(row.VariablesJson);
+        var patchSectionEl = JsonSerializer.Deserialize<JsonElement>(patchJson);
+        var patchedBundle = PatchBundleSection(current, section, patchSectionEl);
+
+        row.VariablesJson = patchedBundle.ToJson();
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        return patchedBundle;
+    }
+
+    /// <summary>
+    /// 补丁 workflow-run 层阶段变量 (stage + section 粒度)。
+    /// deep merge patchJson 进 bundle.Stages[stage].Vars[section]。
+    /// </summary>
+    public async Task<VariableBundle> PatchRunStageVariablesAsync(
+        string runId, string stage, string section, string patchJson)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.WorkflowProfiles.FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
+        row ??= EnsureRunProfileRow(db, runId);
+
+        var current = VariableBundle.FromJson(row.VariablesJson);
+        var patchSectionEl = JsonSerializer.Deserialize<JsonElement>(patchJson);
+        var patchedBundle = PatchBundleStageSection(current, stage, section, patchSectionEl);
+
+        row.VariablesJson = patchedBundle.ToJson();
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        return patchedBundle;
+    }
+
+    private static WorkflowProfileRow EnsureRunProfileRow(MohistDbContext db, string runId)
+    {
+        var row = new WorkflowProfileRow
+        {
+            WorkflowRunId = runId,
+            ProjectId = "",
+            IssueKey = "",
+            TemplateJson = "{}",
+            VariablesJson = VariableBundle.Empty.ToJson(),
+        };
+        db.WorkflowProfiles.Add(row);
+        return row;
+    }
+
+    private static VariableBundle PatchBundleSection(VariableBundle bundle, string section, JsonElement patch)
+    {
+        if (section == "vars")
+        {
+            var current = bundle.Vars.HasValue && bundle.Vars.Value.ValueKind == JsonValueKind.Object
+                ? bundle.Vars.Value
+                : JsonSerializer.Deserialize<JsonElement>("{}");
+            var merged = patch.ValueKind == JsonValueKind.Object
+                ? VariableBundle.DeepMerge(current, patch) ?? patch
+                : patch;
+            return bundle with { Vars = merged };
+        }
+
+        JsonElement? mergedSection;
+        if (bundle.Vars.HasValue && bundle.Vars.Value.ValueKind == JsonValueKind.Object
+            && bundle.Vars.Value.TryGetProperty(section, out var existing)
+            && existing.ValueKind == JsonValueKind.Object
+            && patch.ValueKind == JsonValueKind.Object)
+        {
+            mergedSection = VariableBundle.DeepMerge(existing, patch) ?? patch;
+        }
+        else
+        {
+            mergedSection = patch;
+        }
+
+        var varsRoot = bundle.Vars.HasValue && bundle.Vars.Value.ValueKind == JsonValueKind.Object
+            ? bundle.Vars.Value
+            : JsonSerializer.Deserialize<JsonElement>("{}");
+
+        using var doc = JsonDocument.Parse(varsRoot.GetRawText());
+        var newVarsDict = new Dictionary<string, JsonElement?>(doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => (JsonElement?)p.Value.Clone()));
+        newVarsDict[section] = mergedSection!.Value;
+
+        var serialized = JsonSerializer.Serialize(newVarsDict, WorkflowYamlSerializer.JsonOptions);
+        var newVars = JsonSerializer.Deserialize<JsonElement>(serialized);
+        return bundle with { Vars = newVars };
+    }
+
+    private static VariableBundle PatchBundleStageSection(
+        VariableBundle bundle, string stage, string section, JsonElement patch)
+    {
+        var stages = bundle.Stages is null
+            ? new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, StageVariables>(bundle.Stages, StringComparer.OrdinalIgnoreCase);
+
+        var stageVars = stages.TryGetValue(stage, out var existing) ? existing : new StageVariables(JsonSerializer.Deserialize<JsonElement>("{}"));
+        var stageEl = stageVars.Vars.HasValue && stageVars.Vars.Value.ValueKind == JsonValueKind.Object
+            ? stageVars.Vars.Value
+            : JsonSerializer.Deserialize<JsonElement>("{}");
+
+        if (section == "vars")
+        {
+            var mergedStageVars = patch.ValueKind == JsonValueKind.Object
+                ? VariableBundle.DeepMerge(stageEl, patch) ?? patch
+                : patch;
+            stages[stage] = new StageVariables(mergedStageVars);
+            return bundle with { Stages = stages };
+        }
+
+        JsonElement? mergedSection;
+        if (stageEl.TryGetProperty(section, out var secExisting)
+            && secExisting.ValueKind == JsonValueKind.Object
+            && patch.ValueKind == JsonValueKind.Object)
+        {
+            mergedSection = VariableBundle.DeepMerge(secExisting, patch) ?? patch;
+        }
+        else
+        {
+            mergedSection = patch;
+        }
+
+        using var doc = JsonDocument.Parse(stageEl.GetRawText());
+        var newStageDict = new Dictionary<string, JsonElement?>(doc.RootElement.EnumerateObject()
+            .ToDictionary(p => p.Name, p => (JsonElement?)p.Value.Clone()));
+        newStageDict[section] = mergedSection!.Value;
+
+        var newStageSerialized = JsonSerializer.Serialize(newStageDict, WorkflowYamlSerializer.JsonOptions);
+        var newStageEl = JsonSerializer.Deserialize<JsonElement>(newStageSerialized);
+        stages[stage] = new StageVariables(newStageEl);
+        return bundle with { Stages = stages };
     }
 
     private static JsonElement? ResolvePath(JsonElement root, string path)

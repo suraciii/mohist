@@ -29,6 +29,7 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly WorkflowQueryService _workflowReader;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
+    private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
@@ -40,6 +41,7 @@ public class IssueGrain : Grain, IIssueGrain
         WorkflowQueryService workflowReader,
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueRepositoryResolver repositoryResolver,
+        IssueWorkflowProfileManager issueProfileManager,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -50,6 +52,7 @@ public class IssueGrain : Grain, IIssueGrain
         _workflowReader = workflowReader;
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
+        _issueProfileManager = issueProfileManager;
         _log = log;
     }
 
@@ -112,12 +115,18 @@ public class IssueGrain : Grain, IIssueGrain
         var definition = _profile?.Definition ?? defaultProfile.Definition;
         var stageVariables = BuildStageVariablesFromDefinition(definition);
 
+        var issueKey = $"{issue.ProjectId}:{issue.Number}";
+        var templateYaml = WorkflowYamlSerializer.ToYaml(definition);
+        await _issueProfileManager.UpdateTemplateAsync(issueKey, new IssueTemplateUpdateRequest(Template: templateYaml));
+
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(
             definition,
             new WorkflowStartInput(
                 BuildVariables(wrId, issue, projectContext, definition),
-                stageVariables));
+                stageVariables,
+                ProjectId: projectContext.Id,
+                IssueKey: issueKey));
 
         await SaveIssueAsync();
         await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });

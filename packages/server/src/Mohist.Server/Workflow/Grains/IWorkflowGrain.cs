@@ -37,7 +37,9 @@ public sealed record WorkflowStartInput(
     [property: Id(1)] Dictionary<string, Dictionary<string, string>>? StageVariables = null,
     [property: Id(2)] string? Name = null,
     [property: Id(3)] Dictionary<string, string>? Labels = null,
-    [property: Id(4)] Dictionary<string, string>? Annotations = null);
+    [property: Id(4)] Dictionary<string, string>? Annotations = null,
+    [property: Id(5)] string? ProjectId = null,
+    [property: Id(6)] string? IssueKey = null);
 
 [GenerateSerializer]
 public sealed record RuntimeTaskInput(

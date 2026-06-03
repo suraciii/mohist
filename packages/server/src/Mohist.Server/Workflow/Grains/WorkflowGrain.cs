@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Persistence;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Errors;
@@ -114,6 +115,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         _run.Start();
+        await _profileManager.SaveProfileAsync(GrainKey, definition ?? _profile!.Definition, input?.ProjectId, input?.IssueKey);
         if (!string.IsNullOrWhiteSpace(input?.Variables))
             _variables = new WorkflowExecutionContext(
                 input.Variables!,
@@ -465,6 +467,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             .PatchSection(section, patchJson);
 
         await SaveVariablesAsync();
+        await _profileManager.PatchRunVariablesAsync(GrainKey, section, patchJson);
     }
 
     public async Task PatchStageVariablesAsync(string stage, string section, string patchJson)
@@ -479,6 +482,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             .PatchStageSection(stage, section, patchJson);
 
         await SaveVariablesAsync();
+        await _profileManager.PatchRunStageVariablesAsync(GrainKey, stage, section, patchJson);
     }
 
     public async Task UpdateProfileDefinitionAsync(WorkflowDefinition definition)
@@ -667,74 +671,39 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
 
-        // --- 1. Load template + independent vars from manager ---
+        // --- 1. Load template + independent vars from manager (per design/workflow-template-variables.md) ---
         var template = await _profileManager.LoadTemplateAsync(GrainKey);
-        var projectId = _variables?.String("project", "id");
-        var issueNumber = _variables?.String("issue", "number");
-        var issueKey = projectId is not null && issueNumber is not null ? $"{projectId}:{issueNumber}" : null;
-        var independent = await _profileManager.LoadVariablesAsync(GrainKey, projectId, issueKey);
-        var embedded = template.EmbeddedVariables ?? Mohist.Server.Workflow.Domain.VariableBundle.Empty;
-        var combinedVars = Mohist.Server.Workflow.Domain.VariableBundle.Patch(embedded, independent);
+        var independent = await _profileManager.LoadVariablesAsync(GrainKey);
+        var embedded = template.EmbeddedVariables ?? VariableBundle.Empty;
+        var resolved = VariableBundle.Patch(embedded, independent);
 
         // --- 2. Build the complete dispatch payload ---
-        // Start from _variables.Json (frozen issue/project/prompts context + initial vars).
-        // Then overlay: legacy stage-level vars (_variables.StageVariables),
-        //   combined vars (fresh from manager), stage-level combined vars, dispatch scope.
+        // Start from _variables.Json (frozen issue/project/prompts context + initial template vars).
+        // Then: merge resolved.Vars/Stages on top, inject dispatch scope.
         var payload = WorkflowExecutionContext.ParseObject(_variables?.Json ?? "{}");
 
-        var effectiveVarsJson = payload.TryGetValue("vars", out var existingVars0)
+        var baseVars = payload.TryGetValue("vars", out var existingVars0)
             && existingVars0.HasValue && existingVars0.Value.ValueKind == JsonValueKind.Object
             ? existingVars0.Value
             : JsonSerializer.Deserialize<JsonElement>("{}");
 
-        // 2a. Apply legacy stage-level vars from _variables.StageVariables (for existing workflows)
-        if (_variables?.StageVariables is not null
-            && !string.IsNullOrWhiteSpace(stage)
-            && _variables.StageVariables.TryGetValue(stage, out var legacyStageOverrides)
-            && legacyStageOverrides is not null)
+        // Apply resolved.Vars (3-layer independent: project + issue + workflow-run, merged with embedded template vars)
+        var effectiveVarsJson = baseVars;
+        if (resolved.Vars.HasValue && resolved.Vars.Value.ValueKind == JsonValueKind.Object)
         {
-            if (legacyStageOverrides.TryGetValue("vars", out var legacyStageJson)
-                && !string.IsNullOrWhiteSpace(legacyStageJson))
-            {
-                var legacyStageEl = JsonSerializer.Deserialize<JsonElement>(legacyStageJson);
-                if (legacyStageEl.ValueKind == JsonValueKind.Object)
-                {
-                    var m = Mohist.Server.Workflow.Domain.VariableBundle.DeepMerge(effectiveVarsJson, legacyStageEl);
-                    if (m.HasValue)
-                    {
-                        effectiveVarsJson = m.Value;
-                    }
-                    else if (legacyStageEl.ValueKind == JsonValueKind.Object)
-                    {
-                        effectiveVarsJson = legacyStageEl;
-                    }
-                }
-            }
+            var overlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(resolved.Vars.Value));
+            effectiveVarsJson = VariableBundle.DeepMerge(baseVars, overlay) ?? overlay;
         }
 
-        // 2b. Overlay fresh global vars from combined manager
-        if (combinedVars.Vars.HasValue)
-        {
-            var overlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(combinedVars.Vars.Value));
-            if (overlay.ValueKind == JsonValueKind.Object)
-            {
-                var merged = Mohist.Server.Workflow.Domain.VariableBundle.DeepMerge(effectiveVarsJson, overlay);
-                effectiveVarsJson = merged ?? overlay;
-            }
-        }
-
-        // 2c. Overlay stage-scoped vars from combined manager
-        if (combinedVars.Stages is not null
+        // Apply resolved stage-scoped vars
+        if (resolved.Stages is not null
             && !string.IsNullOrWhiteSpace(stage)
-            && combinedVars.Stages.TryGetValue(stage, out var stageVars)
-            && stageVars.Vars.HasValue)
+            && resolved.Stages.TryGetValue(stage, out var stageVars)
+            && stageVars.Vars.HasValue
+            && stageVars.Vars.Value.ValueKind == JsonValueKind.Object)
         {
             var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
-            if (stageOverlay.ValueKind == JsonValueKind.Object)
-            {
-                var stageMerged = Mohist.Server.Workflow.Domain.VariableBundle.DeepMerge(effectiveVarsJson, stageOverlay);
-                effectiveVarsJson = stageMerged ?? stageOverlay;
-            }
+            effectiveVarsJson = VariableBundle.DeepMerge(effectiveVarsJson, stageOverlay) ?? stageOverlay;
         }
 
         // Set final vars in payload + inject dispatch scope
@@ -750,12 +719,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             File.WriteAllText($"C:\\temp\\diag-{GrainKey}.txt", variables);
 
         // --- DIAGNOSTIC: log variable state for debugging ---
-        var buildStageJson = combinedVars.Stages is not null && combinedVars.Stages.TryGetValue(stage, out var buildStage)
+        var buildStageJson = resolved.Stages is not null && resolved.Stages.TryGetValue(stage, out var buildStage)
             ? (buildStage.Vars.HasValue ? buildStage.Vars.Value.GetRawText() : "<null>")
             : "<no-stage>";
         var diagMsg = $"[DIAG] MakeDispatchAsync run={GrainKey} stage={stage}\n" +
-                      $"  combinedVars.Vars: {(combinedVars.Vars.HasValue ? combinedVars.Vars.Value.GetRawText() : "<null>")}\n" +
-                      $"  combinedVars.Stages[{stage}]: {buildStageJson}\n" +
+                      $"  resolved.Vars: {(resolved.Vars.HasValue ? resolved.Vars.Value.GetRawText() : "<null>")}\n" +
+                      $"  resolved.Stages[{stage}]: {buildStageJson}\n" +
                       $"  effectiveVarsJson: {(effectiveVarsJson.ValueKind == JsonValueKind.Object ? effectiveVarsJson.GetRawText() : $"kind:{effectiveVarsJson.ValueKind}")}\n" +
                       $"  _variables.StageVariables: {(_variables?.StageVariables is null ? "<null>" : string.Join(",", _variables.StageVariables.Keys))}\n";
         _log.LogInformation(diagMsg);
@@ -763,8 +732,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         // --- 3. Expand task.with (replaces the old ApplyStageAgentDefault) ---
         var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
-            ? new Mohist.Server.Workflow.Domain.VariableBundle(effectiveVarsJson)
-            : Mohist.Server.Workflow.Domain.VariableBundle.Empty;
+            ? new VariableBundle(effectiveVarsJson)
+            : VariableBundle.Empty;
 
         var dispatchWith = with is not null
             ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
@@ -1209,6 +1178,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await SaveLeaseAsync();
         await SaveVariablesAsync();
     }
+
 
     private async Task SaveRunAsync()
     {
