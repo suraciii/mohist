@@ -43,6 +43,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IEventStore _events;
     private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
     private readonly WorkflowVariableResolver _variablesResolver;
+    private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
@@ -55,6 +56,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IEventStore events,
         IEnumerable<IWorkflowCompletionHook> completionHooks,
         WorkflowVariableResolver variablesResolver,
+        WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
         _profileStore = profileStore;
@@ -66,6 +68,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _events = events;
         _completionHooks = completionHooks;
         _variablesResolver = variablesResolver;
+        _profileManager = profileManager;
         _log = log;
     }
 
@@ -663,22 +666,126 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         var workId = workType == "task" ? logicalId : $"{logicalId}:{Guid.NewGuid():N}";
         var attempt = workType == "task" ? TaskAttempt(logicalId) : 1;
-        var dispatchContext = new WorkflowDispatchContext(GrainKey, workId, workType, stage, title, attempt);
-        var resolved = await _variablesResolver.ResolveForDispatchAsync(GrainKey, _variables, dispatchContext);
+
+        // --- 1. Load template + independent vars from manager ---
+        var template = await _profileManager.LoadTemplateAsync(GrainKey);
+        var projectId = _variables?.String("project", "id");
+        var issueNumber = _variables?.String("issue", "number");
+        var issueKey = projectId is not null && issueNumber is not null ? $"{projectId}:{issueNumber}" : null;
+        var independent = await _profileManager.LoadVariablesAsync(GrainKey, projectId, issueKey);
+        var embedded = template.EmbeddedVariables ?? Mohist.Server.Workflow.Domain.VariableBundle.Empty;
+        var combinedVars = Mohist.Server.Workflow.Domain.VariableBundle.Patch(embedded, independent);
+
+        // --- 2. Build the complete dispatch payload ---
+        // Start from _variables.Json (frozen issue/project/prompts context + initial vars).
+        // Then overlay: legacy stage-level vars (_variables.StageVariables),
+        //   combined vars (fresh from manager), stage-level combined vars, dispatch scope.
+        var payload = WorkflowExecutionContext.ParseObject(_variables?.Json ?? "{}");
+
+        var effectiveVarsJson = payload.TryGetValue("vars", out var existingVars0)
+            && existingVars0.HasValue && existingVars0.Value.ValueKind == JsonValueKind.Object
+            ? existingVars0.Value
+            : JsonSerializer.Deserialize<JsonElement>("{}");
+
+        // 2a. Apply legacy stage-level vars from _variables.StageVariables (for existing workflows)
+        if (_variables?.StageVariables is not null
+            && !string.IsNullOrWhiteSpace(stage)
+            && _variables.StageVariables.TryGetValue(stage, out var legacyStageOverrides)
+            && legacyStageOverrides is not null)
+        {
+            if (legacyStageOverrides.TryGetValue("vars", out var legacyStageJson)
+                && !string.IsNullOrWhiteSpace(legacyStageJson))
+            {
+                var legacyStageEl = JsonSerializer.Deserialize<JsonElement>(legacyStageJson);
+                if (legacyStageEl.ValueKind == JsonValueKind.Object)
+                {
+                    var m = Mohist.Server.Workflow.Domain.VariableBundle.DeepMerge(effectiveVarsJson, legacyStageEl);
+                    if (m.HasValue)
+                    {
+                        effectiveVarsJson = m.Value;
+                    }
+                    else if (legacyStageEl.ValueKind == JsonValueKind.Object)
+                    {
+                        effectiveVarsJson = legacyStageEl;
+                    }
+                }
+            }
+        }
+
+        // 2b. Overlay fresh global vars from combined manager
+        if (combinedVars.Vars.HasValue)
+        {
+            var overlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(combinedVars.Vars.Value));
+            if (overlay.ValueKind == JsonValueKind.Object)
+            {
+                var merged = Mohist.Server.Workflow.Domain.VariableBundle.DeepMerge(effectiveVarsJson, overlay);
+                effectiveVarsJson = merged ?? overlay;
+            }
+        }
+
+        // 2c. Overlay stage-scoped vars from combined manager
+        if (combinedVars.Stages is not null
+            && !string.IsNullOrWhiteSpace(stage)
+            && combinedVars.Stages.TryGetValue(stage, out var stageVars)
+            && stageVars.Vars.HasValue)
+        {
+            var stageOverlay = JsonSerializer.Deserialize<JsonElement>(JsonSerializer.Serialize(stageVars.Vars.Value));
+            if (stageOverlay.ValueKind == JsonValueKind.Object)
+            {
+                var stageMerged = Mohist.Server.Workflow.Domain.VariableBundle.DeepMerge(effectiveVarsJson, stageOverlay);
+                effectiveVarsJson = stageMerged ?? stageOverlay;
+            }
+        }
+
+        // Set final vars in payload + inject dispatch scope
+        payload["vars"] = effectiveVarsJson;
+        payload["workflow"] = JsonSerializer.SerializeToElement(new { runId = GrainKey }, WorkflowVariableJson.Options);
+        payload["stage"] = JsonSerializer.SerializeToElement(new { name = stage }, WorkflowVariableJson.Options);
+        payload["work"] = JsonSerializer.SerializeToElement(new { id = workId, type = workType, title, attempt }, WorkflowVariableJson.Options);
+
+        var variables = JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
+
+        // --- DIAGNOSTIC (remove after debug) ---
+        if (variables.Contains("project/build-model"))
+            File.WriteAllText($"C:\\temp\\diag-{GrainKey}.txt", variables);
+
+        // --- DIAGNOSTIC: log variable state for debugging ---
+        var buildStageJson = combinedVars.Stages is not null && combinedVars.Stages.TryGetValue(stage, out var buildStage)
+            ? (buildStage.Vars.HasValue ? buildStage.Vars.Value.GetRawText() : "<null>")
+            : "<no-stage>";
+        var diagMsg = $"[DIAG] MakeDispatchAsync run={GrainKey} stage={stage}\n" +
+                      $"  combinedVars.Vars: {(combinedVars.Vars.HasValue ? combinedVars.Vars.Value.GetRawText() : "<null>")}\n" +
+                      $"  combinedVars.Stages[{stage}]: {buildStageJson}\n" +
+                      $"  effectiveVarsJson: {(effectiveVarsJson.ValueKind == JsonValueKind.Object ? effectiveVarsJson.GetRawText() : $"kind:{effectiveVarsJson.ValueKind}")}\n" +
+                      $"  _variables.StageVariables: {(_variables?.StageVariables is null ? "<null>" : string.Join(",", _variables.StageVariables.Keys))}\n";
+        _log.LogInformation(diagMsg);
+        try { System.IO.File.AppendAllText("C:\\temp\\diag.txt", diagMsg); } catch { }
+
+        // --- 3. Expand task.with (replaces the old ApplyStageAgentDefault) ---
+        var effectiveBundle = effectiveVarsJson.ValueKind == JsonValueKind.Object
+            ? new Mohist.Server.Workflow.Domain.VariableBundle(effectiveVarsJson)
+            : Mohist.Server.Workflow.Domain.VariableBundle.Empty;
+
         var dispatchWith = with is not null
             ? new Dictionary<string, JsonElement?>(with, StringComparer.Ordinal)
             : null;
-        if (workType == "task")
+        dispatchWith = WorkflowProfileManager.ExpandTaskWith(effectiveBundle, dispatchWith);
+
+        // --- 4. Inject default agent when task.with has no agent key ---
+        if ((dispatchWith is null || !dispatchWith.ContainsKey("agent"))
+            && effectiveVarsJson.ValueKind == JsonValueKind.Object
+            && effectiveVarsJson.TryGetProperty("agent", out var effectiveAgentEl)
+            && effectiveAgentEl.ValueKind == JsonValueKind.Object)
         {
-            dispatchWith = ApplyStageAgentDefault(dispatchWith, resolved);
+            dispatchWith ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
+            dispatchWith["agent"] = effectiveAgentEl.Clone();
         }
+
         var withStr = dispatchWith is not null ? JsonSerializer.Serialize(dispatchWith) : null;
-        var variables = resolved.Json;
-        var projectId = resolved.String("project", "id");
-        var issueId = resolved.String("issue", "id");
-        var numberStr = resolved.String("issue", "number");
-        WorkIssueRef? issueRef = projectId is not null && issueId is not null && numberStr is not null && int.TryParse(numberStr, out var num)
-            ? new WorkIssueRef(projectId, issueId, num) : null;
+
+        // --- 4. Extract issueRef from context (issue/project from _variables.Json) ---
+        WorkIssueRef? issueRef = BuildIssueRef(payload);
+
         var dispatch = new WorkDispatch(
             WorkflowRunId: GrainKey,
             WorkId: workId,
@@ -692,6 +799,27 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _lease = new WorkLease(workId, workType, stage, logicalId, title, runnerId, dispatch, DispatchedAt: DateTime.UtcNow);
         _lastRunnerId = runnerId;
         return dispatch;
+    }
+
+    private static WorkIssueRef? BuildIssueRef(Dictionary<string, JsonElement?> payload)
+    {
+        if (!payload.TryGetValue("project", out var projectEl) || !projectEl.HasValue) return null;
+        if (!payload.TryGetValue("issue", out var issueEl) || !issueEl.HasValue) return null;
+        if (projectEl.Value.ValueKind != JsonValueKind.Object) return null;
+        if (issueEl.Value.ValueKind != JsonValueKind.Object) return null;
+
+        if (!projectEl.Value.TryGetProperty("id", out var projectIdEl)) return null;
+        if (!issueEl.Value.TryGetProperty("id", out var issueIdEl)) return null;
+        if (!issueEl.Value.TryGetProperty("number", out var numberEl)) return null;
+
+        var projectId = projectIdEl.ValueKind == JsonValueKind.String ? projectIdEl.GetString() : projectIdEl.GetRawText();
+        var issueId = issueIdEl.ValueKind == JsonValueKind.String ? issueIdEl.GetString() : issueIdEl.GetRawText();
+        var numberStr = numberEl.ValueKind == JsonValueKind.Number ? numberEl.GetRawText() : numberEl.GetString();
+
+        if (projectId is null || issueId is null || !int.TryParse(numberStr, out var num))
+            return null;
+
+        return new WorkIssueRef(projectId, issueId, num);
     }
 
     private WorkDispatch? RestoreDispatch(WorkLease lease)
@@ -961,60 +1089,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             };
         }
         return result.Count == 0 ? null : result;
-    }
-
-    private static Dictionary<string, JsonElement?>? ApplyStageAgentDefault(Dictionary<string, JsonElement?>? with, ResolvedWorkflowVariables resolved)
-    {
-        var latestAgent = resolved.NestedSection("vars", "agent");
-
-        if (with is not null && with.TryGetValue("agent", out var existingAgent) && existingAgent.HasValue)
-        {
-            // Existing agent is set. If it's a rendered object, deep-merge with the
-            // latest agent from workflow variables so per-task customizations
-            // (timeoutMs, etc.) are preserved but the user-controlled model is
-            // always fresh. If it's a template string (e.g. "${{ vars.agent }}"),
-            // leave it alone — the runner's renderTemplate will expand it at
-            // execution time using the dispatch's variables.
-            if (existingAgent.Value.ValueKind == JsonValueKind.Object
-                && latestAgent.HasValue
-                && latestAgent.Value.ValueKind == JsonValueKind.Object)
-            {
-                var merged = DeepMergeAgentObject(existingAgent.Value, latestAgent.Value);
-                if (merged.HasValue)
-                    with["agent"] = merged.Value;
-            }
-            return with;
-        }
-
-        if (!latestAgent.HasValue)
-            return with;
-
-        with ??= new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        with["agent"] = latestAgent.Value;
-        return with;
-    }
-
-    private static JsonElement? DeepMergeAgentObject(JsonElement existing, JsonElement latest)
-    {
-        try
-        {
-            if (existing.ValueKind != JsonValueKind.Object || latest.ValueKind != JsonValueKind.Object)
-                return null;
-
-            var merged = JsonNode.Parse(existing.GetRawText())?.AsObject();
-            var latestObj = JsonNode.Parse(latest.GetRawText())?.AsObject();
-            if (merged is null || latestObj is null)
-                return null;
-
-            foreach (var property in latestObj)
-                merged[property.Key] = property.Value?.DeepClone();
-
-            return JsonSerializer.Deserialize<JsonElement>(merged.ToJsonString(), WorkflowVariableJson.Options);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private void EmitStageChanged(string action, string? reason = null)
