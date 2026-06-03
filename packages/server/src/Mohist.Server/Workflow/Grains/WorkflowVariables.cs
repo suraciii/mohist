@@ -38,9 +38,9 @@ public sealed record WorkflowExecutionContext(
     public string ToDispatchJson(WorkflowDispatchContext dispatch, string? projectVariablesJson)
     {
         var payload = ParseObject(Json);
+        ApplyStageVariables(payload, dispatch.Stage);
         ApplyProjectVariables(payload, projectVariablesJson);
         ApplyProjectStageVariables(payload, projectVariablesJson, dispatch.Stage);
-        ApplyStageVariables(payload, dispatch.Stage);
         ApplyDispatchVariables(payload, dispatch);
         return JsonSerializer.Serialize(payload, WorkflowVariableJson.Options);
     }
