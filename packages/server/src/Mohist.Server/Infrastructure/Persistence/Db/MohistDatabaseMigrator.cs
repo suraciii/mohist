@@ -6,6 +6,7 @@ public static class MohistDatabaseMigrator
 {
     private const string InitialCreateMigrationId = "20260530040459_InitialCreate";
     private const string ProjectVariablesBagMigrationId = "20260603090000_AddProjectVariablesBag";
+    private const string WorkflowTemplateAndVariablesTablesMigrationId = "20260603200000_AddWorkflowTemplateAndVariablesTables";
     private const string InitialCreateProductVersion = "10.0.8";
 
     public static void Migrate(MohistDbContext db)
@@ -33,6 +34,7 @@ public static class MohistDatabaseMigrator
             CreateMissingInitialSchemaObjects(db);
             RecordInitialCreate(db);
             RecordMigration(db, ProjectVariablesBagMigrationId, InitialCreateProductVersion);
+            RecordMigration(db, WorkflowTemplateAndVariablesTablesMigrationId, InitialCreateProductVersion);
         }
         finally
         {

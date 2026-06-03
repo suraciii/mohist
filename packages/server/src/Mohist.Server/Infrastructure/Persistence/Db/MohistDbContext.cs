@@ -15,6 +15,8 @@ namespace Mohist.Server.Infrastructure.Persistence.Db;
 public class MohistDbContext : DbContext
 {
     public DbSet<ProjectRow> Projects { get; set; } = null!;
+    public DbSet<ProjectWorkflowProfileRow> ProjectWorkflowProfiles { get; set; } = null!;
+    public DbSet<ProjectTemplateRow> ProjectTemplates { get; set; } = null!;
     public DbSet<ConfigRow> Configs { get; set; } = null!;
     public DbSet<WorkflowEventRow> WorkflowEvents { get; set; } = null!;
     public DbSet<WorkflowAgentSessionRow> WorkflowAgentSessions { get; set; } = null!;
@@ -25,8 +27,10 @@ public class MohistDbContext : DbContext
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
     public DbSet<IssueStateRow> IssueStates { get; set; } = null!;
     public DbSet<IssueProfileRow> IssueProfiles { get; set; } = null!;
+    public DbSet<IssueWorkflowProfileRow> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowRunProfileRow> WorkflowRunProfiles { get; set; } = null!;
+    public DbSet<WorkflowProfileRow> WorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
@@ -218,6 +222,47 @@ public class MohistDbContext : DbContext
         {
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<ProjectWorkflowProfileRow>(entity =>
+        {
+            entity.ToTable("ProjectWorkflowProfiles");
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.DefaultTemplateId).HasMaxLength(256);
+            entity.Property(e => e.VariablesJson).IsRequired();
+        });
+
+        modelBuilder.Entity<ProjectTemplateRow>(entity =>
+        {
+            entity.ToTable("ProjectTemplates");
+            entity.HasKey(e => new { e.ProjectId, e.TemplateId });
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.TemplateId).HasMaxLength(256);
+            entity.Property(e => e.TemplateJson).IsRequired();
+            entity.HasIndex(e => e.ProjectId);
+        });
+
+        modelBuilder.Entity<IssueWorkflowProfileRow>(entity =>
+        {
+            entity.ToTable("IssueWorkflowProfiles");
+            entity.HasKey(e => e.IssueKey);
+            entity.Property(e => e.IssueKey).HasMaxLength(512);
+            entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
+            entity.Property(e => e.VariablesJson).IsRequired();
+        });
+
+        modelBuilder.Entity<WorkflowProfileRow>(entity =>
+        {
+            entity.ToTable("WorkflowProfiles");
+            entity.HasKey(e => e.WorkflowRunId);
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.IssueKey).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.TemplateJson).IsRequired();
+            entity.Property(e => e.VariablesJson).IsRequired();
+            entity.HasIndex(e => e.ProjectId);
+            entity.HasIndex(e => e.IssueKey);
         });
     }
 }
