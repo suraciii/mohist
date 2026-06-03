@@ -15,7 +15,6 @@ using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Project.Queries;
-using Mohist.Server.Infrastructure.Workflow;
 using Mohist.Server.Workflow.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
@@ -57,7 +56,6 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
             siloBuilder.Services.AddSingleton<ProjectQueryService>();
-            siloBuilder.Services.AddScoped<WorkflowVariableResolver>();
             siloBuilder.Services.AddScoped<WorkflowProfileManager>();
             siloBuilder.Services.AddSingleton<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();

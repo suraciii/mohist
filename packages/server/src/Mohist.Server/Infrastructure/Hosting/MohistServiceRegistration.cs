@@ -21,7 +21,6 @@ using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Infrastructure.Workspace;
-using Mohist.Server.Infrastructure.Workflow;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Runner.Projection;
 using Mohist.Server.Runner.SignalR;
@@ -59,7 +58,6 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowAgentSessionQueryService>();
         services.AddScoped<WorkflowProjectionService>();
         services.AddScoped<WorkflowQueryService>();
-        services.AddScoped<WorkflowVariableResolver>();
         services.AddScoped<WorkflowProfileManager>();
         services.AddScoped<ProjectWorkflowProfileManager>();
         services.AddScoped<IssueWorkflowProfileManager>();
