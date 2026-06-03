@@ -105,6 +105,8 @@ public class RunnerGrain : Grain, IRunnerGrain
         if (_status == RunnerStatus.Offline)
             throw new InvalidOperationException($"Runner '{RunnerId}' is offline");
 
+        await TouchPresenceAsync();
+
         var pending = await DequeuePendingWorkAsync();
         if (pending is not null)
             return pending;
