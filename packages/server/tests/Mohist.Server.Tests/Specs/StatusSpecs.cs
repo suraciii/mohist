@@ -84,7 +84,8 @@ public class StatusSpecs : WorkflowGrainSpecs
     public async Task WorkflowDoesNotStoreIssueOrWorkspaceContext()
     {
         var wf = await CreateWorkflowAsync();
-        await wf.StartAsync(SingleStage(), TestInput());
+        await SeedWorkflowTemplateAsync(_workflowId!, SingleStage());
+        await wf.StartAsync(TestInput());
 
         var status = await GetQueryService().GetStatusAsync(_workflowId!);
 

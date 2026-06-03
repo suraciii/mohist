@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
@@ -14,7 +15,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     public async Task NoRunnerAtStart_RegisterLater_AssignAndRun()
     {
         var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage(), TestInput());
+        await SeedWorkflowTemplateAsync(_workflowId!, SingleStage());
+        await workflow.StartAsync(TestInput());
 
         _runnerId = await RegisterRunnerAsync();
 
@@ -30,7 +32,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
     public async Task PausedBeforeRunner_StillPaused()
     {
         var workflow = await CreateWorkflowAsync();
-        await workflow.StartAsync(SingleStage(), TestInput());
+        await SeedWorkflowTemplateAsync(_workflowId!, SingleStage());
+        await workflow.StartAsync(TestInput());
 
         await workflow.PauseAsync("paused before capacity");
         _runnerId = await RegisterRunnerAsync();
@@ -230,11 +233,10 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         ]));
 
         var updatedAgent = new { type = "opencode", model = "minimax-coding-plan/MiniMax-M3" };
-        await workflow.PatchStageVariablesAsync("build", "vars",
-            JsonSerializer.Serialize(new Dictionary<string, JsonElement?>
-            {
-                ["agent"] = JsonSerializer.SerializeToElement(updatedAgent)
-            }));
+        await PatchRunVariablesAsync(_workflowId!, new VariableBundle(Stages: new Dictionary<string, StageVariables>
+        {
+            ["build"] = new(JsonSerializer.SerializeToElement(new { agent = updatedAgent }))
+        }));
 
         var (task, _) = await PollWorkAnyAsync();
 

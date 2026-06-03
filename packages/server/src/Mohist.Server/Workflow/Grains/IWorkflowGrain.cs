@@ -7,7 +7,7 @@ namespace Mohist.Server.Workflow.Grains;
 
 public interface IWorkflowGrain : IGrainWithStringKey
 {
-    Task StartAsync(WorkflowDefinition? definition = null, WorkflowStartInput? input = null);
+    Task StartAsync(WorkflowStartInput? input = null);
     Task ResumeAsync();
     Task PauseAsync(string? reason = null);
     Task StopAsync(string? reason = null);
@@ -22,8 +22,6 @@ public interface IWorkflowGrain : IGrainWithStringKey
     Task<bool> HasIncompleteTaskByIdAsync(string id);
     Task<WorkflowAssignmentResult> AssignRunnerAsync(string runnerId);
     Task ReportResultAsync(string runnerId, string workId, WorkResult result);
-    Task PatchVariablesAsync(string section, string patchJson);
-    Task PatchStageVariablesAsync(string stage, string section, string patchJson);
     Task<string?> GetRunStatusAsync();
     Task<string?> GetClaimedRunnerIdAsync();
     Task<string?> GetCurrentWorkIdAsync();

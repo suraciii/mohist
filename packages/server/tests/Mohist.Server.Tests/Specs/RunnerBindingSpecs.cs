@@ -16,12 +16,14 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
 
         _workflowId = "wf-1";
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-1");
-        await wf1.StartAsync(SingleStage(checks: []), TestInput());
+        await SeedWorkflowTemplateAsync("wf-1", SingleStage(checks: []));
+        await wf1.StartAsync(TestInput());
         await AssignWorkflowToRunnerAsync("wf-1", runnerId);
 
         _workflowId = "wf-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-2");
-        await wf2.StartAsync(SingleStage(checks: []), TestInput());
+        await SeedWorkflowTemplateAsync("wf-2", SingleStage(checks: []));
+        await wf2.StartAsync(TestInput());
 
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);
@@ -39,12 +41,14 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
 
         _workflowId = "wf-capacity-1";
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-1");
-        await wf1.StartAsync(SingleStage(checks: []), TestInput());
+        await SeedWorkflowTemplateAsync("wf-capacity-1", SingleStage(checks: []));
+        await wf1.StartAsync(TestInput());
         await AssignWorkflowToRunnerAsync("wf-capacity-1", runnerId);
 
         _workflowId = "wf-capacity-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-capacity-2");
-        await wf2.StartAsync(SingleStage(checks: []), TestInput());
+        await SeedWorkflowTemplateAsync("wf-capacity-2", SingleStage(checks: []));
+        await wf2.StartAsync(TestInput());
 
         var work1 = await runner.PollAsync();
         Assert.NotNull(work1);
@@ -68,13 +72,14 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         _runnerId = runnerId;
 
         var workflow = Grains.GetGrain<IWorkflowGrain>("wf-sticky");
-        await workflow.StartAsync(SingleStage(
+        await SeedWorkflowTemplateAsync("wf-sticky", SingleStage(
             tasks:
             [
                 new("task-1", "Task 1", "spec/task"),
                 new("task-2", "Task 2", "spec/task")
             ],
-            checks: []), TestInput());
+            checks: []));
+        await workflow.StartAsync(TestInput());
         await AssignWorkflowToRunnerAsync("wf-sticky", runnerId);
 
         var first = await runner.PollAsync();
@@ -97,12 +102,14 @@ public class RunnerBindingSpecs : WorkflowGrainSpecs
         _runnerId = runnerId;
 
         var wf1 = Grains.GetGrain<IWorkflowGrain>("wf-report-1");
-        await wf1.StartAsync(SingleStage(checks: []), TestInput());
+        await SeedWorkflowTemplateAsync("wf-report-1", SingleStage(checks: []));
+        await wf1.StartAsync(TestInput());
         await AssignWorkflowToRunnerAsync("wf-report-1", runnerId);
 
         _workflowId = "wf-report-2";
         var wf2 = Grains.GetGrain<IWorkflowGrain>("wf-report-2");
-        await wf2.StartAsync(SingleStage(checks: []), TestInput());
+        await SeedWorkflowTemplateAsync("wf-report-2", SingleStage(checks: []));
+        await wf2.StartAsync(TestInput());
         await AssignWorkflowToRunnerAsync("wf-report-2", runnerId);
 
         var work1 = await runner.PollAsync();

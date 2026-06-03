@@ -11,8 +11,10 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Project.Storage;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Project.Queries;
+using Mohist.Server.Workflow.Storage;
 using Orleans;
 using Orleans.TestingHost;
 using Xunit;
@@ -56,7 +58,6 @@ public class BacklogFixture : IAsyncLifetime
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connectionString));
             siloBuilder.Services.AddScoped<IStateStore<WorkflowBacklogState>, InMemoryStateStore<WorkflowBacklogState>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowStageLockState>, InMemoryStateStore<WorkflowStageLockState>>();
-            siloBuilder.Services.AddScoped<IStateStore<WorkflowRunProfile>, InMemoryStateStore<WorkflowRunProfile>>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
@@ -127,8 +128,67 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         var workflowId = $"wf-{Guid.NewGuid():N}";
         _workflowId = workflowId;
         var workflow = Grains.GetGrain<IWorkflowGrain>(workflowId);
-        await workflow.StartAsync(definition, TestInput());
+        await SeedWorkflowTemplateAsync(workflowId, definition);
+        await workflow.StartAsync(TestInput());
         return workflow;
+    }
+
+    private async Task SeedWorkflowTemplateAsync(string workflowId, WorkflowDefinition definition)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(_fixture.ConnectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+        var template = await db.ProjectTemplates.FindAsync("test-project", definition.Id);
+        if (template is null)
+        {
+            db.ProjectTemplates.Add(new ProjectTemplateRow
+            {
+                ProjectId = "test-project",
+                TemplateId = definition.Id,
+                TemplateJson = templateJson,
+            });
+        }
+        else
+        {
+            template.TemplateJson = templateJson;
+            template.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var profile = await db.ProjectWorkflowProfiles.FindAsync("test-project");
+        if (profile is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+            {
+                ProjectId = "test-project",
+                DefaultTemplateId = definition.Id,
+            });
+        }
+        else
+        {
+            profile.DefaultTemplateId = definition.Id;
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var runProfile = await db.WorkflowProfiles.FindAsync(workflowId);
+        if (runProfile is null)
+        {
+            db.WorkflowProfiles.Add(new WorkflowProfileRow
+            {
+                WorkflowRunId = workflowId,
+                ProjectId = "test-project",
+                IssueKey = "",
+            });
+        }
+        else
+        {
+            runProfile.ProjectId = "test-project";
+            runProfile.IssueKey = "";
+            runProfile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+        await db.SaveChangesAsync();
     }
 
 

@@ -30,8 +30,10 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
 
         definition = IntegrateWorkflow(resource);
-        await wf1.StartAsync(definition, ProjectInput(projectId));
-        await wf2.StartAsync(definition, ProjectInput(projectId));
+        await SeedWorkflowTemplateAsync(workflow1Id, definition, projectId);
+        await SeedWorkflowTemplateAsync(workflow2Id, definition, projectId);
+        await wf1.StartAsync(ProjectInput(projectId));
+        await wf2.StartAsync(ProjectInput(projectId));
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
@@ -117,8 +119,11 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var wf1 = Grains.GetGrain<IWorkflowGrain>(workflow1Id);
         var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
 
-        await wf1.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
-        await wf2.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
+        var definition = IntegrateWorkflow(resource);
+        await SeedWorkflowTemplateAsync(workflow1Id, definition, projectId);
+        await SeedWorkflowTemplateAsync(workflow2Id, definition, projectId);
+        await wf1.StartAsync(ProjectInput(projectId));
+        await wf2.StartAsync(ProjectInput(projectId));
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 
@@ -161,8 +166,11 @@ public class StageLockSpecs : WorkflowGrainSpecs
         var wf1 = Grains.GetGrain<IWorkflowGrain>(workflow1Id);
         var wf2 = Grains.GetGrain<IWorkflowGrain>(workflow2Id);
 
-        await wf1.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
-        await wf2.StartAsync(IntegrateWorkflow(resource), ProjectInput(projectId));
+        var definition = IntegrateWorkflow(resource);
+        await SeedWorkflowTemplateAsync(workflow1Id, definition, projectId);
+        await SeedWorkflowTemplateAsync(workflow2Id, definition, projectId);
+        await wf1.StartAsync(ProjectInput(projectId));
+        await wf2.StartAsync(ProjectInput(projectId));
         await AssignWorkflowToRunnerAsync(workflow1Id, runner1Id);
         await AssignWorkflowToRunnerAsync(workflow2Id, runner2Id);
 

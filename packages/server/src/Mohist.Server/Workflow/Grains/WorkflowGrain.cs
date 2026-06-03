@@ -2,7 +2,6 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Persistence;
@@ -12,10 +11,7 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Hooks;
 using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
-using Mohist.Server.Workflow.Storage;
-using Mohist.Server.Workflow.Views;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
@@ -26,7 +22,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private static readonly TimeSpan RecoveryReminderDueTime = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RecoveryReminderPeriod = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan StaleLeaseThreshold = TimeSpan.FromMinutes(5);
-    private WorkflowRunProfile? _profile;
     private WorkflowRun? _run;
     private WorkLease? _lease;
     private WorkflowExecutionContext? _variables;
@@ -34,7 +29,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private IGrainReminder? _recoveryReminder;
     private readonly HashSet<string> _announcedWaitingLocks = [];
     private readonly HashSet<string> _announcedAcquiredLocks = [];
-    private readonly IStateStore<WorkflowRunProfile> _profileStore;
     private readonly IWorkflowRunStore _runStore;
     private readonly IStateStore<WorkLease> _leaseStore;
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
@@ -46,7 +40,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly ILogger<WorkflowGrain> _log;
 
     public WorkflowGrain(
-        IStateStore<WorkflowRunProfile> profileStore,
         IWorkflowRunStore runStore,
         IStateStore<WorkLease> leaseStore,
         IStateStore<WorkflowExecutionContext> variablesStore,
@@ -57,7 +50,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
-        _profileStore = profileStore;
         _runStore = runStore;
         _leaseStore = leaseStore;
         _variablesStore = variablesStore;
@@ -73,7 +65,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        _profile = await _profileStore.LoadAsync(GrainKey);
         _run = await _runStore.LoadAsync(GrainKey);
         _lease = await _leaseStore.LoadAsync(GrainKey);
         _variables = await _variablesStore.LoadAsync(GrainKey);
@@ -95,16 +86,14 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await EnsureSchedulingRecoveryAsync();
     }
 
-    public async Task StartAsync(WorkflowDefinition? definition = null, WorkflowStartInput? input = null)
+    public async Task StartAsync(WorkflowStartInput? input = null)
     {
         var phaseBefore = _run?.Status;
-        if (definition is not null)
-            _profile = new WorkflowRunProfile(GrainKey, definition);
 
         if (_run is null)
         {
             await _profileManager.SaveProfileAsync(GrainKey, input?.ProjectId, input?.IssueKey);
-            var effectiveDefinition = definition ?? await LoadEffectiveDefinitionAsync();
+            var effectiveDefinition = await LoadEffectiveDefinitionAsync();
             _run = WorkflowRun.Create(GrainKey, effectiveDefinition,
                 input is not null ? new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, input.Annotations) : null);
         }
@@ -114,7 +103,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (!string.IsNullOrWhiteSpace(input?.Variables))
             _variables = new WorkflowExecutionContext(
                 input.Variables!,
-                input?.StageVariables ?? (definition is not null ? BuildStageVariablesFromDefinition(definition) : null));
+                input?.StageVariables);
 
         _log.LogInformation("Workflow {Id} started, stage={Stage}", GrainKey, _run.CurrentStageId);
         EmitStageChanged("started");
@@ -128,7 +117,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         var template = await _profileManager.LoadTemplateAsync(GrainKey);
         return template.Structure
-            ?? _profile?.Definition
             ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no effective workflow template");
     }
 
@@ -460,34 +448,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await DispatchCompletedHookIfNeededAsync(phaseBefore);
     }
 
-    public async Task PatchVariablesAsync(string section, string patchJson)
-    {
-        EnsureRun();
-        if (string.IsNullOrWhiteSpace(section))
-            throw new InvalidOperationException("Workflow variable section is required");
-
-        _variables = (_variables ?? new WorkflowExecutionContext("{}"))
-            .PatchSection(section, patchJson);
-
-        await SaveVariablesAsync();
-        await _profileManager.PatchRunVariablesAsync(GrainKey, section, patchJson);
-    }
-
-    public async Task PatchStageVariablesAsync(string stage, string section, string patchJson)
-    {
-        EnsureRun();
-        if (string.IsNullOrWhiteSpace(stage))
-            throw new InvalidOperationException("Workflow stage is required");
-        if (string.IsNullOrWhiteSpace(section))
-            throw new InvalidOperationException("Workflow variable section is required");
-
-        _variables = (_variables ?? new WorkflowExecutionContext("{}"))
-            .PatchStageSection(stage, section, patchJson);
-
-        await SaveVariablesAsync();
-        await _profileManager.PatchRunStageVariablesAsync(GrainKey, stage, section, patchJson);
-    }
-
     public Task DeactivateForTestAsync()
     {
         DeactivateOnIdle();
@@ -561,12 +521,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await ReleaseStageLocksAsync(_run.CurrentStageId, reason);
     }
 
-    private async Task ReleaseCurrentStageLocksIfIdleAsync(string reason)
-    {
-        if (_lease is not null) return;
-        await ReleaseCurrentStageLocksAsync(reason);
-    }
-
     private async Task ReleaseStageLocksAsync(string stage, string reason)
     {
         var resource = await GetSequentialLockResourceAsync(stage);
@@ -612,14 +566,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var backlog = GrainFactory.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
         await backlog.EnqueueAsync(GrainKey);
         _log.LogInformation("Workflow {Id} registered to workflow backlog", GrainKey);
-    }
-
-    private async Task RequeueInBacklogAsync()
-    {
-        var projectId = GetProjectId();
-        if (string.IsNullOrWhiteSpace(projectId)) return;
-        await RequeueWorkflowIdAsync(projectId, GrainKey);
-        _log.LogInformation("Workflow {Id} re-queued in workflow backlog", GrainKey);
     }
 
     private async Task RequeueWorkflowIdAsync(string projectId, string workflowRunId)
@@ -806,11 +752,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return lastDot >= 0 && int.TryParse(taskRunId[(lastDot + 1)..], out var attempt)
             ? attempt
             : 1;
-    }
-
-    private void ClearLease()
-    {
-        _lease = null;
     }
 
     private async Task ClearAndDeleteLeaseAsync()
