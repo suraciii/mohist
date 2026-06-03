@@ -18,6 +18,7 @@ public sealed record WorkflowStatusView(
     PendingWorkView? PendingWork,
     FailureStatusView? Failure,
     List<AvailableActionView> AvailableActions,
+    string? ClaimedBy = null,
     MetadataView? Metadata = null);
 
 [GenerateSerializer]
