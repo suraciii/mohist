@@ -132,7 +132,7 @@ async function mergeAction(context: ActionContext): Promise<ActionResult> {
   }
 
   const result = strategy.toLowerCase() === "squash"
-    ? await squashMerge(mergeWorkDir, source, message, context.signal)
+    ? await squashMerge(mergeWorkDir, source, target ?? "", message, context)
     : await git(mergeWorkDir, ["merge", source], context.signal)
   const head = result.success ? await git(mergeWorkDir, ["rev-parse", "HEAD"], context.signal) : null
   const output = JSON.stringify({ kind: "merge", source, target, strategy, workDir: mergeWorkDir, sourceCommitted: sourceCommit.combinedOutput, commit: head?.success ? head.stdout.trim() : null, output: result.combinedOutput })
@@ -152,10 +152,22 @@ async function commitPendingSourceChanges(workDir: string, message: string, sign
   return await git(workDir, ["commit", "-m", `${message} integration`], signal)
 }
 
-async function squashMerge(workDir: string, source: string, message: string, signal: AbortSignal) {
-  const merge = await git(workDir, ["merge", "--squash", source], signal)
+async function squashMerge(workDir: string, source: string, target: string, message: string, context: ActionContext) {
+  const merge = await git(workDir, ["merge", "--squash", source], context.signal)
   if (!merge.success) return merge
-  return await git(workDir, ["commit", "-m", message], signal)
+
+  const title = stringAt(context.variables, ["issue", "title"]) ?? message
+  const numberStr = typeof context.issueNumber === "number" && context.issueNumber > 0
+    ? String(context.issueNumber)
+    : numberAtString(context.variables, ["issue", "number"])
+  const header = numberStr ? `${title} (#${numberStr})` : title
+
+  const logResult = await git(workDir, ["log", "--format=* %s", `${target}..${source}`], context.signal)
+  const body = logResult.success ? logResult.stdout.trim() : ""
+
+  return body
+    ? await git(workDir, ["commit", "-m", header, "-m", trim(body)], context.signal)
+    : await git(workDir, ["commit", "-m", header], context.signal)
 }
 
 function mergeFailure(source: string, target: string | undefined, strategy: string, outputText: string, exitCode: number): ActionResult {
@@ -195,4 +207,12 @@ function stringAt(value: unknown, path: string[]) {
     return (current as Record<string, unknown>)[part]
   }, value)
   return typeof found === "string" ? found : undefined
+}
+
+function numberAtString(value: unknown, path: string[]) {
+  const found = path.reduce<unknown>((current, part) => {
+    if (typeof current !== "object" || current === null || Array.isArray(current)) return undefined
+    return (current as Record<string, unknown>)[part]
+  }, value)
+  return typeof found === "number" ? String(found) : undefined
 }
