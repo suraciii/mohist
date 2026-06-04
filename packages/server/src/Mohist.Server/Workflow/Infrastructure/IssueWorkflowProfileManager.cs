@@ -91,7 +91,7 @@ public class IssueWorkflowProfileManager
 
         if (row is null)
         {
-            row = await MigrateLegacyRowAsync(db, issueId, legacyIssueKey);
+            row = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
         }
 
         if (row is null)
@@ -136,7 +136,7 @@ public class IssueWorkflowProfileManager
 
         if (row is null)
         {
-            row = await MigrateLegacyRowAsync(db, issueId, legacyIssueKey);
+            row = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
         }
 
         if (row is null)
@@ -173,8 +173,8 @@ public class IssueWorkflowProfileManager
     public async Task<Dictionary<string, string>> GetPromptsAsync(string issueId, string? legacyIssueKey = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await FindProfileAsync(db, issueId, legacyIssueKey);
-        return DeserializePrompts(row?.PromptsJson);
+        var profile = await FindProfileAsync(db, issueId, legacyIssueKey);
+        return DeserializePrompts(profile?.Prompts);
     }
 
     public async Task SetPromptAsync(string issueId, string key, string body, string? legacyIssueKey = null)
@@ -183,31 +183,31 @@ public class IssueWorkflowProfileManager
             throw new ArgumentException("key is required", nameof(key));
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.IssueWorkflowProfiles
+        var profile = await db.IssueWorkflowProfiles
             .FirstOrDefaultAsync(x => x.IssueKey == issueId);
 
-        if (row is null)
+        if (profile is null)
         {
-            row = await MigrateLegacyRowAsync(db, issueId, legacyIssueKey);
+            profile = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
         }
 
-        if (row is null)
+        if (profile is null)
         {
-            row = new IssueWorkflowProfileRow
+            profile = new IssueWorkflowProfileRow
             {
                 IssueKey = issueId,
                 VariablesJson = VariableBundle.Empty.ToJson(),
-                PromptsJson = SerializePrompt(key, body),
+                Prompts = SerializePrompt(key, body),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
-            db.IssueWorkflowProfiles.Add(row);
+            db.IssueWorkflowProfiles.Add(profile);
         }
         else
         {
-            var prompts = DeserializePrompts(row.PromptsJson);
+            var prompts = DeserializePrompts(profile.Prompts);
             prompts[key] = body;
-            row.PromptsJson = SerializePrompts(prompts);
-            row.UpdatedAt = DateTimeOffset.UtcNow;
+            profile.Prompts = SerializePrompts(prompts);
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         await db.SaveChangesAsync();
@@ -219,21 +219,21 @@ public class IssueWorkflowProfileManager
             throw new ArgumentException("key is required", nameof(key));
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.IssueWorkflowProfiles
+        var profile = await db.IssueWorkflowProfiles
             .FirstOrDefaultAsync(x => x.IssueKey == issueId);
 
-        if (row is null)
+        if (profile is null)
         {
-            row = await MigrateLegacyRowAsync(db, issueId, legacyIssueKey);
+            profile = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
         }
 
-        if (row is null) return;
+        if (profile is null) return;
 
-        var prompts = DeserializePrompts(row.PromptsJson);
+        var prompts = DeserializePrompts(profile.Prompts);
         if (!prompts.Remove(key)) return;
 
-        row.PromptsJson = SerializePrompts(prompts);
-        row.UpdatedAt = DateTimeOffset.UtcNow;
+        profile.Prompts = SerializePrompts(prompts);
+        profile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
     }
 
@@ -258,7 +258,7 @@ public class IssueWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.IssueKey == legacyIssueKey);
     }
 
-    private static async Task<IssueWorkflowProfileRow?> MigrateLegacyRowAsync(
+    private static async Task<IssueWorkflowProfileRow?> MigrateLegacyProfileAsync(
         MohistDbContext db,
         string issueId,
         string? legacyIssueKey)
@@ -275,7 +275,7 @@ public class IssueWorkflowProfileManager
             SourceTemplateId = legacy.SourceTemplateId,
             TemplateJson = legacy.TemplateJson,
             VariablesJson = legacy.VariablesJson,
-            PromptsJson = legacy.PromptsJson,
+            Prompts = legacy.Prompts,
             UpdatedAt = legacy.UpdatedAt,
         };
         db.IssueWorkflowProfiles.Remove(legacy);

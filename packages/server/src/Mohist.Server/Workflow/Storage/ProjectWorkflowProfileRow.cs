@@ -15,9 +15,13 @@ public class ProjectWorkflowProfileRow
 
     /// <summary>
     /// VariableBundle JSON - 项目级变量配置。
-    /// 结构: { "vars": {...}, "stages": { "plan": { "vars": {...} } } }
     /// </summary>
     public string VariablesJson { get; set; } = "{}";
+
+    /// <summary>
+    /// 项目级提示词。key → body, JSON 序列化。
+    /// </summary>
+    public string Prompts { get; set; } = "{}";
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
