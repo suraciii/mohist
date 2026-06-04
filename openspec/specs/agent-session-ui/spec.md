@@ -5,7 +5,7 @@
 The WebUI SSE subscription SHALL include the following event types: `agent_text_chunk`, `main_tool_call`, `coder_text_chunk`, `coder_tool_call`, `ralph_task_update`, `ralph_loop_progress`, `plan_round_start`, `plan_session_update`. All 4 registration arrays must be kept in sync: `event-bus.ts` EventMap, `events.ts` ALL_EVENT_TYPES, `agent-events.ts` AGENT_DETAIL_EVENTS, `useSSE.ts` eventTypes.
 
 #### Scenario: Agent starts and streams text
-- **WHEN** the Main Agent emits agent_text_chunk events
+- **WHEN** an agent session emits agent_text_chunk events
 - **THEN** the WebUI receives and accumulates the text chunks into a buffer, rendering them as streaming text in real-time
 
 #### Scenario: Plan round start event received
@@ -14,7 +14,7 @@ The WebUI SSE subscription SHALL include the following event types: `agent_text_
 
 ### Requirement: Frontend agentStatus uses issueNumber field for matching
 
-The frontend SSE event handlers and agent status detection SHALL use `issueNumber` (number) instead of `issueId` (UUID) for matching. The `AgentRunnerService.getStatus()` endpoint returns both `issueId` (UUID) and `issueNumber` (number). Frontend SHALL compare `agentStatus.issueNumber === issueNumber` for running detection and filter SSE events by `detail.issueId === String(issueNumber)`.
+The frontend SSE event handlers and agent status detection SHALL use `issueNumber` (number) instead of `issueId` (UUID) for matching. Agent status endpoints return both `issueId` (UUID) and `issueNumber` (number). Frontend SHALL compare `agentStatus.issueNumber === issueNumber` for running detection and filter SSE events by `detail.issueId === String(issueNumber)`.
 
 #### Scenario: Agent running detection works correctly
 - **WHEN** agent is running on issue #5
@@ -40,7 +40,7 @@ The IssueDetailPage SHALL replace the AgentSessionPanel component with a Session
 - **THEN** the SessionTimeline displays: pipeline status timeline, round-based conversation (collapsible), streaming agent text with typing cursor, and tool call timeline with expandable details
 
 #### Scenario: Agent has completed, viewing history
-- **WHEN** the user views an issue detail page and the agent has previously run (issue is not in draft)
+- **WHEN** the user views an issue detail page and the agent has previously run
 - **THEN** the SessionTimeline loads historical data from `GET /api/issues/:number/logs` and reconstructs the full round-based conversation
 
 #### Scenario: Agent is mid-run when page opens
@@ -368,4 +368,3 @@ The prompt card SHALL display one canonical output-target line when prompt subti
 - **WHEN** prompt summary metadata contains both `outputPath` and a subtitle equivalent to `Output: <same path>`
 - **THEN** the transcript page shows that output target once
 - **AND** no duplicate output-path line is rendered in the prompt block
-

@@ -57,6 +57,14 @@ WorkflowGrain 必须负责：
 - 将 committed workflow events 投影为 workflow event rows 和 live events。
 - 对 committed workflow events 执行 orchestration reactions。
 
+事件归属从 `WorkflowRun.Metadata` 读取：
+
+```text
+workflowRunId -> WorkflowRun.Metadata(ProjectId, IssueId)
+```
+
+不要从 runtime context 或 profile variables 反查 project/issue。
+
 ## Event Boundary
 
 Workflow event 是 WorkflowRun 能凭自身状态和方法输入决定的业务事实。
@@ -199,6 +207,8 @@ private async Task CommitAsync(
 persist workflow event row
 publish live event
 ```
+
+持久化和发布使用 `workflowRunId`、`issueId` 和 RESTful `ResourceKey`。如果外层 API 仍用 issue number，先在 API/query 边界解析为 `issueId`。
 
 业务编排只显式响应 WorkflowGrain 关心的事件：
 

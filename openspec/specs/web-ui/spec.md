@@ -206,7 +206,7 @@ The pipeline UI SHALL preserve visibility of repeated check results caused by fa
 
 ### Requirement: Web UI supports issue model overrides
 
-The Web UI SHALL let users configure an issue-level default model and optional per-stage model overrides from the issue workflow UI. Per-stage controls SHALL use real executable pipeline stages: `explore`, `plan`, `build`, `check`, and `integrate`.
+The Web UI SHALL let users configure an issue-level default model and optional per-stage model overrides from the issue workflow UI. Per-stage controls SHALL use real executable pipeline stages: `plan`, `build`, `check`, and `integrate`.
 
 #### Scenario: Configure issue default model
 
@@ -905,4 +905,3 @@ The issue UI SHALL render generic workflow convergence state so users can unders
 
 - **WHEN** no convergence state is available
 - **THEN** the issue UI SHALL preserve the existing task/check progress display
-

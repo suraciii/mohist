@@ -1,23 +1,5 @@
 # OpenSpec Capability: agent-runtime
 
-### Requirement: spawn_agent tool truncates subprocess stdout
-
-The spawn_agent tool SHALL truncate subprocess stdout when it exceeds 8000 characters, preserving the first 3000 and last 5000 characters with a truncation notice in between.
-
-#### Scenario: Stdout within limit
-- **WHEN** opencode subprocess returns stdout of 5000 characters
-- **THEN** the full stdout SHALL be returned without truncation
-
-#### Scenario: Stdout exceeds limit
-- **WHEN** opencode subprocess returns stdout of 20000 characters
-- **THEN** the result SHALL contain the first 3000 characters
-- **AND** a truncation notice SHALL be inserted
-- **AND** the last 5000 characters SHALL be included
-
-#### Scenario: Stdout exactly at limit
-- **WHEN** opencode subprocess returns stdout of exactly 8000 characters
-- **THEN** the full stdout SHALL be returned without truncation
-
 ### Requirement: LLM config is loaded from config.jsonc and passed to resolveModel [UPDATED]
 
 The system SHALL read LLM configuration from `~/.mohist/config.jsonc` (NOT from SQLite config table) and pass it to `resolveModel()` so that user-configured model and proxy settings take effect. The old `llm.*` config keys in SQLite are deprecated and ignored.
@@ -99,26 +81,6 @@ The system SHALL support creating agent sessions in memory with: a unique ID, an
 - **AND** closed sessions SHALL NOT be returned
 - **AND** if no matching session exists, return undefined
 
-### Requirement: Sub-agent spawning (opencode subprocess)
-
-The system SHALL support spawning opencode as a subprocess from the Main Agent via the spawn_agent tool. M1 implementation: spawn_agent directly spawns `opencode agent --local --message <task>` in the issue's worktree, synchronously waits for completion, and returns stdout/stderr/exit_code. No child LLM loop in M1.
-
-#### Scenario: Spawn and wait
-- **WHEN** the Main Agent calls spawn_agent with agent_type, task, and cwd
-- **THEN** the system SHALL spawn an opencode subprocess in the cwd
-- **THEN** the system SHALL wait for the subprocess to complete
-- **THEN** the subprocess output (stdout/stderr/exit_code) SHALL be returned as a tool result
-
-#### Scenario: Sub-agent timeout
-- **WHEN** the opencode subprocess exceeds the configured timeout (default 30 minutes)
-- **THEN** the system SHALL kill the subprocess
-- **THEN** a timeout error SHALL be returned to the Main Agent
-
-#### Scenario: Sub-agent failure
-- **WHEN** the opencode subprocess exits with non-zero code
-- **THEN** the stderr output and exit code SHALL be returned to the Main Agent
-- **THEN** the Main Agent LLM SHALL decide how to handle the failure
-
 ### Requirement: LLM provider configuration [UPDATED]
 
 The system SHALL support configuring LLM providers via `~/.mohist/config.jsonc` (NOT via SQLite ConfigRepo). The configuration SHALL include: default model in "provider/model-id" format (e.g. "anthropic/claude-sonnet-4-20250514"), and per-provider config (apiKey, baseURL, sdk). API keys SHALL be detected from: 1) config.jsonc `provider.<id>.apiKey` (priority), 2) environment variables (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.).
@@ -137,42 +99,6 @@ The system SHALL support configuring LLM providers via `~/.mohist/config.jsonc` 
 - **WHEN** SQLite config table contains `llm.model` or `llm.provider.*` keys
 - **THEN** these keys SHALL be ignored
 - **AND** the system SHALL use config.jsonc exclusively for LLM configuration
-
-### Requirement: spawn_coder 捕获所有 ACP 事件
-
-spawn_coder 工具 SHALL 捕获 opencode acp 子进程的所有 sessionUpdate 事件类型，持久化到 workflow_log 表。
-
-#### Scenario: 完整事件捕获
-- **WHEN** spawn_coder 执行一次 oneshot session
-- **THEN** 所有 sessionUpdate 事件（agent_message_chunk、tool_call、tool_call_update、plan、usage_update、agent_thought_chunk 等）都被记录到 workflow_log
-- **AND** 返回给 Main Agent 的文本结果格式不变（仍为截断后的 agentText）
-
-#### Scenario: 事件关联 issue
-- **WHEN** spawn_coder 捕获到一个 ACP 事件
-- **THEN** workflow_log 记录包含对应的 issue_id
-- **AND** 包含 ACP session_id（如有）
-
-### Requirement: spawn_coder 通过 EventBus 推送 action 事件
-
-spawn_coder 工具 SHALL 在捕获到关键 ACP 事件时通过 EventBus emit，使 Web UI 和 mo attach 可以实时感知 agent 动作。
-
-#### Scenario: 推送 tool_call 事件
-- **WHEN** opencode acp 报告 tool_call 事件
-- **THEN** EventBus emit `tool_call` 事件，payload 包含 issueId、projectId、tool name、status、file locations
-
-#### Scenario: 不推送高频事件
-- **WHEN** opencode acp 报告 agent_message_chunk 事件
-- **THEN** 不通过 EventBus emit（仅存入 workflow_log）
-
-### Requirement: AgentRunnerService 支持自由文本 resume
-
-AgentRunnerService.resume() SHALL 接受任意字符串消息，不限固定格式。当前实现已支持（message 参数为 string 类型），无需修改。
-
-#### Scenario: 自由文本消息注入到 session
-- **WHEN** resume() 被调用，message 参数为 "改用 PostgreSQL"
-- **THEN** 该消息作为 user role message 追加到 session
-- **AND** 新的 agent loop 以包含该消息的 session 上下文启动
-- **AND** LLM 根据消息内容自主决策下一步
 
 ### Requirement: Model discovery does not create opencode sessions
 
@@ -250,4 +176,3 @@ Agent runtime SHALL normalize `tool_call` and `tool_call_update` ACP session upd
 - **WHEN** a `tool_call_update` notification is received
 - **THEN** it SHALL go through the same identity normalization as `tool_call`
 - **AND** completed output and metadata SHALL remain available to observers and logs
-

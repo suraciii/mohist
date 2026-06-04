@@ -14,14 +14,14 @@ The IssueDetailPage SHALL include a SessionTimeline component that renders agent
 
 ### Requirement: SessionTimeline loads history from workflow_log API
 
-When the page loads for a non-draft issue, SessionTimeline SHALL fetch historical data from `GET /api/issues/:number/logs` and reconstruct the round-based conversation structure by splitting on `user_message_chunk` events. This replaces the broken `GET /api/issues/:number/agent-session` source which returns empty results for pipeline runs.
+When the page loads for an issue that has entered the pipeline, SessionTimeline SHALL fetch historical data from `GET /api/issues/:number/logs` and reconstruct the round-based conversation structure by splitting on `user_message_chunk` events. This replaces the broken `GET /api/issues/:number/agent-session` source which returns empty results for pipeline runs.
 
 #### Scenario: Page loads after plan stage completes
 - **WHEN** the user navigates to an issue detail page after the plan stage has completed
 - **THEN** SessionTimeline fetches all workflow_log entries and reconstructs rounds by grouping events between consecutive `user_message_chunk` entries
 
 #### Scenario: No workflow_log entries exist
-- **WHEN** the user views a draft issue with no agent activity
+- **WHEN** the user views a backlog issue with no agent activity
 - **THEN** SessionTimeline shows "No agent activity yet" placeholder
 
 ### Requirement: SessionTimeline appends live SSE events
@@ -145,4 +145,3 @@ Session timeline and transcript surfaces SHALL display a shared Plan agent sessi
 #### Scenario: Build and Check session display is unchanged by default
 - **WHEN** Build or Check tasks do not explicitly configure `agentSessionRef`
 - **THEN** their session/transcript display SHALL remain task-local as before this change
-

@@ -1,30 +1,5 @@
 # OpenSpec Capability: workflow-engine
 
-### Requirement: Stage enum contains only M1 stages
-
-The `Stage` enum SHALL contain only values used by M1: `Draft`, `Designing`, `Implementing`, `Done`. The values `WaitingDesignReview` and `WaitingReview` SHALL be removed.
-
-#### Scenario: Stage enum values
-- **WHEN** the Stage enum is inspected
-- **THEN** it SHALL contain exactly 4 values: `draft`, `designing`, `implementing`, `done`
-- **AND** it SHALL NOT contain `waiting-design-review` or `waiting-review`
-
-### Requirement: Task infrastructure is removed
-
-The `Task` interface SHALL be removed from `types/index.ts`. The `TaskRepo` class SHALL be deleted. The `tasks` SQLite table SHALL be dropped.
-
-#### Scenario: No Task type
-- **WHEN** the types module is inspected
-- **THEN** it SHALL NOT export a `Task` interface
-
-#### Scenario: No TaskRepo
-- **WHEN** the db module is inspected
-- **THEN** it SHALL NOT export `TaskRepo`
-
-#### Scenario: Tasks table dropped
-- **WHEN** the server starts and initializes the database
-- **THEN** the `tasks` table SHALL NOT exist
-
 ### Requirement: REQ-WFE-003 AI review repair is an explicit task
 
 AI review repair SHALL be represented as an explicit check-stage task rather than a check method. The AI review check SHALL parse durable review artifacts and return verdict evidence, while `fix-review-findings` performs any code-changing repair work.
@@ -677,4 +652,3 @@ The workflow engine SHALL use structured failed context and verification-mode re
 
 - **WHEN** structured review convergence is enabled
 - **THEN** existing review history behavior and reviewed-snapshot binding SHALL remain compatible and SHALL NOT be replaced by review-specific core domain state
-

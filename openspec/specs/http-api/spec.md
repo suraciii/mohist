@@ -2,7 +2,7 @@
 
 ### Requirement: API 提供项目管理接口
 
-Server SHALL 提供项目管理的 RESTful API，基于 Hono 框架实现。API handler SHALL 通过 ProjectService 操作数据，不直接调用 StateManager 的 CRUD 方法。
+Server SHALL 提供项目管理的 RESTful API。API handler SHALL 通过 ProjectService 操作数据，不直接调用 StateManager 的 CRUD 方法。
 
 #### Scenario: 列出项目
 - **WHEN** CLI 请求 `GET /api/projects`
@@ -46,7 +46,7 @@ API SHALL 提供问题管理的 RESTful 端点。
 
 ### Requirement: API 提供配置接口
 
-Server SHALL 提供配置管理的 RESTful API，基于 Hono 框架实现。
+Server SHALL 提供配置管理的 RESTful API。
 
 #### Scenario: 获取配置
 - **WHEN** CLI 请求 `GET /api/config`
@@ -58,7 +58,7 @@ Server SHALL 提供配置管理的 RESTful API，基于 Hono 框架实现。
 
 ### Requirement: API 处理错误情况
 
-Server SHALL 返回清晰的错误响应，基于 Hono 框架实现。
+Server SHALL 返回清晰的错误响应。
 
 #### Scenario: Server 未运行时
 - **WHEN** CLI 请求任何 API
@@ -75,13 +75,13 @@ Server SHALL 返回清晰的错误响应，基于 Hono 框架实现。
 - **THEN** 返回 500 错误
 - **AND** 记录错误日志
 
-### Requirement: Status API reflects M1 stage model
+### Requirement: Status API reflects canonical stage model
 
-The status API SHALL only report stages used in M1: draft, designing, implementing, done. The response SHALL NOT include task-related fields (runningTasks, queuedTasks, activeWorkers) or waiting-stage counts (waitingDesignReview, waitingReview). The `ServerState` interface SHALL NOT contain `activeTasks` or `queuedTasks` fields.
+The status API SHALL report issue counts using the canonical pipeline stage model. The response SHALL NOT include task-related fields (runningTasks, queuedTasks, activeWorkers) or waiting-stage counts (waitingDesignReview, waitingReview). The `ServerState` interface SHALL NOT contain `activeTasks` or `queuedTasks` fields.
 
 #### Scenario: Get current project status
 - **WHEN** CLI 请求 `GET /api/status`
-- **THEN** the response SHALL include `issuesByStage` with only `draft`, `designing`, `implementing`, `done` counts
+- **THEN** the response SHALL include `issuesByStage` with `backlog`, `plan`, `build`, `check`, `integrate`, and `done` counts
 - **AND** the response SHALL NOT include `runningTasks`, `queuedTasks`, or `activeWorkers`
 
 #### Scenario: ServerState has no task fields
@@ -165,11 +165,11 @@ StateManager SHALL 仅提供 repo 实例的 getter 和数据库初始化，不�
 
 ### Requirement: Agent status API 返回可恢复 issues
 
-`GET /api/agent/status` 返回值 SHALL 包含 `recoverableIssues` 数组，列出所有 `status = 'active'` 但无对应 agent session 的 issue（即上次 server 运行时未完成的 issue）。每个条目包含 `{ issueNumber, stage }`。
+`GET /api/agent/status` 返回值 SHALL 包含 `recoverableIssues` 数组，列出所有 `status = 'active'` 且已进入 pipeline 但无对应 agent session 的 issue（即上次 server 运行时未完成的 issue）。每个条目包含 `{ issueNumber, stage }`。
 
 #### Scenario: Server 重启后检测可恢复 issues
 - **WHEN** server 重启
-- **AND** 数据库中存在 `status = 'active'` 且 `stage` 不是 `draft` 的 issues
+- **AND** 数据库中存在 `status = 'active'` 且 `stage` 不是 `backlog` 的 issues
 - **THEN** `GET /api/agent/status` 返回的 `recoverableIssues` 数组包含这些 issue 的 number 和 stage
 
 #### Scenario: 所有 issue 正常完成时无可恢复项
@@ -181,7 +181,7 @@ StateManager SHALL 仅提供 repo 实例的 getter 和数据库初始化，不�
 `GET /api/agent/status` 返回值 SHALL 包含 `waitingQuestions` 数组，包含当前所有在 ask_user 中等待回答的 agent 信息：`{ issueId, issueNumber, projectId, questionId, question }`。
 
 #### Scenario: agent 在 ask_user 中等待
-- **WHEN** Main Agent 调用 ask_user 工具并阻塞等待回答
+- **WHEN** an agent task calls ask_user and blocks waiting for an answer
 - **THEN** `GET /api/agent/status` 返回的 `waitingQuestions` 数组包含该 issue 的条目
 - **AND** 条目包含 issueId、issueNumber、projectId、questionId 和 question 内容
 
@@ -718,7 +718,7 @@ The issue recovery API SHALL preserve distinct user intents for Check review fai
 
 ### Requirement: API 提供状态查询接口
 
-Server SHALL 提供 RESTful API 供 CLI 查询状态，基于 Hono 框架实现。Issue list and detail responses SHALL include structured start prerequisite and start eligibility data so clients do not parse issue body text.
+Server SHALL 提供 RESTful API 供 CLI 查询状态。Issue list and detail responses SHALL include structured start prerequisite and start eligibility data so clients do not parse issue body text.
 
 #### Scenario: 获取全局状态
 - **WHEN** CLI 请求 `GET /api/status`
@@ -748,9 +748,9 @@ Server SHALL 提供 RESTful API 供 CLI 查询状态，基于 Hono 框架实现�
 - **THEN** server 返回 400 错误
 - **AND** 错误信息包含 "blocked"
 
-#### Scenario: Start active issue in draft stage
+#### Scenario: Start active issue in backlog stage
 - **WHEN** CLI 请求 `POST /api/issues/:number/start`
-- **AND** issue status 为 `active` 且 stage 为 `draft`
+- **AND** issue status 为 `active` 且 stage 为 `backlog`
 - **THEN** 正常启动 agent
 
 #### Scenario: Start issue waiting for prerequisite delivery
@@ -989,4 +989,3 @@ Recovery APIs SHALL keep rerun and resume distinct from retry. Rerun stage SHALL
 - **WHEN** a client requests resume for an interrupted latest attempt
 - **THEN** the API SHALL use interrupted recovery semantics
 - **AND** it SHALL NOT require `WorkflowRun.status = failed` as if resume were retry
-

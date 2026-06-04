@@ -191,11 +191,12 @@ CLI 命令模块 SHALL 共享同一个 `apiClient` 实现，不各自定义重�
 
 ### Requirement: CLI 阶段名与实现一致
 
-CLI 输出中的阶段名 SHALL 使用当前实现的阶段名：`draft`、`plan`、`build`、`check`、`done`。
+CLI 输出中的阶段名 SHALL 使用当前 canonical pipeline stage model。
 
 #### Scenario: issue list 显示正确阶段名
 - **WHEN** 用户运行 `mo issue list`
-- **THEN** 阶段列显示 `plan`/`build`/`check`/`done`（而非旧的 `designing`/`implementing`）
+- **THEN** 阶段列显示 `backlog`/`plan`/`build`/`check`/`integrate`/`done`
+- **AND** it does not show deprecated `draft`, `designing`, or `implementing` stage names
 
 ### Requirement: CLI 提供 provider 管理命令 [NEW]
 
@@ -572,7 +573,7 @@ CLI SHALL 通过 Server API 支持本地 Issue 的创建、读取、更新、删
 Successful `mo issue create` output SHALL print the created issue number and priority, and SHALL show the `mo issue start` hint only when the created issue is startable according to server-provided start eligibility.
 
 #### Scenario: Start tip shown for backlog issue
-- **WHEN** `mo issue create` returns an issue still in a startable draft or backlog state
+- **WHEN** `mo issue create` returns an issue still in a startable backlog state
 - **AND** `startEligibility.startable` is not false because of waiting prerequisite delivery
 - **THEN** the CLI prints `Created issue #N: <title>`
 - **AND** prints the issue priority
@@ -726,4 +727,3 @@ CLI issue status, issue show, and recovery command output SHALL report recovery 
 
 - **WHEN** the same issue fixture is rendered through API, Web UI, and CLI
 - **THEN** all three surfaces SHALL agree on latest attempt state and recovery action availability
-

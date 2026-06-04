@@ -33,8 +33,8 @@ Server SHALL 管理 Issue pipeline 的调度和执行。
 
 #### Scenario: Issue 启动
 - **WHEN** 用户启动一个 Issue 处理
-- **THEN** Issue stage 从 `draft` 变为 `plan`
-- **AND** Agent Runtime 为该 Issue 创建 Main Agent session
+- **THEN** Issue stage 从 `backlog` 变为 `plan`
+- **AND** workflow runtime starts or resumes a WorkflowRun for the issue
 
 #### Scenario: 并发限制
 - **WHEN** 已有 maxConcurrentAgents 个 agent 运行
@@ -80,8 +80,8 @@ Server SHALL 管理 Issue pipeline 的调度和执行。
 
 #### Scenario: Issue 启动
 - **WHEN** 用户启动一个 Issue 处理
-- **THEN** Issue stage 从 `draft` 变为 `plan`
-- **AND** Agent Runtime 为该 Issue 创建 Main Agent session
+- **THEN** Issue stage 从 `backlog` 变为 `plan`
+- **AND** workflow runtime starts or resumes a WorkflowRun for the issue
 
 #### Scenario: 并发限制
 - **WHEN** 已有 maxConcurrentAgents 个 agent 运行

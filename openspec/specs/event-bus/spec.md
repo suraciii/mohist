@@ -5,7 +5,7 @@
 SSE 端点 SHALL 推送所有 agent 生命周期事件，包括 `agent_paused`。`ALL_EVENT_TYPES` 数组 SHALL 包含 `agent_started`、`agent_completed`、`agent_paused`、`agent_error`、`approval_requested`、`question_asked`、`question_answered`。
 
 #### Scenario: agent 暂停时 SSE 客户端收到通知
-- **WHEN** AgentRunnerService 暂停一个 issue 的 agent session（gate 审批点）
+- **WHEN** workflow runtime pauses an issue at an approval point
 - **AND** SSE 客户端已连接并订阅了该项目的 event
 - **THEN** SSE 客户端收到 `event: agent_paused` 消息，payload 包含 `issueId` 和 `projectId`
 
@@ -66,4 +66,3 @@ Mohist SHALL emit typed events for base advancement, drift detection, rebase opp
 
 - **WHEN** base drift or rebase invalidates candidate evidence
 - **THEN** Mohist SHALL emit an event that identifies affected evidence and issue context
-
