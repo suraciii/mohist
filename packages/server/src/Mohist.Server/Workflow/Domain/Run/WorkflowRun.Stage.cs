@@ -8,12 +8,12 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public void InitializeStage(
+        public IReadOnlyList<WorkflowEvent> InitializeStage(
             IReadOnlyList<TaskDefinition> tasks,
             List<CheckDefinition> checks)
         {
             var current = run.CurrentStage();
-            if (current.Initialized) return;
+            if (current.Initialized) return [];
 
             var newTasks = new List<TaskRun>();
             foreach (var t in tasks)
@@ -32,28 +32,36 @@ public static partial class WorkflowRunExtensions
                 .ToList();
             current.Initialized = true;
             current.Status = StageRunStatus.Running;
-            run.Advance();
+            return run.Advance();
         }
 
-        private void Advance()
+        private IReadOnlyList<WorkflowEvent> Advance()
         {
-            if (run.Status is WorkflowRunStatus.Pending or WorkflowRunStatus.Paused) return;
+            if (run.Status is WorkflowRunStatus.Pending or WorkflowRunStatus.Paused) return [];
+            var events = new List<WorkflowEvent>();
 
             var current = run.CurrentStage();
+            var statusBefore = current.Status;
             current.TryRequestApproval();
+            if (statusBefore != StageRunStatus.AwaitingApproval && current.Status == StageRunStatus.AwaitingApproval)
+                events.Add(new StageApprovalRequested(current.Id));
+
             while (current.Status == StageRunStatus.Completed)
             {
+                events.Add(new StageCompleted(current.Id));
                 var idx = run.Stages.IndexOf(current) + 1;
                 if (idx >= run.Stages.Count)
                 {
                     run.Status = WorkflowRunStatus.Completed;
                     run.CompletedAt = DateTimeOffset.UtcNow;
-                    return;
+                    events.Add(new WorkflowRunCompleted());
+                    return events;
                 }
 
                 current = run.Stages[idx];
                 current.Status = StageRunStatus.Running;
                 run.CurrentStageId = current.Id;
+                events.Add(new StageStarted(current.Id));
             }
 
             run.Status = current.Status switch
@@ -62,6 +70,7 @@ public static partial class WorkflowRunExtensions
                 StageRunStatus.AwaitingApproval => WorkflowRunStatus.AwaitingApproval,
                 _ => WorkflowRunStatus.Running
             };
+            return events;
         }
     }
 

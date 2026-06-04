@@ -8,32 +8,34 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public void ProcessCheckResults(List<CheckResultAction> actions)
+        public IReadOnlyList<WorkflowEvent> ProcessCheckResults(List<CheckResultAction> actions)
         {
+            var events = new List<WorkflowEvent>();
             foreach (var a in actions)
             {
                 switch (a.Action)
                 {
                     case "pass":
-                        run.PassCheck(a.Result);
+                        events.AddRange(run.PassCheck(a.Result));
                         break;
                     case "pending":
-                        run.ResetCheck(a.Result);
+                        events.AddRange(run.ResetCheck(a.Result));
                         break;
                     case "repair":
-                        run.ScheduleCheckRepair(a.Result.Name, a.RepairTasks!, a.Result.Message, a.Result.Output);
+                        events.AddRange(run.ScheduleCheckRepair(a.Result.Name, a.RepairTasks!, a.Result.Message, a.Result.Output));
                         break;
                     case "fail":
-                        run.FailCheck(a.Result);
-                        return;
+                        events.AddRange(run.FailCheck(a.Result));
+                        return events;
                 }
             }
+            return events;
         }
 
-        public void RepairFailedCheck(CheckResult result, TaskDefinition repairTask)
+        public IReadOnlyList<WorkflowEvent> RepairFailedCheck(CheckResult result, TaskDefinition repairTask)
             => run.ScheduleCheckRepair(result.Name, [repairTask], result.Message, result.Output);
 
-        public void ScheduleCheckRepair(
+        public IReadOnlyList<WorkflowEvent> ScheduleCheckRepair(
             string checkName,
             IReadOnlyList<TaskDefinition> repairTasks,
             string? message = null,
@@ -43,19 +45,32 @@ public static partial class WorkflowRunExtensions
             current.ScheduleCheckRepair(checkName, repairTasks, message, output);
             run.Failure = null;
             run.Status = WorkflowRunStatus.Running;
+            var taskIds = current.Tasks
+                .TakeLast(repairTasks.Count)
+                .Select(t => t.Id)
+                .ToArray();
+            return [
+                new RepairScheduled(current.Id, checkName, taskIds),
+                new WorkflowRunResumed()
+            ];
         }
 
-        public void PassCheck(CheckResult result)
+        public IReadOnlyList<WorkflowEvent> PassCheck(CheckResult result)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Passed;
             check.Message = result.Message;
             check.Output = result.Output;
-            run.Advance();
+            var events = new List<WorkflowEvent>
+            {
+                new CheckPassed(current.Id, check.Name, result.Message)
+            };
+            events.AddRange(run.Advance());
+            return events;
         }
 
-        public void FailCheck(CheckResult result)
+        public IReadOnlyList<WorkflowEvent> FailCheck(CheckResult result)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
@@ -71,15 +86,21 @@ public static partial class WorkflowRunExtensions
             }
             current.Status = StageRunStatus.Failed;
             run.Status = WorkflowRunStatus.Failed;
+            return [
+                new CheckFailed(current.Id, check.Name, result.Message),
+                new StageFailed(current.Id, result.Message),
+                new WorkflowRunFailed(result.Message)
+            ];
         }
 
-        public void ResetCheck(CheckResult result)
+        public IReadOnlyList<WorkflowEvent> ResetCheck(CheckResult result)
         {
             var current = run.CurrentStage();
             var check = current.FindCheck(result.Name);
             check.Status = StageCheckStatus.Pending;
             check.Message = result.Message;
             check.Output = result.Output;
+            return [new CheckPending(current.Id, check.Name, result.Message)];
         }
 
     }
