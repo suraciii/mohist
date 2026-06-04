@@ -1,80 +1,42 @@
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Tests.Support;
 
 public class RecordingEventStore : IEventStore
 {
-    private readonly List<EventDto> _events = [];
+    private readonly List<RecordedWorkflowEvent> _events = [];
     private readonly Lock _gate = new();
 
-    public Task<EventDto> AppendAsync(EventInput input, CancellationToken ct = default)
+    public Task<WorkflowDomainEventDto> AppendWorkflowEventAsync(string workflowRunId, WorkflowEvent payload, CancellationToken ct = default)
     {
-        EventDto dto;
+        WorkflowDomainEventDto dto;
         lock (_gate)
         {
-            dto = new EventDto(
-                (_events.Count + 1).ToString(),
-                input.ProjectId,
-                input.IssueId,
-                input.IssueNumber,
-                input.WorkflowRunId,
-                input.Category,
-                input.Type,
-                input.Stage,
-                input.TaskId,
-                input.CheckName,
-                input.RunnerId,
-                input.Status,
-                input.Message,
-                input.Payload,
-                DateTime.UtcNow.ToString("o"));
-            _events.Add(dto);
+            dto = new WorkflowDomainEventDto(
+                _events.Count(e => e.WorkflowRunId == workflowRunId) + 1,
+                $"/workflow-runs/{workflowRunId}",
+                WorkflowEventSerializer.Type(payload),
+                payload,
+                DateTime.UtcNow,
+                "1.0");
+            _events.Add(new RecordedWorkflowEvent(workflowRunId, dto));
         }
 
         return Task.FromResult(dto);
     }
 
-    public Task<IReadOnlyList<EventDto>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default)
+    public Task<IReadOnlyList<WorkflowDomainEventDto>> ListWorkflowEventsAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
     {
         lock (_gate)
         {
-            return Task.FromResult<IReadOnlyList<EventDto>>(_events
-                .Where(e => e.ProjectId == projectId && e.IssueNumber == issueNumber)
-                .TakeLast(limit)
-                .ToList());
-        }
-    }
-
-    public Task<IReadOnlyList<EventDto>> ListWorkflowEventsAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
-    {
-        lock (_gate)
-        {
-            return Task.FromResult<IReadOnlyList<EventDto>>(_events
+            return Task.FromResult<IReadOnlyList<WorkflowDomainEventDto>>(_events
                 .Where(e => e.WorkflowRunId == workflowRunId)
                 .TakeLast(limit)
+                .Select(e => e.Event)
                 .ToList());
         }
     }
 
-    public Task<IReadOnlyList<EventDto>> ListIssueWorkflowLogAsync(string projectId, int issueNumber, CancellationToken ct = default)
-    {
-        lock (_gate)
-        {
-            return Task.FromResult<IReadOnlyList<EventDto>>(_events
-                .Where(e => e.ProjectId == projectId && e.IssueNumber == issueNumber)
-                .OrderBy(e => e.CreatedAt, StringComparer.Ordinal)
-                .ToList());
-        }
-    }
-
-    public Task<IReadOnlyList<EventDto>> ListRecentAsync(string projectId, int limit = 200, CancellationToken ct = default)
-    {
-        lock (_gate)
-        {
-            return Task.FromResult<IReadOnlyList<EventDto>>(_events
-                .Where(e => e.ProjectId == projectId)
-                .TakeLast(limit)
-                .ToList());
-        }
-    }
+    private sealed record RecordedWorkflowEvent(string WorkflowRunId, WorkflowDomainEventDto Event);
 }

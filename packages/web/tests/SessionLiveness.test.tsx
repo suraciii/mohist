@@ -78,7 +78,6 @@ function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionIte
     probeSentAt: null,
     probeDeadlineAt: null,
     failureReason: null,
-    workflowLogs: [],
     ...overrides,
   }
 }

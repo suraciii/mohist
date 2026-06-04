@@ -241,38 +241,19 @@ public static class ProjectRoutes
                 : ApiResults.Ok(prompt);
         });
 
-        group.MapPut("/{id}/templates/{key}/override", async (string id, string key, ProjectPromptOverrideRequest? req, ProjectWorkflowProfileManager manager, IEventStore events) =>
+        group.MapPut("/{id}/templates/{key}/override", async (string id, string key, ProjectPromptOverrideRequest? req, ProjectWorkflowProfileManager manager) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
 
             var prompt = await manager.SetProjectPromptOverrideAsync(id, key, req.DisplayName, req.Description, req.Tags, req.Stage, req.Body);
-            await events.AppendAsync(new EventInput(
-                id,
-                0,
-                "project",
-                "project_template_changed",
-                Status: "changed",
-                Message: key,
-                Payload: new { key }));
 
             return ApiResults.Ok(prompt);
         });
 
-        group.MapDelete("/{id}/templates/{key}/override", async (string id, string key, ProjectWorkflowProfileManager manager, IEventStore events) =>
+        group.MapDelete("/{id}/templates/{key}/override", async (string id, string key, ProjectWorkflowProfileManager manager) =>
         {
-            var existed = await manager.DeleteProjectPromptOverrideAsync(id, key);
-            if (existed)
-            {
-                await events.AppendAsync(new EventInput(
-                    id,
-                    0,
-                    "project",
-                    "project_template_deleted",
-                    Status: "deleted",
-                    Message: key,
-                    Payload: new { key }));
-            }
+            await manager.DeleteProjectPromptOverrideAsync(id, key);
 
             return ApiResults.Ok();
         });

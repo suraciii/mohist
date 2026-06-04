@@ -212,8 +212,8 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-sync-runner-{Guid.NewGuid():N}");
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
-        var timelineBeforeSave = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
-        var planStageBeforeSave = Assert.Single(timelineBeforeSave.Stages, s => s.Stage == "plan");
+        var statusBeforeSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var planStageBeforeSave = Assert.Single(statusBeforeSave.Workflow!.Stages, s => s.Stage == "plan");
         var planTaskIdsBeforeSave = planStageBeforeSave.Tasks.Select(t => t.Id).ToArray();
         var planCheckNamesBeforeSave = planStageBeforeSave.Checks.Select(c => c.Name).ToArray();
         Assert.NotEmpty(planTaskIdsBeforeSave);
@@ -249,8 +249,8 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var savedYaml = savedData.GetProperty("yaml").GetString();
         Assert.Contains("synced-workflow", savedYaml!);
 
-        var timelineAfterSave = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
-        var planStageAfterSave = Assert.Single(timelineAfterSave.Stages, s => s.Stage == "plan");
+        var statusAfterSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var planStageAfterSave = Assert.Single(statusAfterSave.Workflow!.Stages, s => s.Stage == "plan");
         Assert.Equal(planTaskIdsBeforeSave, planStageAfterSave.Tasks.Select(t => t.Id).ToArray());
         Assert.Equal(planCheckNamesBeforeSave, planStageAfterSave.Checks.Select(c => c.Name).ToArray());
         Assert.DoesNotContain(planStageAfterSave.Tasks, t => t.Id == "replacement-plan-task");
@@ -304,15 +304,15 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
         for (var i = 0; i < 100; i++)
         {
-            var buildTimelineAttempt = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
-            var buildStageAttempt = buildTimelineAttempt.Stages.FirstOrDefault(s => s.Stage == "build");
+            var buildStatusAttempt = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+            var buildStageAttempt = buildStatusAttempt.Workflow?.Stages.FirstOrDefault(s => s.Stage == "build");
             if (buildStageAttempt is not null && buildStageAttempt.Tasks.Any(t => t.Id == "brand-new-build-task"))
                 break;
             await Task.Delay(20);
         }
 
-        var buildTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
-        var buildStage = Assert.Single(buildTimeline.Stages, s => s.Stage == "build");
+        var buildStatus = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var buildStage = Assert.Single(buildStatus.Workflow!.Stages, s => s.Stage == "build");
         Assert.Contains(buildStage.Tasks, t => t.Id == "brand-new-build-task");
         Assert.Contains(buildStage.Checks, c => c.Name == "build-definition-check");
     }
@@ -428,8 +428,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     private sealed record IssueDto(int Number, string Id);
     private sealed record IssueWithWorkflowDto(int Number, string Id, string? WorkflowRunId);
     private sealed record IssueWorkflowEnvelopeDto(WorkflowStatusDto? Workflow);
-    private sealed record WorkflowStatusDto(string Status, string? CurrentStage);
-    private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
+    private sealed record WorkflowStatusDto(string Status, string? CurrentStage, WorkflowStageDto[] Stages);
     private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, WorkflowCheckDto[] Checks, ApprovalDto? ApprovalStatus);
     private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);
     private sealed record WorkflowCheckDto(string Name, string Title, string? Uses, string Status, string? Message);

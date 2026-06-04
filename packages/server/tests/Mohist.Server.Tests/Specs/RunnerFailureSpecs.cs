@@ -87,8 +87,5 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal("already-assigned", otherRunner.Reason);
         Assert.Equal("runner-blocked", await reactivated.GetClaimedRunnerIdAsync());
         Assert.Equal("task-1.1", await reactivated.GetCurrentWorkIdAsync());
-
-        var events = await EventStore.ListWorkflowEventsAsync(workflowId);
-        Assert.DoesNotContain(events, e => e.Type == "workflow_task_started" && e.RunnerId == "runner-other");
     }
 }

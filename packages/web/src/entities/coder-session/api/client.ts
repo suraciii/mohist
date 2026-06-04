@@ -3,7 +3,6 @@ import type {
   AgentSessionEventsResponse,
   AgentSessionMetadata,
   CoderSessionSummary,
-  WorkflowLogItem,
 } from '../model/types'
 
 export function getCoderSessions(number: number, projectId?: string | null) {
@@ -22,8 +21,4 @@ export function getAgentSessionEvents(number: number, name: string, projectId?: 
     `/issues/${number}/sessions/${encodeURIComponent(name)}/events`,
     withProject(undefined, projectId),
   )
-}
-
-export function getWorkflowLogs(number: number, projectId?: string | null) {
-  return request<WorkflowLogItem[]>(`/issues/${number}/logs`, withProject(undefined, projectId))
 }

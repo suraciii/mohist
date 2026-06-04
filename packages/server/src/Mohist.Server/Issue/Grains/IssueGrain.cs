@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
@@ -24,7 +23,6 @@ public class IssueGrain : Grain, IIssueGrain
     private IssueWorkflowProfile? _profile;
     private readonly IStateStore<Domain.Issue> _issueStore;
     private readonly IStateStore<IssueWorkflowProfile> _profileStore;
-    private readonly IEventStore _events;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly ConfigService _config;
     private readonly WorkflowQuerier _workflowReader;
@@ -39,7 +37,6 @@ public class IssueGrain : Grain, IIssueGrain
     public IssueGrain(
         IStateStore<Domain.Issue> issueStore,
         IStateStore<IssueWorkflowProfile> profileStore,
-        IEventStore events,
         IssueWorkflowProfileRegistry profiles,
         ConfigService config,
         WorkflowQuerier workflowReader,
@@ -53,7 +50,6 @@ public class IssueGrain : Grain, IIssueGrain
     {
         _issueStore = issueStore;
         _profileStore = profileStore;
-        _events = events;
         _profiles = profiles;
         _config = config;
         _workflowReader = workflowReader;
@@ -158,7 +154,6 @@ public class IssueGrain : Grain, IIssueGrain
                 IssueId: issue.Id));
 
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });
         _log.LogInformation("Issue {Key} started workflow {WrId}", GrainKey, wrId);
         return wrId;
     }
@@ -199,7 +194,6 @@ public class IssueGrain : Grain, IIssueGrain
         }
         _issue.Close();
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_closed", "closed", "Issue closed");
     }
 
     public async Task CompleteWorkAsync(string workflowRunId)
@@ -207,7 +201,6 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null) return;
         if (!_issue.Complete(workflowRunId)) return;
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_completed", "completed", "Issue completed", new { workflowRunId });
     }
 
     public async Task UpdateAsync(string title, string? body)
@@ -215,7 +208,6 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Update(title, body, null, null);
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
 
     public async Task ArchiveAsync()
@@ -223,7 +215,6 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Archive();
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_archived", "archived", "Issue archived");
     }
 
     public async Task UnarchiveAsync()
@@ -231,7 +222,6 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Unarchive();
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_unarchived", "active", "Issue unarchived");
     }
 
     public async Task ReopenAsync()
@@ -239,7 +229,6 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Reopen();
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_reopened", "active", "Issue reopened");
     }
 
     public async Task UpdateFullAsync(UpdateIssueData data)
@@ -247,7 +236,6 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.Update(data.Title, data.Body, data.Labels, data.Priority);
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_updated", "updated", "Issue updated");
     }
 
     public async Task<IssueWorkflowStatus?> GetWorkflowStatusAsync()
@@ -303,7 +291,6 @@ public class IssueGrain : Grain, IIssueGrain
         _profile = profile;
         await SaveIssueAsync();
         await SaveProfileAsync();
-        await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
         return issue.Id;
     }
 
@@ -318,7 +305,6 @@ public class IssueGrain : Grain, IIssueGrain
 
         _issue.AddPrerequisite(prerequisiteNumber);
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_prerequisite_added", "updated", $"Prerequisite #{prerequisiteNumber} added", new { prerequisiteNumber });
         return IssuePrerequisiteResult.Added();
     }
 
@@ -327,7 +313,6 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         _issue!.RemovePrerequisite(prerequisiteNumber);
         await SaveIssueAsync();
-        await AppendIssueEventAsync("issue_prerequisite_removed", "updated", $"Prerequisite #{prerequisiteNumber} removed", new { prerequisiteNumber });
     }
 
     public async Task<IssueStartEligibility> GetStartEligibilityAsync()
@@ -374,23 +359,6 @@ public class IssueGrain : Grain, IIssueGrain
         }
         if (missing.Count > 0)
         {
-            var issue = _issue!;
-            await _events.AppendAsync(new EventInput(
-                issue.ProjectId,
-                issue.Number,
-                "issue",
-                "unknown_prompt_key",
-                IssueId: issue.Id,
-                WorkflowRunId: issue.WorkflowRunId,
-                Stage: MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
-                Status: "failed",
-                Message: "Workflow references unknown prompt template keys",
-                Payload: new
-                {
-                    issueNumber = issue.Number,
-                    missingKeys = missing.ToArray(),
-                    source = "start-work",
-                }));
             throw new MissingPromptsException(missing);
         }
     }
@@ -429,22 +397,6 @@ public class IssueGrain : Grain, IIssueGrain
 
         await _profileStore.SaveAsync(_issue.Id, _profile);
         await _profileStore.SaveAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, _issue.Number), _profile);
-    }
-
-    private Task AppendIssueEventAsync(string type, string? status, string? message, object? payload = null)
-    {
-        if (_issue is null) return Task.CompletedTask;
-        return _events.AppendAsync(new EventInput(
-            _issue.ProjectId,
-            _issue.Number,
-            "issue",
-            type,
-            IssueId: _issue.Id,
-            WorkflowRunId: _issue.WorkflowRunId,
-            Stage: MohistDefaultWorkflowProjection.IssueStatusName(_issue.Status),
-            Status: status,
-            Message: message,
-            Payload: payload));
     }
 
     private void EnsureIssue()
@@ -540,12 +492,6 @@ public class IssueGrain : Grain, IIssueGrain
         }
 
         await SaveProfileAsync();
-
-        await AppendIssueEventAsync(
-            "workflow_profile_updated",
-            "updated",
-            "Workflow profile updated",
-            new { updateMode = _profile.UpdateMode.ToString(), sourceProfileId = _profile.SourceProfileId });
         _log.LogInformation(
             "Issue {Key} workflow profile updated (mode={Mode})",
             GrainKey,

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { deriveToolCallTitle, reconstructRoundsFromEvents, reconstructRoundsFromLogs } from './useSessionTimeline'
-import type { WorkflowLogItem } from '../../../entities/coder-session'
+import { deriveToolCallTitle, reconstructRoundsFromEvents } from './useSessionTimeline'
 
 describe('deriveToolCallTitle', () => {
   it('returns title when title differs from toolName', () => {
@@ -154,51 +153,3 @@ describe('reconstructRoundsFromEvents', () => {
     expect(rounds[1].label).toBe('specs/')
   })
 })
-
-describe('reconstructRoundsFromLogs', () => {
-  function makeLog(overrides: Partial<WorkflowLogItem> = {}): WorkflowLogItem {
-    return {
-      id: overrides.id ?? 'log-1',
-      eventType: overrides.eventType ?? 'agent_message_chunk',
-      data: overrides.data,
-      createdAt: overrides.createdAt ?? '2024-01-01T00:00:00Z',
-    }
-  }
-
-  it('is a thin wrapper that converts workflow logs to session events and delegates to viewSessionEvents', async () => {
-    const viewModule = await import('../../../entities/session/model/view')
-    const spy = vi.spyOn(viewModule, 'viewSessionEvents')
-    try {
-      const logs = [
-        makeLog({ id: 'log-0', eventType: 'user_message_chunk', data: { content: { text: 'hi' } } }),
-        makeLog({ id: 'log-1', eventType: 'agent_message_chunk', data: { content: { text: 'hello' } } }),
-      ]
-      reconstructRoundsFromLogs(logs)
-      expect(spy).toHaveBeenCalledWith(
-        [
-          expect.objectContaining({ type: 'mohist_prompt', payload: { content: { text: 'hi' } } }),
-          expect.objectContaining({ type: 'agent_message_chunk', payload: { content: { text: 'hello' } } }),
-        ],
-        'timeline',
-      )
-    } finally {
-      spy.mockRestore()
-    }
-  })
-
-  it('renames legacy user_message_chunk events to mohist_prompt for shared projection', () => {
-    const logs = [
-      makeLog({ id: 'log-0', eventType: 'user_message_chunk', data: { text: 'first' } }),
-      makeLog({ id: 'log-1', eventType: 'agent_message_chunk', data: { text: 'reply' } }),
-    ]
-    const rounds = reconstructRoundsFromLogs(logs)
-    expect(rounds).toHaveLength(1)
-    expect(rounds[0].userText).toBe('first')
-    expect(rounds[0].agentText).toBe('reply')
-  })
-
-  it('returns empty array for empty logs', () => {
-    expect(reconstructRoundsFromLogs([])).toEqual([])
-  })
-})
-

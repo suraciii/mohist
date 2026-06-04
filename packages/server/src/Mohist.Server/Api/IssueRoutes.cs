@@ -449,14 +449,6 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapGet("/{number:int}/workflow/timeline", async (int number, string projectId, IGrainFactory grains, WorkflowProjectionService projection) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var timeline = await projection.GetTimelineAsync(pid, number);
-            return timeline is not null ? ApiResults.Ok(timeline) : ApiResults.NotFound("Workflow not found");
-        });
-
         issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, WorkflowAgentSessionQuerier sessions) =>
         {
             var pid = projectId;

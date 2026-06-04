@@ -1,6 +1,10 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -16,35 +20,70 @@ public class EventStoreSpecs
     }
 
     [Fact]
-    public async Task AppendAsync_ListIssueEvents_ReturnsOrderedEventsWithPayload()
+    public async Task AppendWorkflowEventAsync_StoresMinimalDomainEventRow()
     {
         using var scope = _fixture.Services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var projectId = $"project-{Guid.NewGuid():N}";
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
 
-        await store.AppendAsync(new EventInput(projectId, 1, "issue", "issue_created", Status: "created", Payload: new { title = "A" }));
-        await store.AppendAsync(new EventInput(projectId, 1, "workflow", "workflow_started", WorkflowRunId: "wr_test_1", Status: "started"));
-        await store.AppendAsync(new EventInput(projectId, 2, "issue", "issue_created", Status: "created"));
+        await store.AppendWorkflowEventAsync(workflowRunId, new WorkflowRunStarted());
+        await store.AppendWorkflowEventAsync(workflowRunId, new StageStarted("plan"));
 
-        var events = await store.ListIssueEventsAsync(projectId, 1);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var rows = await db.Events.AsNoTracking()
+            .Where(e => e.Source == $"/workflow-runs/{workflowRunId}")
+            .OrderBy(e => e.Id)
+            .Select(e => new
+            {
+                e.Id,
+                e.Source,
+                e.Data,
+                e.Time,
+                Type = EF.Property<string>(e, "Type"),
+                SpecVersion = EF.Property<string>(e, "SpecVersion"),
+            })
+            .ToListAsync();
 
-        Assert.Equal(["issue_created", "workflow_started"], events.Select(e => e.Type).ToArray());
-        Assert.NotNull(events[0].Payload);
+        Assert.Collection(rows,
+            first =>
+            {
+                Assert.Equal(1, first.Id);
+                Assert.Equal(nameof(WorkflowRunStarted), first.Type);
+                Assert.Equal("1.0", first.SpecVersion);
+                Assert.Equal(JsonValueKind.Object, first.Data.ValueKind);
+                Assert.Empty(first.Data.EnumerateObject());
+            },
+            second =>
+            {
+                Assert.Equal(2, second.Id);
+                Assert.Equal($"/workflow-runs/{workflowRunId}", second.Source);
+                Assert.Equal(nameof(StageStarted), second.Type);
+                Assert.Equal("1.0", second.SpecVersion);
+                Assert.True(second.Time > DateTime.UtcNow.AddMinutes(-1));
+
+                Assert.Equal("plan", second.Data.GetProperty("stage").GetString());
+            });
     }
 
     [Fact]
-    public async Task ListRecentAsync_IsolatesProjects()
+    public async Task ListWorkflowEventsAsync_ProjectsDomainEventsFromPayload()
     {
         using var scope = _fixture.Services.CreateScope();
         var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var projectA = $"project-{Guid.NewGuid():N}";
-        var projectB = $"project-{Guid.NewGuid():N}";
+        var workflowRunId = $"wr_{Guid.NewGuid():N}";
 
-        await store.AppendAsync(new EventInput(projectA, 1, "issue", "issue_created"));
-        await store.AppendAsync(new EventInput(projectB, 1, "issue", "issue_created"));
+        await store.AppendWorkflowEventAsync(
+            workflowRunId, new TaskCompleted("build", "task.1"));
 
-        var events = await store.ListRecentAsync(projectA);
+        var events = await store.ListWorkflowEventsAsync(workflowRunId);
 
-        Assert.All(events, e => Assert.Equal(projectA, e.ProjectId));
+        var e = Assert.Single(events);
+        Assert.Equal(nameof(TaskCompleted), e.Type);
+        Assert.Equal($"/workflow-runs/{workflowRunId}", e.Source);
+        var payload = Assert.IsType<TaskCompleted>(e.Data.Value);
+        Assert.Equal("build", payload.Stage);
+        Assert.Equal("task.1", payload.TaskId);
     }
+
 }
