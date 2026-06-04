@@ -1,3 +1,9 @@
+---
+name: "Re-verify"
+description: "Re-verifies after fix"
+tags: [check, review]
+stage: check
+---
 ## Input
 
 A review report with `<promise>FAIL</promise>`, `## Result: FAIL`, and structured blocking items. Auto-fixes have been applied since.

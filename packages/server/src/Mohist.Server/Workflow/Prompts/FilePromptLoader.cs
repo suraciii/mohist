@@ -1,4 +1,5 @@
-using System.Text.Json;
+using Mohist.Server.Workflow.Prompts.Domain;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 
 namespace Mohist.Server.Workflow.Prompts;
 
@@ -6,7 +7,7 @@ public sealed class FilePromptLoader : IPromptLoader
 {
     private readonly string _promptsDirectory;
     private readonly IPromptFileStore _files;
-    private readonly Dictionary<string, string> _cache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SystemTemplate> _cache = new(StringComparer.Ordinal);
 
     public FilePromptLoader(string? promptsDirectory = null, IPromptFileStore? files = null)
     {
@@ -16,19 +17,36 @@ public sealed class FilePromptLoader : IPromptLoader
 
     public Dictionary<string, string> LoadAll()
     {
-        if (_cache.Count > 0)
-            return new Dictionary<string, string>(_cache, StringComparer.Ordinal);
+        var templates = LoadAllTemplates();
+        var result = new Dictionary<string, string>(templates.Count, StringComparer.Ordinal);
+        foreach (var (key, template) in templates)
+            result[key] = template.Body;
+        return result;
+    }
 
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+    public Dictionary<string, SystemTemplate> LoadAllTemplates()
+    {
+        if (_cache.Count > 0)
+            return new Dictionary<string, SystemTemplate>(_cache, StringComparer.Ordinal);
+
+        var result = new Dictionary<string, SystemTemplate>(StringComparer.Ordinal);
         if (!_files.DirectoryExists(_promptsDirectory))
             return result;
 
         foreach (var filePath in _files.EnumeratePromptFiles(_promptsDirectory))
         {
-            var name = Path.GetFileNameWithoutExtension(filePath);
+            var key = Path.GetFileNameWithoutExtension(filePath);
             var content = _files.ReadAllText(filePath);
-            result[name] = content;
-            _cache[name] = content;
+            var (frontmatter, body) = PromptFrontmatterParser.Parse(content, key);
+            var template = new SystemTemplate(
+                key,
+                frontmatter.Name ?? key,
+                frontmatter.Description,
+                frontmatter.Tags,
+                frontmatter.Stage,
+                body);
+            result[key] = template;
+            _cache[key] = template;
         }
 
         return result;

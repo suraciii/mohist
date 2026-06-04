@@ -1,3 +1,9 @@
+---
+name: "Create Spec Files"
+description: "Writes spec delta files (ADDED/MODIFIED/REMOVED)"
+tags: [plan, openspec]
+stage: plan
+---
 <artifact id="specs" schema="mohist-default">
 
 <task>

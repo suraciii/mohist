@@ -1,3 +1,9 @@
+---
+name: "Conflict Resolution"
+description: "Resolves rebase/merge conflicts"
+tags: [integrate]
+stage: integrate
+---
 ## Resolution Rules
 
 1. **Preserve both sides.** Never drop or overwrite either side's changes.

@@ -1,3 +1,9 @@
+---
+name: "Build Task"
+description: "Implements a single build task"
+tags: [build]
+stage: build
+---
 <artifact id="build-task">
 
 <task>

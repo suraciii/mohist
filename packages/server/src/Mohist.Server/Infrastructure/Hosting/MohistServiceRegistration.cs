@@ -25,6 +25,9 @@ using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Runner.Projection;
 using Mohist.Server.Runner.SignalR;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Prompts.Storage;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -51,7 +54,9 @@ public static class MohistServiceRegistration
         services.AddScoped<IssueQueryService>();
         services.AddScoped<EpicQueryService>();
         services.AddSingleton<Mohist.Server.Workflow.Prompts.IPromptLoader, Mohist.Server.Workflow.Prompts.FilePromptLoader>();
-        services.AddSingleton<IssueWorkflowProfileRegistry>();
+        services.AddScoped<IProjectTemplateStore, ProjectTemplateStore>();
+        services.AddSingleton<PromptTemplateEngine>();
+        services.AddScoped<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<WorkflowAgentSessionQueryService>();

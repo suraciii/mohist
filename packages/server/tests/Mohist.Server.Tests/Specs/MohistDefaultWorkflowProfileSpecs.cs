@@ -1,9 +1,14 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Domain;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -25,12 +30,81 @@ public class FakePromptLoader : IPromptLoader
     public Dictionary<string, string> LoadAll() => new(Prompts, StringComparer.Ordinal);
 }
 
+public sealed class FakeProjectTemplateStore : IProjectTemplateStore
+{
+    private readonly Dictionary<(string ProjectId, string Key), ProjectTemplate> _rows = new();
+
+    public void Seed(ProjectTemplate template) =>
+        _rows[(template.ProjectId, template.Key)] = template;
+
+    public Task<IReadOnlyList<ProjectTemplate>> GetForProjectAsync(string projectId)
+    {
+        IReadOnlyList<ProjectTemplate> rows = _rows
+            .Where(kv => kv.Key.ProjectId == projectId)
+            .Select(kv => kv.Value)
+            .OrderByDescending(t => t.UpdatedAt)
+            .ToList();
+        return Task.FromResult(rows);
+    }
+
+    public Task<ProjectTemplate?> GetAsync(string projectId, string key)
+    {
+        _rows.TryGetValue((projectId, key), out var row);
+        return Task.FromResult(row);
+    }
+
+    public Task<ProjectTemplate> UpsertAsync(
+        string projectId,
+        string key,
+        string body,
+        string displayName,
+        string description,
+        IReadOnlyList<string> tags,
+        string? stage)
+    {
+        var now = DateTime.UtcNow;
+        ProjectTemplate row;
+        if (_rows.TryGetValue((projectId, key), out var existing))
+        {
+            row = existing with
+            {
+                DisplayName = displayName,
+                Description = description,
+                Tags = tags,
+                Stage = stage,
+                Body = body,
+                UpdatedAt = now,
+            };
+        }
+        else
+        {
+            row = new ProjectTemplate(
+                projectId,
+                key,
+                displayName,
+                description,
+                tags,
+                stage,
+                body,
+                now);
+        }
+        _rows[(projectId, key)] = row;
+        return Task.FromResult(row);
+    }
+
+    public Task DeleteAsync(string projectId, string key)
+    {
+        _rows.Remove((projectId, key));
+        return Task.CompletedTask;
+    }
+}
+
 public class MohistDefaultWorkflowProfileSpecs
 {
     [Fact]
     public void IssueWithNonAsciiTitle_BuildsIssueNumberBasedOpenSpecChangeVariables()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeProjectTemplateStore());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-154",
@@ -146,7 +220,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeProjectTemplateStore());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -171,7 +245,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void StageVariables_MergesStageOverrides()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader());
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeProjectTemplateStore());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -195,7 +269,7 @@ public class MohistDefaultWorkflowProfileSpecs
     public void BuildVariables_IncludesPromptsFromLoader()
     {
         var loader = new FakePromptLoader();
-        var profile = new MohistDefaultIssueWorkflowProfile(loader);
+        var profile = new MohistDefaultIssueWorkflowProfile(loader, new FakeProjectTemplateStore());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -211,6 +285,62 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("# Proposal Artifact\nCreate proposal.md", prompts.GetProperty("proposal").GetString());
         Assert.Equal("# Build\nImplement task", prompts.GetProperty("build").GetString());
         Assert.Equal(7, prompts.EnumerateObject().Count());
+    }
+
+    [Fact]
+    public void BuildVariables_MergesProjectOverridesAndAddsProjectUniqueKeys()
+    {
+        var loader = new FakePromptLoader();
+        var templateStore = new FakeProjectTemplateStore();
+        var now = DateTime.UtcNow;
+        templateStore.Seed(new ProjectTemplate(
+            "project-1",
+            "proposal",
+            "Project Proposal",
+            "Project-level override",
+            new[] { "project" },
+            "plan",
+            "# Project proposal body",
+            now));
+        templateStore.Seed(new ProjectTemplate(
+            "project-1",
+            "deploy-checklist",
+            "Deploy Checklist",
+            "Project-only template",
+            new[] { "project" },
+            "integrate",
+            "# Deploy checklist body",
+            now.AddSeconds(-1)));
+
+        var profile = new MohistDefaultIssueWorkflowProfile(loader, templateStore);
+        var issue = new Mohist.Server.Issue.Domain.Issue
+        {
+            Id = "issue-1",
+            ProjectId = "project-1",
+            Number = 1,
+            Title = "Merge test",
+        };
+
+        var variables = profile.BuildVariables("wr-1", issue, new WorkflowProjectContext("project-1", "Mohist", "/repo", "main"));
+
+        using var document = JsonDocument.Parse(variables);
+        var prompts = document.RootElement.GetProperty("prompts");
+        Assert.Equal("# Project proposal body", prompts.GetProperty("proposal").GetString());
+        Assert.Equal("# Build\nImplement task", prompts.GetProperty("build").GetString());
+        Assert.Equal("# Deploy checklist body", prompts.GetProperty("deploy-checklist").GetString());
+    }
+
+    [Fact]
+    public async Task GetMergedPromptsAsync_KeepsSystemBodyWhenNoOverrideExists()
+    {
+        var loader = new FakePromptLoader();
+        var templateStore = new FakeProjectTemplateStore();
+        var profile = new MohistDefaultIssueWorkflowProfile(loader, templateStore);
+
+        var merged = await profile.GetMergedPromptsAsync("project-99");
+
+        Assert.Equal("# Build\nImplement task", merged["build"]);
+        Assert.Equal(7, merged.Count);
     }
 
     [Fact]
@@ -389,4 +519,201 @@ internal sealed class FakePromptFileStore : IPromptFileStore
         path == Root ? _files.Keys.Where(k => k.EndsWith(".prompt", StringComparison.Ordinal)).Order() : [];
 
     public string ReadAllText(string path) => _files[path];
+}
+
+[Collection("MohistIntegration")]
+public class MohistDefaultWorkflowProfileStartWorkSpecs
+{
+    private readonly MohistIntegrationFixture _fixture;
+    private readonly HttpClient _client;
+
+    public MohistDefaultWorkflowProfileStartWorkSpecs(MohistIntegrationFixture fixture)
+    {
+        _fixture = fixture;
+        _client = fixture.Client;
+    }
+
+    [Fact]
+    public async Task StartWork_WithUnknownPromptReference_Returns400MissingPromptsWithMissingKeysDetails()
+    {
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references unknown prompt", projectId = project.Id });
+
+        var customYaml = """
+            id: missing-prompt-workflow
+            stages:
+              - stage: plan
+                tasks:
+                  - id: missing-prompt-task
+                    title: Missing prompt task
+                    uses: mohist/acp-agent
+                    with:
+                      prompt: ${{ prompts.does-not-exist }}
+                checks: []
+            """;
+        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+
+        using var response = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("missing_prompts", payload.GetProperty("code").GetString());
+        var missingKeys = payload.GetProperty("details").GetProperty("missingKeys").EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        Assert.Contains("does-not-exist", missingKeys);
+    }
+
+    [Fact]
+    public async Task StartWork_WithMultipleUnknownPromptReferences_ReturnsAllMissingKeysInDetails()
+    {
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"multi-missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references multiple unknown prompts", projectId = project.Id });
+
+        var customYaml = """
+            id: multi-missing-prompt-workflow
+            stages:
+              - stage: plan
+                tasks:
+                  - id: multi-missing-prompt-task
+                    title: Multi missing prompt task
+                    uses: mohist/acp-agent
+                    with:
+                      prompt: ${{ prompts.ghost-one }} and ${{ prompts.ghost-two }}
+                checks: []
+            """;
+        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+
+        using var response = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("missing_prompts", payload.GetProperty("code").GetString());
+        var missingKeys = payload.GetProperty("details").GetProperty("missingKeys").EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        Assert.Contains("ghost-one", missingKeys);
+        Assert.Contains("ghost-two", missingKeys);
+    }
+
+    [Fact]
+    public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitMissingPromptsError()
+    {
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"known-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references known prompt", projectId = project.Id });
+
+        var customYaml = """
+            id: known-prompt-workflow
+            stages:
+              - stage: plan
+                tasks:
+                  - id: known-prompt-task
+                    title: Known prompt task
+                    uses: mohist/acp-agent
+                    with:
+                      prompt: ${{ prompts.proposal }}
+                checks: []
+            """;
+        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+
+        using var response = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartWork_WithUnknownPromptReference_AppendsUnknownPromptKeyAuditEvent()
+    {
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"audit-missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references unknown prompt", projectId = project.Id });
+
+        var customYaml = """
+            id: missing-prompt-audit-workflow
+            stages:
+              - stage: plan
+                tasks:
+                  - id: missing-prompt-task
+                    title: Missing prompt task
+                    uses: mohist/acp-agent
+                    with:
+                      prompt: ${{ prompts.does-not-exist }}
+                checks: []
+            """;
+        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+
+        using var startResponse = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+        Assert.Equal(HttpStatusCode.BadRequest, startResponse.StatusCode);
+
+        var events = await ListProjectEventsAsync(project.Id);
+        var auditEvent = Assert.Single(events, e => e.Type == "unknown_prompt_key");
+        Assert.Equal("issue", auditEvent.Category);
+        Assert.Equal(issue.Number, auditEvent.IssueNumber);
+
+        var payload = (JsonElement)auditEvent.Payload!;
+        Assert.Equal(issue.Number, payload.GetProperty("issueNumber").GetInt32());
+        var missingKeys = payload.GetProperty("missingKeys").EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        Assert.Contains("does-not-exist", missingKeys);
+        Assert.Equal("start-work", payload.GetProperty("source").GetString());
+    }
+
+    [Fact]
+    public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitUnknownPromptKeyEvent()
+    {
+        var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"audit-known-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references known prompt", projectId = project.Id });
+
+        var customYaml = """
+            id: known-prompt-audit-workflow
+            stages:
+              - stage: plan
+                tasks:
+                  - id: known-prompt-task
+                    title: Known prompt task
+                    uses: mohist/acp-agent
+                    with:
+                      prompt: ${{ prompts.proposal }}
+                checks: []
+            """;
+        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+
+        using var startResponse = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+        Assert.Equal(HttpStatusCode.OK, startResponse.StatusCode);
+
+        var events = await ListProjectEventsAsync(project.Id);
+        Assert.DoesNotContain(events, e => e.Type == "unknown_prompt_key");
+    }
+
+    private async Task<List<EventDto>> ListProjectEventsAsync(string projectId)
+    {
+        using var response = await _client.GetAsync($"/api/events/recent?projectId={projectId}");
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var events = new List<EventDto>();
+        foreach (var entry in payload.GetProperty("data").EnumerateArray())
+        {
+            events.Add(new EventDto(
+                entry.GetProperty("id").GetString() ?? string.Empty,
+                entry.GetProperty("projectId").GetString() ?? string.Empty,
+                entry.TryGetProperty("issueId", out var issueId) ? issueId.GetString() : null,
+                entry.TryGetProperty("issueNumber", out var issueNumber) ? issueNumber.GetInt32() : 0,
+                entry.TryGetProperty("workflowRunId", out var workflowRunId) ? workflowRunId.GetString() : null,
+                entry.GetProperty("category").GetString() ?? string.Empty,
+                entry.GetProperty("type").GetString() ?? string.Empty,
+                entry.TryGetProperty("stage", out var stage) ? stage.GetString() : null,
+                entry.TryGetProperty("taskId", out var taskId) ? taskId.GetString() : null,
+                entry.TryGetProperty("checkName", out var checkName) ? checkName.GetString() : null,
+                entry.TryGetProperty("runnerId", out var runnerId) ? runnerId.GetString() : null,
+                entry.TryGetProperty("status", out var status) ? status.GetString() : null,
+                entry.TryGetProperty("message", out var message) ? message.GetString() : null,
+                entry.TryGetProperty("payload", out var evPayload) && evPayload.ValueKind != JsonValueKind.Null ? (object)evPayload.Clone() : null,
+                entry.TryGetProperty("createdAt", out var createdAt) ? createdAt.GetString() ?? string.Empty : string.Empty));
+        }
+        return events;
+    }
+
+    private sealed record StartProjectDto(string Id);
+    private sealed record StartIssueDto(int Number, string Id);
 }

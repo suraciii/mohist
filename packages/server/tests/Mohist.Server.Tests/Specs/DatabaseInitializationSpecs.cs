@@ -33,6 +33,48 @@ public class DatabaseInitializationSpecs
     }
 
     [Fact]
+    public async Task Migrate_WhenEmptyDatabase_CreatesProjectPromptTemplatesTableAndIndex()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        db.Database.Migrate();
+
+        Assert.True(await TableExistsAsync(connection, "ProjectPromptTemplates"));
+        Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
+        Assert.True(await MigrationRecordedAsync(connection, "20260601050000_AddProjectTemplates"));
+    }
+
+    [Fact]
+    public async Task Migrate_WhenCalledTwiceOnProjectPromptTemplates_IsIdempotent()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (var db1 = new MohistDbContext(options))
+        {
+            db1.Database.Migrate();
+        }
+
+        await using (var db2 = new MohistDbContext(options))
+        {
+            db2.Database.Migrate();
+        }
+
+        Assert.True(await TableExistsAsync(connection, "ProjectPromptTemplates"));
+        Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
+    }
+
+    [Fact]
     public async Task Migrate_WhenCalledTwice_IsIdempotent()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

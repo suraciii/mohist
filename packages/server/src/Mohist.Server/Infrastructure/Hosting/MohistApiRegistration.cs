@@ -45,6 +45,8 @@ public static class MohistApiRegistration
         app.MapWorkflowTaskRoutes();
         app.MapConfigRoutes();
         app.MapSystemRoutes();
+        app.MapTemplateRoutes();
+        app.MapProjectTemplateRoutes();
         app.MapOpencodeRoutes();
         app.MapLabelsRoutes();
         app.MapLogsRoutes();

@@ -1,3 +1,9 @@
+---
+name: "Self Review"
+description: "5-dimension self review of plan artifacts"
+tags: [plan, openspec, review]
+stage: plan
+---
 <artifact id="self-review">
 
 <task>

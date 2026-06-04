@@ -1,3 +1,9 @@
+---
+name: "Explore"
+description: "External agent for requirement exploration"
+tags: [explore]
+stage: null
+---
 ## Your Task
 
 1. Read the issue description

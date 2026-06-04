@@ -1,3 +1,9 @@
+---
+name: "Review Self Check"
+description: "Self-check of review quality"
+tags: [check, review]
+stage: check
+---
 Verify the review report is properly formatted and complete.
 
 ## What to Verify

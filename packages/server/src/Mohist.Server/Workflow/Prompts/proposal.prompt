@@ -1,3 +1,9 @@
+---
+name: "Generate Proposal"
+description: "Creates the OpenSpec proposal.md for an issue"
+tags: [plan, openspec]
+stage: plan
+---
 <artifact id="proposal" schema="mohist-default">
 
 <task>
