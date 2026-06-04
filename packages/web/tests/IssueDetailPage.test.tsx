@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { baseRender, screen, fireEvent, waitFor } from './test-utils'
+import { baseRender, screen, fireEvent, waitFor, within } from './test-utils'
 import { IssueDetailPage } from '../src/pages/issue-detail/ui/IssueDetailPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -25,6 +25,12 @@ const mocks = vi.hoisted(() => {
       isPending: false,
       error: null,
     },
+    workflowProfile: null as any,
+    workflowProfileLoading: false,
+    workflowProfileError: null as Error | null,
+    workflowProfileRefetch: vi.fn(),
+    workflowProfileUpdateMutate: vi.fn(),
+    workflowProfileDeleteMutate: vi.fn(),
   }
 })
 
@@ -49,6 +55,20 @@ vi.mock('../src/entities/issue/api/queries', async () => {
     useWorktreeStatus: () => ({ data: null }),
     useIssueStageState: () => ({ data: null }),
     useWorkflowRun: () => ({ data: null }),
+    useIssueWorkflowProfileYaml: () => ({
+      data: mocks.workflowProfile,
+      isLoading: mocks.workflowProfileLoading,
+      error: mocks.workflowProfileError,
+      refetch: mocks.workflowProfileRefetch,
+    }),
+    useUpdateIssueWorkflowProfileYaml: () => ({
+      mutate: mocks.workflowProfileUpdateMutate,
+      isPending: false,
+    }),
+    useDeleteIssueWorkflowProfileTemplate: () => ({
+      mutate: mocks.workflowProfileDeleteMutate,
+      isPending: false,
+    }),
   }
 })
 
@@ -79,6 +99,12 @@ beforeEach(() => {
   mocks.issue = null
   mocks.agentStatus = { activeAgents: [], maxConcurrentAgents: 3 }
   mocks.params = { number: '1' }
+  mocks.workflowProfile = null
+  mocks.workflowProfileLoading = false
+  mocks.workflowProfileError = null
+  mocks.workflowProfileRefetch = vi.fn()
+  mocks.workflowProfileUpdateMutate = vi.fn()
+  mocks.workflowProfileDeleteMutate = vi.fn()
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0 },
@@ -487,5 +513,153 @@ describe('IssueDetailPage Markdown rendering', () => {
         expect(screen.getAllByRole('button', { name: 'Rerun Stage' }).length).toBeGreaterThan(0)
       })
     })
+  })
+})
+
+describe('IssueDetailPage workflow profile integration', () => {
+  const referenceProfileData = () => ({
+    issueNumber: 1,
+    projectId: 'test-project',
+    issueKey: 'mohist/test-project#1',
+    sourceTemplateId: null,
+    hasCustomTemplate: false,
+    yaml: null,
+    workflowRunId: null,
+    profileId: 'mohist/default',
+    updateMode: 'Reference',
+    variables: {},
+    updatedAt: '2024-01-01T00:00:00.000Z',
+    templateSource: 'system' as const,
+  })
+
+  function findDetailsCard() {
+    const heading = screen.getByText('Details', { selector: 'h2' })
+    let current: HTMLElement | null = heading
+    while (current && !(current.tagName === 'SECTION')) {
+      current = current.parentElement
+    }
+    if (!current) throw new Error('Details CardSection not found')
+    return current
+  }
+
+  it('does not render a duplicate Workflow Profile row in the DETAILS sidebar', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Plan,
+      workflowProfileId: 'mohist/default',
+      projectName: 'Test Project',
+      repository: { name: 'main', baseBranch: 'main' },
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workflow-profile-reference')).toBeInTheDocument()
+    })
+
+    const detailsCard = findDetailsCard()
+    const labels = within(detailsCard).queryAllByText(/Workflow Profile/i)
+    expect(labels).toHaveLength(0)
+  })
+
+  it('keeps issue metadata visible in the DETAILS sidebar even after the profile row is removed', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Plan,
+      workflowProfileId: 'mohist/default',
+      projectName: 'Test Project',
+      repository: { name: 'main', baseBranch: 'main' },
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workflow-profile-reference')).toBeInTheDocument()
+    })
+
+    const detailsCard = findDetailsCard()
+    expect(within(detailsCard).getByText('Issue Stage')).toBeInTheDocument()
+    expect(within(detailsCard).getByText('Workflow Stage')).toBeInTheDocument()
+    expect(within(detailsCard).getByText('Project')).toBeInTheDocument()
+    expect(within(detailsCard).getByText('Test Project')).toBeInTheDocument()
+    expect(within(detailsCard).getByText('Repository')).toBeInTheDocument()
+    expect(within(detailsCard).getByText('main')).toBeInTheDocument()
+  })
+
+  it('renders the Workflow Profile card as the single source of profile identity', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Plan,
+      workflowProfileId: 'mohist/default',
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const profileCard = await waitFor(() => screen.getByTestId('workflow-profile-reference'))
+    expect(profileCard).toBeInTheDocument()
+    expect(within(profileCard).getByText('mohist/default')).toBeInTheDocument()
+    expect(within(profileCard).getByText('Inherited')).toBeInTheDocument()
+  })
+
+  it('keeps the Coder Model and Per-stage overrides controls inside ACTIONS', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Plan,
+      workflowProfileId: 'mohist/default',
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const actionsHeading = await waitFor(() => screen.getByText('Actions', { selector: 'h2' }))
+    let actionsCard: HTMLElement | null = actionsHeading
+    while (actionsCard && actionsCard.tagName !== 'SECTION') {
+      actionsCard = actionsCard.parentElement
+    }
+    if (!actionsCard) throw new Error('Actions CardSection not found')
+
+    expect(within(actionsCard).getByText('Coder Model')).toBeInTheDocument()
+    expect(within(actionsCard).getByText('Per-stage overrides')).toBeInTheDocument()
+  })
+
+  it('labels active run YAML as runtime output, not workflow profile configuration', async () => {
+    mocks.issue = makeIssue({
+      body: 'Issue body',
+      status: 'in_progress',
+      workflowStage: WorkflowStage.Build,
+      workflowProfileId: 'mohist/default',
+      workflowRunId: 'run-123',
+    })
+    mocks.workflowProfile = referenceProfileData()
+
+    renderWithQueryClient(<IssueDetailPage />)
+
+    const trigger = await waitFor(() =>
+      screen.getByTestId('active-run-yaml-trigger'),
+    )
+    expect(trigger).toBeInTheDocument()
+
+    expect(
+      within(trigger).getByText('Active run YAML'),
+    ).toBeInTheDocument()
+    expect(
+      within(trigger).getByText(
+        /Rendered runtime output of the active workflow run, not the issue's workflow profile configuration\./i,
+      ),
+    ).toBeInTheDocument()
+
+    expect(
+      screen.queryByText(/Workflow Definition/i),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/workflow profile configuration/i, { selector: 'h2' }),
+    ).not.toBeInTheDocument()
   })
 })

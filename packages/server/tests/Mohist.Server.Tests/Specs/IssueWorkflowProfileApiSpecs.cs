@@ -57,6 +57,59 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetWorkflowProfileYaml_ExposesTemplateSourceLabel_ForInheritedProjectAndCustomModes()
+    {
+        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-source-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
+        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for template source", projectId = project.Id });
+
+        var initial = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
+        Assert.Equal(HttpStatusCode.OK, initial.StatusCode);
+        var initialResult = await initial.Content.ReadFromJsonAsync<JsonElement>();
+        var initialData = initialResult.GetProperty("data");
+        Assert.Equal("system", initialData.GetProperty("templateSource").GetString());
+        Assert.Equal("Reference", initialData.GetProperty("updateMode").GetString());
+        Assert.False(initialData.GetProperty("hasCustomTemplate").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, initialData.GetProperty("yaml").ValueKind);
+
+        var projectRefResponse = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template",
+            new { projectTemplateId = "project-template-marker" });
+        Assert.Equal(HttpStatusCode.OK, projectRefResponse.StatusCode);
+        var projectRefData = (await projectRefResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("project", projectRefData.GetProperty("templateSource").GetString());
+        Assert.Equal("Reference", projectRefData.GetProperty("updateMode").GetString());
+        Assert.False(projectRefData.GetProperty("hasCustomTemplate").GetBoolean());
+        Assert.Equal("project-template-marker", projectRefData.GetProperty("sourceTemplateId").GetString());
+        Assert.Equal(JsonValueKind.Null, projectRefData.GetProperty("yaml").ValueKind);
+
+        var customYaml = """
+            id: source-label-custom-workflow
+            stages:
+              - stage: plan
+                tasks:
+                  - id: source-label-task
+                    title: Source Label Task
+                checks: []
+            """;
+        var customResponse = await _client.PutAsJsonAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template",
+            new { yaml = customYaml });
+        Assert.Equal(HttpStatusCode.OK, customResponse.StatusCode);
+        var customData = (await customResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("custom", customData.GetProperty("templateSource").GetString());
+        Assert.Equal("Custom", customData.GetProperty("updateMode").GetString());
+        Assert.True(customData.GetProperty("hasCustomTemplate").GetBoolean());
+        Assert.Null(customData.GetProperty("sourceTemplateId").GetString());
+
+        var deleteResponse = await _client.DeleteAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template");
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        var clearedData = (await deleteResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.Equal("system", clearedData.GetProperty("templateSource").GetString());
+        Assert.False(clearedData.GetProperty("hasCustomTemplate").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, clearedData.GetProperty("yaml").ValueKind);
+    }
+
+    [Fact]
     public async Task SaveWorkflowProfileYaml_UpdatesIssueProfile_WithoutMutatingProjectProfile()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-save-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
