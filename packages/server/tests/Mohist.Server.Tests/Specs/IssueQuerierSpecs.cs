@@ -3,9 +3,11 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Persistence.Issue;
 using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
+using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Querying;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 using Xunit;
@@ -53,6 +55,51 @@ public class IssueQuerierSpecs
         Assert.Equal("Query me", item.Title);
         Assert.Equal("todo", item.Status);
         Assert.Equal("Project One", item.ProjectName);
+    }
+
+    [Fact]
+    public async Task GetAndListAsync_ReadIssueIdKeyedRows()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = "proj-id-keyed-1", Name = "Id Keyed Project", Path = "/tmp/project" };
+        var issue = new Issue.Domain.Issue
+        {
+            Id = "issue_id_keyed_1",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Id keyed issue",
+            Labels = ["feature"],
+            Priority = "p2",
+        };
+        issue.Status = Issue.Domain.IssueStatus.Todo;
+        db.IssueStates.Add(new IssueStateRow
+        {
+            Key = issue.Id,
+            StateJson = IssueStore.Serialize(issue),
+        });
+        db.IssueProfiles.Add(new IssueProfileRow
+        {
+            Key = issue.Id,
+            StateJson = IssueProfileStore.Serialize(new IssueWorkflowProfile("custom", new WorkflowDefinition("custom", []), WorkflowProfileUpdateMode.Custom)),
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var identities = scope.ServiceProvider.GetRequiredService<IssueIdentityResolver>();
+
+        var loaded = await service.GetAsync(project.Id, issue.Number, project);
+        var listed = await service.ListAsync(project.Id, project);
+        var identity = await identities.GetAsync(project.Id, issue.Number);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(issue.Id, loaded.Id);
+        Assert.Equal("custom", loaded.WorkflowProfileId);
+        Assert.NotNull(identity);
+        Assert.Equal(issue.Id, identity.IssueId);
+        var item = Assert.Single(listed);
+        Assert.Equal(issue.Id, item.Id);
+        Assert.Equal("custom", item.WorkflowProfileId);
     }
 
     [Fact]

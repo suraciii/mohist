@@ -61,10 +61,23 @@ public class IssueQuerier
 
     private static async Task<Domain.Issue?> LoadIssueAsync(MohistDbContext db, string projectId, int number)
     {
-        var key = $"{projectId}:{number}"; var row = await db.IssueStates
+        var legacyKey = IssueIdentityResolver.LegacyKey(projectId, number);
+        var legacyRow = await db.IssueStates
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Key == key);
-        return row is null ? null : IssueSnapshot.DeserializeIssue(row.StateJson);
+            .FirstOrDefaultAsync(r => r.Key == legacyKey);
+        var legacyIssue = legacyRow is null ? null : IssueSnapshot.DeserializeIssue(legacyRow.StateJson);
+        if (legacyIssue is not null)
+        {
+            var canonicalRow = await db.IssueStates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Key == legacyIssue.Id);
+            var canonicalIssue = canonicalRow is null ? null : IssueSnapshot.DeserializeIssue(canonicalRow.StateJson);
+            return IssueStateReader.IsIssue(canonicalIssue, projectId, number) ? canonicalIssue : legacyIssue;
+        }
+
+        var rows = await db.IssueStates.AsNoTracking().ToListAsync();
+        return IssueStateReader.SelectCanonicalOrDefault(IssueStateReader.Deserialize(rows)
+            .Where(row => IssueStateReader.IsIssue(row.Issue, projectId, number)));
     }
 
     public async Task<List<IssueReadModel>> ListAsync(
@@ -78,13 +91,8 @@ public class IssueQuerier
     {
         await using var db = await _dbFactory.CreateDbContextAsync(); var rows = await db.IssueStates
             .AsNoTracking()
-            .Where(row => EF.Functions.Like(row.Key, projectId + ":%"))
             .ToListAsync();
-        var list = rows
-            .Select(row => IssueSnapshot.DeserializeIssue(row.StateJson))
-            .Where(issue => issue is not null)
-            .Cast<Domain.Issue>()
-            .Where(issue => issue.ProjectId == projectId)
+        var list = IssueStateReader.SelectCanonicalById(rows, projectId)
             .Select(issue => ToReadModel(ToInfo(issue, project)))
             .OrderBy(i => i.Number)
             .ToList();
@@ -188,7 +196,12 @@ public class IssueQuerier
 
     private async Task PopulateProfileDataAsync(MohistDbContext db, List<IssueReadModel> issues)
     {
-        var keys = issues.Select(i => $"{i.ProjectId}:{i.Number}").ToArray();
+        if (issues.Count == 0) return;
+
+        var keys = issues
+            .SelectMany(i => new[] { i.Id, IssueIdentityResolver.LegacyKey(i.ProjectId, i.Number) })
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var rows = await db.IssueProfiles
             .AsNoTracking()
             .Where(r => keys.Contains(r.Key))
@@ -202,8 +215,8 @@ public class IssueQuerier
         }
         foreach (var issue in issues)
         {
-            var key = $"{issue.ProjectId}:{issue.Number}";
-            if (profilesByKey.TryGetValue(key, out var profile))
+            var legacyKey = IssueIdentityResolver.LegacyKey(issue.ProjectId, issue.Number);
+            if (profilesByKey.TryGetValue(issue.Id, out var profile) || profilesByKey.TryGetValue(legacyKey, out profile))
             {
                 issue.WorkflowProfileId = profile.SourceProfileId;
                 issue.WorkflowProfileMode = profile.UpdateMode.ToString();
@@ -213,10 +226,12 @@ public class IssueQuerier
 
     private async Task PopulateProfileDataOnInfoAsync(MohistDbContext db, IssueInfo info, string projectId, int number)
     {
-        var key = $"{projectId}:{number}";
-        var row = await db.IssueProfiles
+        var legacyKey = IssueIdentityResolver.LegacyKey(projectId, number);
+        var rows = await db.IssueProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Key == key);
+            .Where(r => r.Key == info.Id || r.Key == legacyKey)
+            .ToListAsync();
+        var row = rows.FirstOrDefault(r => r.Key == info.Id) ?? rows.FirstOrDefault(r => r.Key == legacyKey);
         if (row is not null)
         {
             var profile = IssueWorkflowProfileSnapshot.Deserialize(row.StateJson);
@@ -374,15 +389,10 @@ public class IssueQuerier
         var missingPrereqNumbers = prereqNumbers.Where(number => !prereqIssues.ContainsKey(number)).ToArray();
         if (missingPrereqNumbers.Length > 0)
         {
-            var keys = missingPrereqNumbers.Select(number => $"{projectId}:{number}").ToArray();
-            var rows = await db.IssueStates.AsNoTracking()
-                .Where(row => keys.Contains(row.Key))
-                .ToListAsync();
-            foreach (var row in rows)
+            var rows = await db.IssueStates.AsNoTracking().ToListAsync();
+            foreach (var issue in IssueStateReader.SelectCanonicalByNumber(rows, projectId, missingPrereqNumbers).Values)
             {
-                var issue = IssueSnapshot.DeserializeIssue(row.StateJson);
-                if (issue is not null)
-                    prereqIssues[issue.Number] = ToReadModel(ToInfo(issue));
+                prereqIssues[issue.Number] = ToReadModel(ToInfo(issue));
             }
         }
         foreach (var group in prereqRows.GroupBy(p => p.IssueNumber))

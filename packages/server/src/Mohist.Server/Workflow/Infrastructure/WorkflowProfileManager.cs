@@ -26,24 +26,23 @@ public class WorkflowProfileManager
     public async Task<ResolvedTemplate> LoadTemplateAsync(
         string runId,
         string? projectId = null,
-        string? issueKey = null)
+        string? issueId = null,
+        string? legacyIssueKey = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var resolvedContext = await ResolveRunContextAsync(db, runId);
         var context = new RunContext(
             string.IsNullOrWhiteSpace(projectId) ? resolvedContext.ProjectId : projectId,
-            string.IsNullOrWhiteSpace(issueKey) ? resolvedContext.IssueKey : issueKey);
+            string.IsNullOrWhiteSpace(issueId) ? resolvedContext.IssueId : issueId,
+            string.IsNullOrWhiteSpace(legacyIssueKey) ? resolvedContext.LegacyIssueKey : legacyIssueKey);
 
-        var issueProfile = !string.IsNullOrWhiteSpace(context.IssueKey)
-            ? await db.IssueWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.IssueKey == context.IssueKey)
-            : null;
+        var issueProfile = await LoadIssueProfileAsync(db, context);
 
         if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.TemplateJson))
         {
             var issueDef = DeserializeDefinition(issueProfile.TemplateJson);
             if (issueDef is not null && !string.IsNullOrWhiteSpace(issueDef.Id))
-                return ResolvedTemplate.FromDefinition($"issue-custom:{context.IssueKey}", issueDef);
+                return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.IssueKey}", issueDef);
         }
 
         if (issueProfile is not null
@@ -78,7 +77,7 @@ public class WorkflowProfileManager
         var context = await ResolveRunContextAsync(db, runId);
 
         var projectBundle = await LoadProjectLayerAsync(db, context.ProjectId);
-        var issueBundle = await LoadIssueLayerAsync(db, context.IssueKey);
+        var issueBundle = await LoadIssueLayerAsync(db, context);
 
         if (!projectBundle.Vars.HasValue
             && (projectBundle.Stages is null || projectBundle.Stages.Count == 0)
@@ -97,14 +96,16 @@ public class WorkflowProfileManager
             .FirstOrDefaultAsync(x => x.WorkflowRunId == runId);
 
         var projectId = workflowRun?.MetadataProjectId;
+        var issueId = TryReadAnnotation(workflowRun?.State, "issueId");
         var issueKey = TryReadAnnotation(workflowRun?.State, "issueKey");
         var issue = await FindIssueForRunAsync(db, runId);
         projectId = string.IsNullOrWhiteSpace(projectId) ? issue?.ProjectId : projectId;
+        issueId = string.IsNullOrWhiteSpace(issueId) ? issue?.IssueId : issueId;
         issueKey = string.IsNullOrWhiteSpace(issueKey) && issue is not null
             ? $"{issue.ProjectId}:{issue.Number}"
             : issueKey;
 
-        return new RunContext(projectId, issueKey);
+        return new RunContext(projectId, issueId, issueKey);
     }
 
     private static string? TryReadAnnotation(string? stateJson, string key)
@@ -160,11 +161,14 @@ public class WorkflowProfileManager
             if (!root.TryGetProperty("ProjectId", out var projectIdEl)
                 || string.IsNullOrWhiteSpace(projectIdEl.GetString()))
                 return null;
+            if (!root.TryGetProperty("Id", out var issueIdEl)
+                || string.IsNullOrWhiteSpace(issueIdEl.GetString()))
+                return null;
             if (!root.TryGetProperty("Number", out var numberEl)
                 || !numberEl.TryGetInt32(out var number))
                 return null;
 
-            return new IssueRunRef(projectIdEl.GetString()!, number);
+            return new IssueRunRef(issueIdEl.GetString()!, projectIdEl.GetString()!, number);
         }
         catch
         {
@@ -187,12 +191,27 @@ public class WorkflowProfileManager
         return bundle;
     }
 
-    private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, string? issueKey)
+    private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, RunContext context)
     {
-        if (string.IsNullOrWhiteSpace(issueKey)) return VariableBundle.Empty;
-        var issueProfile = await db.IssueWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IssueKey == issueKey);
+        var issueProfile = await LoadIssueProfileAsync(db, context);
         return VariableBundle.FromJson(issueProfile?.VariablesJson);
+    }
+
+    private static async Task<IssueWorkflowProfileRow?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)
+    {
+        if (!string.IsNullOrWhiteSpace(context.IssueId))
+        {
+            var byId = await db.IssueWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.IssueKey == context.IssueId);
+            if (byId is not null)
+                return byId;
+        }
+
+        if (string.IsNullOrWhiteSpace(context.LegacyIssueKey))
+            return null;
+
+        return await db.IssueWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.IssueKey == context.LegacyIssueKey);
     }
 
     /// <summary>
@@ -341,8 +360,8 @@ public class WorkflowProfileManager
         }
     }
 
-    private sealed record RunContext(string? ProjectId, string? IssueKey);
-    private sealed record IssueRunRef(string ProjectId, int Number);
+    private sealed record RunContext(string? ProjectId, string? IssueId, string? LegacyIssueKey);
+    private sealed record IssueRunRef(string IssueId, string ProjectId, int Number);
     private sealed record LegacyProjectVars(
         Dictionary<string, JsonElement?>? Vars = null,
         Dictionary<string, LegacyProjectStageVars?>? Stages = null);

@@ -96,6 +96,8 @@ WorkflowRun.Metadata
 
 Event append, event query, locks, and scheduling should use `workflowRunId` and `issueId`. If an API route still receives issue number, resolve it to `issueId` at the boundary.
 
+New workflow runs write `issueId` to metadata. Existing runs may still have legacy `issueKey = projectId:issueNumber`; read paths may use that only as fallback.
+
 For now, `ResourceKey` is only a URL/resource-path convention. Do not force it into event rows, locks, or audit data until those surfaces are explicitly migrated.
 
 Route identity flow:
