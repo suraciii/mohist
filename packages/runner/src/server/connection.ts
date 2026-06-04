@@ -41,7 +41,7 @@ export class ServerConnection {
   }
 
   async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string; with?: string | null }>) {
-    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow/${encodeURIComponent(workflowRunId)}/tasks`, {
+    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ tasks }),
