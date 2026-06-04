@@ -964,6 +964,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private Task AppendWorkflowEventAsync(WorkflowEvent e, string? reason = null) =>
         e switch
         {
+            null => Task.CompletedTask,
             WorkflowRunStarted => AppendWorkflowEventAsync("workflow_started", "started", "Workflow started"),
             WorkflowRunResumed => AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed"),
             WorkflowRunPaused => AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused"),
@@ -994,71 +995,81 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
                 Stage: x.Stage,
                 CheckName: x.CheckName,
                 Payload: new { x.TaskIds }),
-
-            _ => Task.CompletedTask,
         };
 
-    private async Task On(WorkflowEvent e, string? reason = null)
-    {
-        switch (e)
+    private Task On(WorkflowEvent e, string? reason = null) =>
+        e switch
         {
-            case WorkflowRunStarted:
-                EmitStageChanged("started");
-                await EnsureWorkHeartbeatAsync();
-                break;
+            null => Task.CompletedTask,
+            WorkflowRunStarted => OnWorkflowStartedAsync(),
+            WorkflowRunResumed => OnWorkflowResumedAsync(),
+            WorkflowRunPaused => OnWorkflowPausedAsync(reason),
+            WorkflowRunStopped => OnWorkflowStoppedAsync(reason),
+            WorkflowRunFailed => DisableWorkHeartbeatAsync(),
+            WorkflowRunCompleted => OnWorkflowCompletedAsync(),
+            StageStarted => EnsureWorkHeartbeatAsync(),
+            StageCompleted x => ReleaseStageLocksAsync(x.Stage, "completed"),
+            StageFailed x => ReleaseStageLocksAsync(x.Stage, "failed"),
+            StageApprovalRequested => DisableWorkHeartbeatAsync(),
+            StageApprovalResolved x => OnApprovalResolvedAsync(x),
+            TaskCompleted => EnsureWorkHeartbeatAsync(),
+            TaskFailed => Task.CompletedTask,
+            CheckPassed => EnsureWorkHeartbeatAsync(),
+            CheckFailed => Task.CompletedTask,
+            CheckPending => EnsureWorkHeartbeatAsync(),
+            RepairScheduled => Task.CompletedTask,
+        };
 
-            case WorkflowRunResumed:
-                EmitStageChanged("resumed");
-                await EnsureWorkHeartbeatAsync();
-                break;
+    private async Task OnWorkflowStartedAsync()
+    {
+        EmitStageChanged("started");
+        await EnsureWorkHeartbeatAsync();
+    }
 
-            case WorkflowRunPaused:
-                EmitStageChanged("paused", reason);
-                await DisableWorkHeartbeatAsync();
-                break;
+    private async Task OnWorkflowResumedAsync()
+    {
+        EmitStageChanged("resumed");
+        await EnsureWorkHeartbeatAsync();
+    }
 
-            case WorkflowRunStopped:
-                EmitStageChanged("stopped", reason);
-                await DisableWorkHeartbeatAsync();
-                break;
+    private async Task OnWorkflowPausedAsync(string? reason)
+    {
+        EmitStageChanged("paused", reason);
+        await DisableWorkHeartbeatAsync();
+    }
 
-            case WorkflowRunFailed:
-                await DisableWorkHeartbeatAsync();
-                break;
+    private async Task OnWorkflowStoppedAsync(string? reason)
+    {
+        EmitStageChanged("stopped", reason);
+        await DisableWorkHeartbeatAsync();
+    }
 
-            case WorkflowRunCompleted:
-                await DisableWorkHeartbeatAsync();
-                await DispatchCompletedHooksAsync();
-                break;
+    private async Task OnWorkflowCompletedAsync()
+    {
+        await DisableWorkHeartbeatAsync();
+        await DispatchCompletedHooksAsync();
+    }
 
-            case StageApprovalRequested:
-                await DisableWorkHeartbeatAsync();
-                break;
+    private Task OnApprovalResolvedAsync(StageApprovalResolved e)
+    {
+        return e.Result switch
+        {
+            ApprovalResult.Approved => OnApprovalApprovedAsync(),
+            ApprovalResult.Rejected => OnApprovalRejectedAsync(e.Reason),
+            _ => Task.CompletedTask,
+        };
+    }
 
-            case StageApprovalResolved x when x.Result == ApprovalResult.Approved:
-                EmitStageChanged("approved");
-                await EnsureWorkHeartbeatAsync();
-                break;
+    private async Task OnApprovalApprovedAsync()
+    {
+        EmitStageChanged("approved");
+        await EnsureWorkHeartbeatAsync();
+    }
 
-            case StageApprovalResolved x when x.Result == ApprovalResult.Rejected:
-                EmitStageChanged("rejected", x.Reason);
-                break;
-
-            case StageCompleted x:
-                await ReleaseStageLocksAsync(x.Stage, "completed");
-                break;
-
-            case StageFailed x:
-                await ReleaseStageLocksAsync(x.Stage, "failed");
-                break;
-
-            case StageStarted:
-            case TaskCompleted:
-            case CheckPassed:
-            case CheckPending:
-                await EnsureWorkHeartbeatAsync();
-                break;
-        }
+    private Task OnApprovalRejectedAsync(string? reason)
+    {
+        EmitStageChanged("rejected", reason);
+        return Task.CompletedTask;
     }
 
     private async Task DispatchCompletedHooksAsync()
