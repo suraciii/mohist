@@ -2,12 +2,12 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
-using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Prompts;
 using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Mohist.Server.Workflow.Storage;
+using IssueWorkflowProfiles = Mohist.Server.Issue.WorkflowProfiles.IssueWorkflowProfiles;
 
 namespace Mohist.Server.Workflow.Infrastructure;
 
@@ -47,9 +47,9 @@ public class WorkflowProfileManager
 
         var issueProfile = await LoadIssueProfileAsync(db, context);
 
-        if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.TemplateJson))
+        if (issueProfile is not null && !string.IsNullOrWhiteSpace(issueProfile.Template))
         {
-            var issueDef = DeserializeDefinition(issueProfile.TemplateJson);
+            var issueDef = DeserializeDefinition(issueProfile.Template);
             if (issueDef is not null && !string.IsNullOrWhiteSpace(issueDef.Id))
                 return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.IssueKey}", issueDef);
         }
@@ -190,7 +190,7 @@ public class WorkflowProfileManager
         if (string.IsNullOrWhiteSpace(projectId)) return VariableBundle.Empty;
         var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        var bundle = VariableBundle.FromJson(projectProfile?.VariablesJson);
+        var bundle = VariableBundle.FromJson(projectProfile?.Variables);
         if (!bundle.Vars.HasValue && bundle.Stages is null)
         {
             var legacyBag = await LoadLegacyProjectVariablesAsync(db, projectId);
@@ -203,10 +203,10 @@ public class WorkflowProfileManager
     private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, RunContext context)
     {
         var issueProfile = await LoadIssueProfileAsync(db, context);
-        return VariableBundle.FromJson(issueProfile?.VariablesJson);
+        return VariableBundle.FromJson(issueProfile?.Variables);
     }
 
-    private static async Task<IssueWorkflowProfileRow?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)
+    private static async Task<IssueWorkflowProfile?> LoadIssueProfileAsync(MohistDbContext db, RunContext context)
     {
         if (!string.IsNullOrWhiteSpace(context.IssueId))
         {
@@ -401,7 +401,7 @@ public class WorkflowProfileManager
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
-        var def = DeserializeDefinition(row.TemplateJson);
+        var def = DeserializeDefinition(row.Template);
         return def is null ? null : ResolvedTemplate.FromDefinition($"project-template:{projectId}/{templateId}", def);
     }
 

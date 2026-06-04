@@ -11,8 +11,8 @@ namespace Mohist.Server.Workflow.Infrastructure;
 /// Issue-scope template + variables write endpoint.
 /// 
 /// UpdateTemplateAsync 入参:
-///   ProjectTemplateId: 指向项目模板 (引用, SourceTemplateId 设置, TemplateJson 清空)
-///   Template:          自定义 YAML 字符串 (TemplateJson 设置, SourceTemplateId 清空)
+///   ProjectTemplateId: 指向项目模板 (引用, SourceTemplateId 设置, Template 清空)
+///   Template:          自定义 YAML 字符串 (Template 设置, SourceTemplateId 清空)
 ///   两个都 null:       清空 issue 级模板 (继承项目默认)
 /// </summary>
 public class IssueWorkflowProfileManager
@@ -33,13 +33,13 @@ public class IssueWorkflowProfileManager
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await FindProfileAsync(db, issueId, legacyIssueKey);
         if (row is null) return null;
-        if (!string.IsNullOrWhiteSpace(row.TemplateJson))
-            return DeserializeDefinition(row.TemplateJson);
+        if (!string.IsNullOrWhiteSpace(row.Template))
+            return DeserializeDefinition(row.Template);
         // SourceTemplateId case - caller should resolve via ProjectWorkflowProfileManager.GetTemplateAsync
         return null;
     }
 
-    public async Task<IssueWorkflowProfileRow?> GetProfileAsync(string issueId, string? legacyIssueKey = null)
+    public async Task<IssueWorkflowProfile?> GetProfileAsync(string issueId, string? legacyIssueKey = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         return await FindProfileAsync(db, issueId, legacyIssueKey);
@@ -55,9 +55,9 @@ public class IssueWorkflowProfileManager
             : new IssueWorkflowProfileState(
                 row.IssueKey,
                 row.SourceTemplateId,
-                !string.IsNullOrWhiteSpace(row.TemplateJson),
-                string.IsNullOrWhiteSpace(row.TemplateJson) ? null : DeserializeDefinition(row.TemplateJson),
-                VariableBundle.FromJson(row.VariablesJson),
+                !string.IsNullOrWhiteSpace(row.Template),
+                string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeDefinition(row.Template),
+                VariableBundle.FromJson(row.Variables),
                 row.UpdatedAt);
     }
 
@@ -68,7 +68,7 @@ public class IssueWorkflowProfileManager
     /// - both null:                      clear issue-level template (inherit project default)
     /// - both set:                       invalid
     /// </summary>
-    public async Task<IssueWorkflowProfileRow> UpdateTemplateAsync(
+    public async Task<IssueWorkflowProfile> UpdateTemplateAsync(
         string issueId,
         IssueTemplateUpdateRequest request,
         string? legacyIssueKey = null)
@@ -96,12 +96,12 @@ public class IssueWorkflowProfileManager
 
         if (row is null)
         {
-            row = new IssueWorkflowProfileRow
+            row = new IssueWorkflowProfile
             {
                 IssueKey = issueId,
                 SourceTemplateId = request.ProjectTemplateId,
-                TemplateJson = parsed is null ? null : SerializeDefinition(parsed),
-                VariablesJson = VariableBundle.Empty.ToJson(),
+                Template = parsed is null ? null : SerializeDefinition(parsed),
+                Variables = VariableBundle.Empty.ToJson(),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.IssueWorkflowProfiles.Add(row);
@@ -109,7 +109,7 @@ public class IssueWorkflowProfileManager
         else
         {
             row.SourceTemplateId = request.ProjectTemplateId;
-            row.TemplateJson = parsed is null ? null : SerializeDefinition(parsed);
+            row.Template = parsed is null ? null : SerializeDefinition(parsed);
             row.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -125,7 +125,7 @@ public class IssueWorkflowProfileManager
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await FindProfileAsync(db, issueId, legacyIssueKey);
-        return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.VariablesJson);
+        return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.Variables);
     }
 
     public async Task<VariableBundle> SetVariablesAsync(string issueId, VariableBundle bundle, string? legacyIssueKey = null)
@@ -141,17 +141,17 @@ public class IssueWorkflowProfileManager
 
         if (row is null)
         {
-            row = new IssueWorkflowProfileRow
+            row = new IssueWorkflowProfile
             {
                 IssueKey = issueId,
-                VariablesJson = bundle.ToJson(),
+                Variables = bundle.ToJson(),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.IssueWorkflowProfiles.Add(row);
         }
         else
         {
-            row.VariablesJson = bundle.ToJson();
+            row.Variables = bundle.ToJson();
             row.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -193,10 +193,10 @@ public class IssueWorkflowProfileManager
 
         if (profile is null)
         {
-            profile = new IssueWorkflowProfileRow
+            profile = new IssueWorkflowProfile
             {
                 IssueKey = issueId,
-                VariablesJson = VariableBundle.Empty.ToJson(),
+                Variables = VariableBundle.Empty.ToJson(),
                 Prompts = SerializePrompt(key, body),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
@@ -244,7 +244,7 @@ public class IssueWorkflowProfileManager
     private static string SerializeDefinition(WorkflowDefinition def) =>
         JsonSerializer.Serialize(def, WorkflowYamlSerializer.JsonOptions);
 
-    private static async Task<IssueWorkflowProfileRow?> FindProfileAsync(
+    private static async Task<IssueWorkflowProfile?> FindProfileAsync(
         MohistDbContext db,
         string issueId,
         string? legacyIssueKey)
@@ -258,7 +258,7 @@ public class IssueWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.IssueKey == legacyIssueKey);
     }
 
-    private static async Task<IssueWorkflowProfileRow?> MigrateLegacyProfileAsync(
+    private static async Task<IssueWorkflowProfile?> MigrateLegacyProfileAsync(
         MohistDbContext db,
         string issueId,
         string? legacyIssueKey)
@@ -269,12 +269,12 @@ public class IssueWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.IssueKey == legacyIssueKey);
         if (legacy is null) return null;
 
-        var migrated = new IssueWorkflowProfileRow
+        var migrated = new IssueWorkflowProfile
         {
             IssueKey = issueId,
             SourceTemplateId = legacy.SourceTemplateId,
-            TemplateJson = legacy.TemplateJson,
-            VariablesJson = legacy.VariablesJson,
+            Template = legacy.Template,
+            Variables = legacy.Variables,
             Prompts = legacy.Prompts,
             UpdatedAt = legacy.UpdatedAt,
         };

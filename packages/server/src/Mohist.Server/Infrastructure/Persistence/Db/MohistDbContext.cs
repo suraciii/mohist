@@ -17,7 +17,7 @@ namespace Mohist.Server.Infrastructure.Persistence.Db;
 public class MohistDbContext : DbContext
 {
     public DbSet<ProjectRow> Projects { get; set; } = null!;
-    public DbSet<ProjectWorkflowProfileRow> ProjectWorkflowProfiles { get; set; } = null!;
+    public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<Mohist.Server.Workflow.Storage.ProjectTemplateRow> ProjectTemplates { get; set; } = null!;
     public DbSet<ConfigRow> Configs { get; set; } = null!;
     public DbSet<WorkflowEventRow> WorkflowEvents { get; set; } = null!;
@@ -29,7 +29,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
     public DbSet<IssueStateRow> IssueStates { get; set; } = null!;
     public DbSet<IssueProfileRow> IssueProfiles { get; set; } = null!;
-    public DbSet<IssueWorkflowProfileRow> IssueWorkflowProfiles { get; set; } = null!;
+    public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
@@ -223,13 +223,13 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ProjectId).HasMaxLength(256);
         });
 
-        modelBuilder.Entity<ProjectWorkflowProfileRow>(entity =>
+        modelBuilder.Entity<ProjectWorkflowProfile>(entity =>
         {
             entity.ToTable("ProjectWorkflowProfiles");
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.DefaultTemplateId).HasMaxLength(256);
-            entity.Property(e => e.VariablesJson).IsRequired();
+            entity.Property(e => e.Variables).IsRequired();
             entity.Property(e => e.Prompts).IsRequired().HasDefaultValue("{}");
         });
 
@@ -239,17 +239,17 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => new { e.ProjectId, e.TemplateId });
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.TemplateId).HasMaxLength(256);
-            entity.Property(e => e.TemplateJson).IsRequired();
+            entity.Property(e => e.Template).IsRequired();
             entity.HasIndex(e => e.ProjectId);
         });
 
-        modelBuilder.Entity<IssueWorkflowProfileRow>(entity =>
+        modelBuilder.Entity<IssueWorkflowProfile>(entity =>
         {
             entity.ToTable("IssueWorkflowProfiles");
             entity.HasKey(e => e.IssueKey);
             entity.Property(e => e.IssueKey).HasMaxLength(512);
             entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
-            entity.Property(e => e.VariablesJson).IsRequired();
+            entity.Property(e => e.Variables).IsRequired();
             entity.Property(e => e.Prompts).IsRequired().HasDefaultValue("{}");
         });
 

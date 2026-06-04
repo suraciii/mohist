@@ -6,7 +6,7 @@ namespace Mohist.Server.Workflow.Storage;
 /// Legacy rows may still contain projectId:issueNumber and are migrated on write.
 /// 存储 issue 级模板引用/自定义模板 + issue 级变量配置。
 /// </summary>
-public class IssueWorkflowProfileRow
+public class IssueWorkflowProfile
 {
     public string IssueKey { get; set; } = string.Empty;
 
@@ -21,12 +21,12 @@ public class IssueWorkflowProfileRow
     /// 当用户通过 UpdateTemplateAsync 传了 Template 参数时设置。
     /// 不为 null 时优先使用此结构, SourceTemplateId 被忽略。
     /// </summary>
-    public string? TemplateJson { get; set; }
+    public string? Template { get; set; }
 
     /// <summary>
     /// VariableBundle JSON - issue 级变量配置。
     /// </summary>
-    public string VariablesJson { get; set; } = "{}";
+    public string Variables { get; set; } = "{}";
 
     /// <summary>
     /// Issue 级提示词。key → body, JSON 序列化。

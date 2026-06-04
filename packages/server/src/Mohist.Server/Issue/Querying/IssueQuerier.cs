@@ -206,7 +206,7 @@ public class IssueQuerier
             .AsNoTracking()
             .Where(r => keys.Contains(r.Key))
             .ToListAsync();
-        var profilesByKey = new Dictionary<string, IssueWorkflowProfile>(StringComparer.Ordinal);
+        var profilesByKey = new Dictionary<string, Mohist.Server.Issue.WorkflowProfiles.IssueWorkflowProfile>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
             var profile = IssueWorkflowProfileSnapshot.Deserialize(row.StateJson);
