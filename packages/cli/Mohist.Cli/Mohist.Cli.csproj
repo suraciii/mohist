@@ -21,13 +21,55 @@
     <Content Include="skill-data\**\*" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="skill-data/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
-  <Target Name="GenerateSkillDataManifest" BeforeTargets="Build" Condition="'$(OS)' != 'Windows_NT'">
+  <UsingTask TaskName="GenerateSkillManifest"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ManifestPath ParameterType="System.String" Required="true" />
+      <Version ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.Diagnostics" />
+      <Using Namespace="System.IO" />
+      <Code Type="Fragment" Language="cs">
+<![CDATA[
+        string gitHash = "dev";
+        try
+        {
+          using var process = new Process
+          {
+            StartInfo = new ProcessStartInfo
+            {
+              FileName = "git",
+              Arguments = "rev-parse HEAD",
+              UseShellExecute = false,
+              RedirectStandardOutput = true,
+              CreateNoWindow = true,
+            }
+          };
+          process.Start();
+          var output = process.StandardOutput.ReadToEnd().Trim();
+          process.WaitForExit(5000);
+          if (!string.IsNullOrWhiteSpace(output))
+            gitHash = output;
+        }
+        catch { }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(ManifestPath)!);
+        var json = "{\n  \"schemaVersion\": 1,\n  \"cliVersion\": \"" + Version + "\",\n  \"gitHash\": \"" + gitHash + "\",\n  \"skills\": [ \"mohist\", \"mohist-explore\" ]\n}\n";
+        File.WriteAllText(ManifestPath, json);
+]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="GenerateSkillDataManifest" BeforeTargets="Build">
     <PropertyGroup>
       <_SkillDataManifestPath>$([System.IO.Path]::Combine('$(MSBuildThisFileDirectory)', 'skill-data', 'manifest.json'))</_SkillDataManifestPath>
     </PropertyGroup>
-    <Exec
-      Command="bash &quot;$(MSBuildThisFileDirectory)scripts/generate-skill-manifest.sh&quot; &quot;$(_SkillDataManifestPath)&quot; &quot;$(Version)&quot;"
-      IgnoreExitCode="true" />
+    <GenerateSkillManifest
+      ManifestPath="$(_SkillDataManifestPath)"
+      Version="$(Version)" />
   </Target>
 
 </Project>
