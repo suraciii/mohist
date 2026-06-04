@@ -82,29 +82,49 @@ Workflow event 是 WorkflowRun 能凭自身状态和方法输入决定的业务�
 
 事件类型不带 `Domain` 后缀。
 
+当前实现使用 C# `union`，让事件集合成为封闭集合。新增事件时，持久化映射和 Grain reaction 的 switch expression 必须显式处理，否则编译失败。
+
 ```csharp
-public abstract record WorkflowEvent;
+public union WorkflowEvent(
+    WorkflowRunStarted,
+    WorkflowRunResumed,
+    WorkflowRunPaused,
+    WorkflowRunStopped,
+    WorkflowRunCompleted,
+    WorkflowRunFailed,
+    StageStarted,
+    StageCompleted,
+    StageFailed,
+    StageApprovalRequested,
+    StageApprovalResolved,
+    TaskCompleted,
+    TaskFailed,
+    CheckPassed,
+    CheckFailed,
+    CheckPending,
+    RepairScheduled);
 
-public sealed record WorkflowRunStarted : WorkflowEvent;
-public sealed record WorkflowRunResumed : WorkflowEvent;
-public sealed record WorkflowRunPaused : WorkflowEvent;
-public sealed record WorkflowRunStopped : WorkflowEvent;
-public sealed record WorkflowRunCompleted : WorkflowEvent;
-public sealed record WorkflowRunFailed(string? Message) : WorkflowEvent;
+public sealed record WorkflowRunStarted;
+public sealed record WorkflowRunResumed;
+public sealed record WorkflowRunPaused;
+public sealed record WorkflowRunStopped;
+public sealed record WorkflowRunCompleted;
+public sealed record WorkflowRunFailed(string? Message);
 
-public sealed record StageStarted(string Stage) : WorkflowEvent;
-public sealed record StageCompleted(string Stage) : WorkflowEvent;
-public sealed record StageFailed(string Stage, string? Reason) : WorkflowEvent;
+public sealed record StageStarted(string Stage);
+public sealed record StageCompleted(string Stage);
+public sealed record StageFailed(string Stage, string? Reason);
 
-public sealed record StageApprovalRequested(string Stage) : WorkflowEvent;
-public sealed record StageApprovalResolved(string Stage, ApprovalResult Result) : WorkflowEvent;
+public sealed record StageApprovalRequested(string Stage);
+public sealed record StageApprovalResolved(string Stage, ApprovalResult Result, string? Reason = null);
 
-public sealed record TaskCompleted(string Stage, string TaskId) : WorkflowEvent;
-public sealed record TaskFailed(string Stage, string TaskId, string? Message) : WorkflowEvent;
+public sealed record TaskCompleted(string Stage, string TaskId);
+public sealed record TaskFailed(string Stage, string TaskId, string? Message);
 
-public sealed record CheckPassed(string Stage, string CheckName) : WorkflowEvent;
-public sealed record CheckFailed(string Stage, string CheckName, string? Message) : WorkflowEvent;
-public sealed record RepairScheduled(string Stage, string CheckName, IReadOnlyList<string> TaskIds) : WorkflowEvent;
+public sealed record CheckPassed(string Stage, string CheckName, string? Message);
+public sealed record CheckFailed(string Stage, string CheckName, string? Message);
+public sealed record CheckPending(string Stage, string CheckName, string? Message);
+public sealed record RepairScheduled(string Stage, string CheckName, IReadOnlyList<string> TaskIds);
 ```
 
 `Retry`、`Rerun`、`Approve` 是 command，不是 event。它们可能产生 `WorkflowRunResumed`、`StageStarted`、`StageApprovalResolved` 等事实。
@@ -183,41 +203,32 @@ publish live event
 业务编排只显式响应 WorkflowGrain 关心的事件：
 
 ```csharp
-private async Task On(WorkflowEvent e)
-{
-    switch (e)
+private Task On(WorkflowEvent e) =>
+    e switch
     {
-        case WorkflowRunStarted:
-        case WorkflowRunResumed:
-            await EnsureWorkHeartbeatAsync();
-            break;
-
-        case WorkflowRunPaused:
-        case WorkflowRunStopped:
-        case WorkflowRunFailed:
-        case StageApprovalRequested:
-            await DisableWorkHeartbeatAsync();
-            break;
-
-        case StageCompleted x:
-            await ReleaseStageLocksAsync(x.Stage, "completed");
-            break;
-
-        case StageFailed x:
-            await ReleaseStageLocksAsync(x.Stage, "failed");
-            break;
-
-        case WorkflowRunCompleted:
-            await DisableWorkHeartbeatAsync();
-            await RunCompletionHooksAsync();
-            break;
-    }
-}
+        WorkflowRunStarted => OnWorkflowStartedAsync(),
+        WorkflowRunResumed => OnWorkflowResumedAsync(),
+        WorkflowRunPaused => DisableWorkHeartbeatAsync(),
+        WorkflowRunStopped => DisableWorkHeartbeatAsync(),
+        WorkflowRunFailed => DisableWorkHeartbeatAsync(),
+        WorkflowRunCompleted => OnWorkflowCompletedAsync(),
+        StageStarted => EnsureWorkHeartbeatAsync(),
+        StageCompleted x => ReleaseStageLocksAsync(x.Stage, "completed"),
+        StageFailed x => ReleaseStageLocksAsync(x.Stage, "failed"),
+        StageApprovalRequested => DisableWorkHeartbeatAsync(),
+        StageApprovalResolved x => OnApprovalResolvedAsync(x),
+        TaskCompleted => EnsureWorkHeartbeatAsync(),
+        TaskFailed => Task.CompletedTask,
+        CheckPassed => EnsureWorkHeartbeatAsync(),
+        CheckFailed => Task.CompletedTask,
+        CheckPending => EnsureWorkHeartbeatAsync(),
+        RepairScheduled => Task.CompletedTask,
+    };
 ```
 
 WorkflowGrain 只响应这些编排事件：
 
-- `WorkflowRunStarted` / `WorkflowRunResumed` -> ensure heartbeat.
+- `WorkflowRunStarted` / `WorkflowRunResumed` / `StageStarted` / `TaskCompleted` / `CheckPassed` / `CheckPending` -> ensure heartbeat.
 - `WorkflowRunPaused` / `WorkflowRunStopped` / `WorkflowRunCompleted` / `WorkflowRunFailed` / `StageApprovalRequested` -> disable heartbeat.
 - `StageCompleted` / `StageFailed` -> release stage lock, wake next waiting workflow.
 - `WorkflowRunCompleted` -> run completion hooks.
