@@ -57,6 +57,7 @@ User Project
 | 产品流程设计 | product/design docs | architecture doc |
 | 领域模型表达 | code | architecture doc |
 | 架构边界和原则 | `design/architecture.md` | OpenSpec spec |
+| 默认 workflow 的 stages/tasks/checks | `mohist-default.workflow.yaml` | stage 设计文档 |
 
 ## 判断规则
 
@@ -69,6 +70,8 @@ User Project
 如果一个改动是产品流程、阶段语义、用户体验或审批策略，优先放到产品/设计文档，而不是架构文档。
 
 如果一个改动是在定义实体字段、状态枚举、方法签名或数据结构，优先用代码表达，而不是架构文档。
+
+如果一个改动是在调整默认 workflow 的阶段、任务、检查或 repair 行为，优先修改 `packages/server/src/Mohist.Server/Issue/WorkflowProfiles/mohist-default.workflow.yaml`。`design/` 只记录 workflow engine 机制、身份约定和跨模块边界，不重复默认 workflow 内容。
 
 ## Modeling Boundary
 

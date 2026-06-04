@@ -8,7 +8,7 @@ CLI SHALL 支持创建、查看、更新和关闭本地 Issues。
 - **WHEN** 用户执行 `mo issue create "title" [-l label]...`
 - **THEN** Server 在当前项目中创建 Issue
 - **AND** CLI 显示 Issue 编号（如 `my-app#1`）
-- **AND** Issue stage 为 `draft`
+- **AND** Issue stage 为 `backlog`
 - **AND** Issue status 为 `active`
 - **AND** Issue number 在项目内递增
 - **AND** Issue labels 包含指定的 labels
@@ -182,4 +182,3 @@ Local storage SHALL support efficient Epic list, detail, membership, and issue b
 
 - **WHEN** the service reads an issue detail backlink
 - **THEN** storage can return the primary Epic summary for that issue, if one exists
-

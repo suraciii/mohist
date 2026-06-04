@@ -5,7 +5,7 @@
 ask_user 工具 SHALL 接受一个 question 字符串参数，创建问题记录，emit 事件，然后阻塞直到用户通过 API 回复或超时。`AskUserContext` SHALL 新增可选的 `onWaitingChange` 回调，在等待开始时调用 `onWaitingChange(issueId, questionId, question)`，在等待结束时调用 `onWaitingChange(issueId, null)`。`AskUserContext` 新增 `issueRepo` 字段，用于当 `projectId` 缺失时查询 issue。
 
 ##### Scenario: agent 提问并收到回复
-- **WHEN** Main Agent 调用 ask_user("这个 API 应该返回 JSON 还是 XML？")
+- **WHEN** an agent task calls ask_user("这个 API 应该返回 JSON 还是 XML？")
 - **THEN** 一条 pending 问题记录创建到 questions 表
 - **AND** EventBus emit `question_asked` 事件，payload 包含正确的 projectId（非空字符串）
 - **AND** 如果 `onWaitingChange` 回调存在，调用 `onWaitingChange(issueId, questionId, question)`
@@ -16,7 +16,7 @@ ask_user 工具 SHALL 接受一个 question 字符串参数，创建问题记录
 - **AND** LLM 继续执行下一步
 
 ##### Scenario: 用户超时未回复
-- **WHEN** Main Agent 调用 ask_user
+- **WHEN** an agent task calls ask_user
 - **AND** 用户在超时时间内未回复
 - **THEN** 问题状态设为 `expired`
 - **AND** 如果 `onWaitingChange` 回调存在，调用 `onWaitingChange(issueId, null)`

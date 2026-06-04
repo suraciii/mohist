@@ -19,12 +19,13 @@ style:
 ```text
 WorkflowGrain (Orleans grain, key: workflowRunId)
   状态机 + 调度。
-  读: ProfileManager.Load*(runId)
+  读: ProfileManager.Load*(workflowRunId)
+  读: WorkflowRuntimeContext
 
 WorkflowProfileManager (stateless)
   唯一读入口 + compute。
-  LoadTemplate(runId)              -> ResolvedTemplate
-  LoadVariables(runId)             -> VariableBundle     (独立变量层，已内部 merge)
+  LoadTemplate(workflowRunId)       -> ResolvedTemplate
+  LoadVariables(workflowRunId)      -> VariableBundle     (独立变量层，已内部 merge)
   ExpandTaskWith(resolved, with) -> mergedWith
 
 ProjectWorkflowProfileManager (stateless)
@@ -105,7 +106,7 @@ cover: { vars: { agent: { model: "gpt-4o" } } }
 ### 1. 选定生效模板
 
 ```
-WorkflowProfileManager.LoadTemplate(runId) -> ResolvedTemplate { id, structure, embeddedVariables }
+WorkflowProfileManager.LoadTemplate(workflowRunId) -> ResolvedTemplate { id, structure, embeddedVariables }
 
   issue_workflow_profile.Template?      ─→ return parsed       (自定义)
   issue_workflow_profile.SourceTemplateId ─→ load from project_templates
@@ -116,7 +117,7 @@ WorkflowProfileManager.LoadTemplate(runId) -> ResolvedTemplate { id, structure, 
 ### 2. 加载独立变量（内部 merge 2 层）
 
 ```
-WorkflowProfileManager.LoadVariables(runId) -> VariableBundle
+WorkflowProfileManager.LoadVariables(workflowRunId) -> VariableBundle
 
   project_workflow_profile.Variables     ─┐
   issue_workflow_profile.Variables      ─┘  deepMerge ─→ independent
@@ -127,13 +128,14 @@ WorkflowProfileManager.LoadVariables(runId) -> VariableBundle
 ```
 WorkflowGrain.MakeDispatchAsync(stage, work):
 
-  template    = ProfileManager.LoadTemplate(GrainKey)
-  independent = ProfileManager.LoadVariables(GrainKey)
+  context     = LoadRuntimeContext(workflowRunId)
+  template    = ProfileManager.LoadTemplate(workflowRunId)
+  independent = ProfileManager.LoadVariables(workflowRunId)
   resolved    = deepMerge(template.embeddedVariables, independent)
                  + inject { workflow.runId, stage.name, work.* }
   with        = ProfileManager.ExpandTaskWith(resolved, task.With)
 
-  ─→ WorkDispatch { Arguments: with, Variables: resolved }
+  ─→ WorkDispatch { Context: context, Arguments: with, Variables: resolved }
 ```
 
 ### ExpandTaskWith
@@ -156,7 +158,16 @@ project_workflow_profile       key: projectId
 project_templates              ProjectId, TemplateId, Template
 
 issue_workflow_profile         SourceTemplateId, Template, Variables
+
+workflow_runtime_context       key: workflowRunId
+  Context snapshot for dispatch rendering.
 ```
+
+`WorkflowRuntimeContext` 和 profile variables 分开存。
+
+- Profile variables: 用户/管理员配置，由 `WorkflowProfileManager` 管理。
+- Runtime context: run-start 快照，用于 dispatch，不作为用户配置入口。
+- `WorkflowRun.Metadata` 保存 `ProjectId` + `IssueId`，不要从 runtime context 反查身份。
 
 ## Write API
 
@@ -190,3 +201,5 @@ Run:                GET    /workflow-runs/:workflowRunId/yaml
 前端 "Install" → `GET /workflow-templates/system` → 选一个 → `POST /projects/:projectId/workflow-templates { yaml }`
 
 普通用户调整变量时更新 project/issue workflow profile。workflow run 不保存 template 快照，也不作为常规变量配置入口。
+
+`/variables/effective` 是当前 API 名称；设计语义是 "effective dispatch variables"，不是 runtime context。

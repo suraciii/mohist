@@ -14,7 +14,7 @@ The system SHALL assemble complete context for each task execution.
 
 #### Scenario: Build task context
 - **WHEN** executing task T-003
-- **THEN** the main-agent assembles:
+- **THEN** the Build runtime assembles:
   ```
   [System] You are the Mohist Coder Agent...
   
@@ -42,7 +42,7 @@ The system SHALL verify that task execution meets the acceptance criteria.
 
 #### Scenario: Verify task completion
 - **WHEN** a task execution completes
-- **THEN** the main-agent checks:
+- **THEN** the task handler checks:
   1. Did coder report success?
   2. Does the implementation satisfy all AC?
   3. Run typecheck/tests if specified
@@ -185,4 +185,3 @@ Ralph Build task execution SHALL report each task dispatch through the WorkflowR
 - **WHEN** the Ralph task's agent session is stopped or lost without a genuine failed task result
 - **THEN** the latest task attempt SHALL become `interrupted`
 - **AND** retry SHALL NOT be exposed solely because the task execution was interrupted
-
