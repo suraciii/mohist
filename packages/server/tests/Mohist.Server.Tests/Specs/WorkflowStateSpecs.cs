@@ -163,12 +163,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(ownerRunnerId, await workflow.GetClaimedRunnerIdAsync());
         Assert.Equal(work.WorkId, await workflow.GetCurrentWorkIdAsync());
 
-        var startEvents = (await EventStore.ListWorkflowEventsAsync(_workflowId!))
-            .Where(e => e.Type == "workflow_task_started")
-            .ToList();
-        Assert.Single(startEvents);
-        Assert.Equal(ownerRunnerId, startEvents[0].RunnerId);
-        Assert.Equal(work.WorkId, startEvents[0].TaskId);
     }
 
     [Fact]
@@ -188,12 +182,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         Assert.Null(await runner.PollAsync());
 
-        var startEvents = (await EventStore.ListWorkflowEventsAsync(_workflowId!))
-            .Where(e => e.Type == "workflow_task_started")
-            .ToList();
-        Assert.Single(startEvents);
-        Assert.Equal(runnerId, startEvents[0].RunnerId);
-        Assert.Equal(firstWork.WorkId, startEvents[0].TaskId);
     }
 
     [Fact]
@@ -211,12 +199,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(work.WorkId, lease.WorkId);
         Assert.Equal(runnerId, lease.RunnerId);
 
-        var started = (await EventStore.ListWorkflowEventsAsync(_workflowId!))
-            .Single(e => e.Type == "workflow_task_started");
-
-        Assert.Equal(_workflowId, started.WorkflowRunId);
-        Assert.Equal(lease.WorkId, started.TaskId);
-        Assert.Equal(lease.RunnerId, started.RunnerId);
     }
 
     [Fact]

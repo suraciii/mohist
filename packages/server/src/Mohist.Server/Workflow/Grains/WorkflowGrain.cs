@@ -34,7 +34,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly IEventBus _eventBus;
-    private readonly IEventStore _events;
     private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
@@ -45,7 +44,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IStateStore<WorkflowExecutionContext> variablesStore,
         IWorkflowBacklogDirectory backlogs,
         IEventBus eventBus,
-        IEventStore events,
         IEnumerable<IWorkflowCompletionHook> completionHooks,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
@@ -55,7 +53,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _variablesStore = variablesStore;
         _backlogs = backlogs;
         _eventBus = eventBus;
-        _events = events;
         _completionHooks = completionHooks;
         _profileManager = profileManager;
         _log = log;
@@ -180,7 +177,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var events = await TryScheduleRequestedCheckRepairAsync() ?? _run.Retry();
         _log.LogInformation("Workflow {Id} retry at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
-        await AppendWorkflowEventAsync("workflow_retried", "retry", "Workflow retry requested");
     }
 
     public async Task RerunAsync()
@@ -191,7 +187,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var events = _run.Rerun();
         _log.LogInformation("Workflow {Id} rerun at stage={Stage}", GrainKey, _run.CurrentStageId);
         await CommitAsync(events);
-        await AppendWorkflowEventAsync("workflow_rerun", "rerun", "Workflow stage rerun requested");
     }
 
     public async Task<RuntimeTaskAddedResult> AddTaskAsync(RuntimeTaskInput task)
@@ -210,7 +205,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _log.LogInformation("Workflow {Id} added runtime task {TaskId} at stage={Stage}", GrainKey, task.Id, stage);
 
         await CommitAsync(events);
-        await AppendWorkflowEventAsync("workflow_task_added", "added", $"Workflow task added: {task.Title}", TaskId: task.Id, Payload: task);
         return new RuntimeTaskAddedResult(GrainKey, stage, task.Id);
     }
 
@@ -240,7 +234,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             _run.ClaimBy(runnerId, DateTimeOffset.UtcNow);
             _lastRunnerId = runnerId;
             await SaveRunAsync();
-            await AppendWorkflowEventAsync("workflow_claimed", "claimed", $"Workflow assigned to runner {runnerId}", RunnerId: runnerId);
         }
 
         await RunCoreAsync();
@@ -284,7 +277,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             return;
 
         await SaveLeaseAsync();
-        await AppendWorkDispatchedEventAsync(dispatch, runnerId);
         await AssignRunnerWorkAsync(runnerId, dispatch);
     }
 
@@ -362,10 +354,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             GrainKey, tasksToInsert.Count, current.Id);
 
         await CommitAsync(events);
-        await AppendWorkflowEventAsync(
-            "workflow_tasks_batch_added", "batch_added",
-            $"Added {tasksToInsert.Count} tasks to workflow stage {current.Id}",
-            Payload: new { Count = tasksToInsert.Count });
 
         return new AddTasksBatchResult(GrainKey, current.Id, tasksToInsert.Count);
     }
@@ -440,22 +428,12 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         if (!result.Acquired)
         {
-            if (_announcedWaitingLocks.Add(eventKey))
-                await AppendWorkflowEventAsync(
-                    "workflow_stage_lock_waiting",
-                    "waiting",
-                    $"Waiting for {resource} lock",
-                    Payload: new { resource, projectId, result.OwnerWorkflowRunId, result.WaitingCount });
+            _announcedWaitingLocks.Add(eventKey);
             return false;
         }
 
         _announcedWaitingLocks.Remove(eventKey);
-        if (_announcedAcquiredLocks.Add(eventKey))
-            await AppendWorkflowEventAsync(
-                "workflow_stage_lock_acquired",
-                "acquired",
-                $"Acquired {resource} lock",
-                Payload: new { resource, projectId, result.WaitingCount });
+        _announcedAcquiredLocks.Add(eventKey);
 
         return true;
     }
@@ -491,12 +469,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _announcedAcquiredLocks.Remove(eventKey);
 
         if (!result.Released) return;
-
-        await AppendWorkflowEventAsync(
-            "workflow_stage_lock_released",
-            "released",
-            $"Released {resource} lock",
-            Payload: new { resource, projectId, reason, result.NextWorkflowRunId, result.WaitingCount });
 
         if (!string.IsNullOrWhiteSpace(result.NextWorkflowRunId))
             await RequeueWorkflowIdAsync(projectId, result.NextWorkflowRunId);
@@ -930,73 +902,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             DateTime.UtcNow.ToString("o")));
     }
 
-    private Task AppendWorkDispatchedEventAsync(WorkDispatch dispatch, string runnerId) =>
-        AppendWorkflowEventAsync(
-            dispatch.WorkType switch
-            {
-                "task" => "workflow_task_started",
-                "checks" => "workflow_check_started",
-                _ => "workflow_work_dispatched",
-            },
-            "started",
-            dispatch.Title ?? "Workflow work dispatched",
-            TaskId: dispatch.WorkId,
-            RunnerId: runnerId,
-            Payload: dispatch);
-
     private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, bool saveVariables = false)
     {
-        if (saveVariables)
-            await SaveAllAsync();
-        else
-            await SaveRunAsync();
+        if (_run is not null)
+            await SaveRunAsync(events);
 
-        await PersistAndPublishAsync(events, reason);
+        if (saveVariables)
+        {
+            await SaveLeaseAsync();
+            await SaveVariablesAsync();
+        }
+
         foreach (var e in events)
             await On(e, reason);
     }
-
-    private async Task PersistAndPublishAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null)
-    {
-        foreach (var e in events)
-            await AppendWorkflowEventAsync(e, reason);
-    }
-
-    private Task AppendWorkflowEventAsync(WorkflowEvent e, string? reason = null) =>
-        e switch
-        {
-            null => Task.CompletedTask,
-            WorkflowRunStarted => AppendWorkflowEventAsync("workflow_started", "started", "Workflow started"),
-            WorkflowRunResumed => AppendWorkflowEventAsync("workflow_resumed", "active", "Workflow resumed"),
-            WorkflowRunPaused => AppendWorkflowEventAsync("workflow_paused", "paused", reason ?? "Workflow paused"),
-            WorkflowRunStopped => AppendWorkflowEventAsync("workflow_stopped", "stopped", reason ?? "Workflow stopped"),
-            WorkflowRunCompleted => AppendWorkflowEventAsync("workflow_completed", "completed", "Workflow completed"),
-            WorkflowRunFailed x => AppendWorkflowEventAsync("workflow_failed", "failed", x.Message ?? "Workflow failed", Payload: _run?.Failure),
-
-            StageStarted x => AppendWorkflowEventAsync("workflow_stage_started", "started", $"Stage started: {x.Stage}", Stage: x.Stage),
-            StageCompleted x => AppendWorkflowEventAsync("workflow_stage_completed", "completed", $"Stage completed: {x.Stage}", Stage: x.Stage),
-            StageFailed x => AppendWorkflowEventAsync("workflow_stage_failed", "failed", x.Reason ?? $"Stage failed: {x.Stage}", Stage: x.Stage),
-
-            StageApprovalRequested x => AppendWorkflowEventAsync("workflow_approval_requested", "awaiting", "Workflow approval requested", Stage: x.Stage),
-            StageApprovalResolved x when x.Result == ApprovalResult.Approved =>
-                AppendWorkflowEventAsync("workflow_approval_approved", "approved", "Workflow approval approved", Stage: x.Stage),
-            StageApprovalResolved x =>
-                AppendWorkflowEventAsync("workflow_approval_rejected", "rejected", x.Reason ?? "Workflow approval rejected", Stage: x.Stage),
-
-            TaskCompleted x => AppendWorkflowEventAsync("workflow_task_completed", "completed", "Workflow task completed", Stage: x.Stage, TaskId: x.TaskId),
-            TaskFailed x => AppendWorkflowEventAsync("workflow_task_failed", "failed", x.Message ?? "Workflow task failed", Stage: x.Stage, TaskId: x.TaskId),
-
-            CheckPassed x => AppendWorkflowEventAsync("workflow_check_passed", "pass", x.Message ?? $"Check pass: {x.CheckName}", Stage: x.Stage, CheckName: x.CheckName),
-            CheckPending x => AppendWorkflowEventAsync("workflow_check_pending", "pending", x.Message ?? $"Check pending: {x.CheckName}", Stage: x.Stage, CheckName: x.CheckName),
-            CheckFailed x => AppendWorkflowEventAsync("workflow_check_failed", "fail", x.Message ?? $"Check failed: {x.CheckName}", Stage: x.Stage, CheckName: x.CheckName),
-            RepairScheduled x => AppendWorkflowEventAsync(
-                "workflow_repair_task_injected",
-                "repairing",
-                $"Repair scheduled: {x.CheckName}",
-                Stage: x.Stage,
-                CheckName: x.CheckName,
-                Payload: new { x.TaskIds }),
-        };
 
     private Task On(WorkflowEvent e, string? reason = null) =>
         e switch
@@ -1092,39 +1011,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
     }
 
-    private Task AppendWorkflowEventAsync(
-        string type,
-        string? status,
-        string? message,
-        string? Stage = null,
-        string? TaskId = null,
-        string? CheckName = null,
-        string? RunnerId = null,
-        object? Payload = null)
-    {
-        if (_run is null) return Task.CompletedTask;
-        var projectId = GetProjectId();
-        if (string.IsNullOrEmpty(projectId)) return Task.CompletedTask;
-        var issueNumberStr = _variables?.String("issue", "number");
-        var issueNumber = int.TryParse(issueNumberStr, out var n) ? n : 0;
-        var issueId = _variables?.String("issue", "id");
-
-        return _events.AppendAsync(new EventInput(
-            projectId,
-            issueNumber,
-            "workflow",
-            type,
-            IssueId: issueId,
-            WorkflowRunId: GrainKey,
-            Stage: Stage ?? _run.CurrentStageId!,
-            TaskId: TaskId,
-            CheckName: CheckName,
-            RunnerId: RunnerId,
-            Status: status,
-            Message: message,
-            Payload: Payload));
-    }
-
     private string GetProjectId() => _variables?.String("project", "id") ?? "";
 
     private string? GetIssueId() => _variables?.String("issue", "id");
@@ -1163,14 +1049,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return (projectId, issueId, issueNumber);
     }
 
-    private async Task SaveAllAsync()
-    {
-        await SaveRunAsync();
-        await SaveLeaseAsync();
-        await SaveVariablesAsync();
-    }
-
-
     private async Task SaveRunAsync()
     {
         if (_run is null) return;
@@ -1178,6 +1056,24 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         try
         {
             await _runStore.SaveAsync(_run);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
+                GrainKey);
+            DeactivateOnIdle();
+            throw;
+        }
+    }
+
+    private async Task SaveRunAsync(IReadOnlyList<WorkflowEvent> events)
+    {
+        if (_run is null) return;
+
+        try
+        {
+            await _runStore.SaveAsync(_run, events);
         }
         catch (DbUpdateConcurrencyException ex)
         {

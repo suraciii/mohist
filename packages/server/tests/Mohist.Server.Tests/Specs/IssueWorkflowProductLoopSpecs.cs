@@ -54,23 +54,21 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
 
         var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
-        Assert.Contains(startEvents, e => e.Type == "issue_created");
-        Assert.Contains(startEvents, e => e.Type == "issue_started");
-        Assert.Contains(startEvents, e => e.Type == "workflow_started");
+        Assert.Contains(startEvents, e => e.Type == "WorkflowRunStarted");
 
-        var initialTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
-        Assert.Contains(initialTimeline.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
+        var initialStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        Assert.Contains(initialStatus.Workflow!.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
 
-        var planTimeline = await _client.GetDataAsync<WorkflowTimelineDto>($"/api/issues/{issue.Number}/workflow/timeline?projectId={project.Id}");
-        var planStage = Assert.Single(planTimeline.Stages, s => s.Stage == "plan");
-        Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "completed");
+        var planStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var planStage = Assert.Single(planStatus.Workflow!.Stages, s => s.Stage == "plan");
+        Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "Completed");
         Assert.Null(planStage.ApprovalStatus?.Result);
 
-        var planLogs = await _client.GetDataAsync<WorkflowLogDto[]>($"/api/issues/{issue.Number}/logs?projectId={project.Id}");
-        Assert.Contains(planLogs, e => e.EventType == "workflow_task_completed");
-        Assert.Contains(planLogs, e => e.EventType == "workflow_check_passed");
+        var planEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
+        Assert.Contains(planEvents, e => e.Type == "TaskCompleted");
+        Assert.Contains(planEvents, e => e.Type == "CheckPassed");
 
         var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
         Assert.Equal("in_progress", listedAtApproval.Status);
@@ -93,8 +91,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
 
         await _client.PostOkAsync($"/api/issues/{issue.Number}/archive?projectId={project.Id}");
         var events = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
-        Assert.Contains(events, e => e.Type == "issue_completed");
-        Assert.Contains(events, e => e.Type == "issue_archived");
+        Assert.Contains(events, e => e.Type == "WorkflowRunCompleted");
     }
 
     [Fact]
@@ -389,10 +386,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     private sealed record ApprovalStateDto(string Stage, string Status);
     private sealed record AttentionDto(string Reason);
     private sealed record IssueWorkflowStatusDto(WorkflowStatusDto? Workflow);
-    private sealed record WorkflowStatusDto(string Status, string? CurrentStage);
-    private sealed record EventDto(string Id, string Type, string Category, string? Status, string CreatedAt);
-    private sealed record WorkflowLogDto(string Id, string EventType, string CreatedAt);
-    private sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, WorkflowStageDto[] Stages);
+    private sealed record WorkflowStatusDto(string Status, string? CurrentStage, WorkflowStageDto[] Stages);
+    private sealed record EventDto(long Id, string Type, string Time);
     private sealed record WorkflowYamlDto(string WorkflowRunId, string Yaml);
     private sealed record WorkflowStageDto(string Stage, string Status, WorkflowTaskDto[] Tasks, ApprovalDto? ApprovalStatus);
     private sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status);

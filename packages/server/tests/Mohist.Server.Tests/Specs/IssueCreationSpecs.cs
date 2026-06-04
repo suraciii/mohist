@@ -75,7 +75,7 @@ public class IssueCreationSpecs
         return row?.StateJson;
     }
 
-    private async Task<IReadOnlyList<EventDto>> GetWorkflowEventsAsync(string workflowRunId)
+    private async Task<IReadOnlyList<WorkflowDomainEventDto>> GetWorkflowEventsAsync(string workflowRunId)
     {
         using var scope = _services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
@@ -276,8 +276,7 @@ public class IssueCreationSpecs
         Assert.Null(await runner.PollAsync());
 
         var events = await GetWorkflowEventsAsync(workflowRunId);
-        var stopped = Assert.Single(events, e => e.Type == "workflow_stopped");
-        Assert.Equal("issue-closed", stopped.Message);
+        Assert.Single(events, e => e.Type == "WorkflowRunStopped");
     }
 
     [Fact]

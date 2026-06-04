@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getAgentStatus } from '../../../entities/agent'
-import { getWorkflowLogs } from '../../../entities/coder-session'
-import { useProject } from '../../../entities/project'
 import { onAgentEvent } from '../../../entities/agent'
 import type {
   ToolCallEntry,
-  WorkflowLogItem,
   TaskProgressMap,
   LoopProgress,
   CoderSessionItem,
@@ -109,20 +106,6 @@ function inferRoundLabel(roundIndex: number, totalRounds: number): string {
   return `Round ${roundIndex + 1}`
 }
 
-function adaptWorkflowLogToSessionEvent(log: WorkflowLogItem, sequence: number): SessionEvent {
-  return {
-    id: sequence,
-    sequence,
-    type: log.eventType === 'user_message_chunk' ? 'mohist_prompt' : log.eventType,
-    payload: log.data,
-    createdAt: log.createdAt,
-  }
-}
-
-function adaptWorkflowLogsToSessionEvents(logs: WorkflowLogItem[]): SessionEvent[] {
-  return logs.map((log, index) => adaptWorkflowLogToSessionEvent(log, index))
-}
-
 function timelineToolCallToEntry(tool: SessionTimelineToolCall, fallbackAt: string): ToolCallEntry {
   const state: ToolCallEntry['state'] =
     tool.state === 'running' ? 'started' : tool.state
@@ -164,20 +147,7 @@ export function reconstructRoundsFromEvents(events: SessionEvent[]): Round[] {
   }))
 }
 
-export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
-  return reconstructRoundsFromEvents(adaptWorkflowLogsToSessionEvents(logs))
-}
-
 export function useSessionTimeline(issueNumber: number, session?: CoderSessionItem) {
-  const { projectId } = useProject()
-  const shouldFetchLogs = !session
-
-  const { data: logs = [], isLoading: loadingLogs } = useQuery({
-    queryKey: ['workflow-logs', issueNumber, projectId],
-    queryFn: () => getWorkflowLogs(issueNumber, projectId),
-    enabled: issueNumber > 0 && shouldFetchLogs && !!projectId,
-  })
-
   const sessionRef = useRef(session)
   sessionRef.current = session
 
@@ -303,17 +273,10 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
   }, [flushPlanBuffer])
 
   useEffect(() => {
-    if (session) {
-      const reconstructed = reconstructRoundsFromLogs(session.workflowLogs ?? [])
-      setRounds(reconstructed)
-      return
-    }
-    if (loadingLogs) return
     if (historyLoadedRef.current) return
     historyLoadedRef.current = true
-    const reconstructed = reconstructRoundsFromLogs(logs)
-    setRounds(reconstructed)
-  }, [session?.id, logs, loadingLogs])
+    setRounds([])
+  }, [session?.id])
 
   useEffect(() => {
     const isRunningOnThis = !!(
@@ -670,7 +633,7 @@ export function useSessionTimeline(issueNumber: number, session?: CoderSessionIt
 
   return {
     rounds,
-    isLoading: loadingLogs,
+    isLoading: false,
     isStreaming,
     taskProgress,
     loopProgress,

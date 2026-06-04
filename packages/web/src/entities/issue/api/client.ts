@@ -114,7 +114,8 @@ export function deleteIssueWorkflowProfileTemplate(number: number, projectId: st
 }
 
 export function getWorkflowTimeline(number: number, projectId?: string | null) {
-  return request<WorkflowTimeline>(`/issues/${number}/workflow/timeline`, withProject(undefined, projectId))
+  return request<{ workflow: WorkflowTimeline | null }>(`/issues/${number}/workflow/status`, withProject(undefined, projectId))
+    .then(response => response.workflow)
 }
 
 export function getIssueWorkflowDefinitionVar(number: number, _name: string, projectId: string) {

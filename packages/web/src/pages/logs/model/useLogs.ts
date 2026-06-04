@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { getLogTail, getRecentEvents, type LogTailResult, type WorkflowEvent } from './api'
-import { useProject } from '../../../entities/project'
+import { getLogTail, type LogTailResult } from './api'
 
 export interface ParsedLogEntry {
   raw: string
@@ -31,19 +30,6 @@ export function parseLogLine(line: string): ParsedLogEntry {
   }
 }
 
-function eventToLogEntry(event: WorkflowEvent): ParsedLogEntry {
-  const stage = event.stage ? ` ${event.stage}` : ''
-  const target = event.taskId ?? event.checkName ?? event.runnerId
-  const targetSuffix = target ? ` ${target}` : ''
-  return {
-    raw: JSON.stringify(event),
-    level: event.status === 'failed' || event.status === 'fail' ? 'ERROR' : event.status === 'awaiting' ? 'WARN' : 'INFO',
-    time: event.createdAt,
-    service: event.category || 'workflow',
-    message: `#${event.issueNumber}${stage}${targetSuffix} ${event.type}: ${event.message ?? ''}`.trim(),
-  }
-}
-
 const MAX_ENTRIES = 2000
 const POLL_INTERVAL = 3000
 
@@ -58,7 +44,6 @@ interface UseLogsReturn {
 }
 
 export function useLogs(): UseLogsReturn {
-  const { projectId } = useProject()
   const [entries, setEntries] = useState<ParsedLogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -81,12 +66,7 @@ export function useLogs(): UseLogsReturn {
         : await getLogTail(c)
 
       const parsed: ParsedLogEntry[] = result.lines.map(parseLogLine)
-      const hasFileLogs = result.lines.length > 0 || result.cursor > 0 || !!result.file
-
-      if (!hasFileLogs && projectId) {
-        const recentEvents = await getRecentEvents({ projectId, limit: 500 })
-        setEntries(recentEvents.map(eventToLogEntry))
-      } else if (result.reset) {
+      if (result.reset) {
         setEntries(parsed)
       } else {
         setEntries((prev: ParsedLogEntry[]) => {
@@ -98,7 +78,7 @@ export function useLogs(): UseLogsReturn {
       cursorRef.current = result.cursor
       setCursor(result.cursor)
       setTruncated(result.truncated)
-      setFile(hasFileLogs ? result.file : 'workflow events')
+      setFile(result.file)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch logs')
@@ -106,7 +86,7 @@ export function useLogs(): UseLogsReturn {
       setLoading(false)
       fetchingRef.current = false
     }
-  }, [projectId])
+  }, [])
 
   const refresh = useCallback(() => {
     fetchLogs()

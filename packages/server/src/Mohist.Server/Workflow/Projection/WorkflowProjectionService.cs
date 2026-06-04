@@ -1,44 +1,23 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Issue.Querying;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Storage;
-using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Querying;
 
 namespace Mohist.Server.Workflow.Projection;
 
 public class WorkflowProjectionService
 {
-    private readonly IssueQuerier _issues;
-    private readonly IEventStore _events;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly WorkflowQuerier _workflowReader;
 
-    public WorkflowProjectionService(IssueQuerier issues, IEventStore events, IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowReader)
+    public WorkflowProjectionService(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowReader)
     {
-        _issues = issues;
-        _events = events;
         _dbFactory = dbFactory;
         _workflowReader = workflowReader;
-    }
-
-    public async Task<WorkflowTimelineDto?> GetTimelineAsync(string projectId, int issueNumber, CancellationToken ct = default)
-    {
-        var issue = await _issues.GetAsync(projectId, issueNumber);
-        if (issue?.WorkflowRunId is null) return null;
-
-        var status = await _workflowReader.GetStatusAsync(issue.WorkflowRunId);
-        if (status is null) return null;
-
-        var events = await _events.ListWorkflowEventsAsync(issue.WorkflowRunId, 1000, ct);
-        var sessions = await ListSessionsAsync(issue.WorkflowRunId, ct);
-
-        return BuildTimeline(status, events, sessions);
     }
 
     public async Task<IReadOnlyList<ActiveAgentDto>> ListActiveAgentsAsync(string? projectId = null, CancellationToken ct = default)
@@ -59,13 +38,10 @@ public class WorkflowProjectionService
 
             var status = await _workflowReader.GetStatusAsync(session.WorkflowRunId);
             var pending = status?.PendingWork;
-            if (pending is null || pending.WorkId != session.WorkId) continue;
+            if (status is null || pending is null || pending.WorkId != session.WorkId) continue;
 
-            var timeline = status is null
-                ? null
-                : BuildTimeline(status, await _events.ListWorkflowEventsAsync(session.WorkflowRunId, 1000, ct), [session]);
-            var currentStage = timeline?.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
-            var completed = currentStage?.Tasks.Count(t => t.Status == "completed") ?? 0;
+            var currentStage = status.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
+            var completed = currentStage?.Tasks.Count(t => string.Equals(t.Status, TaskRunStatus.Completed.ToString(), StringComparison.Ordinal)) ?? 0;
             var total = currentStage?.Tasks.Count ?? 0;
             var lastActivity = (session.LastDataAt ?? session.StartedAt ?? session.CreatedAt).ToString("o");
 
@@ -90,70 +66,6 @@ public class WorkflowProjectionService
         }
 
         return result;
-    }
-
-    private static WorkflowTimelineDto BuildTimeline(WorkflowStatusView status, IReadOnlyList<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
-    {
-        var eventList = events.ToList();
-        var stages = status.Stages
-            .Select((stage, i) => BuildStage(stage, i, eventList, sessions))
-            .ToList();
-
-        return new WorkflowTimelineDto(
-            status.WorkflowRunId,
-            status.Status,
-            status.CurrentStage,
-            status.PendingWork,
-            stages,
-            status.AvailableActions);
-    }
-
-    private static WorkflowStageDto BuildStage(StageStatusView stage, int order, List<EventDto> events, IReadOnlyList<WorkflowAgentSession> sessions)
-    {
-        var stageEvents = events.Where(e => e.Stage == stage.Stage).ToList();
-        var startedAt = stageEvents.FirstOrDefault()?.CreatedAt;
-        var completedAt = IsTerminal(stage.Status) ? stageEvents.LastOrDefault()?.CreatedAt : null;
-
-        var tasks = stage.Tasks.Select(task =>
-        {
-            var taskSessions = sessions.Where(s => s.Stage == stage.Stage && (s.WorkId == task.Id || s.Title == task.Title)).ToList();
-            var taskEvents = stageEvents.Where(e => e.TaskId == task.Id || e.Payload?.ToString()?.Contains(task.Id, StringComparison.OrdinalIgnoreCase) == true).ToList();
-            var start = taskSessions.Select(s => s.StartedAt ?? s.CreatedAt).Cast<DateTime?>().Min()?.ToString("o")
-                ?? taskEvents.FirstOrDefault()?.CreatedAt;
-            var end = taskSessions.Select(s => s.CompletedAt).Where(d => d is not null).Cast<DateTime?>().Max()?.ToString("o")
-                ?? (IsTerminal(task.Status) ? taskEvents.LastOrDefault()?.CreatedAt : null);
-            var attempts = Math.Max(1, taskSessions.Count == 0 ? taskEvents.Count(e => e.Type == "workflow_task_started") : taskSessions.Count);
-            return new WorkflowTaskDto(task.Id, task.Title, task.Uses, NormalizeStatus(task.Status), start, end, DurationMs(start, end), attempts, taskEvents.LastOrDefault(e => e.Message is not null)?.Message, task.RequiredFiles, task.Classification);
-        }).ToList();
-
-        var checks = stage.Checks.Select(check =>
-        {
-            var checkEvents = stageEvents.Where(e => e.CheckName == check.Name).ToList();
-            var start = checkEvents.FirstOrDefault(e => e.Type == "workflow_check_started")?.CreatedAt ?? checkEvents.FirstOrDefault()?.CreatedAt;
-            var end = IsTerminal(check.Status) ? checkEvents.LastOrDefault()?.CreatedAt : null;
-            return new WorkflowCheckDto(check.Name, check.Title, check.Uses, NormalizeStatus(check.Status), check.Message, start, end, DurationMs(start, end));
-        }).ToList();
-
-        return new WorkflowStageDto(
-            stage.Stage,
-            NormalizeStatus(stage.Status),
-            order,
-            startedAt,
-            completedAt,
-            DurationMs(startedAt, completedAt),
-            tasks,
-            checks,
-            stage.ApprovalStatus is null ? null : new ApprovalDto(stage.ApprovalStatus.Result, stage.ApprovalStatus.RequestedAt, stage.ApprovalStatus.RespondedAt));
-    }
-
-    private async Task<IReadOnlyList<WorkflowAgentSession>> ListSessionsAsync(string workflowRunId, CancellationToken ct)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.WorkflowAgentSessions.AsNoTracking()
-            .Where(s => s.WorkflowRunId == workflowRunId)
-            .OrderBy(s => s.CreatedAt)
-            .ToListAsync(ct);
-        return rows.Select(ToDomain).ToList();
     }
 
     private static WorkflowAgentSession ToDomain(WorkflowAgentSessionRow r) => new()
@@ -183,26 +95,6 @@ public class WorkflowProjectionService
         ExitCode = r.ExitCode,
     };
 
-    private static string NormalizeStatus(string value) => value.ToLowerInvariant() switch
-    {
-        "passed" or "pass" or "completed" => "completed",
-        "failed" or "fail" => "failed",
-        "awaitingapproval" or "awaiting-approval" => "awaiting-approval",
-        "running" => "running",
-        "pending" => "pending",
-        _ => value.ToLowerInvariant(),
-    };
-
-    private static bool IsTerminal(string status) => NormalizeStatus(status) is "completed" or "failed";
-
-    private static long? DurationMs(string? start, string? end)
-    {
-        if (start is null || end is null) return null;
-        return DateTime.TryParse(start, out var s) && DateTime.TryParse(end, out var e)
-            ? Math.Max(0, (long)(e - s).TotalMilliseconds)
-            : null;
-    }
-
     private static async Task<Dictionary<string, WorkLease?>> LoadLeasesAsync(MohistDbContext db, string[] workflowIds, CancellationToken ct)
     {
         if (workflowIds.Length == 0) return [];
@@ -225,12 +117,6 @@ public class WorkflowProjectionService
             && string.Equals(session.WorkId, lease.WorkId, StringComparison.Ordinal);
     }
 }
-
-public sealed record WorkflowTimelineDto(string WorkflowRunId, string Status, string? CurrentStage, PendingWorkView? PendingWork, IReadOnlyList<WorkflowStageDto> Stages, IReadOnlyList<AvailableActionView> AvailableActions);
-public sealed record WorkflowStageDto(string Stage, string Status, int Order, string? StartedAt, string? CompletedAt, long? DurationMs, IReadOnlyList<WorkflowTaskDto> Tasks, IReadOnlyList<WorkflowCheckDto> Checks, ApprovalDto? ApprovalStatus);
-public sealed record WorkflowTaskDto(string Id, string Title, string? Uses, string Status, string? StartedAt, string? CompletedAt, long? DurationMs, int Attempts, string? Message, IReadOnlyList<WorkflowTaskRequiredFile>? RequiredFiles, TaskClassification Classification);
-public sealed record WorkflowCheckDto(string Name, string Title, string? Uses, string Status, string? Message, string? StartedAt, string? CompletedAt, long? DurationMs);
-public sealed record ApprovalDto(string? Result, string RequestedAt, string? RespondedAt);
 
 public sealed record ActiveAgentDto(string RunnerId, string IssueId, int IssueNumber, string ProjectId, string WorkflowRunId, string WorkId, string WorkType, string? Stage, string? Title, string SessionId, string StartedAt, string LastActivityAt, ActiveAgentProgressDto Progress);
 public sealed record ActiveAgentProgressDto(string? Stage, ActiveWorkItemDto CurrentWorkItem, TaskProgressDto TaskProgress, string LastActivityAt);

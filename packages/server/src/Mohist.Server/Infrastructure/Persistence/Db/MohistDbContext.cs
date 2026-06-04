@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Epic.Storage;
@@ -21,7 +22,7 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<Mohist.Server.Workflow.Storage.ProjectTemplateRow> ProjectTemplates { get; set; } = null!;
     public DbSet<ConfigRow> Configs { get; set; } = null!;
-    public DbSet<WorkflowEventRow> WorkflowEvents { get; set; } = null!;
+    public DbSet<EventRow> Events { get; set; } = null!;
     public DbSet<WorkflowAgentSessionRow> WorkflowAgentSessions { get; set; } = null!;
     public DbSet<WorkflowAgentSessionEventRow> WorkflowAgentSessionEvents { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
@@ -63,23 +64,37 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Value).IsRequired();
         });
 
-        modelBuilder.Entity<WorkflowEventRow>(entity =>
+        modelBuilder.Entity<EventRow>(entity =>
         {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.IssueId).HasMaxLength(256);
-            entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.Category).HasMaxLength(64).IsRequired();
-            entity.Property(e => e.Type).HasMaxLength(128).IsRequired();
-            entity.Property(e => e.Stage).HasMaxLength(64);
-            entity.Property(e => e.TaskId).HasMaxLength(128);
-            entity.Property(e => e.CheckName).HasMaxLength(128);
-            entity.Property(e => e.RunnerId).HasMaxLength(256);
-            entity.Property(e => e.Status).HasMaxLength(64);
-            entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.Id });
-            entity.HasIndex(e => new { e.WorkflowRunId, e.Id });
-            entity.HasIndex(e => new { e.ProjectId, e.Id });
-            entity.HasIndex(e => new { e.Type, e.CreatedAt });
+            entity.ToTable("Events");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id)
+                .IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property<string>("Type")
+                .HasMaxLength(256)
+                .IsRequired()
+                .HasValueGenerator<EventTypeGenerator>()
+                .ValueGeneratedOnAdd();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.Time)
+                .IsRequired()
+                .HasValueGenerator<EventTimeGenerator>()
+                .ValueGeneratedOnAdd();
+            entity.Property<string>("SpecVersion")
+                .HasMaxLength(16)
+                .IsRequired()
+                .HasValueGenerator<EventSpecVersionGenerator>()
+                .ValueGeneratedOnAdd();
+            entity.Ignore(e => e.WorkflowEvent);
+            entity.HasIndex("Type", nameof(EventRow.Source), nameof(EventRow.Id));
         });
 
         modelBuilder.Entity<WorkflowAgentSessionRow>(entity =>

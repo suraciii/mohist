@@ -128,78 +128,37 @@ namespace Mohist.Server.Migrations
                     b.ToTable("Configs");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Persistence.Events.WorkflowEventRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Persistence.Events.EventRow", b =>
                 {
+                    b.Property<string>("Source")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Category")
+                    b.Property<string>("Data")
                         .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
+                        .HasColumnType("JSON");
 
-                    b.Property<string>("CheckName")
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("IssueId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("IssueNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Message")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("PayloadJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
+                    b.Property<string>("SpecVersion")
                         .IsRequired()
-                        .HasMaxLength(256)
+                        .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("RunnerId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Stage")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TaskId")
-                        .HasMaxLength(128)
+                    b.Property<DateTime>("Time")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Type")
                         .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkflowRunId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id");
+                    b.HasKey("Source", "Id");
 
-                    b.HasIndex("ProjectId", "Id");
+                    b.HasIndex("Type", "Source", "Id");
 
-                    b.HasIndex("Type", "CreatedAt");
-
-                    b.HasIndex("WorkflowRunId", "Id");
-
-                    b.HasIndex("ProjectId", "IssueNumber", "Id");
-
-                    b.ToTable("WorkflowEvents");
+                    b.ToTable("Events");
                 });
 
             modelBuilder.Entity("Mohist.Server.Issue.Storage.IssueCommentRow", b =>

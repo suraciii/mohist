@@ -150,7 +150,7 @@ public class ProjectTemplateRoutesSpecs
     }
 
     [Fact]
-    public async Task PutOverride_CreatesRowAndEmitsProjectTemplateChangedEvent()
+    public async Task PutOverride_CreatesRow()
     {
         var project = await CreateProjectAsync();
 
@@ -171,10 +171,6 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("proposal", payload.GetProperty("data").GetProperty("key").GetString());
         Assert.Equal("# Created", payload.GetProperty("data").GetProperty("body").GetString());
 
-        var events = await ListEventsAsync(project.Id);
-        var changeEvent = Assert.Single(events, e => e.Type == "project_template_changed");
-        Assert.Equal("project", changeEvent.Category);
-        Assert.Equal("proposal", changeEvent.Message);
     }
 
     [Fact]
@@ -209,8 +205,6 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("# Updated body", overrideRow.GetProperty("data").GetProperty("body").GetString());
         Assert.Equal("Updated", overrideRow.GetProperty("data").GetProperty("displayName").GetString());
 
-        var events = await ListEventsAsync(project.Id);
-        Assert.Equal(2, events.Count(e => e.Type == "project_template_changed"));
     }
 
     [Fact]
@@ -258,7 +252,7 @@ public class ProjectTemplateRoutesSpecs
     }
 
     [Fact]
-    public async Task DeleteOverride_RemovesRowAndEmitsProjectTemplateDeletedEvent()
+    public async Task DeleteOverride_RemovesRow()
     {
         var project = await CreateProjectAsync();
 
@@ -280,9 +274,6 @@ public class ProjectTemplateRoutesSpecs
             $"/api/projects/{project.Id}/templates/proposal/override");
         Assert.Equal(HttpStatusCode.NotFound, followUp.StatusCode);
 
-        var events = await ListEventsAsync(project.Id);
-        var deleteEvent = Assert.Single(events, e => e.Type == "project_template_deleted");
-        Assert.Equal("proposal", deleteEvent.Message);
     }
 
     [Fact]
@@ -295,8 +286,6 @@ public class ProjectTemplateRoutesSpecs
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var events = await ListEventsAsync(project.Id);
-        Assert.DoesNotContain(events, e => e.Type == "project_template_deleted");
     }
 
     [Fact]
@@ -371,35 +360,6 @@ public class ProjectTemplateRoutesSpecs
             $"/api/projects/{projectId}/templates/{key}/override",
             body);
         response.EnsureSuccessStatusCode();
-    }
-
-    private async Task<List<EventDto>> ListEventsAsync(string projectId)
-    {
-        using var response = await _client.GetAsync($"/api/events/recent?projectId={projectId}");
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var events = new List<EventDto>();
-        foreach (var entry in payload.GetProperty("data").EnumerateArray())
-        {
-            events.Add(new EventDto(
-                entry.GetProperty("id").GetString() ?? string.Empty,
-                entry.GetProperty("projectId").GetString() ?? string.Empty,
-                entry.TryGetProperty("issueId", out var issueId) ? issueId.GetString() : null,
-                entry.TryGetProperty("issueNumber", out var issueNumber) ? issueNumber.GetInt32() : 0,
-                entry.TryGetProperty("workflowRunId", out var workflowRunId) ? workflowRunId.GetString() : null,
-                entry.GetProperty("category").GetString() ?? string.Empty,
-                entry.GetProperty("type").GetString() ?? string.Empty,
-                entry.TryGetProperty("stage", out var stage) ? stage.GetString() : null,
-                entry.TryGetProperty("taskId", out var taskId) ? taskId.GetString() : null,
-                entry.TryGetProperty("checkName", out var checkName) ? checkName.GetString() : null,
-                entry.TryGetProperty("runnerId", out var runnerId) ? runnerId.GetString() : null,
-                entry.TryGetProperty("status", out var status) ? status.GetString() : null,
-                entry.TryGetProperty("message", out var message) ? message.GetString() : null,
-                entry.TryGetProperty("payload", out var payloadElement) ? payloadElement : default,
-                entry.GetProperty("createdAt").GetString() ?? string.Empty));
-        }
-        return events;
     }
 
     private sealed record ProjectDto(string Id);

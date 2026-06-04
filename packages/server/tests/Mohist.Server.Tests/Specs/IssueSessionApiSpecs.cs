@@ -6,6 +6,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -223,54 +224,7 @@ public class IssueSessionApiSpecs
     }
 
     [Fact]
-    public async Task IssueWorkflowLogEndpoint_ReturnsRawEntriesInCreatedAtOrder()
-    {
-        var projectName = $"workflow-log-order-{Guid.NewGuid():N}";
-        var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Workflow log raw ordering", projectId = project.Id });
-
-        using (var scope = _fixture.Services.CreateScope())
-        {
-            var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "workflow", "workflow_started", WorkflowRunId: "wr-1", Status: "started", Payload: new { workflowRunId = "wr-1", note = "kickoff" }));
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "stage", "stage_changed", WorkflowRunId: "wr-1", Stage: "plan", Status: "started", Payload: new { stage = "plan" }));
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "task", "task_started", WorkflowRunId: "wr-1", Stage: "plan", TaskId: "T-1", Status: "started", Payload: new { taskId = "T-1", title = "first task" }));
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "check", "check_started", WorkflowRunId: "wr-1", Stage: "plan", CheckName: "spec/check", Status: "started", Payload: new { check = "spec/check" }));
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "approval", "approval_requested", WorkflowRunId: "wr-1", Stage: "plan", Status: "pending", Payload: new { reason = "plan ready" }));
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "retry", "retry_scheduled", WorkflowRunId: "wr-1", Stage: "plan", Status: "queued", Payload: new { attempts = 1 }));
-        }
-
-        var response = await _client.GetDataAsync<WorkflowLogResponseDto>($"/api/issues/{issue.Number}/workflow-log?projectId={project.Id}");
-
-        var types = response.Entries.Select(e => e.Type).ToArray();
-        Assert.Equal(
-            new[] { "issue_created", "workflow_started", "stage_changed", "task_started", "check_started", "approval_requested", "retry_scheduled" },
-            types);
-
-        var createdAt = response.Entries.Select(e => DateTime.Parse(e.CreatedAt)).ToArray();
-        Assert.Equal(createdAt.OrderBy(t => t).ToArray(), createdAt);
-
-        foreach (var entry in response.Entries)
-        {
-            Assert.Equal(project.Id, entry.ProjectId);
-            Assert.Equal(issue.Number, entry.IssueNumber);
-            Assert.NotNull(entry.Payload);
-        }
-
-        var workflowStarted = response.Entries.Single(e => e.Type == "workflow_started");
-        Assert.Equal("wr-1", workflowStarted.Payload?.GetProperty("workflowRunId").GetString());
-        Assert.Equal("kickoff", workflowStarted.Payload?.GetProperty("note").GetString());
-
-        var approval = response.Entries.Single(e => e.Type == "approval_requested");
-        Assert.Equal("plan ready", approval.Payload?.GetProperty("reason").GetString());
-
-        var taskStarted = response.Entries.Single(e => e.Type == "task_started");
-        Assert.Equal("T-1", taskStarted.TaskId);
-        Assert.Equal("plan", taskStarted.Stage);
-    }
-
-    [Fact]
-    public async Task IssueSessionApis_DoNotReturnServerProjectedTurnsOrWorkflowLogs()
+    public async Task IssueSessionApis_DoNotReturnServerProjectedTurns()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("removal-assertion", sessionName: "plan");
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
@@ -303,20 +257,11 @@ public class IssueSessionApiSpecs
             }
         });
 
-        using (var scope = _fixture.Services.CreateScope())
-        {
-            var store = scope.ServiceProvider.GetRequiredService<IEventStore>();
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "workflow", "workflow_started", WorkflowRunId: currentWorkflowRunId, Status: "started", Payload: new { workflowRunId = currentWorkflowRunId }));
-            await store.AppendAsync(new EventInput(project.Id, issue.Number, "stage", "stage_changed", WorkflowRunId: currentWorkflowRunId, Stage: "plan", Status: "started", Payload: new { stage = "plan" }));
-        }
-
         var metadataRaw = await _client.GetRawAsync($"/api/issues/{issue.Number}/sessions/plan?projectId={project.Id}");
         var eventsRaw = await _client.GetRawAsync($"/api/issues/{issue.Number}/sessions/plan/events?projectId={project.Id}");
-        var workflowLogRaw = await _client.GetRawAsync($"/api/issues/{issue.Number}/workflow-log?projectId={project.Id}");
 
         using (var metadataDoc = JsonDocument.Parse(metadataRaw))
         using (var eventsDoc = JsonDocument.Parse(eventsRaw))
-        using (var workflowLogDoc = JsonDocument.Parse(workflowLogRaw))
         {
             var metadataRoot = metadataDoc.RootElement.GetProperty("data");
             AssertNoProjectionFields(metadataRoot, "metadata");
@@ -331,13 +276,6 @@ public class IssueSessionApiSpecs
             Assert.False(eventsRoot.TryGetProperty("assistant", out _));
             Assert.False(eventsRoot.TryGetProperty("workflowLogs", out _));
             Assert.True(eventsRoot.TryGetProperty("events", out _));
-
-            var workflowLogRoot = workflowLogDoc.RootElement.GetProperty("data");
-            AssertNoProjectionFields(workflowLogRoot, "workflow-log");
-            Assert.False(workflowLogRoot.TryGetProperty("turns", out _));
-            Assert.False(workflowLogRoot.TryGetProperty("assistant", out _));
-            Assert.False(workflowLogRoot.TryGetProperty("workflowLogs", out _));
-            Assert.True(workflowLogRoot.TryGetProperty("entries", out _));
         }
     }
 
@@ -379,6 +317,4 @@ public class IssueSessionApiSpecs
     private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record IssueSessionEventsResponseDto(IssueSessionEventDto[] Events);
     private sealed record IssueSessionEventDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
-    private sealed record WorkflowLogResponseDto(WorkflowLogEntryDto[] Entries);
-    private sealed record WorkflowLogEntryDto(string Id, string ProjectId, int IssueNumber, string Category, string Type, string? Stage, string? TaskId, string? CheckName, string CreatedAt, JsonElement? Payload);
 }

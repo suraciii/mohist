@@ -1,10 +1,3 @@
-export interface WorkflowLogItem {
-  id: string
-  eventType: string
-  data: unknown
-  createdAt: string
-}
-
 export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface AgentSessionMetadataCounts {
@@ -102,9 +95,7 @@ export interface CoderSessionSummary {
   toolErrorCount?: number | null
 }
 
-export type CoderSessionItem = CoderSessionSummary & {
-  workflowLogs?: WorkflowLogItem[]
-}
+export type CoderSessionItem = CoderSessionSummary
 
 export type PromptKind = 'initial' | 'task' | 'retry' | 'followup' | 'recovery' | 'legacy-missing'
 
@@ -249,7 +240,6 @@ export interface CoderSessionDetail {
   metadata: SessionMetadata
   turns: SessionTurn[]
   incomplete: boolean
-  workflowLogs?: WorkflowLogItem[]
 }
 
 export interface ToolCallEntry {

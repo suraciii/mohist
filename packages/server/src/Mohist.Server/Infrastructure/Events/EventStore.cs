@@ -1,7 +1,7 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Events;
+using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Infrastructure.Events;
 
@@ -16,102 +16,34 @@ public class EventStore : IEventStore
         _eventBus = eventBus;
     }
 
-    public async Task<EventDto> AppendAsync(EventInput input, CancellationToken ct = default)
+    public async Task<WorkflowDomainEventDto> AppendWorkflowEventAsync(string workflowRunId, WorkflowEvent payload, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var entry = new WorkflowEventRow
-        {
-            ProjectId = input.ProjectId,
-            IssueId = input.IssueId,
-            IssueNumber = input.IssueNumber,
-            WorkflowRunId = input.WorkflowRunId,
-            Category = input.Category,
-            Type = input.Type,
-            Stage = input.Stage,
-            TaskId = input.TaskId,
-            CheckName = input.CheckName,
-            RunnerId = input.RunnerId,
-            Status = input.Status,
-            Message = input.Message,
-            PayloadJson = input.Payload is not null ? JsonSerializer.Serialize(input.Payload) : null,
-            CreatedAt = DateTime.UtcNow,
-        };
-
-        db.WorkflowEvents.Add(entry);
+        var staged = await WorkflowEventPersistence.StageAsync(db, workflowRunId, [payload], ct);
         await db.SaveChangesAsync(ct);
 
-        var dto = ToDto(entry);
-        _eventBus.Emit(input.Type, dto);
+        var dto = WorkflowEventPersistence.ToDto(staged.Single());
+        _eventBus.Emit(dto.Type, dto);
         return dto;
     }
 
-    public async Task<IReadOnlyList<EventDto>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default)
+    public async Task<IReadOnlyList<WorkflowDomainEventDto>> ListWorkflowEventsAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.WorkflowEvents.AsNoTracking()
-            .Where(e => e.ProjectId == projectId && e.IssueNumber == issueNumber)
+        var source = WorkflowEventPersistence.WorkflowRunSource(workflowRunId);
+        var rows = await db.Events.AsNoTracking()
+            .Where(e => e.Source == source)
             .OrderByDescending(e => e.Id)
             .Take(limit)
             .OrderBy(e => e.Id)
+            .Select(e => new EventReadModel(
+                e,
+                EF.Property<string>(e, "Type"),
+                EF.Property<string>(e, "SpecVersion")))
             .ToListAsync(ct);
-        return rows.Select(ToDto).ToList();
+
+        return rows.Select(e => WorkflowEventPersistence.ToDto(e.Row, e.Type, e.SpecVersion)).ToList();
     }
 
-    public async Task<IReadOnlyList<EventDto>> ListWorkflowEventsAsync(string workflowRunId, int limit = 200, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.WorkflowEvents.AsNoTracking()
-            .Where(e => e.WorkflowRunId == workflowRunId)
-            .OrderByDescending(e => e.Id)
-            .Take(limit)
-            .OrderBy(e => e.Id)
-            .ToListAsync(ct);
-        return rows.Select(ToDto).ToList();
-    }
-
-    public async Task<IReadOnlyList<EventDto>> ListIssueWorkflowLogAsync(string projectId, int issueNumber, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.WorkflowEvents.AsNoTracking()
-            .Where(e => e.ProjectId == projectId && e.IssueNumber == issueNumber)
-            .OrderBy(e => e.CreatedAt)
-            .ThenBy(e => e.Id)
-            .ToListAsync(ct);
-        return rows.Select(ToDto).ToList();
-    }
-
-    public async Task<IReadOnlyList<EventDto>> ListRecentAsync(string projectId, int limit = 200, CancellationToken ct = default)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.WorkflowEvents.AsNoTracking()
-            .Where(e => e.ProjectId == projectId)
-            .OrderByDescending(e => e.Id)
-            .Take(limit)
-            .OrderBy(e => e.Id)
-            .ToListAsync(ct);
-        return rows.Select(ToDto).ToList();
-    }
-
-    private static EventDto ToDto(WorkflowEventRow entry) => new(
-        entry.Id.ToString(),
-        entry.ProjectId,
-        entry.IssueId,
-        entry.IssueNumber,
-        entry.WorkflowRunId,
-        entry.Category,
-        entry.Type,
-        entry.Stage,
-        entry.TaskId,
-        entry.CheckName,
-        entry.RunnerId,
-        entry.Status,
-        entry.Message,
-        ParsePayload(entry.PayloadJson),
-        entry.CreatedAt.ToString("o"));
-
-    private static object? ParsePayload(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return null;
-        return JsonSerializer.Deserialize<JsonElement>(json);
-    }
+    private sealed record EventReadModel(EventRow Row, string Type, string SpecVersion);
 }
