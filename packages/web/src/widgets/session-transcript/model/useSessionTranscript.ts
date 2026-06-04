@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../../../entities/agent'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../../../entities/coder-session'
+import type { SessionTurn, SessionPart, TextPart, ReasoningPart, ToolPart, ErrorPart } from '../../../entities/coder-session'
+import type { SessionEvent, SessionChatPart } from '../../../entities/session/model/view'
+import { viewSessionEvents } from '../../../entities/session/model/view'
 import { parseEditInput, parsePatchOperations, parseJsonSafely } from './transcript-tool-utils'
 import {
   normalizeToolName,
@@ -16,7 +18,8 @@ interface UseSessionTranscriptOptions {
   issueNumber: number
   sessionId: string
   acpSessionId: string
-  initialTurns: SessionTurn[]
+  initialTurns?: SessionTurn[]
+  initialEvents?: SessionEvent[]
   isRunning: boolean
 }
 
@@ -56,6 +59,95 @@ export interface UseSessionTranscriptResult {
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11)
+}
+
+function isSessionChatPart(part: unknown): part is SessionChatPart {
+  if (!part || typeof part !== 'object') return false
+  const candidate = part as { partType?: unknown }
+  return candidate.partType === 'text'
+    || candidate.partType === 'reasoning'
+    || candidate.partType === 'tool'
+    || candidate.partType === 'error'
+}
+
+function chatPartToAssistantPart(
+  part: SessionChatPart,
+): SessionPart {
+  if (part.partType === 'text') {
+    const textPart: TextPart = {
+      id: part.id,
+      type: 'text',
+      text: part.text,
+      startedAt: part.startedAt,
+      completedAt: part.completedAt,
+    }
+    return textPart
+  }
+  if (part.partType === 'reasoning') {
+    const reasoningPart: ReasoningPart = {
+      id: part.id,
+      type: 'reasoning',
+      text: part.text,
+      startedAt: part.startedAt,
+      completedAt: part.completedAt,
+    }
+    return reasoningPart
+  }
+  if (part.partType === 'error') {
+    const errorPart: ErrorPart = {
+      id: part.id,
+      type: 'error',
+      message: part.message,
+      kind: part.kind,
+      at: part.at,
+    }
+    return errorPart
+  }
+  const toolInput = part.input
+  const toolOutput = part.output
+  const tool: ToolPart['tool'] = {
+    toolCallId: part.toolCallId,
+    normalizedName: part.normalizedName,
+    toolName: part.toolName,
+    status: part.status,
+    title: part.title,
+    input: toolInput,
+    output: toolOutput,
+    error: part.error,
+    startedAt: part.startedAt,
+    completedAt: part.completedAt,
+    rawInput: toolInput,
+    rawOutput: toolOutput,
+  }
+  const toolPart: ToolPart = { id: part.id, type: 'tool', tool }
+  return toolPart
+}
+
+function projectHistoricalEvents(events: SessionEvent[]): SessionTurn[] {
+  if (events.length === 0) return []
+  const chat = viewSessionEvents(events, 'chat')
+  return chat.turns.map((turn, index) => {
+    const assistant: SessionPart[] = []
+    for (const part of turn.parts) {
+      if (isSessionChatPart(part)) {
+        assistant.push(chatPartToAssistantPart(part))
+      }
+    }
+    const projected: SessionTurn = {
+      id: turn.id || `turn-${index}`,
+      startedAt: turn.startedAt,
+      completedAt: turn.completedAt,
+      incomplete: turn.incomplete,
+      user: {
+        role: 'mohist',
+        text: turn.prompt.text,
+        kind: turn.prompt.kind,
+        sentAt: turn.prompt.sentAt,
+      },
+      assistant,
+    }
+    return projected
+  })
 }
 
 function createTextPart(text: string, startedAt: string): TextPart {
@@ -527,10 +619,17 @@ export function useSessionTranscript({
   sessionId,
   acpSessionId,
   initialTurns,
+  initialEvents,
   isRunning,
 }: UseSessionTranscriptOptions): UseSessionTranscriptResult {
   const queryClient = useQueryClient()
-const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
+  const initialState = useMemo<SessionTurn[]>(() => {
+    if (initialEvents && initialEvents.length > 0) {
+      return projectHistoricalEvents(initialEvents)
+    }
+    return initialTurns ?? []
+  }, [])
+  const [turns, setTurns] = useState<SessionTurn[]>(initialState)
   const [transcriptVersion, setTranscriptVersion] = useState(0)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [newContentAvailable, setNewContentAvailable] = useState(false)
@@ -594,14 +693,18 @@ const [turns, setTurns] = useState<SessionTurn[]>(initialTurns)
   }, [queryClient, issueNumber, sessionId])
 
   useEffect(() => {
-    setTurns(initialTurns)
+    if (initialEvents && initialEvents.length > 0) {
+      setTurns(projectHistoricalEvents(initialEvents))
+    } else {
+      setTurns(initialTurns ?? [])
+    }
     liveToolCallMapRef.current.clear()
     pendingCorrelationRef.current.clear()
     setIsFinalizing(false)
     setIsThinking(false)
     setIsStreaming(false)
     setTranscriptVersion((version) => version + 1)
-  }, [initialTurns])
+  }, [initialEvents, initialTurns])
 
   useEffect(() => {
     if (!isRunning) {

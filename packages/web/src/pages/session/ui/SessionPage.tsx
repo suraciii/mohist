@@ -1,19 +1,62 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useIssue } from '../../../entities/issue'
 import { useCoderSessions } from '../../../entities/coder-session'
-import { getCoderSessionDetail, getWorkflowSessionDetail } from '../../../entities/coder-session'
+import { getAgentSessionMetadata, getAgentSessionEvents } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
-import type { CoderSessionDetail, SessionStatusKind } from '../../../entities/coder-session'
+import type { AgentSessionMetadata, AgentSessionEvent, SessionMetadata, SessionStatusKind, CoderSessionDetail } from '../../../entities/coder-session'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
 import { Button } from '@/shared/ui/components/button'
 
 type StatusKind = SessionStatusKind
 
-const EMPTY_TURNS: CoderSessionDetail['turns'] = []
+const EMPTY_EVENTS: AgentSessionEvent[] = []
+
+function countTurnsFromEvents(events: AgentSessionEvent[]): number {
+  let count = 0
+  for (const event of events) {
+    if (event.type === 'mohist_prompt') count += 1
+  }
+  return count
+}
+
+function buildSessionMetadata(
+  meta: AgentSessionMetadata,
+  lastEventAt: string | null,
+  turnCount: number,
+  acpSessionId: string,
+): SessionMetadata {
+  const isRunning = meta.status === 'running' || meta.status === 'probing'
+  return {
+    sessionId: meta.id,
+    sessionName: meta.sessionName,
+    coderSessionId: meta.id,
+    issueId: '',
+    acpSessionId: meta.acpSessionId ?? acpSessionId,
+    executionId: null,
+    title: meta.title,
+    status: meta.status,
+    statusKind: meta.statusKind
+      ?? getSessionStatusKind(meta.status, lastEventAt ?? meta.lastActivityAt, isRunning, meta.completedAt),
+    model: meta.model,
+    stage: meta.stage,
+    createdAt: meta.createdAt,
+    completedAt: meta.completedAt,
+    lastActivityAt: lastEventAt,
+    firstPromptSentAt: null,
+    lastDataAt: lastEventAt,
+    probeSentAt: null,
+    probeDeadlineAt: null,
+    failureReason: null,
+    eventCount: meta.metadata.eventCount,
+    toolCount: meta.metadata.toolCount,
+    turnCount,
+    changedFiles: meta.changedFiles,
+  }
+}
 
 function formatDuration(ms: number): string {
   if (ms < 0) return '0s'
@@ -308,17 +351,65 @@ export function SessionPage() {
     ? (s.sessionName ?? s.executionId ?? s.id) === decodedSessionName
     : s.id === decodedSessionId)
 
+  const routeSessionLookup = decodedSessionName ?? routeSessionKey
+  const lookupKey = decodedSessionName ?? decodedSessionId
+
+  const hasRoute = !!routeSessionLookup && !!projectId && !!decodedSessionName && issueNumber > 0
+
   const {
-    data: detail,
-    isLoading: detailLoading,
-    isError: detailError,
-  } = useQuery<CoderSessionDetail, Error>({
-    queryKey: ['issues', issueNumber, projectId, decodedSessionName ? 'workflow-sessions' : 'coder-sessions', routeSessionKey],
-    queryFn: () => decodedSessionName
-      ? getWorkflowSessionDetail(issueNumber, decodedSessionName, projectId)
-      : getCoderSessionDetail(issueNumber, decodedSessionId!, projectId),
-    enabled: !!routeSessionKey && routeSessionKey.length > 0 && issueNumber > 0 && !!projectId,
+    data: metadata,
+    isLoading: metadataLoading,
+    isError: metadataError,
+  } = useQuery<AgentSessionMetadata | null, Error>({
+    queryKey: ['issues', issueNumber, projectId, 'agent-session-metadata', lookupKey],
+    queryFn: async () => {
+      if (!decodedSessionName) return null
+      return getAgentSessionMetadata(issueNumber, decodedSessionName, projectId)
+    },
+    enabled: hasRoute,
   })
+
+  const {
+    data: eventsResponse,
+  } = useQuery<{ events: AgentSessionEvent[] } | null, Error>({
+    queryKey: ['issues', issueNumber, projectId, 'agent-session-events', lookupKey],
+    queryFn: async () => {
+      if (!decodedSessionName) return null
+      return getAgentSessionEvents(issueNumber, decodedSessionName, projectId)
+    },
+    enabled: hasRoute && !!metadata,
+  })
+
+  const initialEvents = useMemo<AgentSessionEvent[]>(() => eventsResponse?.events ?? EMPTY_EVENTS, [eventsResponse])
+
+  const lastEventAt = useMemo(() => {
+    const list = eventsResponse?.events
+    if (!list || list.length === 0) return null
+    return list[list.length - 1]?.createdAt ?? null
+  }, [eventsResponse])
+
+  const detail: CoderSessionDetail | null = useMemo(() => {
+    if (!metadata) return null
+    const turnCount = eventsResponse?.events
+      ? countTurnsFromEvents(eventsResponse.events)
+      : 0
+    return {
+      id: metadata.id,
+      acpSessionId: metadata.acpSessionId,
+      executionId: null,
+      taskDescription: metadata.title,
+      status: metadata.status,
+      createdAt: metadata.createdAt,
+      completedAt: metadata.completedAt,
+      model: metadata.model,
+      coderType: null,
+      stage: metadata.stage,
+      title: metadata.title,
+      metadata: buildSessionMetadata(metadata, lastEventAt, turnCount, metadata.acpSessionId),
+      turns: [],
+      incomplete: false,
+    }
+  }, [metadata, eventsResponse, lastEventAt])
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
@@ -345,7 +436,7 @@ export function SessionPage() {
     issueNumber,
     sessionId: detail?.id ?? decodedSessionId ?? decodedSessionName ?? '',
     acpSessionId,
-    initialTurns: detail?.turns ?? EMPTY_TURNS,
+    initialEvents: initialEvents.length > 0 ? initialEvents : undefined,
     isRunning,
   })
 
@@ -469,11 +560,11 @@ export function SessionPage() {
     return <SessionNotFound issueNumber={issueNumber || 0} />
   }
 
-  if (sessionsLoading || detailLoading) {
+  if (sessionsLoading || metadataLoading) {
     return <SessionLoadingState />
   }
 
-  if (detailError || (!detail && !session)) {
+  if (metadataError || (!metadata && !session)) {
     return <SessionApiErrorState issueNumber={issueNumber} />
   }
 

@@ -8,16 +8,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ProjectProvider } from '../src/entities/project/model/ProjectContext'
 import { MemoryRouter } from 'react-router-dom'
 import React from 'react'
-import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata } from '../src/entities/coder-session'
+import type { SessionTurn, TextPart, ReasoningPart, ToolPart, ErrorPart, CoderSessionDetail, SessionMetadata, AgentSessionMetadata, AgentSessionEvent } from '../src/entities/coder-session'
 
 const sessionPageMocks = vi.hoisted(() => ({
   sessions: [] as any[],
   sessionsLoading: false,
   issue: null as any,
   detail: null as CoderSessionDetail | null,
+  metadata: null as AgentSessionMetadata | null,
+  events: null as AgentSessionEvent[] | null,
   detailError: null as Error | null,
   detailPending: false,
-  params: { number: '123', sessionId: 'session-123' },
+  params: { number: '123', sessionName: 'session-123' },
 }))
 
 vi.mock('react-router-dom', async () => {
@@ -38,15 +40,15 @@ vi.mock('../src/entities/issue/api/queries', () => ({
 
 vi.mock('../src/entities/coder-session/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/entities/coder-session/api/client')>()),
-  getCoderSessionDetail: vi.fn(() => {
+  getAgentSessionMetadata: vi.fn(() => {
     if (sessionPageMocks.detailPending) return new Promise(() => {})
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    return Promise.resolve(sessionPageMocks.detail)
+    return Promise.resolve(sessionPageMocks.metadata)
   }),
-  getWorkflowSessionDetail: vi.fn(() => {
+  getAgentSessionEvents: vi.fn(() => {
     if (sessionPageMocks.detailPending) return new Promise(() => {})
     if (sessionPageMocks.detailError) return Promise.reject(sessionPageMocks.detailError)
-    return Promise.resolve(sessionPageMocks.detail)
+    return Promise.resolve({ events: sessionPageMocks.events ?? [] })
   }),
 }))
 
@@ -63,11 +65,99 @@ beforeEach(() => {
   sessionPageMocks.sessionsLoading = false
   sessionPageMocks.issue = null
   sessionPageMocks.detail = null
+  sessionPageMocks.metadata = null
+  sessionPageMocks.events = null
   sessionPageMocks.detailError = null
   sessionPageMocks.detailPending = false
-  sessionPageMocks.params = { number: '123', sessionId: 'session-123' }
+  sessionPageMocks.params = { number: '123', sessionName: 'session-123' }
   Element.prototype.scrollTo = vi.fn()
 })
+
+function convertLegacyToAgentMetadata(detail: CoderSessionDetail): AgentSessionMetadata {
+  const legacy = detail.metadata
+  return {
+    id: detail.id,
+    sessionName: legacy.sessionId,
+    acpSessionId: detail.acpSessionId,
+    status: legacy.status ?? detail.status,
+    statusKind: legacy.statusKind,
+    model: legacy.model ?? detail.model,
+    stage: legacy.stage ?? detail.stage,
+    title: legacy.title ?? detail.title,
+    createdAt: detail.createdAt,
+    completedAt: detail.completedAt,
+    lastActivityAt: legacy.lastActivityAt ?? null,
+    lastDataAt: legacy.lastDataAt ?? null,
+    probeSentAt: legacy.probeSentAt ?? null,
+    probeDeadlineAt: legacy.probeDeadlineAt ?? null,
+    failureReason: legacy.failureReason ?? null,
+    turnCount: legacy.turnCount ?? 0,
+    changedFiles: legacy.changedFiles,
+    metadata: {
+      eventCount: legacy.eventCount ?? 0,
+      toolCount: legacy.toolCount ?? 0,
+    },
+  }
+}
+
+function convertLegacyTurnsToEvents(turns: SessionTurn[]): AgentSessionEvent[] {
+  const events: AgentSessionEvent[] = []
+  let sequence = 1
+  for (const turn of turns) {
+    events.push({
+      id: sequence,
+      sequence,
+      type: 'mohist_prompt',
+      payload: { text: turn.user.text, kind: turn.user.kind, sentAt: turn.user.sentAt },
+      createdAt: turn.startedAt,
+    })
+    sequence += 1
+    for (const part of turn.assistant) {
+      if (part.type === 'text') {
+        events.push({
+          id: sequence,
+          sequence,
+          type: 'agent_message_chunk',
+          payload: { text: part.text },
+          createdAt: part.startedAt,
+        })
+      } else if (part.type === 'reasoning') {
+        events.push({
+          id: sequence,
+          sequence,
+          type: 'agent_thought_chunk',
+          payload: { text: part.text },
+          createdAt: part.startedAt,
+        })
+      } else if (part.type === 'tool') {
+        events.push({
+          id: sequence,
+          sequence,
+          type: 'tool_call',
+          payload: {
+            toolCallId: part.tool.toolCallId,
+            toolName: part.tool.toolName,
+            title: part.tool.title,
+            status: part.tool.status,
+            rawInput: part.tool.rawInput,
+            rawOutput: part.tool.rawOutput,
+          },
+          createdAt: part.tool.startedAt,
+        })
+      } else if (part.type === 'error') {
+        events.push({
+          id: sequence,
+          sequence,
+          type: 'agent_liveness_status',
+          payload: { status: 'failed', failureReason: part.message },
+          createdAt: part.at,
+        })
+      }
+      sequence += 1
+    }
+  }
+  return events
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -1689,7 +1779,7 @@ describe('SessionPage header and states', () => {
     }
   }
 
-  function makeMockDetail(overrides: Partial<{ metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null }> = {}): CoderSessionDetail {
+  function makeMockDetail(overrides: Partial<{ id: string; metadata: SessionMetadata; turns: SessionTurn[]; incomplete: boolean; status: string; completedAt: string | null }> = {}): CoderSessionDetail {
     return {
       id: 'session-123',
       acpSessionId: 'acp-123',
@@ -1713,6 +1803,8 @@ describe('SessionPage header and states', () => {
     sessions = [makeMockSession()],
     issue = null,
     detail = makeMockDetail(),
+    metadata = null,
+    events = null,
     sessionsLoading = false,
     detailError = null,
     detailPending = false,
@@ -1720,6 +1812,8 @@ describe('SessionPage header and states', () => {
     sessions?: any[]
     issue?: any
     detail?: CoderSessionDetail | null
+    metadata?: AgentSessionMetadata | null
+    events?: AgentSessionEvent[] | null
     sessionsLoading?: boolean
     detailError?: Error | null
     detailPending?: boolean
@@ -1727,13 +1821,27 @@ describe('SessionPage header and states', () => {
     sessionPageMocks.sessions = sessions
     sessionPageMocks.issue = issue
     sessionPageMocks.detail = detail
+    if (metadata) {
+      sessionPageMocks.metadata = metadata
+    } else if (detail) {
+      sessionPageMocks.metadata = convertLegacyToAgentMetadata(detail)
+    } else {
+      sessionPageMocks.metadata = null
+    }
+    if (events) {
+      sessionPageMocks.events = events
+    } else if (detail?.turns && detail.turns.length > 0) {
+      sessionPageMocks.events = convertLegacyTurnsToEvents(detail.turns)
+    } else {
+      sessionPageMocks.events = []
+    }
     sessionPageMocks.sessionsLoading = sessionsLoading
     sessionPageMocks.detailError = detailError
     sessionPageMocks.detailPending = detailPending
   }
 
   describe('header displays session metadata', () => {
-    it('shows issue link, stage, model, turn count, last activity, and status badge', async () => {
+    it('shows issue link, stage, model, last activity, and status badge from metadata', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
           status: 'completed',
@@ -1754,7 +1862,31 @@ describe('SessionPage header and states', () => {
       expect(screen.getByText('Test Issue')).toBeInTheDocument()
       expect(screen.getByText('Build')).toBeInTheDocument()
       expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
-      expect(screen.getByText('3 turns')).toBeInTheDocument()
+    })
+
+    it('shows transcript turn count derived from raw events when transcript is rendered', async () => {
+      const detail = makeMockDetail({
+        metadata: makeMockMetadata({
+          status: 'completed',
+          statusKind: 'completed',
+          stage: 'build',
+          model: 'claude-3-5-sonnet',
+          turnCount: 3,
+          lastActivityAt: '2024-01-01T10:05:00.000Z',
+        }),
+      })
+      const events: AgentSessionEvent[] = [
+        { id: 1, sequence: 1, type: 'mohist_prompt', payload: { text: 'first', kind: 'task' }, createdAt: '2024-01-01T10:00:00.000Z' },
+        { id: 2, sequence: 2, type: 'mohist_prompt', payload: { text: 'second', kind: 'task' }, createdAt: '2024-01-01T10:01:00.000Z' },
+        { id: 3, sequence: 3, type: 'mohist_prompt', payload: { text: 'third', kind: 'task' }, createdAt: '2024-01-01T10:02:00.000Z' },
+      ]
+      setupSessionPage({ detail, events })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('3 turns')).toBeInTheDocument()
+      })
     })
 
     it('shows changed-files summary in header when metadata has changedFiles', async () => {
@@ -1774,20 +1906,90 @@ describe('SessionPage header and states', () => {
       })
     })
 
-    it('loads workflow session detail by route session name', async () => {
+    it('requests metadata before raw events when opening a session route', async () => {
       const api = await import('../src/entities/coder-session/api/client')
-      sessionPageMocks.params = { number: '123', sessionName: 'plan' } as any
+      const callOrder: string[] = []
+      const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
+      const eventsMock = api.getAgentSessionEvents as unknown as ReturnType<typeof vi.fn>
+      metadataMock.mockImplementationOnce(async (..._args) => {
+        callOrder.push('metadata')
+        return sessionPageMocks.metadata
+      })
+      eventsMock.mockImplementationOnce(async (..._args) => {
+        callOrder.push('events')
+        return { events: sessionPageMocks.events ?? [] }
+      })
+
+      sessionPageMocks.params = { number: '51', sessionName: 'T-003.1' } as any
+      const detail = makeMockDetail({
+        id: 'proj/wr/T-003.1',
+        metadata: makeMockMetadata({ sessionId: 'proj/wr/T-003.1', sessionName: 'T-003.1' }),
+      })
       setupSessionPage({
-        sessions: [{ ...makeMockSession(), id: 'proj_1/wr_1/plan', sessionName: 'plan' }],
-        detail: makeMockDetail({ id: 'proj_1/wr_1/plan', metadata: makeMockMetadata({ sessionId: 'proj_1/wr_1/plan', sessionName: 'plan' }) } as any),
+        sessions: [{ ...makeMockSession(), id: 'proj/wr/T-003.1', sessionName: 'T-003.1' }],
+        detail,
+        metadata: { ...convertLegacyToAgentMetadata(detail), sessionName: 'T-003.1' },
       })
 
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(api.getWorkflowSessionDetail).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
+        expect(callOrder[0]).toBe('metadata')
       })
-      expect(api.getCoderSessionDetail).not.toHaveBeenCalled()
+      await waitFor(() => {
+        expect(callOrder).toContain('events')
+      })
+      expect(callOrder.indexOf('metadata')).toBeLessThan(callOrder.indexOf('events'))
+      expect(metadataMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+      expect(eventsMock).toHaveBeenCalledWith(51, 'T-003.1', TEST_PROJECT.id)
+    })
+
+    it('does not request raw events when metadata has not yet loaded', async () => {
+      const api = await import('../src/entities/coder-session/api/client')
+      sessionPageMocks.params = { number: '77', sessionName: 'late' } as any
+      const detail = makeMockDetail({
+        id: 'proj/wr/late',
+        metadata: makeMockMetadata({ sessionId: 'proj/wr/late', sessionName: 'late' }),
+      })
+      setupSessionPage({
+        sessions: [{ ...makeMockSession(), id: 'proj/wr/late', sessionName: 'late' }],
+        detail,
+        detailPending: true,
+      })
+
+      const eventsMock = api.getAgentSessionEvents as unknown as ReturnType<typeof vi.fn>
+      eventsMock.mockClear()
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText(/loading/i)).toBeInTheDocument()
+      })
+
+      expect(eventsMock).not.toHaveBeenCalled()
+    })
+
+    it('loads workflow session metadata by route session name', async () => {
+      const api = await import('../src/entities/coder-session/api/client')
+      sessionPageMocks.params = { number: '123', sessionName: 'plan' } as any
+      const detail = makeMockDetail({
+        id: 'proj_1/wr_1/plan',
+        metadata: makeMockMetadata({ sessionId: 'proj_1/wr_1/plan', sessionName: 'plan' }),
+      })
+      setupSessionPage({
+        sessions: [{ ...makeMockSession(), id: 'proj_1/wr_1/plan', sessionName: 'plan' }],
+        detail,
+        metadata: { ...convertLegacyToAgentMetadata(detail), sessionName: 'plan' },
+      })
+
+      renderWithQueryClient(<SessionPage />)
+
+      await waitFor(() => {
+        expect(api.getAgentSessionMetadata).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
+      })
+      await waitFor(() => {
+        expect(api.getAgentSessionEvents).toHaveBeenCalledWith(123, 'plan', TEST_PROJECT.id)
+      })
     })
 
     it('shows duration for completed sessions', async () => {
@@ -1960,7 +2162,7 @@ describe('SessionPage header and states', () => {
       })
     })
 
-    it('shows incomplete/legacy state when session has incomplete flag and no turns', async () => {
+    it('treats completed session with no events as empty state', async () => {
       const detail = makeMockDetail({
         metadata: makeMockMetadata({
           status: 'completed',
@@ -1974,7 +2176,7 @@ describe('SessionPage header and states', () => {
       renderWithQueryClient(<SessionPage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/incomplete/i)).toBeInTheDocument()
+        expect(screen.getByText(/no activity/i)).toBeInTheDocument()
       })
     })
   })

@@ -410,27 +410,27 @@ public static class IssueRoutes
             return timeline is not null ? ApiResults.Ok(timeline) : ApiResults.NotFound("Workflow not found");
         });
 
-        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, IGrainFactory grains, WorkflowAgentSessionQueryService sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, WorkflowAgentSessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(pid, number));
         });
 
-        issues.MapGet("/{number:int}/coder-sessions/{*sessionId}", async (int number, string sessionId, string projectId, IGrainFactory grains, WorkflowAgentSessionQueryService sessions) =>
+        issues.MapGet("/{number:int}/sessions/{name}", async (int number, string name, string projectId, WorkflowAgentSessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
-            var detail = await sessions.GetTranscriptAsync(pid, number, sessionId);
-            return detail is null ? ApiResults.NotFound($"Coder session {sessionId} not found") : ApiResults.Ok(detail);
+            var metadata = await sessions.GetSessionMetadataAsync(pid, number, name);
+            return metadata is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(metadata);
         });
 
-        issues.MapGet("/{number:int}/workflow/sessions/{sessionName}", async (int number, string sessionName, string projectId, WorkflowAgentSessionQueryService sessions) =>
+        issues.MapGet("/{number:int}/sessions/{name}/events", async (int number, string name, string projectId, WorkflowAgentSessionQueryService sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
-            var detail = await sessions.GetCurrentWorkflowTranscriptAsync(pid, number, sessionName);
-            return detail is null ? ApiResults.NotFound($"Workflow session {sessionName} not found") : ApiResults.Ok(detail);
+            var events = await sessions.GetSessionEventsAsync(pid, number, name);
+            return events is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(events);
         });
 
         issues.MapPost("/{number:int}/resume", async (int number, string projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>

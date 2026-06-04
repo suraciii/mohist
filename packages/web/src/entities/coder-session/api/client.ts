@@ -1,16 +1,27 @@
 import { request, withProject } from '../../../shared/api/client'
-import type { CoderSessionDetail, CoderSessionSummary, WorkflowLogItem } from '../model/types'
+import type {
+  AgentSessionEventsResponse,
+  AgentSessionMetadata,
+  CoderSessionSummary,
+  WorkflowLogItem,
+} from '../model/types'
 
 export function getCoderSessions(number: number, projectId?: string | null) {
   return request<CoderSessionSummary[]>(`/issues/${number}/coder-sessions`, withProject(undefined, projectId))
 }
 
-export function getCoderSessionDetail(number: number, sessionId: string, projectId?: string | null) {
-  return request<CoderSessionDetail>(`/issues/${number}/coder-sessions/${sessionId}`, withProject(undefined, projectId))
+export function getAgentSessionMetadata(number: number, name: string, projectId?: string | null) {
+  return request<AgentSessionMetadata>(
+    `/issues/${number}/sessions/${encodeURIComponent(name)}`,
+    withProject(undefined, projectId),
+  )
 }
 
-export function getWorkflowSessionDetail(number: number, sessionName: string, projectId?: string | null) {
-  return request<CoderSessionDetail>(`/issues/${number}/workflow/sessions/${encodeURIComponent(sessionName)}`, withProject(undefined, projectId))
+export function getAgentSessionEvents(number: number, name: string, projectId?: string | null) {
+  return request<AgentSessionEventsResponse>(
+    `/issues/${number}/sessions/${encodeURIComponent(name)}/events`,
+    withProject(undefined, projectId),
+  )
 }
 
 export function getWorkflowLogs(number: number, projectId?: string | null) {
