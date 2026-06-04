@@ -15,6 +15,8 @@ using Mohist.Server.Project.Storage;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Project.Querying;
 using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Orleans;
 using Orleans.TestingHost;
 using Xunit;
@@ -62,6 +64,8 @@ public class BacklogFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
             siloBuilder.Services.AddSingleton<ProjectQuerier>();
+            siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
+            siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
             siloBuilder.Services.AddScoped<WorkflowProfileManager>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
             siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
@@ -155,19 +159,19 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
             {
                 ProjectId = projectId,
                 TemplateId = definition.Id,
-                TemplateJson = templateJson,
+                Template = templateJson,
             });
         }
         else
         {
-            template.TemplateJson = templateJson;
+            template.Template = templateJson;
             template.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         var profile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
         if (profile is null)
         {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
                 DefaultTemplateId = definition.Id,

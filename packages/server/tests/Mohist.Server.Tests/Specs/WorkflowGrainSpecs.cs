@@ -17,6 +17,8 @@ using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Project.Querying;
 using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;
@@ -56,6 +58,8 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
             siloBuilder.Services.AddSingleton<ProjectQuerier>();
+            siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new FakePromptLoader());
+            siloBuilder.Services.AddSingleton<PromptTemplateEngine>();
             siloBuilder.Services.AddScoped<WorkflowProfileManager>();
             siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
@@ -121,7 +125,7 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        return new WorkflowQuerier(factory, new Mohist.Server.Workflow.Infrastructure.WorkflowProfileManager(factory));
+        return new WorkflowQuerier(factory, new Mohist.Server.Workflow.Infrastructure.WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
     }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
@@ -399,19 +403,19 @@ public abstract class WorkflowGrainSpecs
             {
                 ProjectId = projectId,
                 TemplateId = templateId,
-                TemplateJson = templateJson,
+                Template = templateJson,
             });
         }
         else
         {
-            existingTemplate.TemplateJson = templateJson;
+            existingTemplate.Template = templateJson;
             existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
         if (projectProfile is null)
         {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
                 DefaultTemplateId = templateId,
@@ -432,7 +436,7 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        var manager = new ProjectWorkflowProfileManager(factory);
+        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine());
         await manager.PatchVariablesAsync(projectId, patch);
     }
 

@@ -5,6 +5,8 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Mohist.Server.Workflow.Storage;
 using Xunit;
 
@@ -24,7 +26,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             .Options;
 
         var factory = new TestDbContextFactory(_options);
-        _manager = new WorkflowProfileManager(factory);
+        _manager = new WorkflowProfileManager(factory, null!, new PromptTemplateEngine());
 
         using var initDb = new MohistDbContext(_options);
         initDb.Database.EnsureCreated();
@@ -297,11 +299,11 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         await using var db = new MohistDbContext(_options);
         SeedRunContext(db, projectId, issueId, runId, legacyIssueKey, writeIssueIdAnnotation);
 
-        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
             DefaultTemplateId = projectDefaultTemplateId,
-            VariablesJson = "{}",
+            Variables = "{}",
         });
 
         if (projectDefaultTemplateId is not null && projectTemplateJson is not null)
@@ -310,7 +312,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             {
                 ProjectId = projectId,
                 TemplateId = projectDefaultTemplateId,
-                TemplateJson = projectTemplateJson,
+                Template = projectTemplateJson,
             });
         }
         if (issueSourceTemplateId is not null && projectTemplateJson is not null)
@@ -319,16 +321,16 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
             {
                 ProjectId = projectId,
                 TemplateId = issueSourceTemplateId,
-                TemplateJson = projectTemplateJson,
+                Template = projectTemplateJson,
             });
         }
 
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfileRow
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
             IssueKey = legacyIssueKey ?? issueId,
             SourceTemplateId = issueSourceTemplateId,
-            TemplateJson = issueTemplateJson,
-            VariablesJson = "{}",
+            Template = issueTemplateJson,
+            Variables = "{}",
         });
 
         await db.SaveChangesAsync();
@@ -340,15 +342,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         await using var db = new MohistDbContext(_options);
         SeedRunContext(db, projectId, issueId, runId);
 
-        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            VariablesJson = "{}",
+            Variables = "{}",
         });
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfileRow
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
             IssueKey = issueId,
-            VariablesJson = "{}",
+            Variables = "{}",
         });
 
         await db.SaveChangesAsync();
@@ -361,15 +363,15 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         await using var db = new MohistDbContext(_options);
         SeedRunContext(db, projectId, issueId, runId);
 
-        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+        db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
             ProjectId = projectId,
-            VariablesJson = project.ToJson(),
+            Variables = project.ToJson(),
         });
-        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfileRow
+        db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
             IssueKey = issueId,
-            VariablesJson = issue.ToJson(),
+            Variables = issue.ToJson(),
         });
 
         await db.SaveChangesAsync();

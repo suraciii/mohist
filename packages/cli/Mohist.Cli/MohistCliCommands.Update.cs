@@ -121,8 +121,13 @@ internal sealed class SourceCodeUpdater
         _getUserHome = getUserHome ?? DefaultUserHome;
     }
 
-    private static string? DefaultUserHome() =>
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static string? DefaultUserHome()
+    {
+        var home = Environment.GetEnvironmentVariable("HOME");
+        if (!string.IsNullOrWhiteSpace(home))
+            return home;
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
 
     internal string ResolveManagedSkillAssetRoot()
     {

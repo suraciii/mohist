@@ -1,14 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Prompts;
-using Mohist.Server.Workflow.Prompts.Domain;
+using Mohist.Server.Workflow.Storage;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -30,73 +33,34 @@ public class FakePromptLoader : IPromptLoader
     public Dictionary<string, string> LoadAll() => new(Prompts, StringComparer.Ordinal);
 }
 
-public sealed class FakeProjectTemplateStore : IProjectTemplateStore
+public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 {
-    private readonly Dictionary<(string ProjectId, string Key), ProjectTemplate> _rows = new();
+    private readonly SqliteConnection _connection;
 
-    public void Seed(ProjectTemplate template) =>
-        _rows[(template.ProjectId, template.Key)] = template;
-
-    public Task<IReadOnlyList<ProjectTemplate>> GetForProjectAsync(string projectId)
+    public FakeDbContextFactory(Dictionary<string, string>? projectPrompts = null, string? projectId = null)
     {
-        IReadOnlyList<ProjectTemplate> rows = _rows
-            .Where(kv => kv.Key.ProjectId == projectId)
-            .Select(kv => kv.Value)
-            .OrderByDescending(t => t.UpdatedAt)
-            .ToList();
-        return Task.FromResult(rows);
-    }
-
-    public Task<ProjectTemplate?> GetAsync(string projectId, string key)
-    {
-        _rows.TryGetValue((projectId, key), out var row);
-        return Task.FromResult(row);
-    }
-
-    public Task<ProjectTemplate> UpsertAsync(
-        string projectId,
-        string key,
-        string body,
-        string displayName,
-        string description,
-        IReadOnlyList<string> tags,
-        string? stage)
-    {
-        var now = DateTime.UtcNow;
-        ProjectTemplate row;
-        if (_rows.TryGetValue((projectId, key), out var existing))
+        _connection = new SqliteConnection("Data Source=:memory:");
+        _connection.Open();
+        using var db = CreateDbContext();
+        db.Database.EnsureCreated();
+        if (projectPrompts is { Count: > 0 } && projectId is not null)
         {
-            row = existing with
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
-                DisplayName = displayName,
-                Description = description,
-                Tags = tags,
-                Stage = stage,
-                Body = body,
-                UpdatedAt = now,
-            };
+                ProjectId = projectId,
+                Prompts = projectPrompts,
+            });
+            db.SaveChanges();
         }
-        else
-        {
-            row = new ProjectTemplate(
-                projectId,
-                key,
-                displayName,
-                description,
-                tags,
-                stage,
-                body,
-                now);
-        }
-        _rows[(projectId, key)] = row;
-        return Task.FromResult(row);
     }
 
-    public Task DeleteAsync(string projectId, string key)
+    public MohistDbContext CreateDbContext()
     {
-        _rows.Remove((projectId, key));
-        return Task.CompletedTask;
+        var options = new DbContextOptionsBuilder<MohistDbContext>().UseSqlite(_connection).Options;
+        return new MohistDbContext(options);
     }
+
+    public void Dispose() => _connection.Dispose();
 }
 
 public class MohistDefaultWorkflowProfileSpecs
@@ -104,7 +68,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void IssueWithNonAsciiTitle_BuildsIssueNumberBasedOpenSpecChangeVariables()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeProjectTemplateStore());
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-154",
@@ -220,7 +184,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeProjectTemplateStore());
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -245,7 +209,7 @@ public class MohistDefaultWorkflowProfileSpecs
     [Fact]
     public void StageVariables_MergesStageOverrides()
     {
-        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeProjectTemplateStore());
+        var profile = new MohistDefaultIssueWorkflowProfile(new FakePromptLoader(), new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -269,7 +233,7 @@ public class MohistDefaultWorkflowProfileSpecs
     public void BuildVariables_IncludesPromptsFromLoader()
     {
         var loader = new FakePromptLoader();
-        var profile = new MohistDefaultIssueWorkflowProfile(loader, new FakeProjectTemplateStore());
+        var profile = new MohistDefaultIssueWorkflowProfile(loader, new FakeDbContextFactory());
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -291,28 +255,13 @@ public class MohistDefaultWorkflowProfileSpecs
     public void BuildVariables_MergesProjectOverridesAndAddsProjectUniqueKeys()
     {
         var loader = new FakePromptLoader();
-        var templateStore = new FakeProjectTemplateStore();
-        var now = DateTime.UtcNow;
-        templateStore.Seed(new ProjectTemplate(
-            "project-1",
-            "proposal",
-            "Project Proposal",
-            "Project-level override",
-            new[] { "project" },
-            "plan",
-            "# Project proposal body",
-            now));
-        templateStore.Seed(new ProjectTemplate(
-            "project-1",
-            "deploy-checklist",
-            "Deploy Checklist",
-            "Project-only template",
-            new[] { "project" },
-            "integrate",
-            "# Deploy checklist body",
-            now.AddSeconds(-1)));
+        var dbFactory = new FakeDbContextFactory(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["proposal"] = "# Project proposal body",
+            ["deploy-checklist"] = "# Deploy checklist body",
+        }, "project-1");
 
-        var profile = new MohistDefaultIssueWorkflowProfile(loader, templateStore);
+        var profile = new MohistDefaultIssueWorkflowProfile(loader, dbFactory);
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
             Id = "issue-1",
@@ -334,7 +283,7 @@ public class MohistDefaultWorkflowProfileSpecs
     public async Task GetMergedPromptsAsync_KeepsSystemBodyWhenNoOverrideExists()
     {
         var loader = new FakePromptLoader();
-        var templateStore = new FakeProjectTemplateStore();
+        var templateStore = new FakeDbContextFactory();
         var profile = new MohistDefaultIssueWorkflowProfile(loader, templateStore);
 
         var merged = await profile.GetMergedPromptsAsync("project-99");

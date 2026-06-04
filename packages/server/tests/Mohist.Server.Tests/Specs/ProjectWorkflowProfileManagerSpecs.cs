@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -19,7 +21,7 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         _options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite($"Data Source={_dbPath}")
             .Options;
-        _manager = new ProjectWorkflowProfileManager(new Factory(_options));
+        _manager = new ProjectWorkflowProfileManager(new Factory(_options), new StubPromptLoader(), new PromptTemplateEngine());
 
         using var db = new MohistDbContext(_options);
         db.Database.EnsureCreated();
@@ -223,5 +225,10 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         private readonly DbContextOptions<MohistDbContext> _options;
         public Factory(DbContextOptions<MohistDbContext> options) => _options = options;
         public MohistDbContext CreateDbContext() => new(_options);
+    }
+
+    private sealed class StubPromptLoader : IPromptLoader
+    {
+        public Dictionary<string, string> LoadAll() => new(StringComparer.Ordinal);
     }
 }
