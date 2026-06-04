@@ -6,7 +6,6 @@ using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Prompts;
-using Mohist.Server.Workflow.Prompts.Domain;
 using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Mohist.Server.Workflow.Storage;
 
@@ -21,18 +20,15 @@ public class WorkflowProfileManager
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IPromptLoader _promptLoader;
-    private readonly IProjectTemplateStore _promptStore;
     private readonly PromptTemplateEngine _engine;
 
     public WorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
-        IProjectTemplateStore promptStore,
         PromptTemplateEngine engine)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
-        _promptStore = promptStore;
         _engine = engine;
     }
 
@@ -251,12 +247,15 @@ public class WorkflowProfileManager
         // 2. project prompts
         if (!string.IsNullOrWhiteSpace(pid))
         {
-            var pp = await _promptStore.GetAsync(pid, key);
-            if (pp is not null)
+            var row = await db.ProjectPromptTemplates.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProjectId == pid && x.Key == key);
+            if (row is not null)
             {
                 var systemTemplates = _promptLoader.LoadAllTemplates();
                 var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                return new ResolvedPrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source);
+                return new ResolvedPrompt(key, row.DisplayName, row.Description,
+                    ProjectWorkflowProfileManager.DeserializeTags(row.TagsJson),
+                    row.Stage, row.Body, source);
             }
         }
 
@@ -277,10 +276,12 @@ public class WorkflowProfileManager
         var lk = string.IsNullOrWhiteSpace(legacyIssueKey) ? context.LegacyIssueKey : legacyIssueKey;
 
         var systemTemplates = _promptLoader.LoadAllTemplates();
-        var projectPrompts = !string.IsNullOrWhiteSpace(pid)
-            ? await _promptStore.GetForProjectAsync(pid)
-            : Array.Empty<ProjectTemplate>();
-        var projectByKey = projectPrompts.ToDictionary(p => p.Key, StringComparer.Ordinal);
+        var projectRows = !string.IsNullOrWhiteSpace(pid)
+            ? await db.ProjectPromptTemplates.AsNoTracking()
+                .Where(x => x.ProjectId == pid)
+                .ToListAsync()
+            : new List<Prompts.Storage.ProjectTemplateRow>();
+        var projectByKey = projectRows.ToDictionary(r => r.Key, StringComparer.Ordinal);
 
         Dictionary<string, string> issuePrompts;
         var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
@@ -290,7 +291,7 @@ public class WorkflowProfileManager
             issuePrompts = new Dictionary<string, string>(StringComparer.Ordinal);
 
         var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
-        foreach (var p in projectPrompts)
+        foreach (var p in projectRows)
             keys.Add(p.Key);
         foreach (var k in issuePrompts.Keys)
             keys.Add(k);
@@ -307,7 +308,9 @@ public class WorkflowProfileManager
             if (projectByKey.TryGetValue(key, out var pp))
             {
                 var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                results.Add(new ResolvedPrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source));
+                results.Add(new ResolvedPrompt(key, pp.DisplayName, pp.Description,
+                    ProjectWorkflowProfileManager.DeserializeTags(pp.TagsJson),
+                    pp.Stage, pp.Body, source));
                 continue;
             }
 
