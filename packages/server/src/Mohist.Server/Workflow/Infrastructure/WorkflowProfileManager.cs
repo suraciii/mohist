@@ -239,7 +239,7 @@ public class WorkflowProfileManager
         var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
         if (issueProfile is not null)
         {
-            var prompts = DeserializePrompts(issueProfile.PromptsJson);
+            var prompts = DeserializePrompts(issueProfile.Prompts);
             if (prompts.TryGetValue(key, out var body))
                 return new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, "issue");
         }
@@ -247,15 +247,17 @@ public class WorkflowProfileManager
         // 2. project prompts
         if (!string.IsNullOrWhiteSpace(pid))
         {
-            var row = await db.ProjectPromptTemplates.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.ProjectId == pid && x.Key == key);
-            if (row is not null)
+            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProjectId == pid);
+            if (projectProfile is not null)
             {
-                var systemTemplates = _promptLoader.LoadAllTemplates();
-                var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                return new ResolvedPrompt(key, row.DisplayName, row.Description,
-                    ProjectWorkflowProfileManager.DeserializeTags(row.TagsJson),
-                    row.Stage, row.Body, source);
+                var projectPrompts = DeserializePrompts(projectProfile.Prompts);
+                if (projectPrompts.TryGetValue(key, out var body))
+                {
+                    var systemTemplates = _promptLoader.LoadAllTemplates();
+                    var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
+                    return new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source);
+                }
             }
         }
 
@@ -276,23 +278,30 @@ public class WorkflowProfileManager
         var lk = string.IsNullOrWhiteSpace(legacyIssueKey) ? context.LegacyIssueKey : legacyIssueKey;
 
         var systemTemplates = _promptLoader.LoadAllTemplates();
-        var projectRows = !string.IsNullOrWhiteSpace(pid)
-            ? await db.ProjectPromptTemplates.AsNoTracking()
-                .Where(x => x.ProjectId == pid)
-                .ToListAsync()
-            : new List<Prompts.Storage.ProjectTemplateRow>();
-        var projectByKey = projectRows.ToDictionary(r => r.Key, StringComparer.Ordinal);
+        Dictionary<string, string> projectPrompts;
+        if (!string.IsNullOrWhiteSpace(pid))
+        {
+            var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ProjectId == pid);
+            projectPrompts = projectProfile is not null
+                ? DeserializePrompts(projectProfile.Prompts)
+                : new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        else
+        {
+            projectPrompts = new Dictionary<string, string>(StringComparer.Ordinal);
+        }
 
         Dictionary<string, string> issuePrompts;
         var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
         if (issueProfile is not null)
-            issuePrompts = DeserializePrompts(issueProfile.PromptsJson);
+            issuePrompts = DeserializePrompts(issueProfile.Prompts);
         else
             issuePrompts = new Dictionary<string, string>(StringComparer.Ordinal);
 
         var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
-        foreach (var p in projectRows)
-            keys.Add(p.Key);
+        foreach (var k in projectPrompts.Keys)
+            keys.Add(k);
         foreach (var k in issuePrompts.Keys)
             keys.Add(k);
 
@@ -305,12 +314,10 @@ public class WorkflowProfileManager
                 continue;
             }
 
-            if (projectByKey.TryGetValue(key, out var pp))
+            if (projectPrompts.TryGetValue(key, out var body))
             {
                 var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                results.Add(new ResolvedPrompt(key, pp.DisplayName, pp.Description,
-                    ProjectWorkflowProfileManager.DeserializeTags(pp.TagsJson),
-                    pp.Stage, pp.Body, source));
+                results.Add(new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source));
                 continue;
             }
 

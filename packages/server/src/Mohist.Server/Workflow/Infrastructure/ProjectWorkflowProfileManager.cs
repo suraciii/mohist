@@ -252,21 +252,18 @@ public class ProjectWorkflowProfileManager
     public async Task<IReadOnlyList<EffectivePrompt>> ListPromptsAsync(string projectId)
     {
         var systemTemplates = _promptLoader.LoadAllTemplates();
-        var projectRows = await LoadProjectPromptRowsAsync(projectId);
-        var projectByKey = new Dictionary<string, Prompts.Storage.ProjectTemplateRow>(StringComparer.Ordinal);
-        foreach (var row in projectRows)
-            projectByKey[row.Key] = row;
+        var projectPrompts = await LoadProjectPromptsAsync(projectId);
 
         var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
-        foreach (var row in projectRows)
-            keys.Add(row.Key);
+        foreach (var k in projectPrompts.Keys)
+            keys.Add(k);
 
         return keys.Select(key =>
         {
-            if (projectByKey.TryGetValue(key, out var row))
+            if (projectPrompts.TryGetValue(key, out var body))
             {
                 var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                return ToEffectivePrompt(row, source);
+                return new EffectivePrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source);
             }
 
             var sys = systemTemplates[key];
@@ -276,12 +273,12 @@ public class ProjectWorkflowProfileManager
 
     public async Task<EffectivePrompt?> GetPromptAsync(string projectId, string key)
     {
-        var row = await FindProjectPromptRowAsync(projectId, key);
-        if (row is not null)
+        var projectPrompts = await LoadProjectPromptsAsync(projectId);
+        if (projectPrompts.TryGetValue(key, out var body))
         {
             var systemTemplates = _promptLoader.LoadAllTemplates();
             var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-            return ToEffectivePrompt(row, source);
+            return new EffectivePrompt(key, key, string.Empty, Array.Empty<string>(), null, body, source);
         }
 
         var systemTemplatesMap = _promptLoader.LoadAllTemplates();
@@ -291,52 +288,35 @@ public class ProjectWorkflowProfileManager
         return null;
     }
 
-    public async Task<EffectivePrompt> SetPromptAsync(
-        string projectId,
-        string key,
-        string body,
-        string displayName = "",
-        string description = "",
-        IReadOnlyList<string>? tags = null,
-        string? stage = null)
+    public async Task SetPromptAsync(string projectId, string key, string body)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("key is required", nameof(key));
 
-        var now = DateTime.UtcNow;
-        var tagsJson = SerializeTags(tags ?? Array.Empty<string>());
-
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectPromptTemplates
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+        var profile = await db.ProjectWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
 
-        if (row is null)
+        if (profile is null)
         {
-            row = new Prompts.Storage.ProjectTemplateRow
+            profile = new ProjectWorkflowProfileRow
             {
                 ProjectId = projectId,
-                Key = key,
-                DisplayName = displayName,
-                Description = description,
-                TagsJson = tagsJson,
-                Stage = stage,
-                Body = body,
-                UpdatedAt = now,
+                VariablesJson = VariableBundle.Empty.ToJson(),
+                Prompts = SerializePrompt(key, body),
+                UpdatedAt = DateTimeOffset.UtcNow,
             };
-            db.ProjectPromptTemplates.Add(row);
+            db.ProjectWorkflowProfiles.Add(profile);
         }
         else
         {
-            row.DisplayName = displayName;
-            row.Description = description;
-            row.TagsJson = tagsJson;
-            row.Stage = stage;
-            row.Body = body;
-            row.UpdatedAt = now;
+            var prompts = DeserializePrompts(profile.Prompts);
+            prompts[key] = body;
+            profile.Prompts = SerializePrompts(prompts);
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         await db.SaveChangesAsync();
-        return ToEffectivePrompt(row, "project");
     }
 
     public async Task DeletePromptAsync(string projectId, string key)
@@ -345,11 +325,15 @@ public class ProjectWorkflowProfileManager
             throw new ArgumentException("key is required", nameof(key));
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectPromptTemplates
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
-        if (row is null) return;
+        var profile = await db.ProjectWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+        if (profile is null) return;
 
-        db.ProjectPromptTemplates.Remove(row);
+        var prompts = DeserializePrompts(profile.Prompts);
+        if (!prompts.Remove(key)) return;
+
+        profile.Prompts = SerializePrompts(prompts);
+        profile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
     }
 
@@ -367,40 +351,33 @@ public class ProjectWorkflowProfileManager
     // Helpers
     // =======================================================================
 
-    private async Task<IReadOnlyList<Prompts.Storage.ProjectTemplateRow>> LoadProjectPromptRowsAsync(string projectId)
+    private async Task<Dictionary<string, string>> LoadProjectPromptsAsync(string projectId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.ProjectPromptTemplates.AsNoTracking()
-            .Where(x => x.ProjectId == projectId)
-            .OrderBy(x => x.Key)
-            .ToListAsync();
+        var profile = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+        return DeserializePrompts(profile?.Prompts);
     }
 
-    private async Task<Prompts.Storage.ProjectTemplateRow?> FindProjectPromptRowAsync(string projectId, string key)
+    private static Dictionary<string, string> DeserializePrompts(string? json)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.ProjectPromptTemplates.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
-    }
-
-    internal static EffectivePrompt ToEffectivePrompt(Prompts.Storage.ProjectTemplateRow row, string source) =>
-        new(row.Key, row.DisplayName, row.Description, DeserializeTags(row.TagsJson), row.Stage, row.Body, source);
-
-    internal static IReadOnlyList<string> DeserializeTags(string tagsJson)
-    {
-        if (string.IsNullOrWhiteSpace(tagsJson)) return Array.Empty<string>();
+        if (string.IsNullOrWhiteSpace(json)) return new(StringComparer.Ordinal);
         try
         {
-            return JsonSerializer.Deserialize<List<string>>(tagsJson) ?? new List<string>();
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                ?? new(StringComparer.Ordinal);
         }
         catch
         {
-            return Array.Empty<string>();
+            return new(StringComparer.Ordinal);
         }
     }
 
-    internal static string SerializeTags(IReadOnlyList<string> tags) =>
-        JsonSerializer.Serialize(tags.ToList());
+    private static string SerializePrompts(Dictionary<string, string> prompts) =>
+        JsonSerializer.Serialize(prompts);
+
+    private static string SerializePrompt(string key, string body) =>
+        JsonSerializer.Serialize(new Dictionary<string, string> { [key] = body });
 
     private async Task<bool> ProjectTemplateExistsAsync(string projectId, string templateId)
     {

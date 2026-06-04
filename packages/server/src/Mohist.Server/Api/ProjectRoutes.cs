@@ -237,9 +237,8 @@ public static class ProjectRoutes
             if (req is null || string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
 
-            var result = await manager.SetPromptAsync(id, key, req.Body,
-                req.DisplayName ?? string.Empty, req.Description ?? string.Empty, req.Tags, req.Stage);
-            return ApiResults.Ok(result);
+            await manager.SetPromptAsync(id, key, req.Body);
+            return ApiResults.Ok(new { key, body = req.Body });
         });
 
         group.MapDelete("/{id}/workflow-profile/prompts/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
@@ -274,12 +273,7 @@ public static class ProjectRoutes
     }
 }
 
-public sealed record PromptUpsertRequest(
-    string? Body,
-    string? DisplayName = null,
-    string? Description = null,
-    IReadOnlyList<string>? Tags = null,
-    string? Stage = null);
+public sealed record PromptUpsertRequest(string? Body);
 
 public sealed record PromptPreviewRequest(JsonElement? Variables);
 
