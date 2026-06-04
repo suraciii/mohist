@@ -1,0 +1,24 @@
+namespace Mohist.Server.Workflow.Infrastructure;
+
+public sealed record ResolvedPrompt(
+    string Key,
+    string DisplayName,
+    string Description,
+    IReadOnlyList<string> Tags,
+    string? Stage,
+    string Body,
+    string Source);
+
+public sealed record EffectivePrompt(
+    string Key,
+    string DisplayName,
+    string Description,
+    IReadOnlyList<string> Tags,
+    string? Stage,
+    string Body,
+    string Source);
+
+public sealed record PromptPreviewResult(
+    string Rendered,
+    IReadOnlyList<string> MissingVariables,
+    int Depth);

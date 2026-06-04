@@ -74,6 +74,64 @@ public static class IssueRoutes
             return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(issue.Id, patch, LegacyIssueKey(projectId, number)));
         });
 
+        projectIssues.MapGet("/{number:int}/workflow-profile/prompts", async (string projectId, int number, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        {
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            return ApiResults.Ok(await issueProfileManager.GetPromptsAsync(issue.Id, LegacyIssueKey(projectId, number)));
+        });
+
+        projectIssues.MapPut("/{number:int}/workflow-profile/prompts/{key}", async (string projectId, int number, string key, IssuePromptUpsertRequest? req, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Body))
+                return ApiResults.BadRequest("body is required");
+            if (string.IsNullOrWhiteSpace(key))
+                return ApiResults.BadRequest("key is required");
+
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            await issueProfileManager.SetPromptAsync(issue.Id, key, req.Body, LegacyIssueKey(projectId, number));
+            return ApiResults.Ok(new { key, body = req.Body });
+        });
+
+        projectIssues.MapDelete("/{number:int}/workflow-profile/prompts/{key}", async (string projectId, int number, string key, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                return ApiResults.BadRequest("key is required");
+
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            await issueProfileManager.DeletePromptAsync(issue.Id, key, LegacyIssueKey(projectId, number));
+            return ApiResults.Ok();
+        });
+
+        projectIssues.MapPost("/{number:int}/workflow-profile/prompts/{key}/preview", async (string projectId, int number, string key, PromptPreviewRequest? req, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        {
+            var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
+            if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
+
+            var prompts = await issueProfileManager.GetPromptsAsync(issue.Id, LegacyIssueKey(projectId, number));
+            if (!prompts.TryGetValue(key, out var body))
+                return ApiResults.NotFound($"Prompt '{key}' not found");
+
+            JsonElement variables;
+            if (req?.Variables is { } raw)
+                variables = raw;
+            else
+            {
+                using var doc = JsonDocument.Parse("{}");
+                variables = doc.RootElement.Clone();
+            }
+
+            // Issue preview: use a local engine instance (simple var expansion)
+            var engine = new Mohist.Server.Workflow.Prompts.Infrastructure.PromptTemplateEngine();
+            var (rendered, missing, depth) = engine.Render(body, variables);
+            return ApiResults.Ok(new { rendered, missing, depth });
+        });
+
         issues.MapGet("/", async (
             string? projectId,
             string? stage,
@@ -713,5 +771,8 @@ public sealed record IssueWorkflowProfileResponse(
     string ProfileId,
     string UpdateMode,
     VariableBundle Variables,
+<<<<<<< HEAD
     string UpdatedAt,
     string TemplateSource);
+
+public sealed record IssuePromptUpsertRequest(string? Body);
