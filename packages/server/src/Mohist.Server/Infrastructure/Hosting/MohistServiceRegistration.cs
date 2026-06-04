@@ -58,7 +58,6 @@ public static class MohistServiceRegistration
         services.AddScoped<IssueQuerier>();
         services.AddScoped<EpicQuerier>();
         services.AddSingleton<Mohist.Server.Workflow.Prompts.IPromptLoader, Mohist.Server.Workflow.Prompts.FilePromptLoader>();
-        services.AddScoped<IProjectTemplateStore, ProjectTemplateStore>();
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();

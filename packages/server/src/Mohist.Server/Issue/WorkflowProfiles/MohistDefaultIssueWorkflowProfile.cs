@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Querying;
@@ -12,14 +14,14 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
 {
     private readonly Workflow.Prompts.IPromptLoader _promptLoader;
-    private readonly IProjectTemplateStore _templateStore;
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
     public MohistDefaultIssueWorkflowProfile(
         Workflow.Prompts.IPromptLoader promptLoader,
-        IProjectTemplateStore templateStore)
+        IDbContextFactory<MohistDbContext> dbFactory)
     {
         _promptLoader = promptLoader;
-        _templateStore = templateStore;
+        _dbFactory = dbFactory;
     }
 
     public string Id => IssueWorkflowProfiles.DefaultId;
@@ -33,10 +35,13 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
     public async Task<Dictionary<string, string>> GetMergedPromptsAsync(string projectId)
     {
         var merged = new Dictionary<string, string>(_promptLoader.LoadAll(), StringComparer.Ordinal);
-        var projectOverrides = await _templateStore.GetForProjectAsync(projectId).ConfigureAwait(false);
-        foreach (var t in projectOverrides)
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var profile = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+        if (profile?.Prompts is { Count: > 0 })
         {
-            merged[t.Key] = t.Body;
+            foreach (var (key, body) in profile.Prompts)
+                merged[key] = body;
         }
         return merged;
     }
