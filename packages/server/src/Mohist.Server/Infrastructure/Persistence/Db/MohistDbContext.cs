@@ -97,6 +97,9 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.AgentSessionId).HasMaxLength(256);
             entity.Property(e => e.Status).HasMaxLength(64).IsRequired().HasConversion<string>();
             entity.Property(e => e.Model).HasMaxLength(256);
+            entity.Property(e => e.ResolvedModel).HasMaxLength(256);
+            entity.Property(e => e.CostCurrency).HasMaxLength(16);
+            entity.Property(e => e.FailureCategory).HasMaxLength(64);
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
             entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId });
             entity.HasIndex(e => new { e.WorkflowRunId, e.SessionName }).IsUnique();

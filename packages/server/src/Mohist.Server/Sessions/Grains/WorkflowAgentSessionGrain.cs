@@ -92,10 +92,11 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         if (command.Events.Count == 0) return [];
 
         var session = await GetOrCreateAsync();
-        if (session.IsTerminal) return [];
+        var wasTerminal = session.IsTerminal;
 
         var now = DateTime.UtcNow;
-        session.RecordActivity(now);
+        if (!wasTerminal)
+            session.RecordActivity(now);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var nextSequence = await db.WorkflowAgentSessionEvents
@@ -107,24 +108,73 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
 
         foreach (var e in command.Events)
         {
-            if (e.Type == "agent_liveness_status")
+            if (!wasTerminal)
             {
-                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                var status = GetStringProp(payload, "status") ?? "running";
-                session.MarkActive(status, now, GetStringProp(payload, "failureReason"));
-            }
-            else if (e.Type == "agent_session_terminal")
-            {
-                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                var status = GetStringProp(payload, "status") ?? "completed";
-                var failureReason = GetStringProp(payload, "failureReason");
-                var exitCode = GetIntProp(payload, "exitCode");
-                if (status == "failed")
-                    session.Fail(now, failureReason, exitCode);
-                else if (status == "cancelled")
-                    session.Cancel(now, failureReason, exitCode);
-                else
-                    session.Complete(now, exitCode);
+                if (e.Type == "agent_liveness_status")
+                {
+                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                    var status = GetStringProp(payload, "status") ?? "running";
+                    session.MarkActive(status, now, GetStringProp(payload, "failureReason"));
+                }
+                else if (e.Type == "agent_session_terminal")
+                {
+                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                    var status = GetStringProp(payload, "status") ?? "completed";
+                    var failureReason = GetStringProp(payload, "failureReason");
+                    var failureCategory = GetStringProp(payload, "failureCategory");
+                    var exitCode = GetIntProp(payload, "exitCode");
+                    if (status == "failed")
+                        session.Fail(now, failureReason, exitCode, failureCategory);
+                    else if (status == "cancelled")
+                        session.Cancel(now, failureReason, exitCode, failureCategory);
+                    else
+                        session.Complete(now, exitCode);
+                }
+                else if (e.Type == "agent_usage_update")
+                {
+                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                    var inputTokens = GetLongProp(payload, "inputTokens");
+                    var outputTokens = GetLongProp(payload, "outputTokens");
+                    var totalTokens = GetLongProp(payload, "totalTokens");
+                    var cachedReadTokens = GetLongProp(payload, "cachedReadTokens");
+                    var thoughtTokens = GetLongProp(payload, "thoughtTokens");
+
+                    var costAmount = GetDoubleProp(payload, "costAmount");
+                    var costCurrency = GetStringProp(payload, "costCurrency");
+                    if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("cost", out var costProp) && costProp.ValueKind == JsonValueKind.Object)
+                    {
+                        costAmount ??= GetDoubleProp(costProp, "amount");
+                        costCurrency ??= GetStringProp(costProp, "currency");
+                    }
+
+                    var contextWindowSize = GetLongProp(payload, "contextWindowSize");
+                    var contextWindowUsed = GetLongProp(payload, "contextWindowUsed");
+                    if (payload.ValueKind == JsonValueKind.Object && payload.TryGetProperty("contextWindow", out var cwProp) && cwProp.ValueKind == JsonValueKind.Object)
+                    {
+                        contextWindowSize ??= GetLongProp(cwProp, "size");
+                        contextWindowUsed ??= GetLongProp(cwProp, "used");
+                    }
+
+                    session.ApplyUsage(inputTokens, outputTokens, totalTokens, cachedReadTokens, thoughtTokens, costAmount, costCurrency, contextWindowUsed, contextWindowSize);
+                }
+                else if (e.Type == "agent_session_model_resolved")
+                {
+                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                    var resolvedModel = GetStringProp(payload, "resolvedModel");
+                    session.UpdateResolvedModel(resolvedModel);
+                }
+                else if (e.Type == "tool_call")
+                {
+                    var tool = ParseToolCall(e.PayloadJson, e.Type);
+                    if (tool is not null)
+                        session.RecordToolCall(false);
+                }
+                else if (e.Type == "tool_call_update")
+                {
+                    var tool = ParseToolCall(e.PayloadJson, e.Type);
+                    if (tool is not null && tool.State == "failed")
+                        session.RecordToolError();
+                }
             }
 
             entries.Add(new WorkflowAgentSessionEventRow
@@ -145,7 +195,8 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             });
         }
 
-        session.EnsureActive(now);
+        if (!wasTerminal)
+            session.EnsureActive(now);
 
         var isTerminal = session.IsTerminal;
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
@@ -212,6 +263,19 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             CompletedAt = row.CompletedAt,
             FailureReason = row.FailureReason,
             ExitCode = row.ExitCode,
+            ResolvedModel = row.ResolvedModel,
+            InputTokens = row.InputTokens,
+            OutputTokens = row.OutputTokens,
+            TotalTokens = row.TotalTokens,
+            CachedReadTokens = row.CachedReadTokens,
+            ThoughtTokens = row.ThoughtTokens,
+            CostAmount = row.CostAmount,
+            CostCurrency = row.CostCurrency,
+            ContextWindowUsed = row.ContextWindowUsed,
+            ContextWindowSize = row.ContextWindowSize,
+            FailureCategory = row.FailureCategory,
+            ToolCallCount = row.ToolCallCount,
+            ToolErrorCount = row.ToolErrorCount,
         };
     }
 
@@ -340,7 +404,20 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         s.LastDataAt?.ToString("o"),
         s.CompletedAt?.ToString("o"),
         s.FailureReason,
-        s.ExitCode);
+        s.ExitCode,
+        s.ResolvedModel,
+        s.InputTokens,
+        s.OutputTokens,
+        s.TotalTokens,
+        s.CachedReadTokens,
+        s.ThoughtTokens,
+        s.CostAmount,
+        s.CostCurrency,
+        s.ContextWindowUsed,
+        s.ContextWindowSize,
+        s.FailureCategory,
+        s.ToolCallCount,
+        s.ToolErrorCount);
 
     private static WorkflowAgentSessionEventInfo ToEventInfo(WorkflowAgentSessionEventRow e) => new(
         e.Id.ToString(),
@@ -390,6 +467,22 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         if (element.ValueKind != JsonValueKind.Object) return null;
         return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
             ? prop.GetInt32()
+            : null;
+    }
+
+    private static long? GetLongProp(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
+            ? prop.GetInt64()
+            : null;
+    }
+
+    private static double? GetDoubleProp(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        return element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Number
+            ? prop.GetDouble()
             : null;
     }
 

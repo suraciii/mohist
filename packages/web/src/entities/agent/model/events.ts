@@ -44,4 +44,5 @@ export const AGENT_DETAIL_EVENTS: AgentEventName[] = [
   'check_update',
   'check_suite_status_changed',
   'stage_task_update',
+  'agent_usage_update',
 ]

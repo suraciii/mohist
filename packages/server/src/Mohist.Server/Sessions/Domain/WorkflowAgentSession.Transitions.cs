@@ -111,9 +111,11 @@ public static partial class WorkflowAgentSessionExtensions
             session.LastDataAt = now;
             session.LastHeartbeatAt = now;
             session.ExitCode = exitCode ?? session.ExitCode;
+            session.FailureReason = null;
+            session.FailureCategory = null;
         }
 
-        public void Fail(DateTime now, string? reason, int? exitCode = null)
+        public void Fail(DateTime now, string? reason, int? exitCode = null, string? failureCategory = null)
         {
             if (session.IsTerminal) return;
             session.Status = AgentSessionStatus.Failed;
@@ -121,10 +123,11 @@ public static partial class WorkflowAgentSessionExtensions
             session.LastDataAt = now;
             session.LastHeartbeatAt = now;
             session.FailureReason = reason ?? session.FailureReason;
+            session.FailureCategory = failureCategory ?? session.FailureCategory;
             session.ExitCode = exitCode ?? session.ExitCode;
         }
 
-        public void Cancel(DateTime now, string? reason, int? exitCode = null)
+        public void Cancel(DateTime now, string? reason, int? exitCode = null, string? failureCategory = null)
         {
             if (session.IsTerminal) return;
             session.Status = AgentSessionStatus.Cancelled;
@@ -132,7 +135,74 @@ public static partial class WorkflowAgentSessionExtensions
             session.LastDataAt = now;
             session.LastHeartbeatAt = now;
             session.FailureReason = reason ?? session.FailureReason;
+            session.FailureCategory = failureCategory ?? session.FailureCategory;
             session.ExitCode = exitCode ?? session.ExitCode;
+        }
+
+        public void UpdateResolvedModel(string? model)
+        {
+            if (model is not null)
+                session.ResolvedModel = model;
+        }
+
+        public void ApplyUsage(
+            long? inputTokens,
+            long? outputTokens,
+            long? totalTokens,
+            long? cachedReadTokens,
+            long? thoughtTokens,
+            double? costAmount,
+            string? costCurrency,
+            long? contextWindowUsed,
+            long? contextWindowSize)
+        {
+            if (session.IsTerminal) return;
+
+            session.InputTokens = AddNonNegative(session.InputTokens, inputTokens);
+            session.OutputTokens = AddNonNegative(session.OutputTokens, outputTokens);
+            session.TotalTokens = AddNonNegative(session.TotalTokens, totalTokens);
+            session.CachedReadTokens = AddNonNegative(session.CachedReadTokens, cachedReadTokens);
+            session.ThoughtTokens = AddNonNegative(session.ThoughtTokens, thoughtTokens);
+            session.CostAmount = AddNonNegative(session.CostAmount, costAmount);
+            if (costCurrency is not null)
+                session.CostCurrency = costCurrency;
+            if (contextWindowUsed is not null)
+                session.ContextWindowUsed = contextWindowUsed;
+            if (contextWindowSize is not null)
+                session.ContextWindowSize = contextWindowSize;
+        }
+
+        public void RecordToolCall(bool isError)
+        {
+            if (session.IsTerminal) return;
+
+            session.ToolCallCount = (session.ToolCallCount ?? 0) + 1;
+            if (isError)
+            {
+                var errors = (session.ToolErrorCount ?? 0) + 1;
+                session.ToolErrorCount = Math.Min(errors, session.ToolCallCount.Value);
+            }
+        }
+
+        public void RecordToolError()
+        {
+            if (session.IsTerminal) return;
+
+            var errors = (session.ToolErrorCount ?? 0) + 1;
+            var calls = session.ToolCallCount ?? 0;
+            session.ToolErrorCount = Math.Min(errors, calls);
+        }
+
+        private static long? AddNonNegative(long? current, long? delta)
+        {
+            if (delta is null or < 0) return current;
+            return (current ?? 0) + delta.Value;
+        }
+
+        private static double? AddNonNegative(double? current, double? delta)
+        {
+            if (delta is null or < 0) return current;
+            return (current ?? 0) + delta.Value;
         }
     }
 }

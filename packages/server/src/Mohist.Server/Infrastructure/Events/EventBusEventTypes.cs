@@ -48,5 +48,6 @@ internal static class EventBusEventTypes
         "ralph_loop_progress",
         "plan_round_start",
         "integration_step_updated",
+        "agent_usage_update",
     ];
 }

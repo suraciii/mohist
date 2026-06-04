@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
@@ -10,8 +11,10 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Storage;
 using Xunit;
 
@@ -83,6 +86,37 @@ public class AgentSessionSpecs
                         title = "Read README",
                         rawInput = new { filePath = "README.md" }
                     }
+                },
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 100,
+                        outputTokens = 50,
+                        totalTokens = 150,
+                        cachedReadTokens = 10,
+                        thoughtTokens = 5,
+                        costAmount = 0.01,
+                        costCurrency = "USD",
+                        contextWindowSize = 200000,
+                        contextWindowUsed = 150
+                    }
+                },
+                new
+                {
+                    type = "agent_session_model_resolved",
+                    payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
+                },
+                new
+                {
+                    type = "tool_call_update",
+                    payload = new { toolCallId = "meta-tool-1", kind = "read", status = "failed", title = "Read README" }
+                },
+                new
+                {
+                    type = "agent_session_terminal",
+                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 }
             }
         });
@@ -100,8 +134,21 @@ public class AgentSessionSpecs
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(3, metadata.GetProperty("eventCount").GetInt32());
-        Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
+        Assert.Equal(7, metadata.GetProperty("eventCount").GetInt32());
+        Assert.Equal(2, metadata.GetProperty("toolCount").GetInt32());
+        Assert.Equal("anthropic/claude-sonnet-4", root.GetProperty("resolvedModel").GetString());
+        Assert.Equal(100, root.GetProperty("inputTokens").GetInt64());
+        Assert.Equal(50, root.GetProperty("outputTokens").GetInt64());
+        Assert.Equal(150, root.GetProperty("totalTokens").GetInt64());
+        Assert.Equal(10, root.GetProperty("cachedReadTokens").GetInt64());
+        Assert.Equal(5, root.GetProperty("thoughtTokens").GetInt64());
+        Assert.Equal(0.01, root.GetProperty("costAmount").GetDouble());
+        Assert.Equal("USD", root.GetProperty("costCurrency").GetString());
+        Assert.Equal(150, root.GetProperty("contextWindowUsed").GetInt64());
+        Assert.Equal(200000, root.GetProperty("contextWindowSize").GetInt64());
+        Assert.Equal("probe_timeout", root.GetProperty("failureCategory").GetString());
+        Assert.Equal(1, root.GetProperty("toolCallCount").GetInt32());
+        Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
 
         Assert.False(root.TryGetProperty("events", out _));
         Assert.False(root.TryGetProperty("turns", out _));
@@ -352,6 +399,232 @@ public class AgentSessionSpecs
     }
 
     [Fact]
+    public async Task RunnerAppendsUsageUpdate_AccumulatesTokenAndCostCounters()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-accumulate");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 10,
+                        outputTokens = 5,
+                        totalTokens = 15,
+                        cachedReadTokens = 2,
+                        thoughtTokens = 1,
+                        costAmount = 0.001,
+                        costCurrency = "USD",
+                        contextWindowSize = 200,
+                        contextWindowUsed = 100
+                    }
+                },
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 20,
+                        outputTokens = 10,
+                        totalTokens = 30,
+                        cachedReadTokens = 3,
+                        thoughtTokens = 2,
+                        costAmount = 0.002,
+                        costCurrency = "EUR",
+                        contextWindowSize = 250,
+                        contextWindowUsed = 150
+                    }
+                }
+            }
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal(30, grainSession.InputTokens);
+        Assert.Equal(15, grainSession.OutputTokens);
+        Assert.Equal(45, grainSession.TotalTokens);
+        Assert.Equal(5, grainSession.CachedReadTokens);
+        Assert.Equal(3, grainSession.ThoughtTokens);
+        Assert.Equal(0.003, grainSession.CostAmount);
+        Assert.Equal("EUR", grainSession.CostCurrency);
+        Assert.Equal(150, grainSession.ContextWindowUsed);
+        Assert.Equal(250, grainSession.ContextWindowSize);
+    }
+
+    [Fact]
+    public async Task RunnerAppendsUsageUpdate_PartialFields_DoesNotEraseExistingValues()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-partial");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new object[]
+            {
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 10,
+                        outputTokens = 5,
+                        costAmount = 0.001,
+                        costCurrency = "USD",
+                        contextWindowUsed = 100
+                    }
+                },
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new { inputTokens = 20 }
+                }
+            }
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal(30, grainSession.InputTokens);
+        Assert.Equal(5, grainSession.OutputTokens);
+        Assert.Equal(0.001, grainSession.CostAmount);
+        Assert.Equal("USD", grainSession.CostCurrency);
+        Assert.Equal(100, grainSession.ContextWindowUsed);
+    }
+
+    [Fact]
+    public async Task RunnerAppendsUsageUpdate_TerminalSession_PersistsEventButDoesNotMutateCounters()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("usage-terminal");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new { type = "agent_session_terminal", payload = new { status = "completed", exitCode = 0 } }
+            }
+        });
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 10,
+                        outputTokens = 5,
+                        costAmount = 0.001,
+                        costCurrency = "USD"
+                    }
+                }
+            }
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal("completed", grainSession.Status);
+        Assert.Null(grainSession.InputTokens);
+        Assert.Null(grainSession.CostAmount);
+
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        var events = await db.WorkflowAgentSessionEvents
+            .Where(e => e.SessionId == session.Id)
+            .OrderBy(e => e.Sequence)
+            .ToListAsync();
+        Assert.Equal(2, events.Count);
+        Assert.Equal("agent_session_terminal", events[0].Type);
+        Assert.Equal("agent_usage_update", events[1].Type);
+    }
+
+    [Fact]
+    public async Task RunnerAppendsResolvedModelEvent_UpdatesResolvedModel()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("resolved-model");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new
+                {
+                    type = "agent_session_model_resolved",
+                    payload = new { resolvedModel = "anthropic/claude-sonnet-4-20250514", source = "newSession" }
+                }
+            }
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal("anthropic/claude-sonnet-4-20250514", grainSession.ResolvedModel);
+    }
+
+    [Fact]
+    public async Task RunnerAppendsTerminalEvent_WithFailureCategory_PersistsCategory()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("failure-category");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new
+                {
+                    type = "agent_session_terminal",
+                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
+                }
+            }
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal("failed", grainSession.Status);
+        Assert.Equal("probe timed out", grainSession.FailureReason);
+        Assert.Equal("probe_timeout", grainSession.FailureCategory);
+    }
+
+    [Fact]
+    public async Task RunnerAppendsToolCallEvents_CountsCallsAndErrors()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("tool-calls");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new[]
+            {
+                new
+                {
+                    type = "tool_call",
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read file" }
+                },
+                new
+                {
+                    type = "tool_call",
+                    payload = new { toolCallId = "tool-2", kind = "edit", status = "in_progress", title = "Edit file" }
+                },
+                new
+                {
+                    type = "tool_call_update",
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "completed", title = "Read file" }
+                },
+                new
+                {
+                    type = "tool_call_update",
+                    payload = new { toolCallId = "tool-2", kind = "edit", status = "failed", title = "Edit file" }
+                }
+            }
+        });
+
+        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        Assert.NotNull(grainSession);
+        Assert.Equal(2, grainSession.ToolCallCount);
+        Assert.Equal(1, grainSession.ToolErrorCount);
+    }
+
+    [Fact]
     public async Task AgentActivity_WhenLeaseOwnerDiffers_ReportsOnlyLeaseOwnedActiveSession()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("lease-owner-activity");
@@ -371,6 +644,204 @@ public class AgentSessionSpecs
         Assert.Equal(0, activity.Summary.Active);
         Assert.DoesNotContain(activity.Sessions, s => s.SessionId == session.Id && s.Status is "created" or "running" or "probing");
         Assert.DoesNotContain(activity.Sessions, s => s.IssueNumber == issue.Number && s.Status is "created" or "running" or "probing");
+    }
+
+    [Fact]
+    public async Task AgentActivity_ExposesObservabilityFields()
+    {
+        var (project, _, _, session) = await CreateStartedAgentSessionAsync("activity-observability");
+
+        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
+        {
+            events = new object[]
+            {
+                new
+                {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 100,
+                        outputTokens = 50,
+                        totalTokens = 150,
+                        cachedReadTokens = 10,
+                        thoughtTokens = 5,
+                        costAmount = 0.01,
+                        costCurrency = "USD",
+                        contextWindowSize = 200000,
+                        contextWindowUsed = 150
+                    }
+                },
+                new
+                {
+                    type = "agent_session_model_resolved",
+                    payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
+                },
+                new
+                {
+                    type = "tool_call",
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "in_progress", title = "Read file" }
+                },
+                new
+                {
+                    type = "tool_call_update",
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "failed", title = "Read file" }
+                },
+                new
+                {
+                    type = "agent_session_terminal",
+                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
+                }
+            }
+        });
+
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
+
+        Assert.Equal("anthropic/claude-sonnet-4", card.ResolvedModel);
+        Assert.Equal(100, card.InputTokens);
+        Assert.Equal(50, card.OutputTokens);
+        Assert.Equal(150, card.TotalTokens);
+        Assert.Equal(10, card.CachedReadTokens);
+        Assert.Equal(5, card.ThoughtTokens);
+        Assert.Equal(0.01, card.CostAmount);
+        Assert.Equal("USD", card.CostCurrency);
+        Assert.Equal(150, card.ContextWindowUsed);
+        Assert.Equal(200000, card.ContextWindowSize);
+        Assert.Equal("probe_timeout", card.FailureCategory);
+        Assert.Equal(1, card.ToolCallCount);
+        Assert.Equal(1, card.ToolErrorCount);
+    }
+
+    [Fact]
+    public async Task AgentActivity_WithResolvableWorkflowStage_ReturnsTaskProgress()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress");
+
+        var runStateJson = JsonSerializer.Serialize(new
+        {
+            Id = work.WorkflowRunId,
+            Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
+            Status = "Running",
+            CurrentStageId = work.Stage ?? "Build",
+            Stages = new[]
+            {
+                new
+                {
+                    Id = work.Stage ?? "Build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = "Running",
+                    Tasks = new[]
+                    {
+                        new { Id = "task-1", DefinitionId = "task-1", Attempt = 1, Title = "Task 1", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "task-2", DefinitionId = "task-2", Attempt = 1, Title = "Task 2", Status = "Running", Uses = "mohist/acp-agent" },
+                        new { Id = "task-3", DefinitionId = "task-3", Attempt = 1, Title = "Task 3", Status = "Pending", Uses = "mohist/acp-agent" }
+                    },
+                    Checks = Array.Empty<object>()
+                }
+            }
+        });
+        var issueKey = $"{project.Id}:{issue.Number}";
+        var issueStateJson = JsonSerializer.Serialize(new
+        {
+            ProjectId = project.Id,
+            Number = issue.Number,
+            WorkflowRunId = work.WorkflowRunId,
+            Title = issue.Title
+        });
+
+        await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT OR REPLACE INTO workflow_runs (WorkflowRunId, State) VALUES ({0}, {1})",
+                work.WorkflowRunId, runStateJson);
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT OR REPLACE INTO IssueStates (Key, StateJson) VALUES ({0}, {1})",
+                issueKey, issueStateJson);
+        }
+
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
+
+        Assert.NotNull(card.TaskProgress);
+        Assert.Equal(1, card.TaskProgress!.Completed);
+        Assert.Equal(3, card.TaskProgress.Total);
+    }
+
+    [Fact]
+    public async Task AgentActivity_WhenSessionStageIsStale_UsesWorkflowCurrentStageTaskProgress()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress-stale-stage");
+
+        await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
+        {
+            var row = await db.WorkflowAgentSessions.FirstAsync(s => s.Id == session.Id);
+            row.Stage = "Plan";
+            await db.SaveChangesAsync();
+        }
+
+        var runStateJson = JsonSerializer.Serialize(new
+        {
+            Id = work.WorkflowRunId,
+            Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
+            Status = "Running",
+            CurrentStageId = "Build",
+            Stages = new[]
+            {
+                new
+                {
+                    Id = "Plan",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = "Completed",
+                    Tasks = new[]
+                    {
+                        new { Id = "plan-1", DefinitionId = "plan-1", Attempt = 1, Title = "Plan 1", Status = "Completed", Uses = "mohist/acp-agent" }
+                    },
+                    Checks = Array.Empty<object>()
+                },
+                new
+                {
+                    Id = "Build",
+                    Attempt = 1,
+                    RequiresApproval = false,
+                    Status = "Running",
+                    Tasks = new[]
+                    {
+                        new { Id = "task-1", DefinitionId = "task-1", Attempt = 1, Title = "Task 1", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "task-2", DefinitionId = "task-2", Attempt = 1, Title = "Task 2", Status = "Completed", Uses = "mohist/acp-agent" },
+                        new { Id = "task-3", DefinitionId = "task-3", Attempt = 1, Title = "Task 3", Status = "Running", Uses = "mohist/acp-agent" },
+                        new { Id = "task-4", DefinitionId = "task-4", Attempt = 1, Title = "Task 4", Status = "Pending", Uses = "mohist/acp-agent" }
+                    },
+                    Checks = Array.Empty<object>()
+                }
+            }
+        });
+        var issueKey = $"{project.Id}:{issue.Number}";
+        var issueStateJson = JsonSerializer.Serialize(new
+        {
+            ProjectId = project.Id,
+            Number = issue.Number,
+            WorkflowRunId = work.WorkflowRunId,
+            Title = issue.Title
+        });
+
+        await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT OR REPLACE INTO workflow_runs (WorkflowRunId, State) VALUES ({0}, {1})",
+                work.WorkflowRunId, runStateJson);
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT OR REPLACE INTO IssueStates (Key, StateJson) VALUES ({0}, {1})",
+                issueKey, issueStateJson);
+        }
+
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
+
+        Assert.NotNull(card.TaskProgress);
+        Assert.Equal(2, card.TaskProgress!.Completed);
+        Assert.Equal(4, card.TaskProgress.Total);
     }
 
     [Fact(Skip = "Requires design decision: report-failed should close session, but current RunnerGrain.ReportAsync does not propagate to session")]
@@ -519,7 +990,27 @@ public class AgentSessionSpecs
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     private sealed record ActivitySlotUsageDto(int Active, int Max);
-    private sealed record ActivityCardDto(int IssueNumber, string IssueTitle, string SessionId, string Status, ActivityPreviewDto? LastActivity);
+    private sealed record ActivityCardDto(
+        int IssueNumber,
+        string IssueTitle,
+        string SessionId,
+        string Status,
+        ActivityPreviewDto? LastActivity,
+        string? ResolvedModel,
+        long? InputTokens,
+        long? OutputTokens,
+        long? TotalTokens,
+        long? CachedReadTokens,
+        long? ThoughtTokens,
+        double? CostAmount,
+        string? CostCurrency,
+        long? ContextWindowUsed,
+        long? ContextWindowSize,
+        string? FailureCategory,
+        int? ToolCallCount,
+        int? ToolErrorCount,
+        ActivityTaskProgressDto? TaskProgress);
+    private sealed record ActivityTaskProgressDto(int Completed, int Total);
     private sealed record ActivityPreviewDto(string Kind, string Text, string CreatedAt);
     private sealed record ActivityWaitingDto(int IssueNumber, string IssueTitle, string Label);
     private sealed record AgentSessionEventsTestResponse(AgentSessionEventTestDto[] Events);

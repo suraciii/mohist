@@ -82,6 +82,19 @@ public class WorkflowAgentSessionStore : IStateStore<WorkflowAgentSession>
         CompletedAt = r.CompletedAt,
         FailureReason = r.FailureReason,
         ExitCode = r.ExitCode,
+        ResolvedModel = r.ResolvedModel,
+        InputTokens = r.InputTokens,
+        OutputTokens = r.OutputTokens,
+        TotalTokens = r.TotalTokens,
+        CachedReadTokens = r.CachedReadTokens,
+        ThoughtTokens = r.ThoughtTokens,
+        CostAmount = r.CostAmount,
+        CostCurrency = r.CostCurrency,
+        ContextWindowUsed = r.ContextWindowUsed,
+        ContextWindowSize = r.ContextWindowSize,
+        FailureCategory = r.FailureCategory,
+        ToolCallCount = r.ToolCallCount,
+        ToolErrorCount = r.ToolErrorCount,
     };
 
     private static WorkflowAgentSessionRow ToRow(WorkflowAgentSession s) => new()
@@ -109,5 +122,18 @@ public class WorkflowAgentSessionStore : IStateStore<WorkflowAgentSession>
         CompletedAt = s.CompletedAt,
         FailureReason = s.FailureReason,
         ExitCode = s.ExitCode,
+        ResolvedModel = s.ResolvedModel,
+        InputTokens = s.InputTokens,
+        OutputTokens = s.OutputTokens,
+        TotalTokens = s.TotalTokens,
+        CachedReadTokens = s.CachedReadTokens,
+        ThoughtTokens = s.ThoughtTokens,
+        CostAmount = s.CostAmount,
+        CostCurrency = s.CostCurrency,
+        ContextWindowUsed = s.ContextWindowUsed,
+        ContextWindowSize = s.ContextWindowSize,
+        FailureCategory = s.FailureCategory,
+        ToolCallCount = s.ToolCallCount,
+        ToolErrorCount = s.ToolErrorCount,
     };
 }

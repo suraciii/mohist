@@ -34,6 +34,19 @@ export interface AgentSessionMetadata {
   turnCount?: number
   changedFiles?: FileChangeSummary[]
   metadata: AgentSessionMetadataCounts
+  resolvedModel?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
 }
 
 export interface AgentSessionEvent {
@@ -74,6 +87,19 @@ export interface CoderSessionSummary {
   probeSentAt: string | null
   probeDeadlineAt: string | null
   failureReason: string | null
+  resolvedModel?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
 }
 
 export type CoderSessionItem = CoderSessionSummary & {
@@ -124,6 +150,19 @@ export interface SessionMetadata {
   changedFiles?: FileChangeSummary[]
   warnings?: TranscriptWarning[]
   hasUnknownTools?: boolean
+  resolvedModel?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
 }
 
 export interface TextPart {

@@ -43,6 +43,27 @@ public class IssueSessionApiSpecs
                 new { type = "agent_message_chunk", payload = new { text = "hello" } },
                 new
                 {
+                    type = "agent_usage_update",
+                    payload = new
+                    {
+                        inputTokens = 100,
+                        outputTokens = 50,
+                        totalTokens = 150,
+                        cachedReadTokens = 10,
+                        thoughtTokens = 5,
+                        costAmount = 0.01,
+                        costCurrency = "USD",
+                        contextWindowSize = 200000,
+                        contextWindowUsed = 150
+                    }
+                },
+                new
+                {
+                    type = "agent_session_model_resolved",
+                    payload = new { resolvedModel = "anthropic/claude-sonnet-4", source = "newSession" }
+                },
+                new
+                {
                     type = "tool_call",
                     payload = new
                     {
@@ -52,6 +73,16 @@ public class IssueSessionApiSpecs
                         title = "Read README",
                         rawInput = new { filePath = "README.md" }
                     }
+                },
+                new
+                {
+                    type = "tool_call_update",
+                    payload = new { toolCallId = "tool-1", kind = "read", status = "failed", title = "Read README" }
+                },
+                new
+                {
+                    type = "agent_session_terminal",
+                    payload = new { status = "failed", failureReason = "probe timed out", failureCategory = "probe_timeout", exitCode = 1 }
                 },
                 new { type = "agent_message_chunk", payload = new { text = "world" } }
             }
@@ -70,10 +101,23 @@ public class IssueSessionApiSpecs
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
         Assert.True(root.TryGetProperty("completedAt", out _));
         Assert.True(root.TryGetProperty("model", out _));
+        Assert.Equal("anthropic/claude-sonnet-4", root.GetProperty("resolvedModel").GetString());
+        Assert.Equal(100, root.GetProperty("inputTokens").GetInt64());
+        Assert.Equal(50, root.GetProperty("outputTokens").GetInt64());
+        Assert.Equal(150, root.GetProperty("totalTokens").GetInt64());
+        Assert.Equal(10, root.GetProperty("cachedReadTokens").GetInt64());
+        Assert.Equal(5, root.GetProperty("thoughtTokens").GetInt64());
+        Assert.Equal(0.01, root.GetProperty("costAmount").GetDouble());
+        Assert.Equal("USD", root.GetProperty("costCurrency").GetString());
+        Assert.Equal(150, root.GetProperty("contextWindowUsed").GetInt64());
+        Assert.Equal(200000, root.GetProperty("contextWindowSize").GetInt64());
+        Assert.Equal("probe_timeout", root.GetProperty("failureCategory").GetString());
+        Assert.Equal(1, root.GetProperty("toolCallCount").GetInt32());
+        Assert.Equal(1, root.GetProperty("toolErrorCount").GetInt32());
 
         var metadata = root.GetProperty("metadata");
-        Assert.Equal(3, metadata.GetProperty("eventCount").GetInt32());
-        Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
+        Assert.Equal(7, metadata.GetProperty("eventCount").GetInt32());
+        Assert.Equal(2, metadata.GetProperty("toolCount").GetInt32());
 
         Assert.False(root.TryGetProperty("events", out _));
         Assert.False(root.TryGetProperty("turns", out _));

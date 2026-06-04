@@ -15,8 +15,20 @@ vi.mock('../src/entities/coder-session/api/client', () => ({
   getCoderSessions: (...args: any[]) => apiMocks.getCoderSessions(...args),
 }))
 
+const eventHandlers = new Map<string, ((detail: unknown) => void)[]>()
+
 vi.mock('../src/entities/agent/@x/events', () => ({
-  onAgentEvent: vi.fn(() => vi.fn()),
+  onAgentEvent: vi.fn((name: string, handler: (detail: unknown) => void) => {
+    if (!eventHandlers.has(name)) eventHandlers.set(name, [])
+    eventHandlers.get(name)!.push(handler)
+    return () => {
+      const handlers = eventHandlers.get(name)
+      if (handlers) {
+        const idx = handlers.indexOf(handler)
+        if (idx !== -1) handlers.splice(idx, 1)
+      }
+    }
+  }),
 }))
 
 const queryClients: QueryClient[] = []
@@ -68,9 +80,15 @@ function makeSession(overrides: Partial<CoderSessionItem> = {}): CoderSessionIte
 
 beforeEach(() => {
   vi.clearAllMocks()
+  eventHandlers.clear()
   apiMocks.getCoderSessions.mockReset()
   apiMocks.getCoderSessions.mockResolvedValue([])
 })
+
+function dispatchAgentEvent(name: string, detail: unknown) {
+  const handlers = eventHandlers.get(name) ?? []
+  for (const handler of handlers) handler(detail)
+}
 
 afterEach(() => {
   for (const qc of queryClients) qc.clear()
@@ -219,5 +237,100 @@ describe('CoderSessionItem type contract', () => {
     expect(session.model).toBe('claude-3')
     expect(session.stage).toBe('build')
     expect(session.title).toBe('Test Session')
+  })
+})
+
+describe('useCoderSessions live event handling', () => {
+  it('applies agent_usage_update to matching session', async () => {
+    const sessions = [makeSession({ id: 'session-1', status: 'running' })]
+    apiMocks.getCoderSessions.mockResolvedValue(sessions)
+
+    const { result } = renderHookWithProviders(() => useCoderSessions(1))
+
+    await waitFor(() => {
+      expect(result.current.sessions.length).toBe(1)
+    })
+
+    dispatchAgentEvent('agent_usage_update', {
+      issueId: '1',
+      projectId: TEST_PROJECT.id,
+      coderSessionId: 'session-1',
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      cachedReadTokens: 10,
+      thoughtTokens: 5,
+      costAmount: 0.01,
+      costCurrency: 'USD',
+      contextWindowSize: 200000,
+      contextWindowUsed: 150,
+    })
+
+    await waitFor(() => {
+      const session = result.current.sessions[0]
+      expect(session.inputTokens).toBe(100)
+      expect(session.outputTokens).toBe(50)
+      expect(session.totalTokens).toBe(150)
+      expect(session.cachedReadTokens).toBe(10)
+      expect(session.thoughtTokens).toBe(5)
+      expect(session.costAmount).toBe(0.01)
+      expect(session.costCurrency).toBe('USD')
+      expect(session.contextWindowSize).toBe(200000)
+      expect(session.contextWindowUsed).toBe(150)
+    })
+  })
+
+  it('ignores agent_usage_update for unknown session', async () => {
+    const sessions = [makeSession({ id: 'session-1', status: 'running' })]
+    apiMocks.getCoderSessions.mockResolvedValue(sessions)
+
+    const { result } = renderHookWithProviders(() => useCoderSessions(1))
+
+    await waitFor(() => {
+      expect(result.current.sessions.length).toBe(1)
+    })
+
+    dispatchAgentEvent('agent_usage_update', {
+      issueId: '1',
+      projectId: TEST_PROJECT.id,
+      coderSessionId: 'session-unknown',
+      inputTokens: 100,
+    })
+
+    await waitFor(() => {
+      expect(result.current.sessions[0].inputTokens).toBeUndefined()
+    })
+  })
+
+  it('preserves existing fields when usage update is partial', async () => {
+    const sessions = [makeSession({
+      id: 'session-1',
+      status: 'running',
+      inputTokens: 50,
+      costAmount: 0.005,
+      costCurrency: 'USD',
+    })]
+    apiMocks.getCoderSessions.mockResolvedValue(sessions)
+
+    const { result } = renderHookWithProviders(() => useCoderSessions(1))
+
+    await waitFor(() => {
+      expect(result.current.sessions.length).toBe(1)
+    })
+
+    dispatchAgentEvent('agent_usage_update', {
+      issueId: '1',
+      projectId: TEST_PROJECT.id,
+      coderSessionId: 'session-1',
+      outputTokens: 25,
+    })
+
+    await waitFor(() => {
+      const session = result.current.sessions[0]
+      expect(session.inputTokens).toBe(50)
+      expect(session.outputTokens).toBe(25)
+      expect(session.costAmount).toBe(0.005)
+      expect(session.costCurrency).toBe('USD')
+    })
   })
 })

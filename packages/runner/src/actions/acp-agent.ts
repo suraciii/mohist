@@ -47,7 +47,11 @@ const QUALIFYING_LIVENESS_NOTIFICATION_TYPES = new Set([
   "tool_call_update",
   "tool_result",
   "tool_result_update",
+  "usage_update",
 ])
+
+const RESOLVED_MODEL_EVENT = "agent_session_model_resolved"
+const USAGE_UPDATE_EVENT = "agent_usage_update"
 
 type AcpLivenessActivity =
   | { isActivity: false }
@@ -98,6 +102,115 @@ function hasMessageGrowth(update: SessionNotification["update"]): boolean {
 
 function recordLivenessActivity(notify: (activityType?: string) => void, activity: AcpLivenessActivity) {
   if (activity.isActivity) notify(activity.activityType)
+}
+
+function extractResolvedModelId(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const models = (value as Record<string, unknown>).models
+  if (typeof models !== "object" || models === null) return undefined
+  const current = (models as Record<string, unknown>).currentModelId
+  return typeof current === "string" && current.trim().length > 0 ? current : undefined
+}
+
+function extractResolvedModelFromConfigUpdate(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const configOptions = (value as Record<string, unknown>).configOptions
+  if (!Array.isArray(configOptions)) return undefined
+  for (const entry of configOptions) {
+    if (typeof entry !== "object" || entry === null) continue
+    const option = entry as Record<string, unknown>
+    const category = option.category
+    if (category !== "model") continue
+    const current = option.currentValue
+    if (typeof current === "string" && current.trim().length > 0) return current
+  }
+  return undefined
+}
+
+function buildResolvedModelEventPayload(context: ActionContext, acpSessionId: string, resolvedModel: string, source: "newSession" | "resumeSession" | "config_option_update"): JsonObject {
+  return cleanJson({
+    sessionName: sessionNameFromContext(context),
+    acpSessionId,
+    workId: context.workId,
+    workType: context.workType,
+    stage: context.stage ?? null,
+    resolvedModel,
+    source,
+  })
+}
+
+function buildUsageUpdatePayload(context: ActionContext, acpSessionId: string, source: "prompt_response" | "usage_update", usage?: unknown, update?: { cost?: unknown, size?: unknown, used?: unknown }): JsonObject {
+  const payload: JsonObject = cleanJson({
+    sessionName: sessionNameFromContext(context),
+    acpSessionId,
+    workId: context.workId,
+    workType: context.workType,
+    stage: context.stage ?? null,
+    source,
+  })
+
+  if (usage && typeof usage === "object") {
+    const u = usage as Record<string, unknown>
+    if (typeof u.inputTokens === "number") payload.inputTokens = u.inputTokens
+    if (typeof u.outputTokens === "number") payload.outputTokens = u.outputTokens
+    if (typeof u.totalTokens === "number") payload.totalTokens = u.totalTokens
+    if (typeof u.cachedReadTokens === "number") payload.cachedReadTokens = u.cachedReadTokens
+    if (typeof u.thoughtTokens === "number") payload.thoughtTokens = u.thoughtTokens
+  }
+
+  if (update) {
+    if (update.cost && typeof update.cost === "object") {
+      const c = update.cost as Record<string, unknown>
+      if (typeof c.amount === "number") payload.costAmount = c.amount
+      if (typeof c.currency === "string") payload.costCurrency = c.currency
+    }
+    if (typeof update.size === "number") payload.contextWindowSize = update.size
+    if (typeof update.used === "number") payload.contextWindowUsed = update.used
+  }
+
+  return payload
+}
+
+function hasUsageUpdateContent(payload: JsonObject): boolean {
+  return payload.contextWindowSize !== undefined
+    || payload.contextWindowUsed !== undefined
+    || payload.costAmount !== undefined
+    || payload.costCurrency !== undefined
+    || payload.inputTokens !== undefined
+    || payload.outputTokens !== undefined
+    || payload.totalTokens !== undefined
+    || payload.cachedReadTokens !== undefined
+    || payload.thoughtTokens !== undefined
+}
+
+function createObservabilityAwareEmitter(
+  context: ActionContext,
+  getAcpSessionId: () => string,
+  toolIds: ToolCallIdGenerator,
+): (type: string, update: SessionNotification["update"]) => Promise<void> {
+  return async (type, update) => {
+    const acpSessionId = getAcpSessionId()
+    await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
+
+    if (type === "config_option_update") {
+      const resolvedModel = extractResolvedModelFromConfigUpdate(update as unknown)
+      if (resolvedModel) {
+        await emitSessionEvent(context, RESOLVED_MODEL_EVENT, buildResolvedModelEventPayload(context, acpSessionId, resolvedModel, "config_option_update"))
+      }
+    }
+
+    if (type === "usage_update") {
+      const u = update as unknown as Record<string, unknown>
+      const payload = buildUsageUpdatePayload(context, acpSessionId, "usage_update", undefined, {
+        cost: u.cost,
+        size: u.size,
+        used: u.used,
+      })
+      if (hasUsageUpdateContent(payload)) {
+        await emitSessionEvent(context, USAGE_UPDATE_EVENT, payload)
+      }
+    }
+  }
 }
 
 function createAcpSessionUpdateHandler(options: {
@@ -236,6 +349,7 @@ interface AcpSessionResult {
   exitCode?: number | null
   activityCount?: number
   providerError?: OpencodeProviderErrorDiagnostic
+  failureCategory?: LivenessFailureReason
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
@@ -249,7 +363,8 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   const verification = await verifyExpectations(context)
   const ok = result.success && verification.satisfied
   const agentConfig = resolveAgentConfig(context.with)
-  await emitSessionEvent(context, "agent_session_terminal", { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, exitCode: result.exitCode ?? (ok ? 0 : 1) })
+  const failureCategory = ok ? null : result.failureCategory ?? null
+  await emitSessionEvent(context, "agent_session_terminal", { status: ok ? "completed" : "failed", failureReason: ok ? null : result.error ?? verification.message, failureCategory, exitCode: result.exitCode ?? (ok ? 0 : 1) })
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
@@ -442,9 +557,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       notifyData,
       recordActivity: () => { activityCount += 1 },
       appendAssistantText,
-      emitUpdate: async (type, update) => {
-        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, entry.sessionId, toolIds))
-      },
+      emitUpdate: createObservabilityAwareEmitter(context, () => entry.sessionId, toolIds),
     }),
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -464,7 +577,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount, providerError: promptResult.providerError }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount, providerError: promptResult.providerError, failureCategory: promptResult.failureReason }
     }
     const activityFailure = validatePromptActivity(activityCount)
     if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
@@ -510,9 +623,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       notifyData,
       recordActivity: () => { activityCount += 1 },
       appendAssistantText,
-      emitUpdate: async (type, update) => {
-        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, acpSessionId, toolIds))
-      },
+      emitUpdate: createObservabilityAwareEmitter(context, () => acpSessionId, toolIds),
     }),
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -528,6 +639,8 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
     if (resumeResult === "timeout") throw new Error("Timed out during ACP resumeSession")
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "resume_session" }))
 
+    const resolvedModel = extractResolvedModelId(resumeResult)
+
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
@@ -541,7 +654,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
         }
       }
 
-    await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig)
+    await emitSessionStarted(context, acpSessionId, acp.processPid, agentConfig, resolvedModel, "resumeSession")
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, acpSessionId))
 
     const promptResult = await monitorPrompt(context, connection, acpSessionId, prompt, {
@@ -552,7 +665,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1, activityCount, providerError: promptResult.providerError }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1, activityCount, providerError: promptResult.providerError, failureCategory: promptResult.failureReason }
     }
 
     const activityFailure = validatePromptActivity(activityCount)
@@ -601,9 +714,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
       notifyData,
       recordActivity: () => { activityCount += 1 },
       appendAssistantText,
-      emitUpdate: async (type, update) => {
-        await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
-      },
+      emitUpdate: createObservabilityAwareEmitter(context, () => sessionId, toolIds),
     }),
     async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
       const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -620,6 +731,8 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     sessionId = session.sessionId
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
 
+    const resolvedModel = extractResolvedModelId(session)
+
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
@@ -633,7 +746,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
         }
       }
 
-    await emitSessionStarted(context, sessionId, acp.processPid, agentConfig)
+    await emitSessionStarted(context, sessionId, acp.processPid, agentConfig, resolvedModel)
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
@@ -645,7 +758,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     })
     if (promptResult !== "completed") {
       try { await connection.closeSession?.({ sessionId }) } catch {}
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1, activityCount, providerError: promptResult.providerError }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1, activityCount, providerError: promptResult.providerError, failureCategory: promptResult.failureReason }
     }
 
     const activityFailure = validatePromptActivity(activityCount)
@@ -693,9 +806,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
         notifyData,
         recordActivity: () => { activityCount += 1 },
         appendAssistantText,
-        emitUpdate: async (type, update) => {
-          await emitSessionEvent(context, type, normalizeSessionUpdate(update as unknown as JsonObject, sessionId, toolIds))
-        },
+        emitUpdate: createObservabilityAwareEmitter(context, () => sessionId, toolIds),
       }),
       requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
         const allow = params.options.find((option) => option.kind === "allow_once" || option.kind === "allow_always")
@@ -725,6 +836,8 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
     sessionId = session.sessionId
     recordLivenessActivity(notifyData, classifyAcpLivenessActivity({ kind: "protocol_response", response: "new_session" }))
 
+    const resolvedModel = extractResolvedModelId(session)
+
     const model = agentConfig?.model ?? stringInput(context.with, "model")
     if (model?.trim()) {
       try {
@@ -738,7 +851,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
         }
       }
 
-    await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig)
+    await emitSessionStarted(context, sessionId, acpProcess.processPid, agentConfig, resolvedModel)
     await emitSessionEvent(context, "mohist_prompt", buildPromptEvent(context, prompt, sessionId))
 
     const promptResult = await monitorPrompt(context, connection, sessionId, prompt, {
@@ -750,7 +863,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       exitFailure: acpProcess.exitFailure,
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode(), activityCount, providerError: promptResult.providerError }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode(), activityCount, providerError: promptResult.providerError, failureCategory: promptResult.failureReason }
     }
 
     const activityFailure = validatePromptActivity(activityCount)
@@ -769,11 +882,23 @@ function validatePromptActivity(activityCount: number) {
   return activityCount > 0 ? undefined : "ACP agent prompt completed without any session activity"
 }
 
-async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string; providerError?: OpencodeProviderErrorDiagnostic }> {
+async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string; providerError?: OpencodeProviderErrorDiagnostic; failureReason?: LivenessFailureReason }> {
   const startedAt = Date.now()
   const promptPromise = connection.prompt({ sessionId, prompt: [{ type: "text", text: prompt }] })
+  let promptUsage: unknown
+  promptPromise.then(
+    (response) => { promptUsage = response.usage },
+    () => {},
+  )
   const promptOutcome = promptPromise.then(() => "completed" as const, (error: unknown) => toError(error))
   const exitFailure = options.exitFailure ?? new Promise<never>(() => {})
+
+  const emitPromptUsageIfAppropriate = async () => {
+    if (!promptUsage || typeof promptUsage !== "object") return
+    const payload = buildUsageUpdatePayload(context, sessionId, "prompt_response", promptUsage)
+    if (!hasUsageUpdateContent(payload)) return
+    await emitSessionEvent(context, USAGE_UPDATE_EVENT, payload)
+  }
 
   while (true) {
     const now = Date.now()
@@ -787,13 +912,16 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       aborted(context.signal),
       exitFailure.catch((error) => error),
     ])
-    if (result === "completed") return "completed"
+    if (result === "completed") {
+      await emitPromptUsageIfAppropriate()
+      return "completed"
+    }
     if (result === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
     if (result instanceof Error) {
       const failureReason: LivenessFailureReason = result.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
       await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, providerError: diagnostic, postProbeActivity: hasPostProbeActivity(options.livenessState) })
-      return { error: appendOpencodeDiagnostic(result.message, diagnostic), providerError: diagnostic }
+      return { error: appendOpencodeDiagnostic(result.message, diagnostic), providerError: diagnostic, failureReason }
     }
     if (Date.now() - options.livenessState.lastDataAt < options.livenessQuietThresholdMs) continue
 
@@ -805,7 +933,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       const message = error instanceof Error ? error.message : String(error)
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
       await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_send_failed", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
-      return { error: appendOpencodeDiagnostic(`Failed to send liveness probe: ${message}`, diagnostic), providerError: diagnostic }
+      return { error: appendOpencodeDiagnostic(`Failed to send liveness probe: ${message}`, diagnostic), providerError: diagnostic, failureReason: "probe_send_failed" }
     }
     const probeResult = await Promise.race([
       promptOutcome,
@@ -814,7 +942,24 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       aborted(context.signal),
       exitFailure.catch((error) => error),
     ])
-    if (probeResult === "completed") return "completed"
+    if (probeResult === "completed" && hasPostProbeActivity(options.livenessState)) {
+      await emitPromptUsageIfAppropriate()
+      return "completed"
+    }
+    if (probeResult === "completed") {
+      const probeState: LivenessProbeState = {
+        probeSentAt: options.livenessState.probeSentAt,
+        probeDeadlineAt: options.livenessState.probeDeadlineAt,
+        probeVersion: options.livenessState.probeVersion,
+        lastDataAt: options.livenessState.lastDataAt,
+        ...(options.livenessState.lastActivityType ? { lastActivityType: options.livenessState.lastActivityType } : {}),
+        dataVersion: options.livenessState.dataVersion,
+        postProbeActivity: hasPostProbeActivity(options.livenessState),
+      }
+      const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
+      return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic, failureReason: "probe_timeout" }
+    }
     if (probeResult === "data" && probeWasSatisfied(options.livenessState)) {
       await emitLivenessStatusEvent(context, options.livenessState, "running", { acpSessionId: sessionId, satisfiedProbeVersion: activeProbe.probeVersion })
       clearLivenessProbe(options.livenessState)
@@ -825,7 +970,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       const failureReason: LivenessFailureReason = probeResult.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
       const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
       await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
-      return { error: appendOpencodeDiagnostic(probeResult.message, diagnostic), providerError: diagnostic }
+      return { error: appendOpencodeDiagnostic(probeResult.message, diagnostic), providerError: diagnostic, failureReason }
     }
     const probeState: LivenessProbeState = {
       probeSentAt: options.livenessState.probeSentAt,
@@ -838,7 +983,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     }
     const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
     await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
-    return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic }
+    return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic, failureReason: "probe_timeout" }
   }
 }
 
@@ -870,11 +1015,14 @@ function waitForData(waiters: Set<() => void>, done: () => boolean): Promise<"da
   return new Promise((resolve) => waiters.add(() => resolve("data")))
 }
 
-async function emitSessionStarted(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined) {
+async function emitSessionStarted(context: ActionContext, agentSessionId: string, processPid: number | null, agentConfig: AgentConfig | undefined, resolvedModel?: string, resolvedModelSource: "newSession" | "resumeSession" = "newSession") {
   const sessionName = sessionNameFromContext(context)
   const projectId = context.projectId
   if (sessionName && context.serverConnection && projectId) {
-    await context.serverConnection.attachWorkflowAgentSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model") }, context.signal)
+    await context.serverConnection.attachWorkflowAgentSession(projectId, context.workflowRunId, sessionName, { agentSessionId, workDir: context.workDir, processPid, model: agentConfig?.model ?? stringInput(context.with, "model"), ...(resolvedModel ? { resolvedModel } : {}) }, context.signal)
+  }
+  if (resolvedModel && sessionName) {
+    await emitSessionEvent(context, RESOLVED_MODEL_EVENT, buildResolvedModelEventPayload(context, agentSessionId, resolvedModel, resolvedModelSource))
   }
 }
 

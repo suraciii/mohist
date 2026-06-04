@@ -5,6 +5,7 @@ import { useIssue } from '../../../entities/issue'
 import { useCoderSessions } from '../../../entities/coder-session'
 import { getAgentSessionMetadata, getAgentSessionEvents } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 import { useProject } from '../../../entities/project'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import type { AgentSessionMetadata, AgentSessionEvent, SessionMetadata, SessionStatusKind, CoderSessionDetail } from '../../../entities/coder-session'
@@ -55,6 +56,19 @@ function buildSessionMetadata(
     toolCount: meta.metadata.toolCount,
     turnCount,
     changedFiles: meta.changedFiles,
+    resolvedModel: meta.resolvedModel ?? null,
+    inputTokens: meta.inputTokens ?? null,
+    outputTokens: meta.outputTokens ?? null,
+    totalTokens: meta.totalTokens ?? null,
+    cachedReadTokens: meta.cachedReadTokens ?? null,
+    thoughtTokens: meta.thoughtTokens ?? null,
+    costAmount: meta.costAmount ?? null,
+    costCurrency: meta.costCurrency ?? null,
+    contextWindowUsed: meta.contextWindowUsed ?? null,
+    contextWindowSize: meta.contextWindowSize ?? null,
+    failureCategory: meta.failureCategory ?? null,
+    toolCallCount: meta.toolCallCount ?? null,
+    toolErrorCount: meta.toolErrorCount ?? null,
   }
 }
 
@@ -258,6 +272,18 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
       : `${changedFiles.length} files changed`
     : null
 
+  const hasUsage =
+    meta?.totalTokens != null ||
+    meta?.inputTokens != null ||
+    meta?.outputTokens != null ||
+    meta?.cachedReadTokens != null ||
+    meta?.thoughtTokens != null
+
+  const contextWindowPct =
+    meta?.contextWindowUsed != null && meta?.contextWindowSize != null && meta.contextWindowSize > 0
+      ? Math.min(100, Math.round((meta.contextWindowUsed / meta.contextWindowSize) * 100))
+      : null
+
   return (
     <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
       <div className="flex items-center gap-2 text-sm mb-2">
@@ -290,9 +316,20 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
           <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-medium">
             {getStageLabel(meta?.stage ?? null)}
           </span>
-          {meta?.model && <span>{meta.model}</span>}
+
+          {/* Model badges */}
+          {meta?.model && meta?.resolvedModel && meta.model !== meta.resolvedModel ? (
+            <span className="text-gray-500">
+              {meta.model} <span className="text-gray-300">→</span>{' '}
+              <span className="text-blue-600">{meta.resolvedModel}</span>
+            </span>
+          ) : meta?.model ? (
+            <span>{meta.model}</span>
+          ) : null}
+
           <span className="text-gray-300">·</span>
           <span>{turnCount} turn{turnCount !== 1 ? 's' : ''}</span>
+
           {meta?.lastActivityAt && (
             <>
               <span className="text-gray-300">·</span>
@@ -331,6 +368,48 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
           )}
         </div>
       </div>
+
+      {/* Observability bar */}
+      {(hasUsage || meta?.costAmount != null || meta?.contextWindowUsed != null || meta?.failureCategory || meta?.toolCallCount != null) && (
+        <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 flex-wrap">
+          {hasUsage && (
+            <span>
+              {meta?.totalTokens != null
+                ? `${formatCompact(meta.totalTokens)} tokens`
+                : [
+                    meta?.inputTokens != null ? `${formatCompact(meta.inputTokens)} in` : '',
+                    meta?.outputTokens != null ? `${formatCompact(meta.outputTokens)} out` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+            </span>
+          )}
+          {meta?.costAmount != null && meta?.costCurrency && (
+            <span>{formatCost(meta.costAmount, meta.costCurrency)}</span>
+          )}
+          {meta?.contextWindowUsed != null && (
+            <span>
+              {meta?.contextWindowSize != null
+                ? `${formatCompact(meta.contextWindowUsed)} / ${formatCompact(meta.contextWindowSize)} ctx`
+                : `${formatCompact(meta.contextWindowUsed)} ctx used`}
+              {contextWindowPct != null && (
+                <span className="ml-1 text-gray-400">({contextWindowPct}%)</span>
+              )}
+            </span>
+          )}
+          {meta?.failureCategory && (
+            <span className="px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 text-[10px] font-medium">
+              {meta.failureCategory}
+            </span>
+          )}
+          {meta?.toolCallCount != null && (
+            <span className={meta?.toolErrorCount ? 'text-orange-600 font-medium' : ''}>
+              {meta.toolCallCount} tool{meta.toolCallCount !== 1 ? 's' : ''}
+              {meta?.toolErrorCount ? ` · ${meta.toolErrorCount} error${meta.toolErrorCount !== 1 ? 's' : ''}` : ''}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -6,17 +6,21 @@ using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Queries;
 using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Sessions.Querying;
 
 public class WorkflowAgentSessionQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly WorkflowQueryService _workflowReader;
 
-    public WorkflowAgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowAgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQueryService workflowReader)
     {
         _dbFactory = dbFactory;
+        _workflowReader = workflowReader;
     }
 
     public async Task<IReadOnlyList<WorkflowAgentSessionDto>> ListByWorkflowAsync(string workflowRunId, CancellationToken ct = default)
@@ -72,7 +76,20 @@ public class WorkflowAgentSessionQuerier
             s.Title,
             s.CreatedAt.ToString("o"),
             s.CompletedAt?.ToString("o"),
-            (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o"))).ToList();
+            (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o"),
+            s.ResolvedModel,
+            s.InputTokens,
+            s.OutputTokens,
+            s.TotalTokens,
+            s.CachedReadTokens,
+            s.ThoughtTokens,
+            s.CostAmount,
+            s.CostCurrency,
+            s.ContextWindowUsed,
+            s.ContextWindowSize,
+            s.FailureCategory,
+            s.ToolCallCount,
+            s.ToolErrorCount)).ToList();
     }
 
     public async Task<IReadOnlyList<WorkflowAgentSessionSummaryDto>> ListSummariesByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -106,6 +123,19 @@ public class WorkflowAgentSessionQuerier
             session.Title,
             session.CreatedAt.ToString("o"),
             session.CompletedAt?.ToString("o"),
+            session.ResolvedModel,
+            session.InputTokens,
+            session.OutputTokens,
+            session.TotalTokens,
+            session.CachedReadTokens,
+            session.ThoughtTokens,
+            session.CostAmount,
+            session.CostCurrency,
+            session.ContextWindowUsed,
+            session.ContextWindowSize,
+            session.FailureCategory,
+            session.ToolCallCount,
+            session.ToolErrorCount,
             new AgentSessionMetadataCounts(eventCount, toolCount));
     }
 
@@ -166,9 +196,10 @@ public class WorkflowAgentSessionQuerier
         var sessionIds = sessions.Select(s => s.Id).ToArray();
         var latestEvents = await LoadLatestEventsAsync(db, sessionIds, ct);
         var issueTitles = await LoadIssueTitlesAsync(db, projectId, sessions.Select(s => s.IssueNumber), ct);
+        var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
         var cards = sessions
-            .Select(s => ToActivityCard(s, latestEvents.GetValueOrDefault(s.Id), IssueTitle(issueTitles, s.IssueNumber)))
+            .Select(s => ToActivityCard(s, latestEvents.GetValueOrDefault(s.Id), IssueTitle(issueTitles, s.IssueNumber), taskProgressMap.GetValueOrDefault(s.Id)))
             .ToList();
 
         waiting ??= [];
@@ -180,6 +211,42 @@ public class WorkflowAgentSessionQuerier
             new ActivitySlotUsageDto(cards.Count(c => c.Status is "created" or "running" or "probing"), (runnerIds?.Count ?? 0) + 1));
 
         return new ActivityDto(summary, cards, waiting.ToList());
+    }
+
+    private async Task<Dictionary<string, ActivityTaskProgressDto>> BuildTaskProgressMapAsync(List<WorkflowAgentSessionRow> sessions, CancellationToken ct)
+    {
+        var result = new Dictionary<string, ActivityTaskProgressDto>(StringComparer.Ordinal);
+        var workflowRunIds = sessions.Select(s => s.WorkflowRunId).Distinct(StringComparer.Ordinal).ToArray();
+        if (workflowRunIds.Length == 0) return result;
+
+        var statusTasks = workflowRunIds.Select(async wrid =>
+        {
+            var status = await _workflowReader.GetStatusAsync(wrid);
+            return (WorkflowRunId: wrid, Status: status);
+        });
+        var statuses = await Task.WhenAll(statusTasks);
+        var statusByWorkflow = statuses.ToDictionary(x => x.WorkflowRunId, x => x.Status, StringComparer.Ordinal);
+
+        foreach (var session in sessions)
+        {
+            if (!statusByWorkflow.TryGetValue(session.WorkflowRunId, out var status) || status is null)
+                continue;
+
+            var currentStageId = status.CurrentStage;
+            if (string.IsNullOrWhiteSpace(currentStageId))
+                continue;
+
+            var stage = status.Stages.FirstOrDefault(s => string.Equals(s.Stage, currentStageId, StringComparison.OrdinalIgnoreCase));
+            if (stage is null)
+                continue;
+
+            var completed = stage.Tasks.Count(t => string.Equals(t.Status, "completed", StringComparison.OrdinalIgnoreCase));
+            var total = stage.Tasks.Count;
+            if (total > 0)
+                result[session.Id] = new ActivityTaskProgressDto(completed, total);
+        }
+
+        return result;
     }
 
     private static async Task<Dictionary<string, WorkflowAgentSessionEventRow>> LoadLatestEventsAsync(
@@ -204,7 +271,7 @@ public class WorkflowAgentSessionQuerier
             .ToDictionary(e => e.SessionId);
     }
 
-    private static ActivityCardDto ToActivityCard(WorkflowAgentSessionRow s, WorkflowAgentSessionEventRow? latestEvent, string issueTitle)
+    private static ActivityCardDto ToActivityCard(WorkflowAgentSessionRow s, WorkflowAgentSessionEventRow? latestEvent, string issueTitle, ActivityTaskProgressDto? taskProgress)
     {
         var lastActivityAt = (s.LastDataAt ?? s.StartedAt ?? s.CreatedAt).ToString("o");
         return new ActivityCardDto(
@@ -221,9 +288,22 @@ public class WorkflowAgentSessionQuerier
             s.CompletedAt?.ToString("o"),
             lastActivityAt,
             new ActivityWorkItemDto(s.WorkType ?? "task", s.WorkId ?? s.SessionName, s.Title ?? s.SessionName, s.Stage, null),
-            null,
+            taskProgress,
             latestEvent is null ? null : ToPreview(latestEvent),
-            s.FailureReason);
+            s.FailureReason,
+            s.ResolvedModel,
+            s.InputTokens,
+            s.OutputTokens,
+            s.TotalTokens,
+            s.CachedReadTokens,
+            s.ThoughtTokens,
+            s.CostAmount,
+            s.CostCurrency,
+            s.ContextWindowUsed,
+            s.ContextWindowSize,
+            s.FailureCategory,
+            s.ToolCallCount,
+            s.ToolErrorCount);
     }
 
     private static async Task<Dictionary<int, string>> LoadIssueTitlesAsync(
@@ -302,7 +382,10 @@ public class WorkflowAgentSessionQuerier
         s.WorkId, s.WorkType, s.Stage, s.Title, s.RunnerId, s.AgentSessionId,
         s.Status, s.Model, s.WorkDir, s.ChangeDir, s.ProcessPid,
         s.CreatedAt.ToString("o"), s.StartedAt?.ToString("o"), s.CompletedAt?.ToString("o"),
-        s.LastDataAt?.ToString("o"), s.FailureReason, s.ExitCode);
+        s.LastDataAt?.ToString("o"), s.FailureReason, s.ExitCode,
+        s.ResolvedModel, s.InputTokens, s.OutputTokens, s.TotalTokens, s.CachedReadTokens, s.ThoughtTokens,
+        s.CostAmount, s.CostCurrency, s.ContextWindowUsed, s.ContextWindowSize, s.FailureCategory,
+        s.ToolCallCount, s.ToolErrorCount);
 
     private static WorkflowSessionDto ToWorkflowDto(WorkflowAgentSessionRow s) => new(
         s.Id, s.WorkflowRunId, s.SessionName, s.AgentSessionId,
@@ -315,7 +398,10 @@ public class WorkflowAgentSessionQuerier
         s.Id, s.SessionName, s.AgentSessionId ?? s.Id, s.WorkId, s.Title,
         s.Status, s.CreatedAt.ToString("o"), s.CompletedAt?.ToString("o"),
         s.Model, null, s.Stage, s.Title,
-        s.LastDataAt?.ToString("o"), null, null, s.FailureReason);
+        s.LastDataAt?.ToString("o"), null, null, s.FailureReason,
+        s.ResolvedModel, s.InputTokens, s.OutputTokens, s.TotalTokens, s.CachedReadTokens, s.ThoughtTokens,
+        s.CostAmount, s.CostCurrency, s.ContextWindowUsed, s.ContextWindowSize, s.FailureCategory,
+        s.ToolCallCount, s.ToolErrorCount);
 
     private static WorkflowAgentSessionEventDto ToEventDto(WorkflowAgentSessionEventRow e) => new(
         e.Id.ToString(), e.SessionId, e.ProjectId, e.IssueNumber, e.WorkflowRunId,

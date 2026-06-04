@@ -99,7 +99,8 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
           eventName === 'coder_session_failed' ||
           eventName === 'coder_session_cancelled' ||
           eventName === 'coder_session_status_changed' ||
-          eventName === 'agent_liveness_status'
+          eventName === 'agent_liveness_status' ||
+          eventName === 'agent_usage_update'
         ) {
           queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
         }
