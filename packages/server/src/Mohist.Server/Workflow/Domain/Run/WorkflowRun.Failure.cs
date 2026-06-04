@@ -8,16 +8,20 @@ public static partial class WorkflowRunExtensions
 {
     extension(WorkflowRun run)
     {
-        public void FailStage(string reason)
+        public IReadOnlyList<WorkflowEvent> FailStage(string reason)
         {
             var current = run.CurrentStage();
             current.Failure = new FailureDetails(FailureReason.TaskFailed, current.Id, Message: reason);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
             run.Status = WorkflowRunStatus.Failed;
+            return [
+                new StageFailed(current.Id, reason),
+                new WorkflowRunFailed(reason)
+            ];
         }
 
-        public void Retry()
+        public IReadOnlyList<WorkflowEvent> Retry()
         {
             if (run.Status != WorkflowRunStatus.Failed)
                 throw new WorkflowDomainException($"WorkflowRun is {run.Status}, retry requires failed");
@@ -32,14 +36,14 @@ public static partial class WorkflowRunExtensions
                     current.RetryFailedTask(current.Failure.TaskId);
                     run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
-                    break;
+                    return [new WorkflowRunResumed()];
                 case FailureReason.TaskFailed:
                     throw new WorkflowDomainException($"Stage {current.Id} task failure has no task ID; use rerun to restart the stage");
                 case FailureReason.CheckUnrepaired:
                     current.RetryFailedCheck(current.Failure.CheckName);
                     run.Failure = null;
                     run.Status = WorkflowRunStatus.Running;
-                    break;
+                    return [new WorkflowRunResumed()];
                 case FailureReason.ApprovalRejected:
                     throw new WorkflowDomainException($"Stage {current.Id} failure is approval rejection; use rerun to restart the stage");
                 default:
@@ -47,7 +51,7 @@ public static partial class WorkflowRunExtensions
             }
         }
 
-        public void Rerun()
+        public IReadOnlyList<WorkflowEvent> Rerun()
         {
             var current = run.CurrentStage();
             var stageIdx = run.Stages.FindIndex(s => s.Id == current.Id);
@@ -61,6 +65,10 @@ public static partial class WorkflowRunExtensions
             run.Stages[stageIdx] = newStage;
             run.Failure = null;
             run.Status = WorkflowRunStatus.Running;
+            return [
+                new WorkflowRunResumed(),
+                new StageStarted(newStage.Id)
+            ];
         }
 
         private void ResetStageFailure()

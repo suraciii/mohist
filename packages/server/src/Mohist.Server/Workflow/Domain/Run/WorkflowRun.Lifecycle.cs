@@ -46,27 +46,32 @@ public static partial class WorkflowRunExtensions
                 ?? throw new WorkflowDomainException($"Current stage {run.CurrentStageId} not found");
         }
 
-        public void Start()
+        public IReadOnlyList<WorkflowEvent> Start()
         {
             if (run.Status != WorkflowRunStatus.Pending && run.Status != WorkflowRunStatus.Paused)
                 throw new WorkflowDomainException($"WorkflowRun is {run.Status}");
 
+            var wasPaused = run.Status == WorkflowRunStatus.Paused;
             var current = run.CurrentStage();
             if (current.Status == StageRunStatus.Pending)
                 current.Status = StageRunStatus.Running;
 
             run.Status = WorkflowRunStatus.Running;
             run.StartedAt ??= DateTimeOffset.UtcNow;
+            return wasPaused
+                ? [new WorkflowRunResumed()]
+                : [new WorkflowRunStarted(), new StageStarted(current.Id)];
         }
 
-        public void Pause()
+        public IReadOnlyList<WorkflowEvent> Pause()
         {
             if (run.Status != WorkflowRunStatus.Running)
                 throw new WorkflowDomainException($"WorkflowRun is {run.Status}, pause requires Running");
             run.Status = WorkflowRunStatus.Paused;
+            return [new WorkflowRunPaused()];
         }
 
-        public void Resume()
+        public IReadOnlyList<WorkflowEvent> Resume()
         {
             if (run.Status != WorkflowRunStatus.Paused)
                 throw new WorkflowDomainException($"WorkflowRun is {run.Status}, resume requires Paused");
@@ -76,13 +81,15 @@ public static partial class WorkflowRunExtensions
                 current.Status = StageRunStatus.Running;
 
             run.Status = WorkflowRunStatus.Running;
+            return [new WorkflowRunResumed()];
         }
 
-        public void Stop()
+        public IReadOnlyList<WorkflowEvent> Stop()
         {
             if (run.Status is not (WorkflowRunStatus.Running or WorkflowRunStatus.Paused))
                 throw new WorkflowDomainException($"WorkflowRun is {run.Status}, stop requires Running or Paused");
             run.Status = WorkflowRunStatus.Stopped;
+            return [new WorkflowRunStopped()];
         }
     }
 }

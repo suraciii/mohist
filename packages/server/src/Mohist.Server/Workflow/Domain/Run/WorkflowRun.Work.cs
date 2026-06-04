@@ -51,7 +51,7 @@ public static partial class WorkflowRunExtensions
             return null;
         }
 
-        public void AddRuntimeTask(
+        public IReadOnlyList<WorkflowEvent> AddRuntimeTask(
             TaskDefinition task,
             string? stage = null,
             bool invalidateChecks = false)
@@ -82,9 +82,10 @@ public static partial class WorkflowRunExtensions
                 current.Status = StageRunStatus.Running;
 
             run.Status = WorkflowRunStatus.Running;
+            return [new WorkflowRunResumed()];
         }
 
-        public void InsertRuntimeTasksAfter(
+        public IReadOnlyList<WorkflowEvent> InsertRuntimeTasksAfter(
             IReadOnlyList<TaskDefinition> tasks,
             bool invalidateChecks = false)
         {
@@ -110,6 +111,7 @@ public static partial class WorkflowRunExtensions
                     c.Output = null;
                 }
             }
+            return tasks.Count > 0 ? [new WorkflowRunResumed()] : [];
         }
 
         private void AddRepairTask(string checkName, TaskDefinition task)
