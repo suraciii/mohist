@@ -1,12 +1,12 @@
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.Grains;
 
 public interface IIssueGrain : IGrainWithStringKey
 {
-    Task CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null);
+    Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null);
     Task<string> StartWorkAsync(WorkflowProjectContext? project = null);
     Task CompleteWorkAsync(string workflowRunId);
     Task CancelAsync();

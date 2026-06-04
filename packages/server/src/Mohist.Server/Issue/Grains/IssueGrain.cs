@@ -3,18 +3,18 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -27,9 +27,11 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IEventStore _events;
     private readonly IssueWorkflowProfileRegistry _profiles;
     private readonly ConfigService _config;
-    private readonly WorkflowQueryService _workflowReader;
+    private readonly WorkflowQuerier _workflowReader;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
+    private readonly IssueIdentityResolver _identityResolver;
+    private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly ILogger<IssueGrain> _log;
@@ -40,9 +42,11 @@ public class IssueGrain : Grain, IIssueGrain
         IEventStore events,
         IssueWorkflowProfileRegistry profiles,
         ConfigService config,
-        WorkflowQueryService workflowReader,
+        WorkflowQuerier workflowReader,
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueRepositoryResolver repositoryResolver,
+        IssueIdentityResolver identityResolver,
+        WorkflowProfileManager workflowProfileManager,
         IssueWorkflowProfileManager issueProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
         ILogger<IssueGrain> log)
@@ -55,6 +59,8 @@ public class IssueGrain : Grain, IIssueGrain
         _workflowReader = workflowReader;
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
+        _identityResolver = identityResolver;
+        _workflowProfileManager = workflowProfileManager;
         _issueProfileManager = issueProfileManager;
         _projectProfileManager = projectProfileManager;
         _log = log;
@@ -66,6 +72,21 @@ public class IssueGrain : Grain, IIssueGrain
     {
         _issue = await _issueStore.LoadAsync(GrainKey);
         _profile = await _profileStore.LoadAsync(GrainKey);
+        if (_issue is null && TryParseLegacyKey(GrainKey, out var projectId, out var number))
+        {
+            _issue = await _issueStore.LoadAsync(IssueIdentityResolver.LegacyKey(projectId, number));
+            _profile = await _profileStore.LoadAsync(IssueIdentityResolver.LegacyKey(projectId, number));
+        }
+        if (_issue is null)
+        {
+            var identity = await _identityResolver.GetByIdAsync(GrainKey, ct);
+            if (identity is not null)
+            {
+                var legacyKey = IssueIdentityResolver.LegacyKey(identity.ProjectId, identity.Number);
+                _issue = await _issueStore.LoadAsync(legacyKey);
+                _profile ??= await _profileStore.LoadAsync(legacyKey);
+            }
+        }
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
@@ -119,9 +140,10 @@ public class IssueGrain : Grain, IIssueGrain
         if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
             await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
 
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
-        var definition = _profile?.Definition ?? defaultProfile.Definition;
+        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issueKey);
+        var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.DefaultId).Definition;
 
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
         var mergedPrompts = defaultProfile is MohistDefaultIssueWorkflowProfile mohistDefaultProfile
             ? await mohistDefaultProfile.GetMergedPromptsAsync(issue.ProjectId)
             : new Dictionary<string, string>(StringComparer.Ordinal);
@@ -251,7 +273,7 @@ public class IssueGrain : Grain, IIssueGrain
             wfStatus);
     }
 
-    public async Task CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null)
+    public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null)
     {
         if (_issue is not null)
             throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
@@ -259,7 +281,7 @@ public class IssueGrain : Grain, IIssueGrain
         var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
 
         var issue = Domain.Issue.Create(
-            $"issue_{Guid.NewGuid():N}",
+            issueId ?? $"issue_{Guid.NewGuid():N}",
             projectId,
             number,
             title,
@@ -282,6 +304,7 @@ public class IssueGrain : Grain, IIssueGrain
         await SaveIssueAsync();
         await SaveProfileAsync();
         await AppendIssueEventAsync("issue_created", "created", "Issue created", new { title, priority = priority ?? "p2", labels = labels ?? [] });
+        return issue.Id;
     }
 
     public async Task<IssuePrerequisiteResult> AddPrerequisiteAsync(int prerequisiteNumber)
@@ -391,13 +414,21 @@ public class IssueGrain : Grain, IIssueGrain
     private async Task SaveIssueAsync()
     {
         if (_issue is null) return;
-        await _issueStore.SaveAsync(GrainKey, _issue);
+        await _issueStore.SaveAsync(_issue.Id, _issue);
+        await _issueStore.SaveAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, _issue.Number), _issue);
     }
 
     private async Task SaveProfileAsync()
     {
         if (_profile is null) return;
-        await _profileStore.SaveAsync(GrainKey, _profile);
+        if (_issue is null)
+        {
+            await _profileStore.SaveAsync(GrainKey, _profile);
+            return;
+        }
+
+        await _profileStore.SaveAsync(_issue.Id, _profile);
+        await _profileStore.SaveAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, _issue.Number), _profile);
     }
 
     private Task AppendIssueEventAsync(string type, string? status, string? message, object? payload = null)
@@ -427,13 +458,27 @@ public class IssueGrain : Grain, IIssueGrain
         if (_issue is null) return null;
         try
         {
-            var issue = await _issueStore.LoadAsync($"{_issue.ProjectId}:{issueNumber}");
+            var issueId = await _identityResolver.GetIdAsync(_issue.ProjectId, issueNumber);
+            if (issueId is null) return null;
+            var issue = await _issueStore.LoadAsync(issueId)
+                ?? await _issueStore.LoadAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, issueNumber));
             return issue is null ? null : IssuePrerequisiteSummary.FromDomain(issue);
         }
         catch (InvalidOperationException)
         {
             return null;
         }
+    }
+
+    private static bool TryParseLegacyKey(string key, out string projectId, out int number)
+    {
+        projectId = string.Empty;
+        number = 0;
+        var parts = key.Split(':', 2);
+        if (parts.Length != 2 || !int.TryParse(parts[1], out number))
+            return false;
+        projectId = parts[0];
+        return !string.IsNullOrWhiteSpace(projectId);
     }
 
     public async Task<IssueCommentResult> AddCommentAsync(string body)

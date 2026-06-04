@@ -208,7 +208,7 @@ persist workflow event row
 publish live event
 ```
 
-持久化和发布使用 `workflowRunId`、`issueId` 和 RESTful `ResourceKey`。如果外层 API 仍用 issue number，先在 API/query 边界解析为 `issueId`。
+持久化和发布使用 `workflowRunId` 和 `issueId`。如果外层 API 仍用 issue number，先在 API/query 边界解析为 `issueId`。`ResourceKey` 暂时只作为 URL/resource-path 约定。
 
 业务编排只显式响应 WorkflowGrain 关心的事件：
 

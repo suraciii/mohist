@@ -1,6 +1,6 @@
 using Mohist.Server.Project.Domain;
 
-namespace Mohist.Server.Project.Queries;
+namespace Mohist.Server.Project.Querying;
 
 [GenerateSerializer]
 public class ProjectInfo

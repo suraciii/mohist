@@ -5,11 +5,11 @@ using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Issue;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Tests.Support;
 using Xunit;
 
@@ -29,8 +29,9 @@ public class IssueRepositoryReferenceSpecs
     public async Task NewIssue_WithExplicitRepository_PersistsOnlyTheReference()
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>($"{projectId}:1");
-        await grain.CreateAsync(projectId, 1, "Explicit", "body", null, "p2", "secondary");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(issueId);
+        await grain.CreateAsync(projectId, 1, "Explicit", "body", null, "p2", "secondary", issueId);
 
         var storedJson = await LoadStateJsonAsync(projectId, 1);
         using var doc = JsonDocument.Parse(storedJson);
@@ -46,8 +47,9 @@ public class IssueRepositoryReferenceSpecs
     public async Task NewIssue_WithoutRepository_PersistsDefaultProjectRepositoryReference()
     {
         var (projectId, project) = await SetupProjectWithRepositoriesAsync();
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>($"{projectId}:1");
-        await grain.CreateAsync(projectId, 1, "Default", "body", null, "p2", null);
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IIssueGrain>(issueId);
+        await grain.CreateAsync(projectId, 1, "Default", "body", null, "p2", null, issueId);
 
         var info = await GetIssueInfoAsync(projectId, 1);
         Assert.NotNull(info);
@@ -246,8 +248,8 @@ public class IssueRepositoryReferenceSpecs
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)
     {
         using var scope = _fixture.Services.CreateScope();
-        var projectsQuery = scope.ServiceProvider.GetRequiredService<ProjectQueryService>();
-        var issuesQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var projectsQuery = scope.ServiceProvider.GetRequiredService<ProjectQuerier>();
+        var issuesQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var project = await projectsQuery.GetByIdAsync(projectId);
         return await issuesQuery.GetInfoAsync(projectId, number, project);
     }

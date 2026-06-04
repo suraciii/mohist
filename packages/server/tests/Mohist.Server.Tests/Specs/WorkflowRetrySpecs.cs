@@ -3,7 +3,7 @@ using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using System.Text.Json;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -65,7 +65,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         await workflow.RetryAsync();
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         var buildStage = status.Stages.Find(s => s.Stage == "build");
         Assert.NotNull(buildStage);
@@ -84,7 +84,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         await workflow.RetryAsync();
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);
         Assert.Null(status.Failure);
@@ -189,7 +189,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         await workflow.RejectAsync("needs rework");
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
         Assert.NotNull(status.Failure);
@@ -273,7 +273,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (task, r1) = await PollWorkAnyAsync();
         await ReportAsync(r1, task.WorkId, "failed", "compile error");
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
         Assert.NotNull(status.Failure);
@@ -300,7 +300,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (checks, r2) = await PollWorkAnyAsync();
         await ReportChecksFailAsync(r2, checks, "check-1", "typecheck errors");
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Failed", status.Status);
         Assert.NotNull(status.Failure);
@@ -325,7 +325,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var (checks, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, checks, "plan-ok");
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("AwaitingApproval", status.Status);
 
@@ -342,7 +342,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage());
         var (_, r1) = await PollWorkAnyAsync();
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);
 

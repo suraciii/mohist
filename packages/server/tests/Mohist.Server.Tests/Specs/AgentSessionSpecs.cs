@@ -58,7 +58,7 @@ public class AgentSessionSpecs
     public async Task IssueSessionMetadataEndpoint_ReturnsMetadataOnlyWithoutTurnsOrRawEvents()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-only", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -113,7 +113,7 @@ public class AgentSessionSpecs
     public async Task IssueSessionEventsEndpoint_ReturnsRawEventsInAscendingSequence()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -513,7 +513,7 @@ public class AgentSessionSpecs
     });
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title);
+    private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
     private sealed record WorkflowAgentSessionSummaryDto(string Id, string SessionName, string Status);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);

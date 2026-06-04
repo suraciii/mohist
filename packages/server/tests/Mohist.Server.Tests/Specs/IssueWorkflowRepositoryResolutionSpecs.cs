@@ -1,12 +1,12 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -40,8 +40,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "develop");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await issueGrain.CreateAsync(projectId, number, "Use secondary repo", body: null, labels: null, priority: null, "secondary");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        await issueGrain.CreateAsync(projectId, number, "Use secondary repo", body: null, labels: null, priority: null, "secondary", issueId);
 
         var wrId = await issueGrain.StartWorkAsync();
 
@@ -66,8 +67,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "develop");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await issueGrain.CreateAsync(projectId, number, "Repo metadata drifts", body: null, labels: null, priority: null, "secondary");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        await issueGrain.CreateAsync(projectId, number, "Repo metadata drifts", body: null, labels: null, priority: null, "secondary", issueId);
 
         await projectGrain.RemoveRepositoryAsync("secondary");
         await projectGrain.AddRepositoryAsync(
@@ -99,8 +101,9 @@ public class IssueWorkflowRepositoryResolutionSpecs
             "develop");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await issueGrain.CreateAsync(projectId, number, "Repo gets removed", body: null, labels: null, priority: null, "secondary");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        await issueGrain.CreateAsync(projectId, number, "Repo gets removed", body: null, labels: null, priority: null, "secondary", issueId);
 
         await projectGrain.RemoveRepositoryAsync("secondary");
 
@@ -109,7 +112,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Contains("RepositoryNotFound", ex.Message);
 
         using var scope = _services.CreateScope();
-        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var info = await issueQuery.GetInfoAsync(projectId, number, await LoadProjectAsync(projectId));
         Assert.NotNull(info);
         Assert.Null(info.WorkflowRunId);
@@ -127,14 +130,15 @@ public class IssueWorkflowRepositoryResolutionSpecs
         await projectGrain.CreateAsync($"proj-{Guid.NewGuid():N}", "/proj/main", "main");
 
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await issueGrain.CreateAsync(projectId, number, "Ghost repo", body: null, labels: null, priority: null, "ghost");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(issueId);
+        await issueGrain.CreateAsync(projectId, number, "Ghost repo", body: null, labels: null, priority: null, "ghost", issueId);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
         Assert.Contains("RepositoryNotFound", ex.Message);
 
         using var scope = _services.CreateScope();
-        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var info = await issueQuery.GetInfoAsync(projectId, number, await LoadProjectAsync(projectId));
         Assert.NotNull(info);
         Assert.Null(info!.WorkflowRunId);
@@ -148,7 +152,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
     private async Task<JsonDocument> LoadWorkflowVariablesAsync(string workflowRunId)
     {
         using var scope = _services.CreateScope();
-        var query = scope.ServiceProvider.GetRequiredService<WorkflowQueryService>();
+        var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
         var snapshot = await query.GetVariablesAsync(workflowRunId);
         Assert.NotNull(snapshot);
         Assert.False(string.IsNullOrWhiteSpace(snapshot!.Variables));

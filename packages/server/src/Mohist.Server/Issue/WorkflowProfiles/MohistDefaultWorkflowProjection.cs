@@ -1,5 +1,5 @@
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;

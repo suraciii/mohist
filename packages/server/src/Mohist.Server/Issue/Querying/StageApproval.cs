@@ -1,4 +1,4 @@
-namespace Mohist.Server.Issue.Queries;
+namespace Mohist.Server.Issue.Querying;
 
 public class StageApproval
 {

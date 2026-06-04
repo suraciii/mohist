@@ -4,8 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Issue.Querying;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
@@ -40,15 +40,16 @@ public class IssueCreationSpecs
     private async Task<IssueInfo> CreateIssueAsync(string projectId, string title, string? body = null, string[]? labels = null, string? priority = null)
     {
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var grain = _grains.GetGrain<IIssueGrain>($"{projectId}:{number}");
-        await grain.CreateAsync(projectId, number, title, body, labels, priority, null);
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var grain = _grains.GetGrain<IIssueGrain>(issueId);
+        await grain.CreateAsync(projectId, number, title, body, labels, priority, null, issueId);
         return (await GetIssueInfoAsync(projectId, number))!;
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)
     {
         using var scope = _services.CreateScope();
-        var issues = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var issues = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         return await issues.GetInfoAsync(projectId, number);
     }
 
@@ -114,7 +115,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Context");
 
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "trunk"));
 
         Assert.StartsWith("wr_", wrId);
@@ -156,7 +157,7 @@ public class IssueCreationSpecs
         }
 
         var created = await CreateIssueAsync(project.Id, "Project template issue");
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
         var wrId = await grain.StartWorkAsync();
 
         var runnerId = $"runner-template-test-{Guid.NewGuid():N}";
@@ -195,7 +196,7 @@ public class IssueCreationSpecs
     }
 
     [Fact]
-    public async Task QueryService_ReturnsIssueInfo()
+    public async Task Querier_ReturnsIssueInfo()
     {
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Info test", "desc");
@@ -214,7 +215,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Original", "old body");
 
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
         await grain.UpdateAsync("Updated", "new body");
         var info = await GetIssueInfoAsync(project.Id, created.Number);
 
@@ -229,7 +230,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Closable");
 
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
         await grain.StartWorkAsync();
         await grain.CancelAsync();
 
@@ -245,7 +246,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Cancelable");
 
-        var issue = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var issue = _grains.GetGrain<IIssueGrain>(created.Id);
         var workflowRunId = await issue.StartWorkAsync(new WorkflowProjectContext(project.Id, project.Name, project.Path, project.BaseBranch));
 
         var runnerId = $"runner-{Guid.NewGuid():N}";
@@ -285,7 +286,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Dup");
 
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             grain.CreateAsync(project.Id, 999, "dup", null, null, null, null));
     }
@@ -296,7 +297,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var created = await CreateIssueAsync(project.Id, "Add Search");
 
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{created.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(created.Id);
         await grain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));
 
         var status = await grain.GetWorkflowStatusAsync();
@@ -325,7 +326,7 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var prereq = await CreateIssueAsync(project.Id, "Prereq");
         var dependent = await CreateIssueAsync(project.Id, "Dependent");
-        var grain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
+        var grain = _grains.GetGrain<IIssueGrain>(dependent.Id);
 
         await grain.AddPrerequisiteAsync(prereq.Number);
         var info = await GetIssueInfoAsync(project.Id, dependent.Number);
@@ -344,8 +345,8 @@ public class IssueCreationSpecs
         var project = await SetupProjectAsync();
         var prereq = await CreateIssueAsync(project.Id, "Prereq");
         var dependent = await CreateIssueAsync(project.Id, "Dependent");
-        var prereqGrain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{prereq.Number}");
-        var dependentGrain = _grains.GetGrain<IIssueGrain>($"{project.Id}:{dependent.Number}");
+        var prereqGrain = _grains.GetGrain<IIssueGrain>(prereq.Id);
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
 
         await dependentGrain.AddPrerequisiteAsync(prereq.Number);
         var prereqRunId = await prereqGrain.StartWorkAsync(new WorkflowProjectContext(project.Id, "My Project", "/tmp/my-project", "main"));

@@ -12,10 +12,10 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Storage;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Workflow.Infrastructure;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
@@ -55,7 +55,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
-            siloBuilder.Services.AddSingleton<ProjectQueryService>();
+            siloBuilder.Services.AddSingleton<ProjectQuerier>();
             siloBuilder.Services.AddScoped<WorkflowProfileManager>();
             siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
@@ -115,13 +115,13 @@ public abstract class WorkflowGrainSpecs
 
     protected RecordingEventStore EventStore => _fixture.EventStore;
 
-    protected WorkflowQueryService GetQueryService()
+    protected WorkflowQuerier GetQuerier()
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        return new WorkflowQueryService(factory, new Mohist.Server.Workflow.Infrastructure.WorkflowProfileManager(factory));
+        return new WorkflowQuerier(factory, new Mohist.Server.Workflow.Infrastructure.WorkflowProfileManager(factory));
     }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)

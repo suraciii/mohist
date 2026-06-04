@@ -7,15 +7,15 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Projection;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 
-namespace Mohist.Server.Issue.Queries;
+namespace Mohist.Server.Issue.Querying;
 
-public class IssueQueryService
+public class IssueQuerier
 {
     private static readonly JsonSerializerOptions RunJsonOptions = new()
     {
@@ -25,13 +25,13 @@ public class IssueQueryService
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueWorkflowProfileRegistry _profiles;
-    private readonly ProjectQueryService _projects;
+    private readonly ProjectQuerier _projects;
     private readonly IssueRepositoryResolver _resolver;
 
-    public IssueQueryService(
+    public IssueQuerier(
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueWorkflowProfileRegistry profiles,
-        ProjectQueryService projects,
+        ProjectQuerier projects,
         IssueRepositoryResolver resolver)
     {
         _dbFactory = dbFactory;

@@ -1,8 +1,8 @@
 using System.Text.Json.Serialization;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 
-namespace Mohist.Server.Issue.Queries;
+namespace Mohist.Server.Issue.Querying;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum IssueRepositoryProblemCode

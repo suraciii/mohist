@@ -4,13 +4,13 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Storage;
 using System.Text.Json;
 
-namespace Mohist.Server.Project.Queries;
+namespace Mohist.Server.Project.Querying;
 
-public class ProjectQueryService
+public class ProjectQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
-    public ProjectQueryService(IDbContextFactory<MohistDbContext> dbFactory)
+    public ProjectQuerier(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
     }

@@ -1,9 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Infrastructure.Persistence.Issue;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Storage;
@@ -13,11 +13,11 @@ using Xunit;
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("MohistIntegration")]
-public class IssueQueryServiceSpecs
+public class IssueQuerierSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
 
-    public IssueQueryServiceSpecs(MohistIntegrationFixture fixture)
+    public IssueQuerierSpecs(MohistIntegrationFixture fixture)
     {
         _fixture = fixture;
     }
@@ -45,7 +45,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
 
         var list = await service.ListAsync(project.Id, project, stage: "todo", label: "bug");
 
@@ -138,7 +138,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
@@ -226,7 +226,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
@@ -311,7 +311,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
@@ -344,7 +344,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
@@ -395,7 +395,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
@@ -469,7 +469,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);
@@ -554,7 +554,7 @@ public class IssueQueryServiceSpecs
         });
         await db.SaveChangesAsync();
 
-        var service = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var list = await service.ListAsync(project.Id, project);
 
         var item = Assert.Single(list);

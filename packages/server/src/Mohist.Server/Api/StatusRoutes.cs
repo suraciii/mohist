@@ -1,6 +1,6 @@
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Issue.Querying;
+using Mohist.Server.Project.Querying;
 
 namespace Mohist.Server.Api;
 
@@ -8,7 +8,7 @@ public static class StatusRoutes
 {
     public static WebApplication MapStatusRoutes(this WebApplication app)
     {
-        app.MapGet("/api/status", async (bool? all, string? projectId, IGrainFactory grains, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        app.MapGet("/api/status", async (bool? all, string? projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
         {
             if (all == true)
             {
@@ -67,7 +67,7 @@ public static class StatusRoutes
         return app;
     }
 
-    private static async Task<ProjectInfo?> ResolveProjectAsync(string? projectId, ProjectQueryService projectsQuery)
+    private static async Task<ProjectInfo?> ResolveProjectAsync(string? projectId, ProjectQuerier projectsQuery)
     {
         if (!string.IsNullOrWhiteSpace(projectId))
             return await projectsQuery.GetByIdAsync(projectId);

@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Projection;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 using Mohist.Server.Workflow.Views;
 using Xunit;
 

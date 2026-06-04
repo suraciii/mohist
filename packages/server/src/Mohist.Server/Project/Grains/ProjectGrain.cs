@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using System.Text.Json;
@@ -26,7 +26,7 @@ public class ProjectGrain : Grain, IProjectGrain
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FindAsync(GrainKey);
         if (entry is not null)
-            _project = ProjectQueryService.ToInfo(entry);
+            _project = ProjectQuerier.ToInfo(entry);
     }
 
     public Task<ProjectInfo?> GetAsync() => Task.FromResult(_project);
