@@ -174,7 +174,7 @@ public class IssueWorkflowProfileManager
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var profile = await FindProfileAsync(db, issueId, legacyIssueKey);
-        return DeserializePrompts(profile?.Prompts);
+        return profile?.Prompts ?? new(StringComparer.Ordinal);
     }
 
     public async Task SetPromptAsync(string issueId, string key, string body, string? legacyIssueKey = null)
@@ -197,16 +197,14 @@ public class IssueWorkflowProfileManager
             {
                 IssueKey = issueId,
                 Variables = VariableBundle.Empty.ToJson(),
-                Prompts = SerializePrompt(key, body),
+                Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body },
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.IssueWorkflowProfiles.Add(profile);
         }
         else
         {
-            var prompts = DeserializePrompts(profile.Prompts);
-            prompts[key] = body;
-            profile.Prompts = SerializePrompts(prompts);
+            profile.Prompts[key] = body;
             profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -229,10 +227,7 @@ public class IssueWorkflowProfileManager
 
         if (profile is null) return;
 
-        var prompts = DeserializePrompts(profile.Prompts);
-        if (!prompts.Remove(key)) return;
-
-        profile.Prompts = SerializePrompts(prompts);
+        if (!profile.Prompts.Remove(key)) return;
         profile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
     }
@@ -295,26 +290,6 @@ public class IssueWorkflowProfileManager
             return null;
         }
     }
-
-    private static Dictionary<string, string> DeserializePrompts(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return new(StringComparer.Ordinal);
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
-                ?? new(StringComparer.Ordinal);
-        }
-        catch
-        {
-            return new(StringComparer.Ordinal);
-        }
-    }
-
-    private static string SerializePrompts(Dictionary<string, string> prompts) =>
-        JsonSerializer.Serialize(prompts);
-
-    private static string SerializePrompt(string key, string body) =>
-        JsonSerializer.Serialize(new Dictionary<string, string> { [key] = body });
 }
 
 /// <summary>

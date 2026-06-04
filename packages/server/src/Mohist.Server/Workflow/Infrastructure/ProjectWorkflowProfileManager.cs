@@ -303,16 +303,14 @@ public class ProjectWorkflowProfileManager
             {
                 ProjectId = projectId,
                 Variables = VariableBundle.Empty.ToJson(),
-                Prompts = SerializePrompt(key, body),
+                Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body },
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.ProjectWorkflowProfiles.Add(profile);
         }
         else
         {
-            var prompts = DeserializePrompts(profile.Prompts);
-            prompts[key] = body;
-            profile.Prompts = SerializePrompts(prompts);
+            profile.Prompts[key] = body;
             profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -329,10 +327,7 @@ public class ProjectWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
         if (profile is null) return;
 
-        var prompts = DeserializePrompts(profile.Prompts);
-        if (!prompts.Remove(key)) return;
-
-        profile.Prompts = SerializePrompts(prompts);
+        if (!profile.Prompts.Remove(key)) return;
         profile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
     }
@@ -356,28 +351,8 @@ public class ProjectWorkflowProfileManager
         await using var db = await _dbFactory.CreateDbContextAsync();
         var profile = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return DeserializePrompts(profile?.Prompts);
+        return profile?.Prompts ?? new(StringComparer.Ordinal);
     }
-
-    private static Dictionary<string, string> DeserializePrompts(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return new(StringComparer.Ordinal);
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
-                ?? new(StringComparer.Ordinal);
-        }
-        catch
-        {
-            return new(StringComparer.Ordinal);
-        }
-    }
-
-    private static string SerializePrompts(Dictionary<string, string> prompts) =>
-        JsonSerializer.Serialize(prompts);
-
-    private static string SerializePrompt(string key, string body) =>
-        JsonSerializer.Serialize(new Dictionary<string, string> { [key] = body });
 
     private async Task<bool> ProjectTemplateExistsAsync(string projectId, string templateId)
     {
