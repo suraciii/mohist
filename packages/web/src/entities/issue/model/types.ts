@@ -153,7 +153,7 @@ export interface Issue {
   prerequisites?: IssuePrerequisiteSummary[]
   startEligibility?: IssueStartEligibility
   drift?: BaseDriftInfo | null
-  primaryEpic?: { id: string; title: string; status: string; priority: string } | null
+  primaryEpic?: { id: string; number: number | null; title: string; status: string; priority: string } | null
   recovery?: RecoveryProjection | null
   convergence?: WorkflowConvergenceState | null
 }

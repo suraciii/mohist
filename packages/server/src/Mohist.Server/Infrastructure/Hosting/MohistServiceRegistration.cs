@@ -2,8 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Queries;
 using Mohist.Server.Project.Queries;
+using Mohist.Server.Infrastructure.Persistence.Epic;
 using Mohist.Server.Infrastructure.Persistence.Issue;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
@@ -43,6 +45,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
         services.AddScoped<IStateStore<IssueWorkflowProfile>, IssueProfileStore>();
         services.AddScoped<IStateStore<IssueCounterState>, IssueCounterStore>();
+        services.AddScoped<IStateStore<EpicCounterState>, EpicCounterStore>();
         services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();
         services.AddScoped<IStateStore<WorkflowStageLockState>, WorkflowStageLockStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();

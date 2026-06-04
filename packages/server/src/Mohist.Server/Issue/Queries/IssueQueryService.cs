@@ -413,6 +413,7 @@ public class IssueQueryService
                     issue.PrimaryEpic = new IssuePrimaryEpic
                     {
                         Id = epic.Id,
+                        Number = epic.Number,
                         Title = epic.Title,
                         Status = epic.Status,
                         Priority = epic.Priority,

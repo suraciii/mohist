@@ -36,17 +36,25 @@ public class EpicQueryService
         return epic is null ? null : await ToDetailAsync(db, epic);
     }
 
+    public async Task<EpicDetailDto?> GetByNumberAsync(string projectId, int number)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var epic = await db.Epics.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId && e.Number == number);
+        return epic is null ? null : await ToDetailAsync(db, epic);
+    }
+
     private async Task<EpicWithProgressDto> ToWithProgressAsync(MohistDbContext db, EpicRow epic)
     {
         var progress = await BuildProgressAsync(db, epic);
-        return new EpicWithProgressDto(epic.Id, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), progress);
+        return new EpicWithProgressDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), progress);
     }
 
     private async Task<EpicDetailDto> ToDetailAsync(MohistDbContext db, EpicRow epic)
     {
         var linked = await GetLinkedIssuesAsync(db, epic);
         var progress = BuildProgress(linked);
-        return new EpicDetailDto(epic.Id, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress);
+        return new EpicDetailDto(epic.Id, epic.Number, epic.Title, epic.Description, epic.Priority, epic.Status, epic.CreatedAt.ToString("o"), epic.UpdatedAt.ToString("o"), linked, progress);
     }
 
     private async Task<EpicProgressDto> BuildProgressAsync(MohistDbContext db, EpicRow epic) =>
@@ -63,24 +71,21 @@ public class EpicQueryService
         var allIssues = await _issuesQuery.ListAsync(epic.ProjectId, all: true);
         var byId = allIssues.ToDictionary(i => i.Id);
         return links
-            .Select(link => byId.TryGetValue(link.IssueId, out var issue) ? new LinkedIssueDto(issue.Id, issue.Number, issue.Title, issue.Health, issue.Status, issue.Priority) : null)
+            .Select(link => byId.TryGetValue(link.IssueId, out var issue)
+                ? new LinkedIssueDto(
+                    Id: issue.Id,
+                    Number: issue.Number,
+                    Title: issue.Title,
+                    Status: issue.Status,
+                    Stage: issue.WorkflowStage ?? "",
+                    Health: issue.Health,
+                    Priority: issue.Priority)
+                : null)
             .Where(i => i is not null)
             .Cast<LinkedIssueDto>()
             .ToList();
     }
 
-    private static EpicProgressDto BuildProgress(IReadOnlyList<LinkedIssueDto> linked)
-    {
-        var completed = linked.Where(IsCompleted).ToList();
-        var next = linked.FirstOrDefault(i => !IsCompleted(i));
-        return new EpicProgressDto(
-            completed.Count,
-            linked.Count,
-            linked.Where(i => i.Status == "blocked").Select(i => i.Id).ToArray(),
-            linked.Where(i => i.Status == "active" && !IsCompleted(i)).Select(i => i.Id).ToArray(),
-            next is null ? null : new EpicNextIssueDto(next.Id, next.Number, next.Title),
-            linked.Count > 0 && completed.Count == linked.Count);
-    }
-
-    private static bool IsCompleted(LinkedIssueDto issue) => issue.Status is "done" or "completed";
+    private static EpicProgressDto BuildProgress(IReadOnlyList<LinkedIssueDto> linked) =>
+        EpicProgress.Build(linked);
 }

@@ -52,7 +52,12 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-medium text-muted-foreground">#{epic.id.slice(0, 8)}</span>
+            <span
+              className="text-sm font-medium text-muted-foreground"
+              data-testid="epic-number"
+            >
+              {epic.number != null ? `#${epic.number}` : `#${epic.id.slice(0, 8)}`}
+            </span>
             <StatusBadge status={epic.status} />
             <PriorityBadge priority={epic.priority} />
           </div>
@@ -64,7 +69,7 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
         <div className="flex items-center justify-between text-sm mb-1">
           <span className="text-muted-foreground">Progress</span>
           <span className="font-medium text-foreground">
-            {progress.completedCount} / {progress.totalIssueCount} completed
+            {progress.deliveredCount} / {progress.totalIssueCount} completed
           </span>
         </div>
         <div className="w-full bg-muted rounded-full h-1.5">
@@ -72,7 +77,7 @@ function EpicCard({ epic }: { epic: EpicWithProgress }) {
             className="bg-blue-600 h-1.5 rounded-full transition-all"
             style={{
               width: progress.totalIssueCount > 0
-                ? `${(progress.completedCount / progress.totalIssueCount) * 100}%`
+                ? `${(progress.deliveredCount / progress.totalIssueCount) * 100}%`
                 : '0%'
             }}
           />

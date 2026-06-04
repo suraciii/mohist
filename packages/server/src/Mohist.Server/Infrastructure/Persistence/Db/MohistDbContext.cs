@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Epic.Storage;
 using Mohist.Server.Epics;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Persistence.Events;
@@ -36,6 +37,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
     public DbSet<Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow> ProjectPromptTemplates { get; set; } = null!;
+    public DbSet<EpicCounterRow> EpicCounters { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -146,6 +148,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Priority).HasMaxLength(16).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.Number });
         });
 
         modelBuilder.Entity<EpicIssueRow>(entity =>
@@ -256,6 +259,12 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.TagsJson).IsRequired().HasDefaultValue("[]");
             entity.Property(e => e.Body).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt });
+        });
+
+        modelBuilder.Entity<EpicCounterRow>(entity =>
+        {
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
         });
     }
 }
