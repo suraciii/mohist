@@ -130,19 +130,19 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
             {
                 ProjectId = "test-project",
                 TemplateId = definition.Id,
-                TemplateJson = templateJson,
+                Template = templateJson,
             });
         }
         else
         {
-            template.TemplateJson = templateJson;
+            template.Template = templateJson;
             template.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
         var profile = await db.ProjectWorkflowProfiles.FindAsync("test-project");
         if (profile is null)
         {
-            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfileRow
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
             {
                 ProjectId = "test-project",
                 DefaultTemplateId = definition.Id,

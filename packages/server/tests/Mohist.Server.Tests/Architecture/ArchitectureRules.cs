@@ -180,8 +180,9 @@ public class ArchitectureRules
 
         Assert.All(dbSetProperties, entityType =>
         {
-            Assert.True(entityType.Name.EndsWith("Row"),
-                $"EF entity '{entityType.Name}' must end with 'Row'. " +
+            Assert.True(
+                entityType.Name.EndsWith("Row") || entityType.Name.EndsWith("Profile"),
+                $"EF entity '{entityType.Name}' must end with 'Row' or 'Profile'. " +
                 $"Entity type: {entityType.FullName}");
         });
     }

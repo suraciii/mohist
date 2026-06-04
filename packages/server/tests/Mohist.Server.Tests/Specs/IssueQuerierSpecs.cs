@@ -81,7 +81,7 @@ public class IssueQuerierSpecs
         db.IssueProfiles.Add(new IssueProfileRow
         {
             Key = issue.Id,
-            StateJson = IssueProfileStore.Serialize(new IssueWorkflowProfile("custom", new WorkflowDefinition("custom", []), WorkflowProfileUpdateMode.Custom)),
+            StateJson = IssueProfileStore.Serialize(new Mohist.Server.Issue.WorkflowProfiles.IssueWorkflowProfile("custom", new WorkflowDefinition("custom", []), WorkflowProfileUpdateMode.Custom)),
         });
         await db.SaveChangesAsync();
 

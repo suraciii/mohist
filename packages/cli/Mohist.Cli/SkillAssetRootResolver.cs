@@ -46,8 +46,13 @@ internal sealed class SkillAssetRootResolver
             : Path.Combine(home, ".mohist", "cli", "skill-data");
     }
 
-    private static string? DefaultUserHome() =>
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static string? DefaultUserHome()
+    {
+        var home = Environment.GetEnvironmentVariable("HOME");
+        if (!string.IsNullOrWhiteSpace(home))
+            return home;
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
 
     public SkillAssetRootResolution Resolve(IReadOnlyList<string> expectedSkillNames)
     {

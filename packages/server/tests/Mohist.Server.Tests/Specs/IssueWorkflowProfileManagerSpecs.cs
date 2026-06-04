@@ -51,7 +51,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
 
         Assert.Equal("issue_1", row.IssueKey);
         Assert.Equal("some-template", row.SourceTemplateId);
-        Assert.Null(row.TemplateJson);
+        Assert.Null(row.Template);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
             new IssueTemplateUpdateRequest(Template: yaml));
 
         Assert.Null(row.SourceTemplateId);
-        Assert.NotNull(row.TemplateJson);
+        Assert.NotNull(row.Template);
 
         var def = await _manager.GetTemplateAsync("issue_2");
         Assert.NotNull(def);
@@ -102,7 +102,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
             new IssueTemplateUpdateRequest());
 
         Assert.Null(row.SourceTemplateId);
-        Assert.Null(row.TemplateJson);
+        Assert.Null(row.Template);
     }
 
     [Fact]

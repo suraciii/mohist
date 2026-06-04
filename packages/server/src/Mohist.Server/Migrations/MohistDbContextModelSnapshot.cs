@@ -328,7 +328,7 @@ namespace Mohist.Server.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Variables")
+                    b.Property<string>("VariablesJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
