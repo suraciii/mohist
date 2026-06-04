@@ -69,6 +69,17 @@ public class EventStore : IEventStore
         return rows.Select(ToDto).ToList();
     }
 
+    public async Task<IReadOnlyList<EventDto>> ListIssueWorkflowLogAsync(string projectId, int issueNumber, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.WorkflowEvents.AsNoTracking()
+            .Where(e => e.ProjectId == projectId && e.IssueNumber == issueNumber)
+            .OrderBy(e => e.CreatedAt)
+            .ThenBy(e => e.Id)
+            .ToListAsync(ct);
+        return rows.Select(ToDto).ToList();
+    }
+
     public async Task<IReadOnlyList<EventDto>> ListRecentAsync(string projectId, int limit = 200, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);

@@ -77,7 +77,7 @@ public class WorkflowSessionSpecs
     }
 
     [Fact]
-    public async Task GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionIsQueried_ThenTurnsReflectsEventStreamAndTurnCount()
+    public async Task GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionEventsAreQueried_ThenRawEventsReturnInSequence()
     {
         const string promptBody =
             "Real full mohist_prompt text body. " +
@@ -121,149 +121,19 @@ public class WorkflowSessionSpecs
             }
         });
 
-        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/workflow/sessions/{sessionName}?projectId={project.Id}");
-        Assert.Equal(sessionId, detail.Id);
-        Assert.Equal(sessionName, detail.SessionName);
+        var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/issues/{issue.Number}/sessions/{sessionName}?projectId={project.Id}");
+        Assert.Equal(sessionId, metadata.Id);
+        Assert.Equal(sessionName, metadata.SessionName);
+        Assert.Equal(5, metadata.Metadata.EventCount);
+        Assert.Equal(0, metadata.Metadata.ToolCount);
 
-        var turns = detail.Turns.EnumerateArray().ToArray();
-        var turn = Assert.Single(turns);
-        var user = turn.GetProperty("user");
-        Assert.Equal(promptBody, user.GetProperty("text").GetString());
-        Assert.Equal("task", user.GetProperty("kind").GetString());
-        Assert.Equal("mohist", user.GetProperty("role").GetString());
-
-        var assistant = turn.GetProperty("assistant").EnumerateArray().ToArray();
-        Assert.Contains(assistant, p => p.GetProperty("type").GetString() == "text" && p.GetProperty("text").GetString()!.Contains("starting work"));
-        var probeIndex = Array.FindIndex(assistant, p =>
-            p.GetProperty("type").GetString() == "error"
-            && p.GetProperty("kind").GetString() == "recovery"
-            && p.GetProperty("message").GetString()!.Contains("Liveness probe sent"));
-        var livenessFailedIndex = Array.FindIndex(assistant, p =>
-            p.GetProperty("type").GetString() == "error"
-            && p.GetProperty("kind").GetString() == "recovery"
-            && p.GetProperty("message").GetString()!.Contains("Liveness failed"));
-        var terminalIndex = Array.FindIndex(assistant, p =>
-            p.GetProperty("type").GetString() == "error"
-            && p.GetProperty("kind").GetString() == "failed");
-        Assert.True(probeIndex >= 0);
-        Assert.True(livenessFailedIndex >= 0);
-        Assert.True(terminalIndex >= 0);
-        Assert.Equal(failureReason, assistant[terminalIndex].GetProperty("message").GetString());
-        Assert.False(string.IsNullOrEmpty(turn.GetProperty("completedAt").GetString()));
-        var textIndex = Array.FindIndex(assistant, p => p.GetProperty("type").GetString() == "text");
-        Assert.True(textIndex < probeIndex);
-        Assert.True(probeIndex < livenessFailedIndex);
-        Assert.True(livenessFailedIndex < terminalIndex);
-
-        Assert.Equal(1, detail.Metadata.GetProperty("turnCount").GetInt32());
-    }
-
-    [Fact]
-    public async Task GivenLegacySessionWithoutMohistPrompt_WhenIssueWorkflowSessionIsQueried_ThenTranscriptReturnsLegacyMissingTurn()
-    {
-        const string shortSessionTitle = "Cover backend projection and progress behavior";
-        var (project, issue, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-legacy-missing", title: shortSessionTitle);
-        var sessionId = GrainKey.WorkflowAgentSession(project.Id, workflowRunId, sessionName);
-
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{workflowRunId}/{sessionName}/attach", new
-        {
-            agentSessionId = sessionId,
-            workDir = project.Path,
-            processPid = 1234
-        });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{workflowRunId}/{sessionName}/events", new
-        {
-            events = new object[]
-            {
-                new { type = "agent_message_chunk", payload = new { text = "legacy hello" } },
-                new
-                {
-                    type = "agent_session_terminal",
-                    payload = new { status = "completed", exitCode = 0 }
-                }
-            }
-        });
-
-        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/workflow/sessions/{sessionName}?projectId={project.Id}");
-        var turns = detail.Turns.EnumerateArray().ToArray();
-        var turn = Assert.Single(turns);
-
-        var user = turn.GetProperty("user");
-        Assert.Equal("legacy-missing", user.GetProperty("kind").GetString());
-        Assert.Equal("mohist", user.GetProperty("role").GetString());
-        Assert.Equal("Prompt was not recorded for this historical session", user.GetProperty("text").GetString());
-        Assert.NotEqual(shortSessionTitle, user.GetProperty("text").GetString());
-        Assert.NotEqual(sessionName, user.GetProperty("text").GetString());
-        Assert.NotEqual(sessionId, user.GetProperty("text").GetString());
-        Assert.Equal("legacy-missing", user.GetProperty("summary").GetProperty("kind").GetString());
-
-        var assistant = turn.GetProperty("assistant").EnumerateArray().ToArray();
-        Assert.Contains(assistant, p => p.GetProperty("type").GetString() == "text" && p.GetProperty("text").GetString()!.Contains("legacy hello"));
-        Assert.Contains(assistant, p => p.GetProperty("type").GetString() == "error" && p.GetProperty("kind").GetString() == "completed");
-
-        Assert.Equal(1, detail.Metadata.GetProperty("turnCount").GetInt32());
-    }
-
-    [Fact]
-    public async Task GivenTwoMohistPromptEvents_WhenIssueWorkflowSessionIsQueried_ThenTranscriptProducesTwoTurnsInEventOrder()
-    {
-        var (project, issue, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-two-prompts");
-        var sessionId = GrainKey.WorkflowAgentSession(project.Id, workflowRunId, sessionName);
-
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{workflowRunId}/{sessionName}/attach", new
-        {
-            agentSessionId = sessionId,
-            workDir = project.Path,
-            processPid = 1234
-        });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{workflowRunId}/{sessionName}/events", new
-        {
-            events = new object[]
-            {
-                new
-                {
-                    type = "mohist_prompt",
-                    payload = new { text = "first mohist prompt body", kind = "task" }
-                },
-                new { type = "agent_message_chunk", payload = new { text = "first response" } }
-            }
-        });
-        await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{workflowRunId}/{sessionName}/events", new
-        {
-            events = new object[]
-            {
-                new
-                {
-                    type = "mohist_prompt",
-                    payload = new { text = "second mohist prompt body", kind = "followup" }
-                },
-                new { type = "agent_message_chunk", payload = new { text = "second response" } },
-                new
-                {
-                    type = "agent_session_terminal",
-                    payload = new { status = "completed", exitCode = 0 }
-                }
-            }
-        });
-
-        var detail = await _client.GetDataAsync<WorkflowAgentSessionTranscript>($"/api/issues/{issue.Number}/workflow/sessions/{sessionName}?projectId={project.Id}");
-        var turns = detail.Turns.EnumerateArray().ToArray();
-        Assert.Equal(2, turns.Length);
-
-        Assert.Equal("first mohist prompt body", turns[0].GetProperty("user").GetProperty("text").GetString());
-        Assert.Equal("task", turns[0].GetProperty("user").GetProperty("kind").GetString());
-        var firstAssistant = turns[0].GetProperty("assistant").EnumerateArray().ToArray();
-        Assert.Contains(firstAssistant, p => p.GetProperty("type").GetString() == "text" && p.GetProperty("text").GetString()!.Contains("first response"));
-        Assert.DoesNotContain(firstAssistant, p => p.GetProperty("type").GetString() == "text" && p.GetProperty("text").GetString()!.Contains("second response"));
-
-        Assert.Equal("second mohist prompt body", turns[1].GetProperty("user").GetProperty("text").GetString());
-        Assert.Equal("followup", turns[1].GetProperty("user").GetProperty("kind").GetString());
-        var secondAssistant = turns[1].GetProperty("assistant").EnumerateArray().ToArray();
-        Assert.Contains(secondAssistant, p => p.GetProperty("type").GetString() == "text" && p.GetProperty("text").GetString()!.Contains("second response"));
-        Assert.DoesNotContain(secondAssistant, p => p.GetProperty("type").GetString() == "text" && p.GetProperty("text").GetString()!.Contains("first response"));
-        Assert.Contains(secondAssistant, p => p.GetProperty("type").GetString() == "error" && p.GetProperty("kind").GetString() == "completed");
-
-        Assert.Equal(2, detail.Metadata.GetProperty("turnCount").GetInt32());
+        var events = await _client.GetDataAsync<IssueSessionEventsTestResponse>($"/api/issues/{issue.Number}/sessions/{sessionName}/events?projectId={project.Id}");
+        Assert.Equal(5, events.Events.Length);
+        Assert.Equal("mohist_prompt", events.Events[0].Type);
+        Assert.Equal(promptBody, events.Events[0].Payload?.GetProperty("text").GetString());
+        Assert.Equal("task", events.Events[0].Payload?.GetProperty("kind").GetString());
+        Assert.Equal("agent_session_terminal", events.Events[^1].Type);
+        Assert.Equal(failureReason, events.Events[^1].Payload?.GetProperty("failureReason").GetString());
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
@@ -310,5 +180,8 @@ public class WorkflowSessionSpecs
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(int Number, string Title);
-    private sealed record WorkflowAgentSessionTranscript(string Id, string SessionName, JsonElement Turns, JsonElement Metadata);
+    private sealed record IssueSessionMetadataTestDto(string Id, string SessionName, IssueSessionMetadataCountsTestDto Metadata);
+    private sealed record IssueSessionMetadataCountsTestDto(int EventCount, int ToolCount);
+    private sealed record IssueSessionEventsTestResponse(IssueSessionEventTestDto[] Events);
+    private sealed record IssueSessionEventTestDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
 }

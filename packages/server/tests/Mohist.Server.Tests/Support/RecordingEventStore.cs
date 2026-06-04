@@ -56,6 +56,17 @@ public class RecordingEventStore : IEventStore
         }
     }
 
+    public Task<IReadOnlyList<EventDto>> ListIssueWorkflowLogAsync(string projectId, int issueNumber, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<EventDto>>(_events
+                .Where(e => e.ProjectId == projectId && e.IssueNumber == issueNumber)
+                .OrderBy(e => e.CreatedAt, StringComparer.Ordinal)
+                .ToList());
+        }
+    }
+
     public Task<IReadOnlyList<EventDto>> ListRecentAsync(string projectId, int limit = 200, CancellationToken ct = default)
     {
         lock (_gate)

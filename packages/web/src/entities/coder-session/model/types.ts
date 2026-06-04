@@ -5,6 +5,49 @@ export interface WorkflowLogItem {
   createdAt: string
 }
 
+export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
+
+export interface AgentSessionMetadataCounts {
+  eventCount: number
+  toolCount: number
+  messageChunkCount?: number
+  thoughtChunkCount?: number
+  promptCount?: number
+}
+
+export interface AgentSessionMetadata {
+  id: string
+  sessionName: string
+  acpSessionId: string
+  status: string
+  statusKind?: SessionStatusKind
+  model: string | null
+  stage: string | null
+  title: string | null
+  createdAt: string
+  completedAt: string | null
+  lastActivityAt?: string | null
+  lastDataAt?: string | null
+  probeSentAt?: string | null
+  probeDeadlineAt?: string | null
+  failureReason?: string | null
+  turnCount?: number
+  changedFiles?: FileChangeSummary[]
+  metadata: AgentSessionMetadataCounts
+}
+
+export interface AgentSessionEvent {
+  id: number
+  sequence: number
+  type: string
+  payload: unknown
+  createdAt: string
+}
+
+export interface AgentSessionEventsResponse {
+  events: AgentSessionEvent[]
+}
+
 export interface FileChangeSummary {
   path: string
   operation: 'created' | 'modified' | 'deleted' | 'moved'
@@ -82,8 +125,6 @@ export interface SessionMetadata {
   warnings?: TranscriptWarning[]
   hasUnknownTools?: boolean
 }
-
-export type SessionStatusKind = 'loading' | 'live' | 'probing' | 'finalizing' | 'completed' | 'failed' | 'stale'
 
 export interface TextPart {
   id: string

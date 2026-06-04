@@ -12,6 +12,12 @@ import type {
   CoderSessionItem,
 } from '../../../entities/coder-session'
 import type { AgentDetailEventMap } from '../../../entities/agent'
+import {
+  viewSessionEvents,
+  type SessionEvent,
+  type SessionTimelineToolCall,
+  type SessionTimelineRecovery,
+} from '../../../entities/session/model/view'
 
 const FLUSH_INTERVAL = 100
 
@@ -69,13 +75,6 @@ export interface PlanProgress {
   totalSteps: number
 }
 
-const RECOVERY_LOG_EVENT_MAP: Record<string, RecoveryEvent['status']> = {
-  acp_session_hang_detected: 'detected',
-  acp_session_recovery_started: 'recovering',
-  acp_session_recovery_succeeded: 'recovered',
-  acp_session_recovery_failed: 'failed',
-}
-
 export function deriveToolCallTitle(toolName: string, title: string | undefined, rawInput: string | undefined): string {
   if (title && title !== toolName) return title
   if (!rawInput) return toolName
@@ -110,125 +109,63 @@ function inferRoundLabel(roundIndex: number, totalRounds: number): string {
   return `Round ${roundIndex + 1}`
 }
 
+function adaptWorkflowLogToSessionEvent(log: WorkflowLogItem, sequence: number): SessionEvent {
+  return {
+    id: sequence,
+    sequence,
+    type: log.eventType === 'user_message_chunk' ? 'mohist_prompt' : log.eventType,
+    payload: log.data,
+    createdAt: log.createdAt,
+  }
+}
+
+function adaptWorkflowLogsToSessionEvents(logs: WorkflowLogItem[]): SessionEvent[] {
+  return logs.map((log, index) => adaptWorkflowLogToSessionEvent(log, index))
+}
+
+function timelineToolCallToEntry(tool: SessionTimelineToolCall, fallbackAt: string): ToolCallEntry {
+  const state: ToolCallEntry['state'] =
+    tool.state === 'running' ? 'started' : tool.state
+  return {
+    executionId: '',
+    toolName: tool.toolName,
+    state,
+    timestamp: new Date(tool.startedAt ?? fallbackAt).getTime(),
+    toolCallId: tool.toolCallId,
+    title: deriveToolCallTitle(tool.toolName, tool.title, tool.rawInput),
+    rawInput: tool.rawInput,
+    rawOutput: tool.rawOutput,
+  }
+}
+
+function timelineRecoveryToEvent(recovery: SessionTimelineRecovery): RecoveryEvent {
+  return {
+    status: recovery.status,
+    attempt: recovery.attempt ?? 1,
+    reason: recovery.reason,
+    timestamp: new Date(recovery.at).getTime(),
+  }
+}
+
+export function reconstructRoundsFromEvents(events: SessionEvent[]): Round[] {
+  if (events.length === 0) return []
+  const view = viewSessionEvents(events, 'timeline')
+  const totalRounds = view.rounds.length
+  return view.rounds.map((round) => ({
+    roundIndex: round.roundIndex,
+    label: inferRoundLabel(round.roundIndex, totalRounds),
+    startedAt: round.startedAt,
+    completedAt: round.completedAt,
+    userText: round.userText,
+    agentText: round.agentText,
+    thoughtText: round.thoughtText,
+    toolCalls: round.toolCalls.map((tool) => timelineToolCallToEntry(tool, round.startedAt)),
+    recoveryEvents: round.recovery.map(timelineRecoveryToEvent),
+  }))
+}
+
 export function reconstructRoundsFromLogs(logs: WorkflowLogItem[]): Round[] {
-  if (logs.length === 0) return []
-
-  const rounds: Round[] = []
-  let currentRound: Round | null = null
-  const toolCallMap = new Map<string, ToolCallEntry>()
-
-  for (const log of logs) {
-    if (log.eventType === 'user_message_chunk') {
-      const d = log.data as { content?: { text?: string } }
-      const userText = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
-      if (currentRound) {
-        currentRound.completedAt = log.createdAt
-        currentRound.toolCalls = Array.from(toolCallMap.values())
-      }
-      toolCallMap.clear()
-      currentRound = {
-        roundIndex: rounds.length,
-        label: '',
-        startedAt: log.createdAt,
-        completedAt: null,
-        userText,
-        agentText: '',
-        thoughtText: '',
-        toolCalls: [],
-        recoveryEvents: [],
-      }
-      rounds.push(currentRound)
-      continue
-    }
-
-    if (!currentRound) {
-      currentRound = {
-        roundIndex: 0,
-        label: '',
-        startedAt: log.createdAt,
-        completedAt: null,
-        userText: '',
-        agentText: '',
-        thoughtText: '',
-        toolCalls: [],
-        recoveryEvents: [],
-      }
-      rounds.push(currentRound)
-    }
-
-    if (log.eventType === 'agent_message_chunk') {
-      const d = log.data as { content?: { text?: string } }
-      const text = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
-      if (text) {
-        currentRound.agentText += text
-      }
-    }
-
-    if (log.eventType === 'agent_thought_chunk') {
-      const d = log.data as { content?: { text?: string } }
-      const text = d?.content?.text ?? (d as Record<string, unknown>)?.text as string ?? ''
-      if (text) {
-        currentRound.thoughtText += text
-      }
-    }
-
-    if (log.eventType === 'tool_call' || log.eventType === 'tool_call_update') {
-      const d = log.data as Record<string, unknown>
-      const toolCallId = d.toolCallId as string | undefined
-      const status = d.status as string | undefined
-      const title = d.title as string | undefined
-      const kind = d.kind as string | undefined
-      const rawInput = d.rawInput
-      const rawOutput = d.rawOutput
-      if (!toolCallId) continue
-
-      if (status === 'completed' || status === 'failed') {
-        const existing = toolCallMap.get(toolCallId)
-        if (existing) {
-          existing.state = status === 'completed' ? 'completed' : 'failed'
-          if (title !== undefined) existing.title = title
-          if (rawInput !== undefined) existing.rawInput = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '')
-          if (rawOutput !== undefined) existing.rawOutput = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput ?? '')
-        }
-      } else {
-        const toolName = title ?? kind ?? ''
-        const rawInputStr = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '')
-        toolCallMap.set(toolCallId, {
-          executionId: '',
-          toolName,
-          state: ((status ?? 'pending') === 'pending' || (status ?? 'pending') === 'in_progress') ? 'started' : status as 'completed' | 'failed',
-          timestamp: new Date(log.createdAt).getTime(),
-          toolCallId,
-          title: deriveToolCallTitle(toolName, title, rawInputStr),
-          rawInput: rawInputStr,
-        })
-      }
-    }
-
-    const recoveryStatus = RECOVERY_LOG_EVENT_MAP[log.eventType]
-    if (recoveryStatus && currentRound) {
-      const d = log.data as Record<string, unknown>
-      currentRound.recoveryEvents.push({
-        status: recoveryStatus,
-        attempt: (d.attempt as number) ?? 1,
-        reason: d.reason as string | undefined,
-        timestamp: new Date(log.createdAt).getTime(),
-      })
-    }
-  }
-
-  if (currentRound) {
-    currentRound.toolCalls = Array.from(toolCallMap.values())
-  }
-
-  const totalRounds = rounds.length
-  for (const round of rounds) {
-    if (!round.label) {
-      round.label = inferRoundLabel(round.roundIndex, totalRounds)
-    }
-  }
-
-  return rounds
+  return reconstructRoundsFromEvents(adaptWorkflowLogsToSessionEvents(logs))
 }
 
 export function useSessionTimeline(issueNumber: number, session?: CoderSessionItem) {

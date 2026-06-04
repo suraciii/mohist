@@ -14,6 +14,13 @@ public static class ApiTestClient
         return await ReadDataAsync<T>(response);
     }
 
+    public static async Task<string> GetRawAsync(this HttpClient client, string path)
+    {
+        using var response = await client.GetAsync(path);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync();
+    }
+
     public static async Task<T> PostDataAsync<T>(this HttpClient client, string path, object? body = null)
     {
         using var response = body is null

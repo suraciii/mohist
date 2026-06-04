@@ -1,9 +1,12 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Infrastructure.Events;
 
 public interface IEventStore
 {
     Task<EventDto> AppendAsync(EventInput input, CancellationToken ct = default);
     Task<IReadOnlyList<EventDto>> ListIssueEventsAsync(string projectId, int issueNumber, int limit = 200, CancellationToken ct = default);
+    Task<IReadOnlyList<EventDto>> ListIssueWorkflowLogAsync(string projectId, int issueNumber, CancellationToken ct = default);
     Task<IReadOnlyList<EventDto>> ListWorkflowEventsAsync(string workflowRunId, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<EventDto>> ListRecentAsync(string projectId, int limit = 200, CancellationToken ct = default);
 }
@@ -39,3 +42,6 @@ public sealed record EventDto(
     string? Message,
     object? Payload,
     string CreatedAt) : IProjectScoped;
+
+public sealed record WorkflowLogResponse(
+    [property: JsonPropertyName("entries")] IReadOnlyList<EventDto> Entries);

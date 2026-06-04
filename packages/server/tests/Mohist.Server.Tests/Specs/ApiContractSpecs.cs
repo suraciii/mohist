@@ -29,6 +29,8 @@ public class ApiContractSpecs
     [InlineData("/api/providers/runtime")]
     [InlineData("/api/issues/1/agent-session")]
     [InlineData("/api/agent/session-status")]
+    [InlineData("/api/issues/1/coder-sessions/session-1?projectId=p1")]
+    [InlineData("/api/issues/1/workflow/sessions/plan?projectId=p1")]
     public async Task RemovedLegacyApi_WhenRequested_ReturnsNotFound(string path)
     {
         using var response = await _fixture.Client.GetAsync(path);

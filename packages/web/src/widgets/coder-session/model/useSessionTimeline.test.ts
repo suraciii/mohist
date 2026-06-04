@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { deriveToolCallTitle } from './useSessionTimeline'
+import { describe, it, expect, vi } from 'vitest'
+import { deriveToolCallTitle, reconstructRoundsFromEvents, reconstructRoundsFromLogs } from './useSessionTimeline'
+import type { WorkflowLogItem } from '../../../entities/coder-session'
 
 describe('deriveToolCallTitle', () => {
   it('returns title when title differs from toolName', () => {
@@ -47,3 +48,157 @@ describe('deriveToolCallTitle', () => {
     ).toBe('main.ts')
   })
 })
+
+function makeSessionEvent(overrides: Partial<{
+  id: number
+  sequence: number
+  type: string
+  payload: unknown
+  createdAt: string
+}> = {}) {
+  const sequence = overrides.sequence ?? 0
+  return {
+    id: overrides.id ?? sequence,
+    sequence,
+    type: overrides.type ?? 'mohist_prompt',
+    payload: overrides.payload,
+    createdAt: overrides.createdAt ?? '2024-01-01T00:00:00.000Z',
+  }
+}
+
+describe('reconstructRoundsFromEvents', () => {
+  it('returns empty array for empty events', () => {
+    expect(reconstructRoundsFromEvents([])).toEqual([])
+  })
+
+  it('routes events through viewSessionEvents timeline projection', async () => {
+    const viewModule = await import('../../../entities/session/model/view')
+    const spy = vi.spyOn(viewModule, 'viewSessionEvents')
+    try {
+      const events = [makeSessionEvent({ type: 'mohist_prompt', payload: { text: 'hello' } })]
+      reconstructRoundsFromEvents(events)
+      expect(spy).toHaveBeenCalledWith(events, 'timeline')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('creates one round per mohist_prompt with assistant and thought content grouped', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'first prompt', kind: 'initial' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'agent_message_chunk', payload: { text: 'Hello' }, createdAt: '2024-01-01T00:00:01Z' }),
+      makeSessionEvent({ sequence: 2, type: 'agent_message_chunk', payload: { text: ' world' }, createdAt: '2024-01-01T00:00:02Z' }),
+      makeSessionEvent({ sequence: 3, type: 'agent_thought_chunk', payload: { text: 'thinking' }, createdAt: '2024-01-01T00:00:03Z' }),
+      makeSessionEvent({ sequence: 4, type: 'mohist_prompt', payload: { text: 'second prompt', kind: 'task' }, createdAt: '2024-01-01T00:00:04Z' }),
+      makeSessionEvent({ sequence: 5, type: 'agent_message_chunk', payload: { text: 'second' }, createdAt: '2024-01-01T00:00:05Z' }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+
+    expect(rounds).toHaveLength(2)
+    expect(rounds[0].roundIndex).toBe(0)
+    expect(rounds[0].userText).toBe('first prompt')
+    expect(rounds[0].agentText).toBe('Hello world')
+    expect(rounds[0].thoughtText).toBe('thinking')
+    expect(rounds[0].startedAt).toBe('2024-01-01T00:00:00Z')
+    expect(rounds[1].roundIndex).toBe(1)
+    expect(rounds[1].userText).toBe('second prompt')
+    expect(rounds[1].agentText).toBe('second')
+    expect(rounds[1].thoughtText).toBe('')
+  })
+
+  it('groups tool_call and tool_call_update by toolCallId with updated status', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'use tools' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'tool_call', payload: { toolCallId: 'call-1', kind: 'bash', title: 'bash', rawInput: '{"command":"ls"}' }, createdAt: '2024-01-01T00:00:01Z' }),
+      makeSessionEvent({ sequence: 2, type: 'tool_call_update', payload: { toolCallId: 'call-1', status: 'completed', rawOutput: 'file.txt' }, createdAt: '2024-01-01T00:00:02Z' }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].toolCalls).toHaveLength(1)
+    expect(rounds[0].toolCalls[0].toolCallId).toBe('call-1')
+    expect(rounds[0].toolCalls[0].toolName).toBe('bash')
+    expect(rounds[0].toolCalls[0].state).toBe('completed')
+    expect(rounds[0].toolCalls[0].rawOutput).toBe('file.txt')
+    expect(rounds[0].toolCalls[0].rawInput).toBe('{"command":"ls"}')
+  })
+
+  it('maps agent_liveness_status events to recovery events on the active round', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'p' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'agent_liveness_status', payload: { status: 'probing', activeProbeVersion: 2 }, createdAt: '2024-01-01T00:00:01Z' }),
+      makeSessionEvent({ sequence: 2, type: 'agent_liveness_status', payload: { status: 'failed', failureReason: 'timeout' }, createdAt: '2024-01-01T00:00:02Z' }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].recoveryEvents).toHaveLength(2)
+    expect(rounds[0].recoveryEvents[0].status).toBe('recovering')
+    expect(rounds[0].recoveryEvents[0].attempt).toBe(2)
+    expect(rounds[0].recoveryEvents[1].status).toBe('failed')
+    expect(rounds[0].recoveryEvents[1].reason).toBe('timeout')
+  })
+
+  it('infers round labels from total count', () => {
+    const events = [
+      makeSessionEvent({ sequence: 0, type: 'mohist_prompt', payload: { text: 'p1' }, createdAt: '2024-01-01T00:00:00Z' }),
+      makeSessionEvent({ sequence: 1, type: 'mohist_prompt', payload: { text: 'p2' }, createdAt: '2024-01-01T00:00:01Z' }),
+    ]
+
+    const rounds = reconstructRoundsFromEvents(events)
+
+    expect(rounds[0].label).toBe('proposal.md')
+    expect(rounds[1].label).toBe('specs/')
+  })
+})
+
+describe('reconstructRoundsFromLogs', () => {
+  function makeLog(overrides: Partial<WorkflowLogItem> = {}): WorkflowLogItem {
+    return {
+      id: overrides.id ?? 'log-1',
+      eventType: overrides.eventType ?? 'agent_message_chunk',
+      data: overrides.data,
+      createdAt: overrides.createdAt ?? '2024-01-01T00:00:00Z',
+    }
+  }
+
+  it('is a thin wrapper that converts workflow logs to session events and delegates to viewSessionEvents', async () => {
+    const viewModule = await import('../../../entities/session/model/view')
+    const spy = vi.spyOn(viewModule, 'viewSessionEvents')
+    try {
+      const logs = [
+        makeLog({ id: 'log-0', eventType: 'user_message_chunk', data: { content: { text: 'hi' } } }),
+        makeLog({ id: 'log-1', eventType: 'agent_message_chunk', data: { content: { text: 'hello' } } }),
+      ]
+      reconstructRoundsFromLogs(logs)
+      expect(spy).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ type: 'mohist_prompt', payload: { content: { text: 'hi' } } }),
+          expect.objectContaining({ type: 'agent_message_chunk', payload: { content: { text: 'hello' } } }),
+        ],
+        'timeline',
+      )
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('renames legacy user_message_chunk events to mohist_prompt for shared projection', () => {
+    const logs = [
+      makeLog({ id: 'log-0', eventType: 'user_message_chunk', data: { text: 'first' } }),
+      makeLog({ id: 'log-1', eventType: 'agent_message_chunk', data: { text: 'reply' } }),
+    ]
+    const rounds = reconstructRoundsFromLogs(logs)
+    expect(rounds).toHaveLength(1)
+    expect(rounds[0].userText).toBe('first')
+    expect(rounds[0].agentText).toBe('reply')
+  })
+
+  it('returns empty array for empty logs', () => {
+    expect(reconstructRoundsFromLogs([])).toEqual([])
+  })
+})
+

@@ -29,6 +29,32 @@ public sealed record WorkflowAgentSessionDto(
 
 public sealed record WorkflowAgentSessionEventDto(string Id, string SessionId, string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName, string? AgentSessionId, string? WorkId, string? WorkType, string? Stage, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
 
+public sealed record AgentSessionMetadataDto(
+    string Id,
+    string SessionName,
+    [property: JsonPropertyName("acpSessionId")] string AgentRuntimeSessionId,
+    [property: JsonPropertyName("status")] string Status,
+    string? Model,
+    string? Stage,
+    string? Title,
+    string CreatedAt,
+    string? CompletedAt,
+    [property: JsonPropertyName("metadata")] AgentSessionMetadataCounts Metadata);
+
+public sealed record AgentSessionMetadataCounts(
+    [property: JsonPropertyName("eventCount")] int EventCount,
+    [property: JsonPropertyName("toolCount")] int ToolCount);
+
+public sealed record AgentSessionEventDto(
+    [property: JsonPropertyName("id")] long Id,
+    [property: JsonPropertyName("sequence")] long Sequence,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("payload")] JsonElement? Payload,
+    [property: JsonPropertyName("createdAt")] string CreatedAt);
+
+public sealed record AgentSessionEventsResponse(
+    [property: JsonPropertyName("events")] IReadOnlyList<AgentSessionEventDto> Events);
+
 public sealed record WorkflowAgentSessionSummaryDto(
     string Id,
     string SessionName,
@@ -46,46 +72,6 @@ public sealed record WorkflowAgentSessionSummaryDto(
     string? ProbeSentAt,
     string? ProbeDeadlineAt,
     string? FailureReason);
-
-public sealed record WorkflowAgentSessionTranscript(
-    string Id,
-    string SessionName,
-    [property: JsonPropertyName("acpSessionId")] string AgentRuntimeSessionId,
-    [property: JsonPropertyName("executionId")] string? WorkId,
-    [property: JsonPropertyName("taskDescription")] string? TaskTitle,
-    [property: JsonPropertyName("status")] string Status,
-    string CreatedAt,
-    string? CompletedAt,
-    string? Model,
-    [property: JsonPropertyName("coderType")] string? AgentKind,
-    string? Stage,
-    string? Title,
-    object Metadata,
-    IReadOnlyList<WorkflowAgentSessionTranscriptTurn> Turns,
-    bool Incomplete,
-    IReadOnlyList<WorkflowAgentSessionTranscriptItem> WorkflowLogs);
-
-public sealed record WorkflowAgentSessionTranscriptItem(string Id, string EventType, JsonElement? Data, string CreatedAt);
-
-public sealed record WorkflowAgentSessionTranscriptTurn(
-    string Id,
-    string StartedAt,
-    string? CompletedAt,
-    WorkflowAgentSessionTranscriptTurnUser User,
-    IReadOnlyList<JsonElement> Assistant);
-
-public sealed record WorkflowAgentSessionTranscriptTurnUser(
-    string Role,
-    string Text,
-    string Kind,
-    string SentAt,
-    WorkflowAgentSessionTranscriptPromptSummary? Summary);
-
-public sealed record WorkflowAgentSessionTranscriptPromptSummary(
-    string Kind,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OutputPath = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? ContextFiles = null);
 
 public sealed record WorkflowAgentSessionInfoDto(int IssueNumber, string IssueTitle, string IssueStage, string SessionId, [property: JsonPropertyName("status")] string Status, string? Model, string? Title, string CreatedAt, string? CompletedAt, string? LastActivityAt);
 
@@ -143,6 +129,5 @@ public sealed record ActivityPreviewDto(string Kind, string Text, string Created
 public sealed record ActivityWaitingCardDto(string IssueId, int IssueNumber, string IssueTitle, string? Stage, string Label, string? RequestedAt, string? Preview);
 
 public sealed record WorkflowAgentSessionStartedRequest(string? ExternalSessionId = null, string? Model = null, string? WorkDir = null, string? ChangeDir = null, int? ProcessPid = null);
-public sealed record WorkflowAgentSessionTranscriptEntryRequest(string Type, JsonElement Payload);
 public sealed record WorkflowAgentSessionStatusRequest([property: JsonPropertyName("status")] string Status, DateTime? LastDataAt = null, string? FailureReason = null);
 public sealed record WorkflowAgentSessionCompletedRequest([property: JsonPropertyName("status")] string Status, string? FailureReason = null, int? ExitCode = null);

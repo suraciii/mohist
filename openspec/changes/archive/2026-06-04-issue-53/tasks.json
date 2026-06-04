@@ -1,0 +1,195 @@
+{
+  "project": "mohist",
+  "description": "Split agent session transcript access into metadata and raw event endpoints, expose raw workflow logs, and centralize session event projection in the web client.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add raw session API contracts",
+      "spec": "specs/http-api/spec.md#requirement-issue-session-metadata-endpoint-is-lightweight",
+      "description": "Implement the replacement session metadata and raw session events API contracts. The metadata endpoint must read only session details and aggregate counts, while the events endpoint must return raw ordered session events without server-side projection.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/sessions/:name returns id, sessionName, acpSessionId, status, model, stage, title, createdAt, completedAt, and metadata only.",
+        "GET /api/issues/:number/sessions/:name/events returns { events: [...] } with id, sequence, type, raw payload, and createdAt for every persisted event.",
+        "Session events are ordered by ascending sequence.",
+        "Neither endpoint returns turns, assistant parts, workflowLogs, or projected transcript data."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Backend session metadata and raw events endpoints",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use existing session and event storage/indexes only; do not add schema changes or cursor pagination."
+    },
+    {
+      "id": "T-002",
+      "title": "Expose raw workflow log API",
+      "spec": "specs/workflow-log/spec.md#requirement-workflow-events-are-exposed-as-a-first-class-issue-log",
+      "description": "Add a dedicated issue workflow log endpoint backed by the existing WorkflowEvents store. The endpoint must return workflow-level rows only and preserve payloads as raw stored values.",
+      "acceptanceCriteria": [
+        "GET /api/issues/:number/workflow-log returns { entries: [...] } for the issue's WorkflowEvents rows.",
+        "Entries are ordered by ascending createdAt.",
+        "Each entry preserves the raw payload without transcript, timeline, or assistant projection.",
+        "Agent session stream events such as agent_message_chunk and tool_call_update are not returned as workflow log entries."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Backend workflow-log endpoint",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep workflow log access separate from session event access."
+    },
+    {
+      "id": "T-003",
+      "title": "Remove server transcript projection",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-server-no-longer-owns-assistant-transcript-projection",
+      "description": "Remove the server-side assistant turn projection path from session APIs. Delete or retire BuildAssistantParts behavior and WorkflowAgentSessionTranscript.Turns so the backend no longer owns chat, timeline, or compact view shaping.",
+      "acceptanceCriteria": [
+        "Server session responses do not include WorkflowAgentSessionTranscript.Turns or any turns collection.",
+        "Server code no longer calls BuildAssistantParts or an equivalent assistant-part projection function for session detail data.",
+        "The misleading workflowLogs field is removed from session transcript/session detail responses.",
+        "Existing backend compile and route tests use the new metadata/events shapes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server projection code removed from session API path",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "This is a clean break; do not add a compatibility shim for the old combined transcript DTO."
+    },
+    {
+      "id": "T-004",
+      "title": "Add backend endpoint tests",
+      "spec": "specs/http-api/spec.md#requirement-issue-session-events-endpoint-returns-raw-ordered-events",
+      "description": "Add backend tests for the new metadata, session events, and workflow-log endpoints. Tests should prove payload shape, ordering, raw payload preservation, and absence of server-projected transcript fields.",
+      "acceptanceCriteria": [
+        "Metadata endpoint test verifies required metadata fields and absence of events, turns, assistant, and workflowLogs.",
+        "Session events endpoint test verifies all events are returned in ascending sequence order with raw payloads.",
+        "Workflow-log endpoint test verifies entries are returned in ascending createdAt order with raw payloads.",
+        "A removal-focused assertion verifies session APIs no longer return server-projected turns."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Backend tests for split session and workflow-log APIs",
+      "dependsOn": ["T-001", "T-002", "T-003"],
+      "passes": true,
+      "notes": "Prefer product/API-path tests consistent with the repository testing guidance."
+    },
+    {
+      "id": "T-005",
+      "title": "Create shared session projection",
+      "spec": "specs/session-timeline-ui/spec.md#requirement-session-event-projection-module-supports-timeline-and-compact-views",
+      "description": "Create the client projection module at entities/session/model/view.ts. It must own all payload narrowing for raw SessionEvent.payload and derive chat, timeline, and compact views from the same ordered raw event stream.",
+      "acceptanceCriteria": [
+        "viewSessionEvents(events, 'chat') returns prompt-led chat turns with assistant text, reasoning, and tool parts.",
+        "viewSessionEvents(events, 'timeline') returns timeline-oriented groups suitable for SessionTimeline rendering.",
+        "viewSessionEvents(events, 'compact') returns compact summary data using the same event narrowing and ordering semantics.",
+        "Raw SessionEvent payloads are typed as unknown outside the projection module."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/entities/session/model/view.ts",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Collapse current chat, live transcript, and timeline parsing semantics into this one module."
+    },
+    {
+      "id": "T-006",
+      "title": "Update session page data flow",
+      "spec": "specs/agent-session-ui/spec.md#requirement-session-page-loads-metadata-before-raw-events",
+      "description": "Update SessionPage and related hooks so the initial page request fetches metadata only, while transcript content fetches raw events separately and projects them client-side. Historical refresh rendering must use the same chat projection as live event processing.",
+      "acceptanceCriteria": [
+        "Opening /issues/:number/workflow/sessions/:name first requests GET /api/issues/:number/sessions/:name for header metadata.",
+        "Transcript rendering requests GET /api/issues/:number/sessions/:name/events when events are needed.",
+        "useSessionTranscript calls viewSessionEvents(events, 'chat') for historical raw events.",
+        "SessionPage does not require turns or workflowLogs in the metadata response."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SessionPage and session transcript hooks consume metadata plus raw events endpoints",
+      "dependsOn": ["T-001", "T-003", "T-005"],
+      "passes": true,
+      "notes": "Do not change SSE live update protocol; only align historical projection with the shared module."
+    },
+    {
+      "id": "T-007",
+      "title": "Route timeline through shared projection",
+      "spec": "specs/session-timeline-ui/spec.md#requirement-timeline-reconstruction-uses-shared-projection",
+      "description": "Update session timeline reconstruction so it no longer independently parses raw event streams. Remove reconstructRoundsFromLogs or reduce it to a thin wrapper around viewSessionEvents(events, 'timeline').",
+      "acceptanceCriteria": [
+        "Timeline reconstruction calls viewSessionEvents(events, 'timeline').",
+        "reconstructRoundsFromLogs is removed or contains no independent parsing for assistant chunks, thought chunks, tool calls, or Mohist prompts.",
+        "Historical and live timeline rendering use equivalent grouping, tool identity, and assistant content ordering for the same ordered events."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Timeline reconstruction uses shared session projection",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Keep current UI surface behavior while eliminating duplicated event parsing."
+    },
+    {
+      "id": "T-008",
+      "title": "Add frontend projection tests",
+      "spec": "specs/session-timeline-ui/spec.md#requirement-session-event-projection-module-supports-timeline-and-compact-views",
+      "description": "Add frontend tests for viewSessionEvents using a representative synthetic raw session event stream. The tests should cover chat, timeline, and compact outputs and ensure payload narrowing remains centralized.",
+      "acceptanceCriteria": [
+        "Chat projection test verifies prompt-led turn order, assistant text chunks, reasoning chunks, and tool parts.",
+        "Timeline projection test verifies timeline groups for the same synthetic stream.",
+        "Compact projection test verifies summary/count or preview output for the same stream.",
+        "Tests fail if projection behavior depends on server-projected turns."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Frontend tests for viewSessionEvents chat, timeline, and compact kinds",
+      "dependsOn": ["T-005", "T-007"],
+      "passes": false,
+      "notes": "Use synthetic raw events that include mohist_prompt, agent_message_chunk, agent_thought_chunk, tool_call, and tool_call_update."
+    },
+    {
+      "id": "T-009",
+      "title": "Add SessionPage endpoint tests",
+      "spec": "specs/agent-session-ui/spec.md#requirement-session-transcript-projection-is-shared-client-side",
+      "description": "Add frontend tests proving SessionPage consumes the split metadata and raw events endpoints. The page should render header metadata without old transcript fields and render transcript content by projecting raw events through the shared module.",
+      "acceptanceCriteria": [
+        "SessionPage test verifies the initial request uses GET /api/issues/:number/sessions/:name.",
+        "SessionPage test verifies transcript loading uses GET /api/issues/:number/sessions/:name/events.",
+        "SessionPage renders header metadata when the metadata response has no turns and no workflowLogs.",
+        "SessionPage transcript rendering is based on projected raw events rather than server-projected turns."
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Frontend SessionPage tests for metadata and events endpoint usage",
+      "dependsOn": ["T-006", "T-008"],
+      "passes": false,
+      "notes": "Mock split endpoint responses instead of the removed combined transcript shape."
+    },
+    {
+      "id": "T-010",
+      "title": "Run end-to-end verification",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-persisted-session-events-are-served-raw-for-client-projection",
+      "description": "Run the relevant backend and frontend verification commands after implementation. Confirm the split API, client projection, and UI integration all pass together with no schema migration or compatibility shim.",
+      "acceptanceCriteria": [
+        "Backend test suite covering issue session and workflow-log APIs passes.",
+        "Frontend tests covering viewSessionEvents and SessionPage endpoint usage pass.",
+        "A build or typecheck confirms removed transcript DTO fields are not still referenced in compiled code.",
+        "No database migration or new index is introduced."
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "REVIEW",
+      "output": "Verified implementation with passing relevant tests/builds",
+      "dependsOn": ["T-004", "T-009"],
+      "passes": true,
+      "notes": "Use repository-standard commands such as npm test, npm run build, or focused package test commands as appropriate."
+    }
+  ]
+}

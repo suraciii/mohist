@@ -18,6 +18,15 @@ public static class WorkflowEventRoutes
             return ApiResults.Ok(list);
         });
 
+        app.MapGet("/api/issues/{number:int}/workflow-log", async (int number, string projectId, IEventStore events) =>
+        {
+            var pid = projectId;
+            if (pid is null) return ApiResults.BadRequest("No active project");
+
+            var list = await events.ListIssueWorkflowLogAsync(pid, number);
+            return ApiResults.Ok(new WorkflowLogResponse(list));
+        });
+
         app.MapGet("/api/issues/{number:int}/logs", async (int number, string projectId, int? limit, IGrainFactory grains, IEventStore events, ProjectQueryService projectsQuery) =>
         {
             var pid = projectId;
