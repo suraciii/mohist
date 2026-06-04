@@ -1,5 +1,6 @@
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Querying;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Infrastructure;
 using System.Text.Json;
@@ -218,6 +219,86 @@ public static class ProjectRoutes
             return ApiResults.Ok(result);
         });
 
+        group.MapGet("/{id}/templates", async (string id, ProjectWorkflowProfileManager manager) =>
+        {
+            var prompts = await manager.ListPromptsAsync(id);
+            return ApiResults.Ok(prompts.Select(ToTemplateRoutePrompt));
+        });
+
+        group.MapGet("/{id}/templates/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        {
+            var prompt = await manager.GetPromptAsync(id, key);
+            return prompt is null
+                ? ApiResults.NotFound($"Prompt '{key}' not found")
+                : ApiResults.Ok(ToTemplateRoutePrompt(prompt));
+        });
+
+        group.MapGet("/{id}/templates/{key}/override", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        {
+            var prompt = await manager.GetProjectPromptOverrideAsync(id, key);
+            return prompt is null
+                ? ApiResults.NotFound($"Prompt override '{key}' not found")
+                : ApiResults.Ok(prompt);
+        });
+
+        group.MapPut("/{id}/templates/{key}/override", async (string id, string key, ProjectPromptOverrideRequest? req, ProjectWorkflowProfileManager manager, IEventStore events) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Body))
+                return ApiResults.BadRequest("body is required");
+
+            var prompt = await manager.SetProjectPromptOverrideAsync(id, key, req.DisplayName, req.Description, req.Tags, req.Stage, req.Body);
+            await events.AppendAsync(new EventInput(
+                id,
+                0,
+                "project",
+                "project_template_changed",
+                Status: "changed",
+                Message: key,
+                Payload: new { key }));
+
+            return ApiResults.Ok(prompt);
+        });
+
+        group.MapDelete("/{id}/templates/{key}/override", async (string id, string key, ProjectWorkflowProfileManager manager, IEventStore events) =>
+        {
+            var existed = await manager.DeleteProjectPromptOverrideAsync(id, key);
+            if (existed)
+            {
+                await events.AppendAsync(new EventInput(
+                    id,
+                    0,
+                    "project",
+                    "project_template_deleted",
+                    Status: "deleted",
+                    Message: key,
+                    Payload: new { key }));
+            }
+
+            return ApiResults.Ok();
+        });
+
+        group.MapPost("/{id}/templates/{key}/preview", async (string id, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager) =>
+        {
+            JsonElement variables;
+            if (req?.Variables is { } raw)
+                variables = raw;
+            else
+            {
+                using var doc = JsonDocument.Parse("{}");
+                variables = doc.RootElement.Clone();
+            }
+
+            try
+            {
+                var result = await manager.PreviewPromptAsync(id, key, variables);
+                return ApiResults.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
+        });
+
         group.MapGet("/{id}/workflow-profile/prompts", async (string id, ProjectWorkflowProfileManager manager) =>
         {
             var prompts = await manager.ListPromptsAsync(id);
@@ -271,9 +352,21 @@ public static class ProjectRoutes
 
         return app;
     }
+
+    private static EffectivePrompt ToTemplateRoutePrompt(EffectivePrompt prompt) =>
+        prompt.Source == "project"
+            ? prompt with { Source = "project-override" }
+            : prompt;
 }
 
 public sealed record PromptUpsertRequest(string? Body);
+
+public sealed record ProjectPromptOverrideRequest(
+    string? DisplayName,
+    string? Description,
+    string[]? Tags,
+    string? Stage,
+    string? Body);
 
 public sealed record PromptPreviewRequest(JsonElement? Variables);
 

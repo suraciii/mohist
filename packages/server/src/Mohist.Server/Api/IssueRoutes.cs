@@ -489,9 +489,9 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/rebase", async (int number, string projectId, RebaseRequest? req, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        issues.MapPost("/{number:int}/rebase", async (int number, string projectId, RebaseRequest? req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
         {
-            var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId; var pid = projectId;
+            var wrId = await ResolveWorkflowRunIdAsync(grains, issueIdentityResolver, issuesQuery, projectId, number); var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             if (wrId is null) return ApiResults.NotFound("No workflow run");
 
@@ -603,6 +603,21 @@ public static class IssueRoutes
     {
         var issueId = await issueIdentityResolver.GetIdAsync(projectId, number);
         return issueId is null ? null : grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+    }
+
+    private static async Task<string?> ResolveWorkflowRunIdAsync(
+        IGrainFactory grains,
+        IssueIdentityResolver issueIdentityResolver,
+        IssueQuerier issuesQuery,
+        string projectId,
+        int number)
+    {
+        var wrId = (await issuesQuery.GetInfoAsync(projectId, number))?.WorkflowRunId;
+        if (!string.IsNullOrWhiteSpace(wrId))
+            return wrId;
+
+        var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, projectId, number);
+        return grain is null ? null : (await grain.GetWorkflowStatusAsync())?.WorkflowRunId;
     }
 
     private static async Task<IResult> UpdateIssueWorkflowTemplateAsync(

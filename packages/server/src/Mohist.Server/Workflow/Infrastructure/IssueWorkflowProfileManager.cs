@@ -39,12 +39,6 @@ public class IssueWorkflowProfileManager
         return null;
     }
 
-    public async Task<IssueWorkflowProfile?> GetProfileAsync(string issueId, string? legacyIssueKey = null)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync();
-        return await FindProfileAsync(db, issueId, legacyIssueKey);
-    }
-
     public async Task<IssueWorkflowProfileState> GetStateAsync(string issueId, string? legacyIssueKey = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -61,6 +55,12 @@ public class IssueWorkflowProfileManager
                 row.UpdatedAt);
     }
 
+    internal async Task<IssueWorkflowProfile?> GetProfileAsync(string issueId, string? legacyIssueKey = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await FindProfileAsync(db, issueId, legacyIssueKey);
+    }
+
     /// <summary>
     /// Update issue template choice.
     /// - request.ProjectTemplateId set:  reference a project template, clear custom
@@ -68,7 +68,7 @@ public class IssueWorkflowProfileManager
     /// - both null:                      clear issue-level template (inherit project default)
     /// - both set:                       invalid
     /// </summary>
-    public async Task<IssueWorkflowProfile> UpdateTemplateAsync(
+    public async Task<IssueWorkflowProfileState> UpdateTemplateAsync(
         string issueId,
         IssueTemplateUpdateRequest request,
         string? legacyIssueKey = null)
@@ -114,7 +114,7 @@ public class IssueWorkflowProfileManager
         }
 
         await db.SaveChangesAsync();
-        return row;
+        return ToState(row);
     }
 
     // =======================================================================
@@ -290,6 +290,15 @@ public class IssueWorkflowProfileManager
             return null;
         }
     }
+
+    private static IssueWorkflowProfileState ToState(IssueWorkflowProfile row) =>
+        new(
+            row.IssueKey,
+            row.SourceTemplateId,
+            !string.IsNullOrWhiteSpace(row.Template),
+            string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeDefinition(row.Template),
+            VariableBundle.FromJson(row.Variables),
+            row.UpdatedAt);
 }
 
 /// <summary>

@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Prompts;
 using Mohist.Server.Workflow.Prompts.Domain;
 using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Mohist.Server.Workflow.Storage;
+using ProjectPromptTemplateRow = Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow;
 
 namespace Mohist.Server.Workflow.Infrastructure;
 
@@ -310,7 +311,11 @@ public class ProjectWorkflowProfileManager
         }
         else
         {
-            profile.Prompts[key] = body;
+            var prompts = new Dictionary<string, string>(profile.Prompts, StringComparer.Ordinal)
+            {
+                [key] = body,
+            };
+            profile.Prompts = prompts;
             profile.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -327,9 +332,77 @@ public class ProjectWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
         if (profile is null) return;
 
-        if (!profile.Prompts.Remove(key)) return;
+        var prompts = new Dictionary<string, string>(profile.Prompts, StringComparer.Ordinal);
+        if (!prompts.Remove(key)) return;
+        profile.Prompts = prompts;
         profile.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
+    }
+
+    public async Task<EffectivePrompt?> GetProjectPromptOverrideAsync(string projectId, string key)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectPromptTemplates.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+        return row is null
+            ? null
+            : new EffectivePrompt(
+                row.Key,
+                string.IsNullOrWhiteSpace(row.DisplayName) ? row.Key : row.DisplayName,
+                row.Description,
+                DeserializeTags(row.TagsJson),
+                row.Stage,
+                row.Body,
+                "project-override");
+    }
+
+    public async Task<EffectivePrompt> SetProjectPromptOverrideAsync(
+        string projectId,
+        string key,
+        string? displayName,
+        string? description,
+        string[]? tags,
+        string? stage,
+        string body)
+    {
+        await SetPromptAsync(projectId, key, body);
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectPromptTemplates
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+
+        if (row is null)
+        {
+            row = new ProjectPromptTemplateRow { ProjectId = projectId, Key = key };
+            db.ProjectPromptTemplates.Add(row);
+        }
+
+        row.DisplayName = string.IsNullOrWhiteSpace(displayName) ? key : displayName!;
+        row.Description = description ?? string.Empty;
+        row.TagsJson = JsonSerializer.Serialize(tags ?? Array.Empty<string>());
+        row.Stage = stage;
+        row.Body = body;
+        row.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return new EffectivePrompt(row.Key, row.DisplayName, row.Description, tags ?? Array.Empty<string>(), row.Stage, row.Body, "project-override");
+    }
+
+    public async Task<bool> DeleteProjectPromptOverrideAsync(string projectId, string key)
+    {
+        var existing = await GetProjectPromptOverrideAsync(projectId, key);
+        await DeletePromptAsync(projectId, key);
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectPromptTemplates
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+        if (row is not null)
+        {
+            db.ProjectPromptTemplates.Remove(row);
+            await db.SaveChangesAsync();
+        }
+
+        return existing is not null;
     }
 
     public async Task<PromptPreviewResult> PreviewPromptAsync(
@@ -352,6 +425,20 @@ public class ProjectWorkflowProfileManager
         var profile = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
         return profile?.Prompts ?? new(StringComparer.Ordinal);
+    }
+
+    private static string[] DeserializeTags(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private async Task<bool> ProjectTemplateExistsAsync(string projectId, string templateId)

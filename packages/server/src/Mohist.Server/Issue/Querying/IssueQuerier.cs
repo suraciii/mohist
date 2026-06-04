@@ -92,7 +92,7 @@ public class IssueQuerier
         await using var db = await _dbFactory.CreateDbContextAsync(); var rows = await db.IssueStates
             .AsNoTracking()
             .ToListAsync();
-        var list = IssueStateReader.SelectCanonicalById(rows, projectId)
+        var list = IssueStateReader.SelectCanonicalByNumber(rows, projectId)
             .Select(issue => ToReadModel(ToInfo(issue, project)))
             .OrderBy(i => i.Number)
             .ToList();
