@@ -19,9 +19,9 @@ public class ProjectWorkflowProfile
     public string Variables { get; set; } = "{}";
 
     /// <summary>
-    /// 项目级提示词。key → body, JSON 序列化。
+    /// 项目级提示词。key → body。
     /// </summary>
-    public string Prompts { get; set; } = "{}";
+    public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal);
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

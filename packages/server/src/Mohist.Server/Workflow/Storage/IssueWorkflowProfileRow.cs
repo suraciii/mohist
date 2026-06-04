@@ -29,9 +29,9 @@ public class IssueWorkflowProfile
     public string Variables { get; set; } = "{}";
 
     /// <summary>
-    /// Issue 级提示词。key → body, JSON 序列化。
+    /// Issue 级提示词。key → body。
     /// </summary>
-    public string Prompts { get; set; } = "{}";
+    public Dictionary<string, string> Prompts { get; set; } = new(StringComparer.Ordinal);
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

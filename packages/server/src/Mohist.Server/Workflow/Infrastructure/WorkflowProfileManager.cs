@@ -239,8 +239,7 @@ public class WorkflowProfileManager
         var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
         if (issueProfile is not null)
         {
-            var prompts = DeserializePrompts(issueProfile.Prompts);
-            if (prompts.TryGetValue(key, out var body))
+            if (issueProfile.Prompts.TryGetValue(key, out var body))
                 return new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, "issue");
         }
 
@@ -251,8 +250,7 @@ public class WorkflowProfileManager
                 .FirstOrDefaultAsync(x => x.ProjectId == pid);
             if (projectProfile is not null)
             {
-                var projectPrompts = DeserializePrompts(projectProfile.Prompts);
-                if (projectPrompts.TryGetValue(key, out var body))
+                if (projectProfile.Prompts.TryGetValue(key, out var body))
                 {
                     var systemTemplates = _promptLoader.LoadAllTemplates();
                     var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
@@ -284,7 +282,7 @@ public class WorkflowProfileManager
             var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.ProjectId == pid);
             projectPrompts = projectProfile is not null
-                ? DeserializePrompts(projectProfile.Prompts)
+                ? projectProfile.Prompts
                 : new Dictionary<string, string>(StringComparer.Ordinal);
         }
         else
@@ -295,7 +293,7 @@ public class WorkflowProfileManager
         Dictionary<string, string> issuePrompts;
         var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
         if (issueProfile is not null)
-            issuePrompts = DeserializePrompts(issueProfile.Prompts);
+            issuePrompts = issueProfile.Prompts;
         else
             issuePrompts = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -335,20 +333,6 @@ public class WorkflowProfileManager
     {
         var (rendered, missing, depth) = _engine.Render(body, variables);
         return new PromptPreviewResult(rendered, missing, depth);
-    }
-
-    private static Dictionary<string, string> DeserializePrompts(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return new(StringComparer.Ordinal);
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
-                ?? new(StringComparer.Ordinal);
-        }
-        catch
-        {
-            return new(StringComparer.Ordinal);
-        }
     }
 
     /// <summary>
