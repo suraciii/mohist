@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Prompts;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
@@ -8,9 +10,9 @@ public class IssueWorkflowProfileRegistry
 
     public IssueWorkflowProfileRegistry(
         Workflow.Prompts.IPromptLoader promptLoader,
-        IProjectTemplateStore templateStore)
+        IDbContextFactory<MohistDbContext> dbFactory)
     {
-        var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, templateStore);
+        var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, dbFactory);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
             [defaults.Id] = defaults,

@@ -771,7 +771,6 @@ public sealed record IssueWorkflowProfileResponse(
     string ProfileId,
     string UpdateMode,
     VariableBundle Variables,
-<<<<<<< HEAD
     string UpdatedAt,
     string TemplateSource);
 
