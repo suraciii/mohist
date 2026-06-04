@@ -635,6 +635,11 @@ public static class IssueRoutes
         var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
         var profileId = template?.Id ?? state.SourceTemplateId ?? "mohist/default";
         var updateMode = template is not null ? "Custom" : "Reference";
+        var templateSource = state.HasCustomTemplate || template is not null
+            ? "custom"
+            : !string.IsNullOrWhiteSpace(state.SourceTemplateId)
+                ? "project"
+                : "system";
 
         return new IssueWorkflowProfileResponse(
             IssueNumber: number,
@@ -647,7 +652,8 @@ public static class IssueRoutes
             ProfileId: profileId,
             UpdateMode: updateMode,
             Variables: variables,
-            UpdatedAt: state.UpdatedAt?.ToString("O") ?? info.UpdatedAt);
+            UpdatedAt: state.UpdatedAt?.ToString("O") ?? info.UpdatedAt,
+            TemplateSource: templateSource);
     }
 
     private static Dictionary<string, object?> DefaultConflictResolverWith() => new()
@@ -705,4 +711,5 @@ public sealed record IssueWorkflowProfileResponse(
     string ProfileId,
     string UpdateMode,
     VariableBundle Variables,
-    string UpdatedAt);
+    string UpdatedAt,
+    string TemplateSource);

@@ -154,15 +154,24 @@ function WorkflowYamlDialog({ workflowRunId }: { workflowRunId: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors flex items-center justify-between"
+        data-testid="active-run-yaml-trigger"
+        className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors"
       >
-        <span className="text-sm text-gray-600">Workflow Definition (YAML)</span>
-        <span className="text-xs text-blue-600">View</span>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-600">Active run YAML</span>
+          <span className="text-xs text-blue-600">View</span>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Rendered runtime output of the active workflow run, not the issue&apos;s workflow profile configuration.
+        </p>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-hidden flex flex-col p-0">
           <DialogHeader>
-            <DialogTitle>Workflow Definition</DialogTitle>
+            <DialogTitle>Active run YAML</DialogTitle>
+            <p className="text-xs text-muted-foreground pt-1">
+              Rendered runtime output of the active workflow run, not the issue&apos;s workflow profile configuration.
+            </p>
           </DialogHeader>
           <div className="flex-1 overflow-auto px-4 pb-4">
             {isLoading ? (
@@ -721,14 +730,6 @@ export function IssueDetailPage() {
                       {formatStageName(issue.status)}
                     </dd>
                   </div>
-                  {issue.workflowProfileId && (
-                    <div className="flex justify-between gap-3">
-                      <dt className="text-muted-foreground">Workflow Profile</dt>
-                      <dd className="text-foreground font-mono text-xs text-right">
-                        {issue.workflowProfileId}
-                      </dd>
-                    </div>
-                  )}
                   {workflowStage && (
                     <div className="flex justify-between gap-3">
                       <dt className="text-muted-foreground">Workflow Stage</dt>

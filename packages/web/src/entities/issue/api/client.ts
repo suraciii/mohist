@@ -107,6 +107,12 @@ export function updateIssueWorkflowProfileYaml(number: number, yaml: string, pro
   })
 }
 
+export function deleteIssueWorkflowProfileTemplate(number: number, projectId: string) {
+  return request<IssueWorkflowProfileYamlResponse>(`/projects/${encodeURIComponent(projectId)}/issues/${number}/workflow-profile/template`, {
+    method: 'DELETE',
+  })
+}
+
 export function getWorkflowTimeline(number: number, projectId?: string | null) {
   return request<WorkflowTimeline>(`/issues/${number}/workflow/timeline`, withProject(undefined, projectId))
 }

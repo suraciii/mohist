@@ -653,4 +653,5 @@ export interface IssueWorkflowProfileYamlResponse {
   updateMode: string
   variables: unknown
   updatedAt: string
+  templateSource?: 'system' | 'project' | 'custom'
 }

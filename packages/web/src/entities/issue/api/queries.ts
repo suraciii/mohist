@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
-import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue, getIssueWorkflowProfileYaml, updateIssueWorkflowProfileYaml } from './client'
+import type { IssueWorkflowProfileYamlResponse } from '../model/types'
+import { getCommitDiff, getIssue, getIssueCommits, getIssueDiff, getIssues, getLabels, getWorkflowTimeline, getWorkflowYaml, getWorktreeStatus, unarchiveIssue, getIssueWorkflowProfileYaml, updateIssueWorkflowProfileYaml, deleteIssueWorkflowProfileTemplate } from './client'
 
 export function useIssues(params?: { stage?: string; label?: string; projectId?: string }) {
   return useQuery({
@@ -124,6 +125,17 @@ export function useUpdateIssueWorkflowProfileYaml() {
   return useMutation({
     mutationFn: ({ issueNumber, yaml }: { issueNumber: number; yaml: string }) =>
       updateIssueWorkflowProfileYaml(issueNumber, yaml, projectId!),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
+    },
+  })
+}
+
+export function useDeleteIssueWorkflowProfileTemplate() {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation<IssueWorkflowProfileYamlResponse, Error, { issueNumber: number }>({
+    mutationFn: ({ issueNumber }) => deleteIssueWorkflowProfileTemplate(issueNumber, projectId!),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['issues', data.issueNumber, projectId, 'workflow-profile-yaml'] })
     },
