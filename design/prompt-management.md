@@ -15,34 +15,70 @@ style:
 
 # Prompt Management
 
-Prompt 是 workflow profile 的第三块，和 template、variables 同级，由 `WorkflowProfileManager` 统一读取。
+Prompt 是 workflow profile 的第三块，和 template、variables 同级管理。
+
+```text
+workflow profile
+├── template    (WorkflowDefinition, 控制 stage/task/check 结构)
+├── variables   (VariableBundle, 控制 agent/model/timeout)
+└── prompts     (提示词 template, 控制每个 stage 发给 agent 的指令)
+```
+
+## 三层存储
+
+```text
+  Issue WorkflowProfiles.Prompts     key → body     (最高优先级)
+       ↓ 未命中
+  Project WorkflowProfiles.Prompts   key → body     (项目覆盖)
+       ↓ 未命中
+  System .prompt 文件                IPromptLoader  (内置只读)
+```
+
+与 variables 完全一致：项目和 Issue 都在同一个 profile row 里。
+
+## 数据模型
+
+```text
+ProjectWorkflowProfileRow
+  ProjectId, DefaultTemplateId, Variables, Prompts
+  存储: variables 和 prompts 均为 key→value 结构, JSON 序列化
+
+IssueWorkflowProfileRow
+  IssueKey, SourceTemplateId, Template, Variables, Prompts
+  存储: 同上，Template 为 WorkflowDefinition JSON
+
+SystemTemplate (已有, IPromptLoader 加载)
+  Key, DisplayName, Description, Tags, Stage, Body
+```
+
+字段名不带 `Json` 后缀——序列化是实现细节，不应出现在字段名中。
 
 ## 工作流
 
 ```text
 写入:
 
-  IssuePrompts                ProjectPromptTemplates 表       .prompt 文件
-  (ProfileRow.Prompts)        IProjectTemplateStore           IPromptLoader
-  key → body                  key → {body, stage, ...}        文件系统, 内置只读
-       │                              │                            │
-       └──────────────────────────────┼────────────────────────────┘
-                                      │
-                         WorkflowProfileManager
-                         LoadPrompt(runId, key)
-                                      │
-                              ┌───────┴───────┐
-                              ▼               ▼
-                         Prompts[key]     Variables
-                         (合并后 body)    (LoadVariables)
-                              │               │
-                              └───────┬───────┘
-                                      ▼
-                             PromptTemplateEngine
-                             Render(body, vars)
-                                      │
-                                      ▼
-                            最终文本 → Agent
+  Issue Prompts          Project Prompts            .prompt 文件
+  (ProfileRow.Prompts)   (ProfileRow.Prompts)       IPromptLoader
+  key → body              key → body                文件系统, 内置只读
+       │                        │                        │
+       └────────────────────────┼────────────────────────┘
+                                │
+                   WorkflowProfileManager
+                   LoadPrompt(runId, key)
+                                │
+                        ┌───────┴───────┐
+                        ▼               ▼
+                   Prompts[key]     Variables
+                   (合并后 body)   (LoadVariables)
+                        │               │
+                        └───────┬───────┘
+                                ▼
+                       PromptTemplateEngine
+                       Render(body, vars)
+                                │
+                                ▼
+                      最终文本 → Agent
 ```
 
 ## 读路径
@@ -54,9 +90,9 @@ LoadPrompt(runId, "build")
   │
   ├─ 从 WorkflowRun 反查 projectId + issueId
   │
-  ├─ IssueWorkflowProfileRow.Prompts["build"]   → 命中则返回 (source: issue)
-  ├─ ProjectPromptTemplates.Key="build"          → 命中则返回 (source: project)
-  └─ IPromptLoader.LoadAllTemplates()["build"]   → 命中则返回 (source: system)
+  ├─ IssueWorkflowProfileRow.Prompts["build"]     → 命中 (source: issue)
+  ├─ ProjectWorkflowProfileRow.Prompts["build"]   → 命中 (source: project)
+  └─ IPromptLoader.LoadAllTemplates()["build"]    → 命中 (source: system)
 
 LoadVariables(runId) → VariableBundle
 
@@ -70,37 +106,32 @@ Render(body, vars)
 ## Modules
 
 ```text
-WorkflowProfileManager (已有, 新增 3 个方法)
+WorkflowProfileManager
+  统一读入口: template + variables + prompts。
   LoadPrompt(runId, key)        → ResolvedPrompt?
   LoadPrompts(runId, stage?)    → ResolvedPrompt[]
   RenderPrompt(body, vars)      → (rendered, missing, depth)
-  依赖: IDbContextFactory, IProjectTemplateStore, IPromptLoader, PromptTemplateEngine
+  依赖: IDbContextFactory, IPromptLoader, PromptTemplateEngine
 
-ProjectWorkflowProfileManager (已有, 新增 prompt 方法)
+ProjectWorkflowProfileManager
+  项目级 template + variables + prompts 写端。
+  ListSystemPromptsAsync()                 → SystemTemplate[]
   ListPromptsAsync(projectId)              → EffectivePrompt[]
   GetPromptAsync(projectId, key)           → EffectivePrompt?
-  SetPromptAsync(projectId, key, body, …)  → ProjectTemplate
-  DeletePromptAsync(projectId, key)
+  SetPromptAsync(projectId, key, body)     → void
+  DeletePromptAsync(projectId, key)        → void
   PreviewPromptAsync(projectId, key, vars) → PreviewResult
+  依赖: IDbContextFactory, IPromptLoader, PromptTemplateEngine
 
-IssueWorkflowProfileManager (已有, 新增 prompt 方法)
-  GetPromptsAsync(issueId)               → Dictionary<string, string>
+IssueWorkflowProfileManager
+  Issue 级 template + variables + prompts 写端。
+  GetPromptsAsync(issueId)             → Dictionary<string, string>
   SetPromptAsync(issueId, key, body)
   DeletePromptAsync(issueId, key)
-```
 
-## 数据模型
-
-```text
-ProjectPromptTemplates 表 (已有)
-  ProjectId, Key, DisplayName, Description, Tags, Stage, Body, UpdatedAt
-  PK: (ProjectId, Key)
-
-IssueWorkflowProfileRow (已有, 新增字段)
-  + Prompts  // Dictionary<string, string>  key → body
-
-SystemTemplate (已有)
-  Key, DisplayName, Description, Tags, Stage, Body
+IPromptLoader (已有, 不变)
+  系统默认提示词来源, 从 .prompt 文件加载。
+  LoadAllTemplates() → Dictionary<string, SystemTemplate>
 ```
 
 ## 变量展开
@@ -167,11 +198,7 @@ POST   /api/projects/{id}/issues/{n}/workflow-profile/prompts/{key}/preview
 
 `GET /{key}` 返回合并后的有效值（含 Source），`PUT` 设置当前层，`DELETE` 清除当前层。
 
-旧路由废弃：
-
-```text
-/api/projects/{id}/templates  →  迁至 /workflow-profile/prompts
-```
+废弃：`/api/projects/{id}/templates` → 迁至 `/workflow-profile/prompts`
 
 ## 前端
 
