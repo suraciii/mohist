@@ -8,4 +8,5 @@ public interface IEpicGrain : IGrainWithStringKey
     Task LinkIssueAsync(string issueId, int issueNumber, string projectId);
     Task UnlinkIssueAsync(string issueId, string projectId);
     Task<EpicDto> SetStatusAsync(string status);
+    Task<EpicDto?> UpdateAsync(string? title, string? description, string? priority);
 }

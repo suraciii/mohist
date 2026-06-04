@@ -37,3 +37,16 @@ export function markEpicDone(id: string, projectId?: string | null) {
 export function closeEpic(id: string, projectId?: string | null) {
   return request<Epic>(`/epics/${encodeURIComponent(id)}/close`, withProject({ method: 'POST' }, projectId))
 }
+
+export interface UpdateEpicInput {
+  title?: string
+  description?: string
+  priority?: string
+}
+
+export function updateEpic(id: string, data: UpdateEpicInput, projectId?: string | null) {
+  return request<Epic>(`/epics/${encodeURIComponent(id)}`, withProject({
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }, projectId))
+}

@@ -33,6 +33,7 @@ vi.mock('../../../entities/epic', async (importOriginal) => {
 const epics = [
   {
     id: 'epic-active',
+    number: null,
     title: 'Active Epic',
     description: 'Active description',
     priority: 'p1',
@@ -40,7 +41,7 @@ const epics = [
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     progress: {
-      completedCount: 1,
+      deliveredCount: 1,
       totalIssueCount: 3,
       blockedIssues: [],
       activeIssues: ['issue-2'],
@@ -50,6 +51,7 @@ const epics = [
   },
   {
     id: 'epic-done',
+    number: null,
     title: 'Done Epic',
     description: 'Done description',
     priority: 'p2',
@@ -57,8 +59,47 @@ const epics = [
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     progress: {
-      completedCount: 2,
+      deliveredCount: 2,
       totalIssueCount: 2,
+      blockedIssues: [],
+      activeIssues: [],
+      nextIssue: null,
+      readyToMarkDone: true,
+    },
+  },
+]
+
+const numberedEpics = [
+  {
+    id: 'epic-uuid-1-aaaa-bbbb-cccccccccccc',
+    number: 7,
+    title: 'Numbered Active Epic',
+    description: 'Has a number',
+    priority: 'p1',
+    status: EpicStatus.Active,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    progress: {
+      deliveredCount: 0,
+      totalIssueCount: 2,
+      blockedIssues: [],
+      activeIssues: ['issue-2'],
+      nextIssue: { id: 'issue-2', number: 2, title: 'Continue work' },
+      readyToMarkDone: false,
+    },
+  },
+  {
+    id: 'epic-uuid-2-aaaa-bbbb-dddddddddddd',
+    number: 8,
+    title: 'Numbered Done Epic',
+    description: 'Has a number',
+    priority: 'p2',
+    status: EpicStatus.Done,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    progress: {
+      deliveredCount: 1,
+      totalIssueCount: 1,
       blockedIssues: [],
       activeIssues: [],
       nextIssue: null,
@@ -132,5 +173,52 @@ describe('EpicListPage', () => {
     fireEvent.click(screen.getByText('Active Epic'))
 
     expect(mockNavigate).toHaveBeenCalledWith('/epic/epic-active')
+  })
+})
+
+describe('EpicListPage numbered display', () => {
+  const createMutate = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockNavigate.mockClear()
+    mocks.useEpics.mockReturnValue({ data: numberedEpics, isLoading: false })
+    mocks.useCreateEpic.mockReturnValue({ mutate: createMutate, isPending: false, isError: false })
+  })
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('renders #N as the primary epic identifier when number is present', () => {
+    renderPage()
+
+    const numbers = screen.getAllByTestId('epic-number')
+    expect(numbers).toHaveLength(2)
+    expect(numbers[0]).toHaveTextContent('#7')
+    expect(numbers[1]).toHaveTextContent('#8')
+  })
+
+  it('does not display a truncated UUID as the primary epic identifier when number is present', () => {
+    renderPage()
+
+    const numbers = screen.getAllByTestId('epic-number')
+    for (const node of numbers) {
+      const text = node.textContent ?? ''
+      expect(text).not.toContain('epic-uuid-')
+      expect(text).not.toContain('aaaa-bbbb')
+    }
+    expect(screen.queryByText('#epic-uuid-1-aaaa-bbbb-cccccccccccc')).toBeNull()
+    expect(screen.queryByText('#epic-uuid-2-aaaa-bbbb-dddddddddddd')).toBeNull()
+  })
+
+  it('falls back to the truncated UUID when epic number is null', () => {
+    mocks.useEpics.mockReturnValue({ data: epics, isLoading: false })
+    renderPage()
+
+    const numbers = screen.getAllByTestId('epic-number')
+    expect(numbers).toHaveLength(2)
+    expect(numbers[0]).toHaveTextContent('#epic-act')
+    expect(numbers[1]).toHaveTextContent('#epic-don')
   })
 })

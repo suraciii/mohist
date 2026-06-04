@@ -1,0 +1,202 @@
+{
+  "project": "mohist",
+  "description": "Fix Epic progress projection and add numbered, searchable, editable, safely guarded Epic management.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Fix linked issue progress projection",
+      "spec": "specs/epic-tracking/spec.md#projected-epic-progress",
+      "description": "Correct the server linked issue projection so status, stage, and health are distinct fields populated from the matching issue row properties. Ensure Epic progress and next issue recommendation use issue lifecycle status, not health or stage, when counting delivered work and determining readiness.",
+      "acceptanceCriteria": [
+        "Epic detail and list progress count linked issues with status done or completed as delivered.",
+        "Issue health values such as active, blocked, or green do not increase delivered counts.",
+        "Linked issue API responses expose status, stage, and health as distinct fields with status containing lifecycle status.",
+        "A server spec creates an Epic with one delivered linked issue and one in-progress linked issue and asserts deliveredCount is 1, readyToMarkDone is false, and nextIssue points at the unfinished issue."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Corrected Epic DTO/query projection and server spec coverage for linked issue progress.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Prefer named arguments or another explicit construction style for LinkedIssueDto to avoid future positional mapping bugs."
+    },
+    {
+      "id": "T-002",
+      "title": "Assign and expose Epic numbers",
+      "spec": "specs/epic-tracking/spec.md#user-readable-epic-identification",
+      "description": "Add nullable project-scoped Epic numbers to persistence and assign the next available number when a new Epic is created. Expose the number through Epic list, detail, progress, and issue primary Epic response DTOs while preserving existing ID-based lookup behavior.",
+      "acceptanceCriteria": [
+        "New Epics receive the next available number within the current project at creation time.",
+        "Epic list, Epic detail, Epic progress, and issue primaryEpic responses include number when available.",
+        "Existing ID-based Epic lookup continues to resolve UUID-based URLs and stored references.",
+        "Server specs cover numbered Epic creation and primaryEpic number projection."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Epic Number schema/model support, creation allocation, DTO projection, and server specs.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow the existing Issue.Number allocation pattern and keep Number nullable for old rows."
+    },
+    {
+      "id": "T-003",
+      "title": "Add Epic number lookup API",
+      "spec": "specs/epic-tracking/spec.md#user-readable-epic-identification",
+      "description": "Add API support for resolving an Epic by project-scoped number without replacing ID lookup. The explicit by-number route should return the same detail shape as the existing ID detail route, and the existing detail route should also resolve number-or-id references using the same project context rules as other Epic APIs.",
+      "acceptanceCriteria": [
+        "GET /api/epics/by-number/{number} returns the same Epic detail data as GET /api/epics/{id} for the same Epic.",
+        "GET /api/epics/{id} resolves both UUID Epic IDs and numeric Epic references.",
+        "Unknown numbers return the existing not-found style client response.",
+        "Existing GET /api/epics/{id} route remains compatible with UUID Epic IDs.",
+        "Server specs cover successful explicit number lookup, numeric detail-route lookup, and continued ID lookup compatibility."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Number-based Epic lookup route, number-or-id detail route compatibility, and server route specs.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Keep the explicit by-number route and limit number-or-id parsing to the existing compatibility detail route instead of making every internal Epic reference parser ambiguous."
+    },
+    {
+      "id": "T-004",
+      "title": "Display Epic numbers in Web UI",
+      "spec": "specs/epic-tracking/spec.md#user-readable-epic-identification",
+      "description": "Update Web Epic API types and user-facing Epic labels to prefer #N when a number is present. Apply the display behavior to Epic list rows, Epic detail headers, and the issue detail primary Epic label, with short IDs used only as fallback or secondary context.",
+      "acceptanceCriteria": [
+        "Epic list displays #N as the visible primary Epic identifier when number is available.",
+        "Epic detail displays #N as the visible primary Epic identifier when number is available.",
+        "Issue detail primaryEpic label displays #N when number is available.",
+        "Web specs cover numbered display and verify truncated UUID is not the primary visible label when number is present."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated Web Epic types, labels, and numbered display specs.",
+      "dependsOn": ["T-002"],
+      "passes": true,
+      "notes": "Retain fallback rendering for old Epics with null number."
+    },
+    {
+      "id": "T-005",
+      "title": "Add searchable Epic issue selection",
+      "spec": "specs/epic-tracking/spec.md#searchable-epic-issue-selection",
+      "description": "Replace the flat Add Issue selector on the Epic detail page with a searchable selection control over the existing issue data. Filter candidates by issue number or title, exclude already linked issues from selectable candidates, and disable unavailable issues with inline explanations before submission.",
+      "acceptanceCriteria": [
+        "Typing in the Add Issue control filters candidates by title or issue number.",
+        "Already linked issues are excluded from selectable candidates.",
+        "Closed, archived, and non-startable candidates are shown unavailable with a reason and cannot be submitted.",
+        "The Add Issue submit action is disabled when no selectable candidate is selected or no selectable candidate exists.",
+        "Existing duplicate membership error messaging is preserved for stale or racing submissions.",
+        "Web specs cover search filtering, disabled unavailable candidates with reasons, and disabled empty submission."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Searchable Add Issue Web control and Epic detail page specs.",
+      "dependsOn": ["T-001", "T-004"],
+      "passes": false,
+      "notes": "Use the existing issue list data on the page; do not add a new server search endpoint for this issue."
+    },
+    {
+      "id": "T-006",
+      "title": "Add Epic metadata update API",
+      "spec": "specs/epic-tracking/spec.md#editable-epic-metadata",
+      "description": "Add an Epic grain update operation and PATCH route for title, description, and priority. Persist changed metadata, update UpdatedAt, and ensure the operation does not change Epic status, linked issue membership, or issue workflow state.",
+      "acceptanceCriteria": [
+        "PATCH /api/epics/{id} updates title, description, and priority when provided.",
+        "A successful metadata update advances updatedAt.",
+        "Metadata updates preserve Epic status and linked issue membership.",
+        "Server specs cover metadata update persistence and preservation of status and linked issue membership."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EpicGrain update method, PATCH route, request DTO, and server specs.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Model the request shape after the existing UpdateIssueRequest pattern where practical."
+    },
+    {
+      "id": "T-007",
+      "title": "Add Epic edit flow in Web UI",
+      "spec": "specs/epic-tracking/spec.md#editable-epic-metadata",
+      "description": "Expose an edit affordance on the Epic detail page for updating title, description, and priority through the PATCH API. After a successful save, invalidate or refetch Epic queries so the page shows the updated metadata.",
+      "acceptanceCriteria": [
+        "Epic detail page lets the user edit title, description, and priority.",
+        "Saving sends the metadata update to the PATCH API and shows updated values after success.",
+        "The edit flow does not change linked issue membership or lifecycle status in the UI state.",
+        "Web specs cover a successful edit and refreshed display of title, description, and priority."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Epic detail edit UI, client API support, query invalidation, and Web specs.",
+      "dependsOn": ["T-006"],
+      "passes": false,
+      "notes": "An explicit edit dialog or inline edit is acceptable if create and update semantics remain clear."
+    },
+    {
+      "id": "T-008",
+      "title": "Enforce Epic lifecycle guards in API",
+      "spec": "specs/epic-tracking/spec.md#epic-lifecycle",
+      "description": "Guard terminal Epic lifecycle operations server-side. Mark Done must reject Epics with undelivered linked issues and leave status unchanged, repeated terminal actions must be rejected, and Close must only close the Epic and remove EpicIssue membership without modifying issue workflow state.",
+      "acceptanceCriteria": [
+        "Mark Done succeeds only when projected progress indicates the Epic is ready to mark done.",
+        "Mark Done before all linked issues are delivered returns a client-visible 4xx response and leaves Epic status unchanged.",
+        "Done and closed Epics reject repeated terminal lifecycle actions.",
+        "Close changes Epic status to closed and removes EpicIssue links without changing issue status, prerequisites, or workflow data.",
+        "Server specs cover rejected premature Mark Done, successful Mark Done when ready, repeated terminal action rejection, and Close unlink behavior."
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server lifecycle guard implementation and lifecycle specs.",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "Use projected progress for readiness; do not automatically mark Epics done when all linked issues are delivered."
+    },
+    {
+      "id": "T-009",
+      "title": "Mirror lifecycle safety in Web UI",
+      "spec": "specs/epic-tracking/spec.md#epic-lifecycle",
+      "description": "Update the Epic detail lifecycle controls to reflect server-side safety rules. Disable Mark Done until progress is ready with an explanation of unfinished issue count, require a close confirmation that states how many linked issues will be unlinked, and hide or disable repeated terminal actions for done or closed Epics.",
+      "acceptanceCriteria": [
+        "Mark Done is disabled while readyToMarkDone is false and explains how many linked issues remain unfinished.",
+        "Mark Done becomes available when progress indicates the Epic is ready to mark done.",
+        "Close Epic opens a confirmation dialog that includes the linked issue count before submitting.",
+        "Done and closed Epic detail pages show terminal status and do not offer repeated terminal actions.",
+        "Web specs cover disabled Mark Done, close confirmation, and terminal action suppression."
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Guarded Epic detail lifecycle controls and Web lifecycle specs.",
+      "dependsOn": ["T-008"],
+      "passes": false,
+      "notes": "UI guards supplement server validation; they must not be the only enforcement."
+    },
+    {
+      "id": "T-010",
+      "title": "Run Epic regression suite",
+      "spec": "specs/epic-tracking/spec.md#epic-tracking-regression",
+      "description": "Run the focused server and Web regression coverage for Epic behavior after all implementation tasks are complete. Fix any regressions discovered in existing Epic list, detail, and issue primary Epic tests while preserving the new behavior from this change.",
+      "acceptanceCriteria": [
+        "Existing EpicListPage.test.tsx passes.",
+        "Existing EpicDetailPage.test.tsx passes.",
+        "IssueApiSpecs Epics_LinkIssueAndExposePrimaryEpic passes.",
+        "New server specs for projection, numbering, lookup, metadata update, and lifecycle guards pass.",
+        "New Web specs for numbered display, searchable Add Issue, edit flow, and lifecycle guards pass."
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Passing focused Epic server and Web test runs.",
+      "dependsOn": ["T-003", "T-005", "T-007", "T-009"],
+      "passes": false,
+      "notes": "Use the repository's targeted test commands where available before broader test runs."
+    }
+  ]
+}

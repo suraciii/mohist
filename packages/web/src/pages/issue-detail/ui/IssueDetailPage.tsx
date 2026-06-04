@@ -477,10 +477,16 @@ export function IssueDetailPage() {
                 type="button"
                 onClick={() => navigate(`/epic/${issue.primaryEpic!.id}`)}
                 className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                data-testid="primary-epic-label"
               >
                 <span className="text-xs text-muted-foreground/70">Part of Epic:</span>
-                <span className="font-mono font-medium text-foreground/80">
-                  #{issue.primaryEpic.id.slice(0, 8)}
+                <span
+                  className="font-mono font-medium text-foreground/80"
+                  data-testid="primary-epic-number"
+                >
+                  {issue.primaryEpic.number != null
+                    ? `#${issue.primaryEpic.number}`
+                    : `#${issue.primaryEpic.id.slice(0, 8)}`}
                 </span>
                 <span className="font-medium text-foreground/90">
                   {issue.primaryEpic.title}

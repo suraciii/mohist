@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace Mohist.Server.Infrastructure.Persistence.Db;
 
@@ -32,9 +34,7 @@ public static class MohistDatabaseMigrator
                 return;
 
             CreateMissingInitialSchemaObjects(db);
-            RecordInitialCreate(db);
-            RecordMigration(db, ProjectVariablesBagMigrationId, InitialCreateProductVersion);
-            RecordMigration(db, WorkflowTemplateAndVariablesTablesMigrationId, InitialCreateProductVersion);
+            RecordAllMigrationsAsApplied(db);
         }
         finally
         {
@@ -58,21 +58,20 @@ public static class MohistDatabaseMigrator
         return command.ExecuteScalar() is not null;
     }
 
-    private static void RecordInitialCreate(MohistDbContext db)
+    private static void RecordAllMigrationsAsApplied(MohistDbContext db)
     {
-        RecordMigration(db, InitialCreateMigrationId, InitialCreateProductVersion);
-    }
-
-    private static void RecordMigration(MohistDbContext db, string migrationId, string productVersion)
-    {
-        using var command = db.Database.GetDbConnection().CreateCommand();
-        command.CommandText = """
-            INSERT OR IGNORE INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-            VALUES ($migrationId, $productVersion);
-            """;
-        AddParameter(command, "$migrationId", migrationId);
-        AddParameter(command, "$productVersion", productVersion);
-        command.ExecuteNonQuery();
+        var migrationsAssembly = db.GetService<IMigrationsAssembly>();
+        foreach (var migrationId in migrationsAssembly.Migrations.Keys)
+        {
+            using var command = db.Database.GetDbConnection().CreateCommand();
+            command.CommandText = """
+                INSERT OR IGNORE INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+                VALUES ($migrationId, $productVersion);
+                """;
+            AddParameter(command, "$migrationId", migrationId);
+            AddParameter(command, "$productVersion", InitialCreateProductVersion);
+            command.ExecuteNonQuery();
+        }
     }
 
     private static void CreateMissingInitialSchemaObjects(MohistDbContext db)

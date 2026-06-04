@@ -1,6 +1,7 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useProject } from '../../../entities/project'
+import { IssueStatus, type Issue } from '../../../entities/issue'
 import { useIssues } from '../../../entities/issue'
 import {
   useAddEpicIssue,
@@ -10,11 +11,21 @@ import {
   useRemoveEpicIssue,
 } from '../../../entities/epic'
 import { EpicStatus, type LinkedIssue } from '../../../entities/epic'
+import { EditEpicDialog } from '../../../features/edit-epic'
 import { ApiError } from '../../../shared/api/client'
 import { Button } from '@/shared/ui/components/button'
 import { Card } from '@/shared/ui/components/card'
 import { Badge } from '@/shared/ui/components/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
+import { Input } from '@/shared/ui/components/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/components/popover'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/ui/components/dialog'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -104,6 +115,170 @@ function formatAddIssueError(error: unknown): string {
   return error instanceof Error ? error.message : 'Failed to add issue'
 }
 
+function getCandidateUnavailableReason(issue: Issue): string | null {
+  if (issue.status === IssueStatus.Done) return 'Closed'
+  if (issue.archivedAt) return 'Archived'
+  if (issue.startEligibility?.startable === false) {
+    if (issue.startEligibility.message) return issue.startEligibility.message
+    const firstWait = issue.startEligibility.waitingForCompletion?.[0]
+    if (firstWait) return `Waiting for #${firstWait.number}`
+    return 'Not startable'
+  }
+  return null
+}
+
+function isCandidateSelectable(issue: Issue): boolean {
+  return getCandidateUnavailableReason(issue) === null
+}
+
+interface EpicIssueSelectorProps {
+  candidates: Issue[]
+  value: string | null
+  onChange: (issueId: string | null) => void
+  hasSelectableCandidate: boolean
+  disabled?: boolean
+}
+
+function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate, disabled }: EpicIssueSelectorProps) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  const selected = candidates.find(candidate => candidate.id === value) ?? null
+  const isDisabled = disabled || (!hasSelectableCandidate && !selected)
+
+  useEffect(() => {
+    if (!open) {
+      setSearch('')
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => searchRef.current?.focus())
+    }
+  }, [open])
+
+  const filteredCandidates = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return candidates
+    return candidates.filter(candidate => {
+      if (candidate.title.toLowerCase().includes(query)) return true
+      return `#${candidate.number}`.toLowerCase().includes(query)
+        || String(candidate.number).includes(query)
+    })
+  }, [candidates, search])
+
+  const triggerLabel = selected
+    ? `#${selected.number} ${selected.title}`
+    : hasSelectableCandidate
+      ? 'Select an issue to link'
+      : candidates.length === 0
+        ? 'No issues available'
+        : 'No selectable issues'
+
+  function handleSelect(candidate: Issue) {
+    onChange(candidate.id)
+    setOpen(false)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            data-testid="epic-issue-selector-trigger"
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            disabled={isDisabled}
+            className={`flex-1 justify-between gap-1.5 min-h-[40px] ${
+              open
+                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                : selected
+                  ? 'text-foreground'
+                  : 'text-muted-foreground'
+            }`}
+          />
+        }
+      >
+        <span className="truncate">{triggerLabel}</span>
+        <svg className="h-4 w-4 shrink-0 text-muted-foreground" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <div className="p-2">
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2">
+              <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <Input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by number or title..."
+              data-testid="epic-issue-search"
+              className="pl-9"
+            />
+          </div>
+        </div>
+        <div className="max-h-64 overflow-y-auto border-t" role="listbox" data-testid="epic-issue-listbox">
+          {candidates.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+              No issues available
+            </div>
+          ) : filteredCandidates.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+              No issues match &quot;{search}&quot;
+            </div>
+          ) : (
+            filteredCandidates.map(candidate => {
+              const reason = getCandidateUnavailableReason(candidate)
+              const selectable = reason === null
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  role="option"
+                  aria-selected={candidate.id === value}
+                  aria-disabled={!selectable}
+                  disabled={!selectable}
+                  data-testid="epic-issue-option"
+                  data-issue-id={candidate.id}
+                  data-unavailable={selectable ? undefined : 'true'}
+                  onClick={() => handleSelect(candidate)}
+                  className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors ${
+                    candidate.id === value
+                      ? 'bg-blue-50 text-blue-700'
+                      : selectable
+                        ? 'text-foreground hover:bg-muted'
+                        : 'cursor-not-allowed bg-muted/40 text-muted-foreground'
+                  }`}
+                >
+                  <span className="font-medium">#{candidate.number} {candidate.title}</span>
+                  {!selectable && (
+                    <span
+                      data-testid="epic-issue-option-reason"
+                      className="text-xs text-muted-foreground"
+                    >
+                      {reason}
+                    </span>
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 export function EpicDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
@@ -114,13 +289,20 @@ export function EpicDetailPage() {
   const removeEpicIssue = useRemoveEpicIssue()
   const markEpicDone = useMarkEpicDone()
   const closeEpic = useCloseEpic()
-  const [selectedIssueId, setSelectedIssueId] = useState('')
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
 
   const availableIssues = useMemo(() => {
     if (!issues || !epic) return []
     const linkedIds = new Set(epic.linkedIssues.map(issue => issue.id))
     return issues.filter(issue => !linkedIds.has(issue.id))
   }, [epic, issues])
+
+  const hasSelectableCandidate = useMemo(
+    () => availableIssues.some(isCandidateSelectable),
+    [availableIssues],
+  )
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12 text-muted-foreground">Loading...</div>
@@ -145,16 +327,33 @@ export function EpicDetailPage() {
   }
 
   const progressPercent = epic.progress.totalIssueCount > 0
-    ? (epic.progress.completedCount / epic.progress.totalIssueCount) * 100
+    ? (epic.progress.deliveredCount / epic.progress.totalIssueCount) * 100
     : 0
   const epicId = epic.id
+  const submitDisabled = !selectedIssueId || addEpicIssue.isPending
+  const unfinishedCount = Math.max(epic.progress.totalIssueCount - epic.progress.deliveredCount, 0)
+  const markDoneBlocked = epic.status === EpicStatus.Active && !epic.progress.readyToMarkDone
+  const markDoneTooltip = markDoneBlocked
+    ? unfinishedCount === 1
+      ? '1 linked issue remains unfinished'
+      : `${unfinishedCount} linked issues remain unfinished`
+    : undefined
+  const isClosed = epic.status === EpicStatus.Closed
+  const isDone = epic.status === EpicStatus.Done
+  const linkedIssueCount = epic.linkedIssues.length
+
+  function handleConfirmClose() {
+    closeEpic.mutate(epicId, {
+      onSettled: () => setCloseConfirmOpen(false),
+    })
+  }
 
   function handleAddIssue(event: FormEvent) {
     event.preventDefault()
     if (!selectedIssueId) return
     addEpicIssue.mutate(
       { epicId, issueId: selectedIssueId },
-      { onSuccess: () => setSelectedIssueId('') },
+      { onSuccess: () => setSelectedIssueId(null) },
     )
   }
 
@@ -175,7 +374,9 @@ export function EpicDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>#{epic.id.slice(0, 8)}</span>
+              <span data-testid="epic-number">
+                {epic.number != null ? `#${epic.number}` : `#${epic.id.slice(0, 8)}`}
+              </span>
               <StatusBadge status={epic.status} />
               <PriorityBadge priority={epic.priority} />
             </div>
@@ -183,21 +384,32 @@ export function EpicDetailPage() {
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground/80">{epic.description}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {epic.status === EpicStatus.Active && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEditDialogOpen(true)}
+              data-testid="edit-epic-button"
+            >
+              Edit
+            </Button>
+            {!isDone && !isClosed && (
               <Button
                 type="button"
                 onClick={() => markEpicDone.mutate(epic.id)}
-                disabled={markEpicDone.isPending}
+                disabled={markEpicDone.isPending || markDoneBlocked}
+                title={markDoneTooltip}
+                data-testid="mark-epic-done"
               >
                 {markEpicDone.isPending ? 'Marking...' : 'Mark Done'}
               </Button>
             )}
-            {epic.status !== EpicStatus.Closed && (
+            {!isDone && !isClosed && (
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => closeEpic.mutate(epic.id)}
+                onClick={() => setCloseConfirmOpen(true)}
                 disabled={closeEpic.isPending}
+                data-testid="close-epic-trigger"
               >
                 {closeEpic.isPending ? 'Closing...' : 'Close Epic'}
               </Button>
@@ -209,7 +421,7 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Progress</div>
             <div className="mt-2 text-2xl font-semibold text-foreground">
-              {epic.progress.completedCount} / {epic.progress.totalIssueCount}
+              {epic.progress.deliveredCount} / {epic.progress.totalIssueCount}
             </div>
             <div className="mt-3 h-2 rounded-full bg-background">
               <div className="h-2 rounded-full bg-blue-600" style={{ width: `${progressPercent}%` }} />
@@ -239,24 +451,16 @@ export function EpicDetailPage() {
       <Card className="p-6">
         <h2 className="text-lg font-semibold text-foreground">Linked Issues</h2>
         <form onSubmit={handleAddIssue} className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <Select
+          <EpicIssueSelector
+            candidates={availableIssues}
             value={selectedIssueId}
-            onValueChange={(value) => setSelectedIssueId(value ?? '')}
-          >
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder="Select an issue to link" />
-            </SelectTrigger>
-            <SelectContent>
-              {availableIssues.map(issue => (
-                <SelectItem key={issue.id} value={issue.id}>
-                  #{issue.number} {issue.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={setSelectedIssueId}
+            hasSelectableCandidate={hasSelectableCandidate}
+          />
           <Button
             type="submit"
-            disabled={!selectedIssueId || addEpicIssue.isPending}
+            disabled={submitDisabled}
+            data-testid="add-issue-submit"
           >
             {addEpicIssue.isPending ? 'Adding...' : 'Add Issue'}
           </Button>
@@ -291,6 +495,47 @@ export function EpicDetailPage() {
           </div>
         )}
       </Card>
+
+      <EditEpicDialog
+        open={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        epic={epic}
+      />
+
+      <Dialog open={closeConfirmOpen} onOpenChange={(v) => !v && setCloseConfirmOpen(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close Epic?</DialogTitle>
+            <DialogDescription>
+              {linkedIssueCount === 0
+                ? 'This Epic has no linked issues. Closing it will mark the Epic as closed.'
+                : linkedIssueCount === 1
+                  ? 'Closing this Epic will unlink 1 associated issue. Issue workflow state will not change.'
+                  : `Closing this Epic will unlink ${linkedIssueCount} associated issues. Issue workflow state will not change.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCloseConfirmOpen(false)}
+              disabled={closeEpic.isPending}
+              data-testid="close-epic-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmClose}
+              disabled={closeEpic.isPending}
+              data-testid="close-epic-confirm"
+            >
+              {closeEpic.isPending ? 'Closing...' : 'Close Epic'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

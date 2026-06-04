@@ -98,7 +98,8 @@ public class IssueStartEligibility
 public class IssuePrimaryEpic
 {
     [Id(0)] public string Id { get; set; } = null!;
-    [Id(1)] public string Title { get; set; } = null!;
-    [Id(2)] public string Status { get; set; } = null!;
-    [Id(3)] public string Priority { get; set; } = null!;
+    [Id(1)] public int? Number { get; set; }
+    [Id(2)] public string Title { get; set; } = null!;
+    [Id(3)] public string Status { get; set; } = null!;
+    [Id(4)] public string Priority { get; set; } = null!;
 }

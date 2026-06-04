@@ -1,4 +1,4 @@
-import type { IssueStatus, IssueHealth } from '../../issue/@x/types'
+import type { IssueStatus, IssueHealth, WorkflowStage } from '../../issue/@x/types'
 
 export enum EpicStatus {
   Active = 'active',
@@ -10,6 +10,7 @@ export type EpicPriority = 'p0' | 'p1' | 'p2' | 'p3' | 'p4'
 
 export interface Epic {
   id: string
+  number: number | null
   title: string
   description: string
   priority: EpicPriority
@@ -19,7 +20,7 @@ export interface Epic {
 }
 
 export interface EpicProgress {
-  completedCount: number
+  deliveredCount: number
   totalIssueCount: number
   blockedIssues: string[]
   activeIssues: string[]
@@ -36,6 +37,7 @@ export interface LinkedIssue {
   number: number
   title: string
   status: IssueStatus
+  stage: WorkflowStage | ''
   health: IssueHealth
   priority: string | null
 }
