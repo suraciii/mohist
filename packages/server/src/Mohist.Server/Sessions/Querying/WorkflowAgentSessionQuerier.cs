@@ -7,7 +7,7 @@ using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 
@@ -16,9 +16,9 @@ namespace Mohist.Server.Sessions.Querying;
 public class WorkflowAgentSessionQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly WorkflowQueryService _workflowReader;
+    private readonly WorkflowQuerier _workflowReader;
 
-    public WorkflowAgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQueryService workflowReader)
+    public WorkflowAgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowReader)
     {
         _dbFactory = dbFactory;
         _workflowReader = workflowReader;

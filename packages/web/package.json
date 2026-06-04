@@ -44,6 +44,7 @@
     "vitest": "^4.1.4"
   },
   "optionalDependencies": {
-    "lightningcss-linux-x64-gnu": "^1.32.0"
+    "lightningcss-linux-x64-gnu": "^1.32.0",
+    "lightningcss-win32-x64-msvc": "^1.32.0"
   }
 }

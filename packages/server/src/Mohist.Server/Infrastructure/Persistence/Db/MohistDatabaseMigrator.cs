@@ -81,7 +81,11 @@ public static class MohistDatabaseMigrator
             .Replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ")
             .Replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ");
 
-        db.Database.ExecuteSqlRaw(script);
+        using (var command = db.Database.GetDbConnection().CreateCommand())
+        {
+            command.CommandText = script;
+            command.ExecuteNonQuery();
+        }
 
         CreateOrleansInfrastructure(db);
     }

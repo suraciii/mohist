@@ -103,6 +103,56 @@ public class IssueQuerierSpecs
     }
 
     [Fact]
+    public async Task ListAsync_WithLegacyAndCanonicalRowsForSameNumber_ReturnsCanonicalIssueOnce()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var project = new ProjectInfo { Id = $"proj-dual-key-{Guid.NewGuid():N}", Name = "Dual Key Project", Path = "/tmp/project" };
+        var issue = new Issue.Domain.Issue
+        {
+            Id = $"issue_dual_key_{Guid.NewGuid():N}",
+            ProjectId = project.Id,
+            Number = 1,
+            Title = "Canonical title",
+            Labels = [],
+            Priority = "p2",
+        };
+        issue.Status = Issue.Domain.IssueStatus.Todo;
+
+        var legacyIssue = new Issue.Domain.Issue
+        {
+            Id = issue.Id,
+            ProjectId = project.Id,
+            Number = issue.Number,
+            Title = "Legacy title",
+            Labels = [],
+            Priority = "p2",
+        };
+        legacyIssue.Status = Issue.Domain.IssueStatus.Todo;
+
+        db.IssueStates.AddRange(
+            new IssueStateRow
+            {
+                Key = IssueIdentityResolver.LegacyKey(project.Id, issue.Number),
+                StateJson = IssueStore.Serialize(legacyIssue),
+            },
+            new IssueStateRow
+            {
+                Key = issue.Id,
+                StateJson = IssueStore.Serialize(issue),
+            });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+
+        var list = await service.ListAsync(project.Id, project);
+
+        var item = Assert.Single(list);
+        Assert.Equal(issue.Id, item.Id);
+        Assert.Equal("Canonical title", item.Title);
+    }
+
+    [Fact]
     public async Task ListAsync_WithActiveWorkflowStageAndUserTasks_IncludesWorkflowStageProgress()
     {
         using var scope = _fixture.Services.CreateScope();

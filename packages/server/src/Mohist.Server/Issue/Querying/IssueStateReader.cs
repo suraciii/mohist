@@ -32,6 +32,13 @@ internal static class IssueStateReader
             .Select(SelectCanonical)
             .ToList();
 
+    public static IReadOnlyList<Domain.Issue> SelectCanonicalByNumber(IEnumerable<IssueStateRow> rows, string projectId) =>
+        Deserialize(rows)
+            .Where(row => row.Issue.ProjectId == projectId)
+            .GroupBy(row => row.Issue.Number)
+            .Select(SelectCanonical)
+            .ToList();
+
     public static Dictionary<int, Domain.Issue> SelectCanonicalByNumber(
         IEnumerable<IssueStateRow> rows,
         string projectId,
