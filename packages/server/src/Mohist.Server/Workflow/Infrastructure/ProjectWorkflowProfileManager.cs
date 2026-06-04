@@ -78,7 +78,7 @@ public class ProjectWorkflowProfileManager
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectTemplates.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
-        return row is null ? null : DeserializeDefinition(row.TemplateJson);
+        return row is null ? null : DeserializeDefinition(row.Template);
     }
 
     public async Task<ProjectTemplateInfo> CreateTemplateAsync(string projectId, string yaml)
@@ -103,7 +103,7 @@ public class ProjectWorkflowProfileManager
         {
             ProjectId = projectId,
             TemplateId = def.Id,
-            TemplateJson = SerializeDefinition(def),
+            Template = SerializeDefinition(def),
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -127,7 +127,7 @@ public class ProjectWorkflowProfileManager
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
-        row.TemplateJson = SerializeDefinition(def);
+        row.Template = SerializeDefinition(def);
         row.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
 
@@ -166,11 +166,11 @@ public class ProjectWorkflowProfileManager
 
         if (row is null)
         {
-            row = new ProjectWorkflowProfileRow
+            row = new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
                 DefaultTemplateId = templateId,
-                VariablesJson = VariableBundle.Empty.ToJson(),
+                Variables = VariableBundle.Empty.ToJson(),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.ProjectWorkflowProfiles.Add(row);
@@ -202,7 +202,7 @@ public class ProjectWorkflowProfileManager
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.VariablesJson);
+        return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.Variables);
     }
 
     public async Task<VariableBundle> SetVariablesAsync(string projectId, VariableBundle bundle)
@@ -213,17 +213,17 @@ public class ProjectWorkflowProfileManager
 
         if (row is null)
         {
-            row = new ProjectWorkflowProfileRow
+            row = new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                VariablesJson = bundle.ToJson(),
+                Variables = bundle.ToJson(),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
             db.ProjectWorkflowProfiles.Add(row);
         }
         else
         {
-            row.VariablesJson = bundle.ToJson();
+            row.Variables = bundle.ToJson();
             row.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -299,10 +299,10 @@ public class ProjectWorkflowProfileManager
 
         if (profile is null)
         {
-            profile = new ProjectWorkflowProfileRow
+            profile = new ProjectWorkflowProfile
             {
                 ProjectId = projectId,
-                VariablesJson = VariableBundle.Empty.ToJson(),
+                Variables = VariableBundle.Empty.ToJson(),
                 Prompts = SerializePrompt(key, body),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };

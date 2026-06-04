@@ -12,7 +12,7 @@ public class ProjectTemplateRow
     /// <summary>
     /// WorkflowDefinition JSON - 模板结构 (stages/tasks/checks + 内嵌 variables 段)。
     /// </summary>
-    public string TemplateJson { get; set; } = "{}";
+    public string Template { get; set; } = "{}";
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;

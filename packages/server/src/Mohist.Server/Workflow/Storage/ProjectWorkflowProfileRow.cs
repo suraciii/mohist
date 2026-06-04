@@ -4,7 +4,7 @@ namespace Mohist.Server.Workflow.Storage;
 /// 项目 workflow profile (key: ProjectId, 1:1 与 project)。
 /// 存储项目级默认模板引用 + 项目级变量配置。
 /// </summary>
-public class ProjectWorkflowProfileRow
+public class ProjectWorkflowProfile
 {
     public string ProjectId { get; set; } = string.Empty;
 
@@ -16,7 +16,7 @@ public class ProjectWorkflowProfileRow
     /// <summary>
     /// VariableBundle JSON - 项目级变量配置。
     /// </summary>
-    public string VariablesJson { get; set; } = "{}";
+    public string Variables { get; set; } = "{}";
 
     /// <summary>
     /// 项目级提示词。key → body, JSON 序列化。

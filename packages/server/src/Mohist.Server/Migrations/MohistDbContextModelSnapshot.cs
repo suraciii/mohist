@@ -328,7 +328,7 @@ namespace Mohist.Server.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("VariablesJson")
+                    b.Property<string>("Variables")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -614,7 +614,7 @@ namespace Mohist.Server.Migrations
                     b.ToTable("BacklogStates");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Workflow.Storage.IssueWorkflowProfileRow", b =>
+            modelBuilder.Entity("Mohist.Server.Workflow.Storage.IssueWorkflowProfile", b =>
                 {
                     b.Property<string>("IssueKey")
                         .HasMaxLength(512)
@@ -624,13 +624,19 @@ namespace Mohist.Server.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("TemplateJson")
+                    b.Property<string>("Prompts")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("{}");
+
+                    b.Property<string>("Template")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("VariablesJson")
+                    b.Property<string>("Variables")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -652,7 +658,7 @@ namespace Mohist.Server.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("TemplateJson")
+                    b.Property<string>("Template")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -666,7 +672,7 @@ namespace Mohist.Server.Migrations
                     b.ToTable("ProjectTemplates", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Workflow.Storage.ProjectWorkflowProfileRow", b =>
+            modelBuilder.Entity("Mohist.Server.Workflow.Storage.ProjectWorkflowProfile", b =>
                 {
                     b.Property<string>("ProjectId")
                         .HasMaxLength(256)
@@ -676,10 +682,16 @@ namespace Mohist.Server.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Prompts")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("{}");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("VariablesJson")
+                    b.Property<string>("Variables")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
