@@ -167,6 +167,77 @@ public class IssueWorkflowProfileManager
     }
 
     // =======================================================================
+    // Prompts
+    // =======================================================================
+
+    public async Task<Dictionary<string, string>> GetPromptsAsync(string issueId, string? legacyIssueKey = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await FindProfileAsync(db, issueId, legacyIssueKey);
+        return DeserializePrompts(row?.PromptsJson);
+    }
+
+    public async Task SetPromptAsync(string issueId, string key, string body, string? legacyIssueKey = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("key is required", nameof(key));
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.IssueWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
+
+        if (row is null)
+        {
+            row = await MigrateLegacyRowAsync(db, issueId, legacyIssueKey);
+        }
+
+        if (row is null)
+        {
+            row = new IssueWorkflowProfileRow
+            {
+                IssueKey = issueId,
+                VariablesJson = VariableBundle.Empty.ToJson(),
+                PromptsJson = SerializePrompt(key, body),
+                UpdatedAt = DateTimeOffset.UtcNow,
+            };
+            db.IssueWorkflowProfiles.Add(row);
+        }
+        else
+        {
+            var prompts = DeserializePrompts(row.PromptsJson);
+            prompts[key] = body;
+            row.PromptsJson = SerializePrompts(prompts);
+            row.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeletePromptAsync(string issueId, string key, string? legacyIssueKey = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("key is required", nameof(key));
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.IssueWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
+
+        if (row is null)
+        {
+            row = await MigrateLegacyRowAsync(db, issueId, legacyIssueKey);
+        }
+
+        if (row is null) return;
+
+        var prompts = DeserializePrompts(row.PromptsJson);
+        if (!prompts.Remove(key)) return;
+
+        row.PromptsJson = SerializePrompts(prompts);
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+    }
+
+    // =======================================================================
     // Helpers
     // =======================================================================
 
@@ -204,6 +275,7 @@ public class IssueWorkflowProfileManager
             SourceTemplateId = legacy.SourceTemplateId,
             TemplateJson = legacy.TemplateJson,
             VariablesJson = legacy.VariablesJson,
+            PromptsJson = legacy.PromptsJson,
             UpdatedAt = legacy.UpdatedAt,
         };
         db.IssueWorkflowProfiles.Remove(legacy);
@@ -223,6 +295,26 @@ public class IssueWorkflowProfileManager
             return null;
         }
     }
+
+    private static Dictionary<string, string> DeserializePrompts(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new(StringComparer.Ordinal);
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                ?? new(StringComparer.Ordinal);
+        }
+        catch
+        {
+            return new(StringComparer.Ordinal);
+        }
+    }
+
+    private static string SerializePrompts(Dictionary<string, string> prompts) =>
+        JsonSerializer.Serialize(prompts);
+
+    private static string SerializePrompt(string key, string body) =>
+        JsonSerializer.Serialize(new Dictionary<string, string> { [key] = body });
 }
 
 /// <summary>

@@ -4,17 +4,23 @@ using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Domain;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Workflow.Infrastructure;
 
 /// <summary>
-/// Project-scope template + variables write endpoint.
-/// 管理: 项目模板 CRUD + 项目级变量 Set/Patch + 系统模板 catalog 读取 + 项目默认模板设置。
+/// Project-scope template + variables + prompts write endpoint.
+/// 管理: 项目模板 CRUD + 项目级变量 Set/Patch + 系统模板 catalog 读取 + 项目默认模板设置 + 项目提示词。
 /// </summary>
 public class ProjectWorkflowProfileManager
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IPromptLoader _promptLoader;
+    private readonly IProjectTemplateStore _promptStore;
+    private readonly PromptTemplateEngine _engine;
 
     /// <summary>
     /// Hardcoded system templates (in-binary, read-only).
@@ -27,9 +33,16 @@ public class ProjectWorkflowProfileManager
             Description: "Plan, build, check, and integrate an issue using OpenSpec artifacts.")
     ];
 
-    public ProjectWorkflowProfileManager(IDbContextFactory<MohistDbContext> dbFactory)
+    public ProjectWorkflowProfileManager(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IPromptLoader promptLoader,
+        IProjectTemplateStore promptStore,
+        PromptTemplateEngine engine)
     {
         _dbFactory = dbFactory;
+        _promptLoader = promptLoader;
+        _promptStore = promptStore;
+        _engine = engine;
     }
 
     // =======================================================================
@@ -229,6 +242,91 @@ public class ProjectWorkflowProfileManager
         var current = await GetVariablesAsync(projectId);
         var merged = VariableBundle.Patch(current, patch);
         return await SetVariablesAsync(projectId, merged);
+    }
+
+    // =======================================================================
+    // Prompts
+    // =======================================================================
+
+    public async Task<IReadOnlyList<SystemTemplate>> ListSystemPromptsAsync()
+    {
+        return _promptLoader.LoadAllTemplates().Values
+            .OrderBy(t => t.Key, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<EffectivePrompt>> ListPromptsAsync(string projectId)
+    {
+        var systemTemplates = _promptLoader.LoadAllTemplates();
+        var projectPrompts = await _promptStore.GetForProjectAsync(projectId);
+        var projectByKey = projectPrompts.ToDictionary(p => p.Key, StringComparer.Ordinal);
+
+        var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
+        foreach (var p in projectPrompts)
+            keys.Add(p.Key);
+
+        return keys.Select(key =>
+        {
+            if (projectByKey.TryGetValue(key, out var pp))
+            {
+                var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
+                return new EffectivePrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source);
+            }
+
+            var sys = systemTemplates[key];
+            return new EffectivePrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
+        }).ToList();
+    }
+
+    public async Task<EffectivePrompt?> GetPromptAsync(string projectId, string key)
+    {
+        var pp = await _promptStore.GetAsync(projectId, key);
+        if (pp is not null)
+        {
+            var systemTemplates = _promptLoader.LoadAllTemplates();
+            var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
+            return new EffectivePrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source);
+        }
+
+        var systemTemplatesOnly = _promptLoader.LoadAllTemplates();
+        if (systemTemplatesOnly.TryGetValue(key, out var sys))
+            return new EffectivePrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
+
+        return null;
+    }
+
+    public async Task<ProjectTemplate> SetPromptAsync(
+        string projectId,
+        string key,
+        string body,
+        string displayName = "",
+        string description = "",
+        IReadOnlyList<string>? tags = null,
+        string? stage = null)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("key is required", nameof(key));
+
+        return await _promptStore.UpsertAsync(
+            projectId, key, body, displayName, description, tags ?? Array.Empty<string>(), stage);
+    }
+
+    public async Task DeletePromptAsync(string projectId, string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("key is required", nameof(key));
+
+        await _promptStore.DeleteAsync(projectId, key);
+    }
+
+    public async Task<PromptPreviewResult> PreviewPromptAsync(
+        string projectId, string key, JsonElement variables)
+    {
+        var effective = await GetPromptAsync(projectId, key)
+            ?? throw new ArgumentException($"Prompt '{key}' not found");
+
+        var (rendered, missing, depth) = _engine.Render(effective.Body, variables);
+        return new PromptPreviewResult(rendered, missing, depth);
     }
 
     // =======================================================================

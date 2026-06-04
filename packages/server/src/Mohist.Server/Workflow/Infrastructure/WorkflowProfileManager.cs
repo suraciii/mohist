@@ -5,22 +5,35 @@ using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Prompts;
+using Mohist.Server.Workflow.Prompts.Domain;
+using Mohist.Server.Workflow.Prompts.Infrastructure;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Workflow.Infrastructure;
 
 /// <summary>
-/// Workflow template/variable resolution entrypoint.
+/// Workflow template/variables/prompts resolution entrypoint.
 /// Template resolution never depends on a workflow-run profile snapshot:
 /// issue custom > issue referenced template > project default > system default.
 /// </summary>
 public class WorkflowProfileManager
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly IPromptLoader _promptLoader;
+    private readonly IProjectTemplateStore _promptStore;
+    private readonly PromptTemplateEngine _engine;
 
-    public WorkflowProfileManager(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowProfileManager(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        IPromptLoader promptLoader,
+        IProjectTemplateStore promptStore,
+        PromptTemplateEngine engine)
     {
         _dbFactory = dbFactory;
+        _promptLoader = promptLoader;
+        _promptStore = promptStore;
+        _engine = engine;
     }
 
     public async Task<ResolvedTemplate> LoadTemplateAsync(
@@ -212,6 +225,120 @@ public class WorkflowProfileManager
 
         return await db.IssueWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.IssueKey == context.LegacyIssueKey);
+    }
+
+    // =======================================================================
+    // Prompts
+    // =======================================================================
+
+    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null, string? issueId = null, string? legacyIssueKey = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var context = await ResolveRunContextAsync(db, runId);
+        var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
+        var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
+        var lk = string.IsNullOrWhiteSpace(legacyIssueKey) ? context.LegacyIssueKey : legacyIssueKey;
+
+        // 1. issue prompts
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
+        if (issueProfile is not null)
+        {
+            var prompts = DeserializePrompts(issueProfile.PromptsJson);
+            if (prompts.TryGetValue(key, out var body))
+                return new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, body, "issue");
+        }
+
+        // 2. project prompts
+        if (!string.IsNullOrWhiteSpace(pid))
+        {
+            var pp = await _promptStore.GetAsync(pid, key);
+            if (pp is not null)
+            {
+                var systemTemplates = _promptLoader.LoadAllTemplates();
+                var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
+                return new ResolvedPrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source);
+            }
+        }
+
+        // 3. system prompts
+        var systemTemplatesMap = _promptLoader.LoadAllTemplates();
+        if (systemTemplatesMap.TryGetValue(key, out var sys))
+            return new ResolvedPrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
+
+        return null;
+    }
+
+    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null, string? issueId = null, string? legacyIssueKey = null)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var context = await ResolveRunContextAsync(db, runId);
+        var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
+        var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
+        var lk = string.IsNullOrWhiteSpace(legacyIssueKey) ? context.LegacyIssueKey : legacyIssueKey;
+
+        var systemTemplates = _promptLoader.LoadAllTemplates();
+        var projectPrompts = !string.IsNullOrWhiteSpace(pid)
+            ? await _promptStore.GetForProjectAsync(pid)
+            : Array.Empty<ProjectTemplate>();
+        var projectByKey = projectPrompts.ToDictionary(p => p.Key, StringComparer.Ordinal);
+
+        Dictionary<string, string> issuePrompts;
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
+        if (issueProfile is not null)
+            issuePrompts = DeserializePrompts(issueProfile.PromptsJson);
+        else
+            issuePrompts = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
+        foreach (var p in projectPrompts)
+            keys.Add(p.Key);
+        foreach (var k in issuePrompts.Keys)
+            keys.Add(k);
+
+        var results = new List<ResolvedPrompt>();
+        foreach (var key in keys)
+        {
+            if (issuePrompts.TryGetValue(key, out var issueBody))
+            {
+                results.Add(new ResolvedPrompt(key, key, string.Empty, Array.Empty<string>(), null, issueBody, "issue"));
+                continue;
+            }
+
+            if (projectByKey.TryGetValue(key, out var pp))
+            {
+                var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
+                results.Add(new ResolvedPrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source));
+                continue;
+            }
+
+            if (systemTemplates.TryGetValue(key, out var sys))
+                results.Add(new ResolvedPrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(stage))
+            results = results.Where(r => r.Stage is null || string.Equals(r.Stage, stage, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        return results;
+    }
+
+    public PromptPreviewResult RenderPrompt(string body, JsonElement variables)
+    {
+        var (rendered, missing, depth) = _engine.Render(body, variables);
+        return new PromptPreviewResult(rendered, missing, depth);
+    }
+
+    private static Dictionary<string, string> DeserializePrompts(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new(StringComparer.Ordinal);
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
+                ?? new(StringComparer.Ordinal);
+        }
+        catch
+        {
+            return new(StringComparer.Ordinal);
+        }
     }
 
     /// <summary>

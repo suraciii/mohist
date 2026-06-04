@@ -218,9 +218,70 @@ public static class ProjectRoutes
             return ApiResults.Ok(result);
         });
 
+        group.MapGet("/{id}/workflow-profile/prompts", async (string id, ProjectWorkflowProfileManager manager) =>
+        {
+            var prompts = await manager.ListPromptsAsync(id);
+            return ApiResults.Ok(prompts);
+        });
+
+        group.MapGet("/{id}/workflow-profile/prompts/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        {
+            var prompt = await manager.GetPromptAsync(id, key);
+            return prompt is null
+                ? ApiResults.NotFound($"Prompt '{key}' not found")
+                : ApiResults.Ok(prompt);
+        });
+
+        group.MapPut("/{id}/workflow-profile/prompts/{key}", async (string id, string key, PromptUpsertRequest? req, ProjectWorkflowProfileManager manager) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Body))
+                return ApiResults.BadRequest("body is required");
+
+            var result = await manager.SetPromptAsync(id, key, req.Body,
+                req.DisplayName ?? string.Empty, req.Description ?? string.Empty, req.Tags, req.Stage);
+            return ApiResults.Ok(result);
+        });
+
+        group.MapDelete("/{id}/workflow-profile/prompts/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        {
+            await manager.DeletePromptAsync(id, key);
+            return ApiResults.Ok();
+        });
+
+        group.MapPost("/{id}/workflow-profile/prompts/{key}/preview", async (string id, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager) =>
+        {
+            JsonElement variables;
+            if (req?.Variables is { } raw)
+                variables = raw;
+            else
+            {
+                using var doc = JsonDocument.Parse("{}");
+                variables = doc.RootElement.Clone();
+            }
+
+            try
+            {
+                var result = await manager.PreviewPromptAsync(id, key, variables);
+                return ApiResults.Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
+        });
+
         return app;
     }
 }
+
+public sealed record PromptUpsertRequest(
+    string? Body,
+    string? DisplayName = null,
+    string? Description = null,
+    IReadOnlyList<string>? Tags = null,
+    string? Stage = null);
+
+public sealed record PromptPreviewRequest(JsonElement? Variables);
 
 public record CreateProjectRequest(string Name, string Path, string? BaseBranch = null);
 public record UpdateProjectRequest(string? BaseBranch = null);

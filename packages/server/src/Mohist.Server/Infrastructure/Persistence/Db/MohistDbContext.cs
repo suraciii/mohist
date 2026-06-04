@@ -249,6 +249,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IssueKey).HasMaxLength(512);
             entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
             entity.Property(e => e.VariablesJson).IsRequired();
+            entity.Property(e => e.PromptsJson).IsRequired().HasDefaultValue("{}");
         });
 
         modelBuilder.Entity<Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow>(entity =>
