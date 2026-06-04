@@ -81,6 +81,22 @@ export type AgentDetailEventMap = {
   check_update: { issueId: string; projectId: string; checkName: string; status: string; duration?: number; autoFixed?: boolean; verdict?: string; snapshotSha?: string }
   check_suite_status_changed: { issueId: string; projectId: string; issueNumber: number; suiteStatus: string; snapshotSha: string }
   stage_task_update: { issueId: string; projectId: string; stage: string; taskId: string; taskTitle: string; status: 'started' | 'completed' | 'failed' | 'retrying'; attempt: number; artifacts: string[] }
+  agent_usage_update: {
+    issueId: string
+    projectId: string
+    executionId?: string
+    acpSessionId?: string
+    coderSessionId?: string
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    cachedReadTokens?: number
+    thoughtTokens?: number
+    costAmount?: number
+    costCurrency?: string
+    contextWindowSize?: number
+    contextWindowUsed?: number
+  }
 }
 
 export interface AgentSessionInfo {
@@ -132,6 +148,19 @@ export interface AgentActivitySession {
   taskProgress: AgentActivityTaskProgress | null
   lastActivity: AgentActivityPreview | null
   failureReason: string | null
+  resolvedModel?: string | null
+  inputTokens?: number | null
+  outputTokens?: number | null
+  totalTokens?: number | null
+  cachedReadTokens?: number | null
+  thoughtTokens?: number | null
+  costAmount?: number | null
+  costCurrency?: string | null
+  contextWindowUsed?: number | null
+  contextWindowSize?: number | null
+  failureCategory?: string | null
+  toolCallCount?: number | null
+  toolErrorCount?: number | null
 }
 
 export interface AgentActivityWaiting {

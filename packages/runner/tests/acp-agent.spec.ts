@@ -549,6 +549,151 @@ describe("mohist/acp-agent", () => {
     expect(result.message ?? "").toContain("Unknown prompt loader: 'no/such-loader'")
     expect(fixture.agent.calls.find((entry) => entry.event === "initialize")).toBeUndefined()
   })
+
+  it("NewSessionReturnsCurrentModelId_RunnerEmitsResolvedModelEvent", async () => {
+    const fixture = createFixture("resolved-model")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("success")
+    const resolvedModelEvent = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(resolvedModelEvent).toBeTruthy()
+    expect(resolvedModelEvent?.resolvedModel).toBe("openai/gpt-4.1")
+    expect(resolvedModelEvent?.source).toBe("newSession")
+    expect(resolvedModelEvent?.acpSessionId).toBe("fake-session-1")
+  })
+
+  it("NewSessionLacksCurrentModelId_RunnerDoesNotEmitResolvedModelEvent", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "do the work" }))
+
+    expect(result.status).toBe("success")
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")).toBe(false)
+  })
+
+  it("ConfigOptionUpdateChangesModel_RunnerEmitsResolvedModelEvent", async () => {
+    const fixture = createFixture("config-option-update")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "switch the model" }))
+
+    expect(result.status).toBe("success")
+    const resolvedModelEvent = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(resolvedModelEvent).toBeTruthy()
+    expect(resolvedModelEvent?.resolvedModel).toBe("anthropic/claude-sonnet-4-5")
+    expect(resolvedModelEvent?.source).toBe("config_option_update")
+  })
+
+  it("UsageUpdateArrives_RunnerEmitsAgentUsageUpdateAndPreservesLiveness", async () => {
+    const fixture = createFixture("usage-update")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "track usage" }))
+
+    expect(result.status).toBe("success")
+    const usageEvent = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_usage_update")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(usageEvent).toBeTruthy()
+    expect(usageEvent?.source).toBe("usage_update")
+    expect(usageEvent?.contextWindowSize).toBe(200000)
+    expect(usageEvent?.contextWindowUsed).toBe(15000)
+    expect(usageEvent?.costAmount).toBe(0.0012)
+    expect(usageEvent?.costCurrency).toBe("USD")
+    expect(fixture.serverConnection.calls.some((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status" && (entry.payload as { failureReason?: string }).failureReason === "probe_timeout")).toBe(false)
+  })
+
+  it("PromptResponseCarriesUsage_RunnerEmitsAgentUsageUpdateAfterCompletion", async () => {
+    const fixture = createFixture("prompt-usage")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "report usage" }))
+
+    expect(result.status).toBe("success")
+    const usageEvent = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_usage_update")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(usageEvent).toBeTruthy()
+    expect(usageEvent?.source).toBe("prompt_response")
+    expect(usageEvent?.inputTokens).toBe(120)
+    expect(usageEvent?.outputTokens).toBe(40)
+    expect(usageEvent?.totalTokens).toBe(160)
+    expect(usageEvent?.cachedReadTokens).toBe(80)
+    expect(usageEvent?.thoughtTokens).toBe(5)
+
+    const promptEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "mohist_prompt")
+    const usageEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_usage_update")
+    const terminalEventIndex = fixture.serverConnection.calls.findIndex((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+    expect(promptEventIndex).toBeGreaterThanOrEqual(0)
+    expect(usageEventIndex).toBeGreaterThan(promptEventIndex)
+    expect(terminalEventIndex).toBeGreaterThan(usageEventIndex)
+  })
+
+  it("ProbeTimeoutFails_TerminalEventCarriesProbeTimeoutFailureCategory", async () => {
+    const fixture = createFixture("probe-timeout")
+
+    const result = await acpAgentAction(fixture.context({
+      prompt: "quiet task",
+      session: "timeout-session",
+      livenessQuietThresholdMs: 30,
+      probeTimeoutMs: 60,
+      timeout: 1_000,
+    }))
+
+    expect(result.status).toBe("failure")
+    const terminalEvent = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(terminalEvent).toBeTruthy()
+    expect(terminalEvent?.failureCategory).toBe("probe_timeout")
+    expect(terminalEvent?.failureReason).toEqual(expect.any(String))
+  })
+
+  it("SuccessfulRun_TerminalEventOmitsFailureCategory", async () => {
+    const fixture = createFixture("basic")
+
+    const result = await acpAgentAction(fixture.context({ prompt: "happy path" }))
+
+    expect(result.status).toBe("success")
+    const terminalEvent = fixture.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(terminalEvent).toBeTruthy()
+    expect(terminalEvent?.status).toBe("completed")
+    expect(terminalEvent?.failureCategory).toBeNull()
+    expect(terminalEvent?.failureReason).toBeNull()
+  })
+})
+
+describe("mohist/acp-agent shared session observability", () => {
+  it("ResumedSessionExposesCurrentModelId_RunnerEmitsResolvedModelEventWithResumeSource", async () => {
+    const shared = createSharedSessionFixture("resolved-model", { sessionRecord: { acpSessionId: "server-session-1" } })
+
+    const result = await acpAgentAction(contextWithOverrides({
+      prompt: "resume and report",
+      session: "shared-session",
+      livenessQuietThresholdMs: 5_000,
+      probeTimeoutMs: 5_000,
+      timeout: 5_000,
+    }, undefined, shared.context()))
+
+    expect(result.status).toBe("success")
+    const resolvedModelEvent = shared.serverConnection.calls
+      .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_model_resolved")
+      .map((entry) => entry.payload as Record<string, unknown>)
+      .at(-1)
+    expect(resolvedModelEvent).toBeTruthy()
+    expect(resolvedModelEvent?.resolvedModel).toBe("anthropic/claude-haiku-4-5")
+    expect(resolvedModelEvent?.source).toBe("resumeSession")
+  })
 })
 
 function createFixture(scenario: Scenario) {
@@ -621,7 +766,7 @@ function baseContext(withInput: Record<string, unknown>, signal = new AbortContr
   }
 }
 
-type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete"
+type Scenario = "basic" | "model-fallback" | "permission" | "tool-weird" | "liveness" | "quiet-then-done" | "liveness-non-message" | "abort" | "tool-liveness" | "probe-timeout" | "abort-during-probe" | "empty-complete" | "resolved-model" | "config-option-update" | "usage-update" | "prompt-usage"
 
 class FakeAcpAgent {
   readonly calls: any[] = []
@@ -644,6 +789,9 @@ class FakeAcpAgent {
       },
       async newSession(params) {
         self.calls.push({ event: "newSession", cwd: params.cwd })
+        if (self.scenario === "resolved-model") {
+          return { sessionId: "fake-session-1", models: { currentModelId: "openai/gpt-4.1" } }
+        }
         return { sessionId: "fake-session-1" }
       },
       async setSessionConfigOption(params) {
@@ -672,6 +820,19 @@ class FakeAcpAgent {
         if (self.scenario === "abort") return await new Promise(() => {})
         if (self.scenario === "empty-complete") return { stopReason: "end_turn" }
         if (self.scenario === "tool-weird") await self.emitWeirdToolEvents(params.sessionId)
+        if (self.scenario === "config-option-update") {
+          await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "switching" } } } as never)
+          await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "config_option_update", configOptions: [{ id: "model", category: "model", name: "Model", type: "select", currentValue: "anthropic/claude-sonnet-4-5", options: [{ value: "anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5" }] }] } } as never)
+          return { stopReason: "end_turn" }
+        }
+        if (self.scenario === "usage-update") {
+          await self.connection.sessionUpdate({ sessionId: params.sessionId, update: { sessionUpdate: "usage_update", size: 200000, used: 15000, cost: { amount: 0.0012, currency: "USD" } } } as never)
+          return { stopReason: "end_turn" }
+        }
+        if (self.scenario === "prompt-usage") {
+          await self.connection.sessionUpdate(textUpdate(params.sessionId, "usage test"))
+          return { stopReason: "end_turn", usage: { inputTokens: 120, outputTokens: 40, totalTokens: 160, cachedReadTokens: 80, thoughtTokens: 5 } }
+        }
         else await self.emitBasicEvents(params.sessionId)
         return { stopReason: "end_turn" }
       },
@@ -828,7 +989,7 @@ class FakeSharedAcpAgent {
   readonly calls: any[] = []
   private connection!: AgentSideConnection
 
-  constructor(private readonly scenario: "thought-liveness" | "probe-send-failed") {}
+  constructor(private readonly scenario: "thought-liveness" | "probe-send-failed" | "resolved-model") {}
 
   bind(connection: AgentSideConnection) {
     this.connection = connection
@@ -846,6 +1007,9 @@ class FakeSharedAcpAgent {
       },
         async resumeSession(params) {
           self.calls.push({ event: "resumeSession", sessionId: params.sessionId, cwd: params.cwd })
+          if (self.scenario === "resolved-model") {
+            return { sessionId: params.sessionId, models: { currentModelId: "anthropic/claude-haiku-4-5" } }
+          }
           return {}
         },
       async prompt(params) {
@@ -858,6 +1022,8 @@ class FakeSharedAcpAgent {
           }
         } else if (self.scenario === "probe-send-failed") {
           await delay(80)
+        } else if (self.scenario === "resolved-model") {
+          await self.connection.sessionUpdate(thoughtUpdate(params.sessionId, "thinking"))
         }
         return { stopReason: "end_turn" }
       },

@@ -1,0 +1,143 @@
+{
+  "project": "mohist",
+  "description": "Enhance agent session observability with resolved model, token usage, cost, failure categories, tool statistics, and live task progress.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Emit resolved model and usage telemetry from ACP runner",
+      "spec": "specs/agent-runtime/spec.md#requirement-runner-resolves-the-actual-model-from-acp-session-responses",
+      "description": "Update the ACP runner to extract `models.currentModelId` from `newSession` and `resumeSession`, emit resolved-model updates from `config_option_update`, classify `usage_update` as liveness activity, and emit `agent_usage_update` events from both `PromptResponse.usage` and usage notifications. Failed terminal events must include the structured `failureCategory` derived from the existing liveness failure reason while preserving the free-text failure reason.",
+      "acceptanceCriteria": [
+        "`emitSessionStarted` or an equivalent follow-up event carries `resolvedModel` when ACP reports `models.currentModelId`, and leaves it absent/null when ACP does not report a value.",
+        "`config_option_update` model changes emit an event that updates only the resolved model and never overwrites the intent model.",
+        "`usage_update` is treated as qualifying liveness activity and produces an `agent_usage_update` payload with only the token, cost, context-window, and routing fields actually reported by ACP.",
+        "`PromptResponse.usage` produces an `agent_usage_update` after prompt completion and before subsequent liveness or terminal events.",
+        "Failed `agent_session_terminal` events include `failureCategory` values from `probe_timeout`, `probe_send_failed`, `protocol_disconnect`, or `process_exit`; successful terminals omit or null the category."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Runner emits resolved model, usage, and structured failure telemetry events.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Keep ACP parsing defensive and do not synthesize missing usage/model fields."
+    },
+    {
+      "id": "T-002",
+      "title": "Add session observability fields to domain, storage, and migration",
+      "spec": "specs/coder-session-tracking/spec.md#requirement-workflowagentsession-domain-and-dto-surface-observability-fields",
+      "description": "Extend `WorkflowAgentSession`, `WorkflowAgentSessionRow`, row mappings, and EF schema with additive observability fields for resolved model, token counters, cost, context window usage, failure category, and tool counts. Add domain transitions for updating resolved model, applying usage deltas, and recording tool calls/errors.",
+      "acceptanceCriteria": [
+        "An additive EF Core migration adds nullable columns for `ResolvedModel`, token counters, `CostAmount`, `CostCurrency`, `ContextWindowUsed`, `ContextWindowSize` when needed by UI, `FailureCategory`, `ToolCallCount`, and `ToolErrorCount` without dropping, renaming, constraining, or retyping existing columns.",
+        "New domain and row properties are mapped consistently and default to null or zero-like nullable values for existing rows with no telemetry.",
+        "`UpdateResolvedModel` updates only `ResolvedModel`; `ApplyUsage` accumulates non-negative token/cost deltas and stores latest context-window values; `RecordToolCall` increments call/error counters without allowing errors to exceed calls.",
+        "Domain/unit tests or equivalent coverage verify accumulation, null handling, resolved-model independence from `Model`, and failure/tool field behavior."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Persisted session model and database schema support all new observability fields.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The design calls out `ContextWindowSize` as needed for exact used/size UI display; include it if current DTO/UI surfaces need historical reads."
+    },
+    {
+      "id": "T-003",
+      "title": "Apply observability events in session grain",
+      "spec": "specs/coder-session-tracking/spec.md#requirement-coder-session-grain-updates-from-agent_usage_update-events",
+      "description": "Update `WorkflowAgentSessionGrain.AppendEventsAsync` to parse and persist `agent_usage_update`, resolved-model update, terminal failure-category, and tool call events through the new domain transitions. Raw events must remain auditable in `WorkflowAgentSessionEvents` while the session row stores accumulated summary fields.",
+      "acceptanceCriteria": [
+        "`agent_usage_update` events update accumulated token counters, latest context-window fields, `CostAmount`, and `CostCurrency`, and persist the raw event row.",
+        "Usage events with partial fields update only present values and do not erase previously accumulated values.",
+        "Usage events arriving after a terminal session are persisted for audit but do not mutate terminal status or counters and do not emit live usage invalidation for terminal sessions.",
+        "Resolved-model events and terminal payloads update `ResolvedModel` and `FailureCategory` according to the specs while preserving `Model` and `FailureReason` semantics.",
+        "`tool_call` increments `ToolCallCount` once per parsed call, failed terminal `tool_call_update` increments `ToolErrorCount`, and successful/in-progress updates do not count as errors."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Session grain persists usage, resolved model, failure category, and tool statistics from appended events.",
+      "dependsOn": ["T-002"],
+      "passes": false,
+      "notes": "Reuse existing tool-call parsing and keep mutation rules centralized in the domain model."
+    },
+    {
+      "id": "T-004",
+      "title": "Expose observability fields and task progress through APIs",
+      "spec": "specs/coder-session-tracking/spec.md#requirement-token-and-cost-fields-are-exposed-on-session-dtos",
+      "description": "Extend session read models, DTO projections, and query services so list/detail/info/activity responses include the new observability fields with stable camelCase JSON names. Populate `ActivityCardDto.TaskProgress` from existing workflow projection/query accessors instead of returning a hard-coded null placeholder.",
+      "acceptanceCriteria": [
+        "`WorkflowAgentSessionDto`, `WorkflowAgentSessionSummaryDto`, `WorkflowAgentSessionInfoDto`, and activity session payloads expose `resolvedModel`, token fields, cost fields, context-window fields, `failureCategory`, `toolCallCount`, and `toolErrorCount` as additive nullable/number fields.",
+        "DTO mapping preserves `Model` as the intent model and emits `ResolvedModel` separately without fallback synthesis when unresolved.",
+        "`WorkflowAgentSessionQueryService.ToActivityCard` sets `TaskProgress` to `{ completed, total }` for sessions whose workflow run and current stage can be resolved, and returns null only when lookup fails.",
+        "Task progress values match what `WorkflowProjectionService.ListActiveAgentsAsync` reports for the same workflow run and stage.",
+        "Backend tests cover DTO mapping for new fields and non-null task progress for resolvable active sessions."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Session APIs and activity responses expose observability summaries and real workflow task progress.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Reuse existing workflow projection/query accessors; avoid duplicating workflow task status rules in the session query service."
+    },
+    {
+      "id": "T-005",
+      "title": "Register agent_usage_update in live event pipeline",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-sse-event-type-registries-include-agent_usage_update",
+      "description": "Register the new `agent_usage_update` event in backend and frontend SSE/event type registries, add a typed frontend event payload, and ensure live query invalidation refreshes agent activity/session summaries when usage updates arrive.",
+      "acceptanceCriteria": [
+        "Backend event type registries include the literal `agent_usage_update` so the SSE bridge forwards usage events.",
+        "Frontend `AGENT_DETAIL_EVENTS` and `AgentDetailEventMap` include `agent_usage_update` with typed optional token, cost, context-window, and routing fields.",
+        "`LiveTaskProvider` invalidates affected `agent-activity` queries on usage updates so cards and summaries refetch updated observability fields.",
+        "Existing event types continue to route unchanged and no event type is removed."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Live SSE pipeline routes usage events and refreshes session/activity queries.",
+      "dependsOn": ["T-001", "T-003", "T-004"],
+      "passes": false,
+      "notes": "Keep event payload property names aligned with backend DTO names: `costAmount`, `costCurrency`, `contextWindowSize`, `contextWindowUsed`."
+    },
+    {
+      "id": "T-006",
+      "title": "Render session observability in Web UI",
+      "spec": "specs/agent-session-ui/spec.md#requirement-sessionmetadata-type-carries-the-new-observability-fields",
+      "description": "Extend frontend session metadata/activity types and update `SessionHeader`, `SessionCard`, and `SessionPage` to render resolved model, token usage, cost, context-window usage, failure category, and tool counts. The UI should omit unavailable values, avoid duplicate model badges when intent and resolved model match, and keep the session page read-only.",
+      "acceptanceCriteria": [
+        "`SessionMetadata`, `CoderSessionSummary`, and `AgentActivitySession` include all new observability fields with matching camelCase JSON property names and null-safe defaults.",
+        "`SessionHeader` shows intent/resolved model badges, cumulative usage/cost, context-window used/size or used-only fallback, and tool/error counts with warning styling when errors are present.",
+        "`SessionCard` shows compact resolved-model, usage, failure-category, and tool-count summaries that wrap cleanly on narrow widths.",
+        "`SessionPage` displays the same observability information in the existing header area, derives and caps context-window percentage client-side, and adds no composer/control interactions.",
+        "Frontend tests or type checks cover formatting/null handling for the new fields."
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Web UI displays session resolved model, usage, cost, failure category, task progress, and tool statistics.",
+      "dependsOn": ["T-004", "T-005"],
+      "passes": false,
+      "notes": "Prefer compact human-readable formatting such as `12.4k tokens`, `12.4k in · 3.1k out`, and `14k / 200k ctx`."
+    },
+    {
+      "id": "T-007",
+      "title": "Verify end-to-end session observability behavior",
+      "spec": "specs/pipeline-session-events/spec.md#requirement-agent_usage_update-session-event-carries-token-cost-and-context-window-deltas",
+      "description": "Add or update cross-layer tests that exercise the runner-to-grain-to-API-to-UI observability path for resolved model, usage/cost, failure category, tool counts, live invalidation, and activity task progress. Run the relevant backend, runner, and web verification commands and record any remaining gaps.",
+      "acceptanceCriteria": [
+        "Runner tests verify resolved model extraction, `usage_update` liveness classification, `agent_usage_update` payload shape, and terminal `failureCategory` emission.",
+        "Backend tests verify migration/read-model mapping, grain accumulation semantics, failure-category persistence, tool-count persistence, and task-progress injection.",
+        "Frontend tests or type checks verify typed usage events, query invalidation wiring, and UI rendering/null handling for observability fields.",
+        "Relevant commands such as `npm test`, `npm run build`, `npm run build:web`, or narrower package-specific equivalents pass, or failures are documented with exact causes."
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Automated verification demonstrates the new session observability path works end-to-end.",
+      "dependsOn": ["T-001", "T-003", "T-004", "T-005", "T-006"],
+      "passes": false,
+      "notes": "This task should not introduce new product behavior beyond test coverage and minor fixes required to make the implemented behavior pass."
+    }
+  ]
+}

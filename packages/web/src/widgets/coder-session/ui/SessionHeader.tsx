@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { CoderSessionSummary } from '../../../entities/coder-session'
+import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 
 interface SessionHeaderProps {
   session: CoderSessionSummary
@@ -85,7 +86,6 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
   const label = getSessionLabel(session)
   const sessionName = session.sessionName ?? session.executionId ?? session.id
   const transcriptPath = `/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`
-  const coderInfo = [session.coderType, session.model].filter(Boolean).join(' · ') || 'unknown'
   const startTime = formatTime(session.createdAt)
 
   const isActive = session.status === 'running' || session.status === 'probing'
@@ -95,11 +95,31 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
       ? new Date(session.completedAt).getTime() - new Date(session.createdAt).getTime()
       : 0
 
+  const hasUsage =
+    session.totalTokens != null ||
+    session.inputTokens != null ||
+    session.outputTokens != null ||
+    session.cachedReadTokens != null ||
+    session.thoughtTokens != null
+
+  const hasContextWindow = session.contextWindowUsed != null
+
   const content = (
     <>
       <StatusIcon status={session.status} />
       <span className="text-sm font-medium text-gray-800 truncate max-w-[200px]">{label}</span>
-      <span className="text-xs text-gray-400">{coderInfo}</span>
+
+      {/* Model badges */}
+      {session.model && session.resolvedModel && session.model !== session.resolvedModel ? (
+        <span className="text-xs text-gray-400">
+          <span className="text-gray-500">{session.model}</span>
+          <span className="text-gray-300 mx-1">→</span>
+          <span className="text-blue-600">{session.resolvedModel}</span>
+        </span>
+      ) : session.model ? (
+        <span className="text-xs text-gray-400">{session.model}</span>
+      ) : null}
+
       {session.status === 'probing' && (
         <span className="text-xs text-yellow-600 font-medium">Checking session</span>
       )}
@@ -108,6 +128,43 @@ export function SessionHeader({ session, issueNumber, showTranscriptLink }: Sess
           {session.failureReason}
         </span>
       )}
+
+      {/* Usage badge */}
+      {hasUsage && (
+        <span className="text-xs text-gray-500">
+          {session.totalTokens != null
+            ? `${formatCompact(session.totalTokens)} tokens`
+            : [
+                session.inputTokens != null ? `${formatCompact(session.inputTokens)} in` : '',
+                session.outputTokens != null ? `${formatCompact(session.outputTokens)} out` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+        </span>
+      )}
+
+      {/* Cost badge */}
+      {session.costAmount != null && session.costCurrency && (
+        <span className="text-xs text-gray-500">{formatCost(session.costAmount, session.costCurrency)}</span>
+      )}
+
+      {/* Context window badge */}
+      {hasContextWindow && (
+        <span className="text-xs text-gray-500">
+          {session.contextWindowSize != null
+            ? `${formatCompact(session.contextWindowUsed)} / ${formatCompact(session.contextWindowSize)} ctx`
+            : `${formatCompact(session.contextWindowUsed)} ctx used`}
+        </span>
+      )}
+
+      {/* Tool/error counts */}
+      {session.toolCallCount != null && (
+        <span className={`text-xs ${session.toolErrorCount ? 'text-orange-600 font-medium' : 'text-gray-500'}`}>
+          {session.toolCallCount} tool{session.toolCallCount !== 1 ? 's' : ''}
+          {session.toolErrorCount ? ` · ${session.toolErrorCount} error${session.toolErrorCount !== 1 ? 's' : ''}` : ''}
+        </span>
+      )}
+
       <span className="text-xs text-gray-400 ml-auto flex items-center gap-2 shrink-0">
         <span>{startTime}</span>
         <span className="text-gray-300">·</span>

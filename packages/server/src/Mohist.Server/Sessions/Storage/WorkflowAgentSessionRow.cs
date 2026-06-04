@@ -25,4 +25,18 @@ public class WorkflowAgentSessionRow
     public DateTime? CompletedAt { get; set; }
     public string? FailureReason { get; set; }
     public int? ExitCode { get; set; }
+
+    public string? ResolvedModel { get; set; }
+    public long? InputTokens { get; set; }
+    public long? OutputTokens { get; set; }
+    public long? TotalTokens { get; set; }
+    public long? CachedReadTokens { get; set; }
+    public long? ThoughtTokens { get; set; }
+    public double? CostAmount { get; set; }
+    public string? CostCurrency { get; set; }
+    public long? ContextWindowUsed { get; set; }
+    public long? ContextWindowSize { get; set; }
+    public string? FailureCategory { get; set; }
+    public int? ToolCallCount { get; set; }
+    public int? ToolErrorCount { get; set; }
 }

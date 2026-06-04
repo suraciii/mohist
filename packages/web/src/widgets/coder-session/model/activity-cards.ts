@@ -31,6 +31,7 @@ export interface SessionCard {
   sessionId: string
   status: string
   model: string | null
+  resolvedModel: string | null
   taskDescription: string | null
   title: string | null
   createdAt: string
@@ -40,6 +41,16 @@ export interface SessionCard {
   taskProgress: TaskProgress | null
   currentWorkTitle: string | null
   failureReason: string | null
+  failureCategory: string | null
+  inputTokens: number | null
+  outputTokens: number | null
+  totalTokens: number | null
+  costAmount: number | null
+  costCurrency: string | null
+  contextWindowUsed: number | null
+  contextWindowSize: number | null
+  toolCallCount: number | null
+  toolErrorCount: number | null
 }
 
 export interface StatusCounts {
@@ -60,6 +71,7 @@ function sessionToCard(s: AgentActivitySession): SessionCard {
     sessionId: s.sessionId,
     status: s.status,
     model: s.model,
+    resolvedModel: s.resolvedModel ?? null,
     taskDescription: s.taskDescription,
     title: s.currentWorkItem?.title ?? s.taskDescription,
     createdAt: s.createdAt,
@@ -69,6 +81,16 @@ function sessionToCard(s: AgentActivitySession): SessionCard {
     taskProgress: s.taskProgress,
     currentWorkTitle: s.currentWorkItem?.title ?? null,
     failureReason: s.failureReason,
+    failureCategory: s.failureCategory ?? null,
+    inputTokens: s.inputTokens ?? null,
+    outputTokens: s.outputTokens ?? null,
+    totalTokens: s.totalTokens ?? null,
+    costAmount: s.costAmount ?? null,
+    costCurrency: s.costCurrency ?? null,
+    contextWindowUsed: s.contextWindowUsed ?? null,
+    contextWindowSize: s.contextWindowSize ?? null,
+    toolCallCount: s.toolCallCount ?? null,
+    toolErrorCount: s.toolErrorCount ?? null,
   }
 }
 

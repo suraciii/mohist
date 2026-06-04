@@ -64,7 +64,20 @@ public sealed record WorkflowAgentSessionInfo(
     [property: Id(18)] string? LastDataAt,
     [property: Id(19)] string? CompletedAt,
     [property: Id(20)] string? FailureReason,
-    [property: Id(21)] int? ExitCode);
+    [property: Id(21)] int? ExitCode,
+    [property: Id(22)] string? ResolvedModel,
+    [property: Id(23)] long? InputTokens,
+    [property: Id(24)] long? OutputTokens,
+    [property: Id(25)] long? TotalTokens,
+    [property: Id(26)] long? CachedReadTokens,
+    [property: Id(27)] long? ThoughtTokens,
+    [property: Id(28)] double? CostAmount,
+    [property: Id(29)] string? CostCurrency,
+    [property: Id(30)] long? ContextWindowUsed,
+    [property: Id(31)] long? ContextWindowSize,
+    [property: Id(32)] string? FailureCategory,
+    [property: Id(33)] int? ToolCallCount,
+    [property: Id(34)] int? ToolErrorCount);
 
 [GenerateSerializer]
 public sealed record WorkflowAgentSessionEventInfo(

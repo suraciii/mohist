@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '../model/activity-cards'
 import { ActiveSessionAnomalies, WaitingSessionAnomalies } from '../model/anomaly'
+import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000)
@@ -31,6 +32,48 @@ const STAGE_COLORS: Record<string, string> = {
   review: 'bg-teal-100 text-teal-700',
   check: 'bg-orange-100 text-orange-700',
   integrate: 'bg-slate-100 text-slate-700',
+}
+
+function ObservabilityBar({ card }: { card: SessionCardType }) {
+  const parts: string[] = []
+
+  if (card.resolvedModel && card.resolvedModel !== card.model) {
+    parts.push(`using ${card.resolvedModel}`)
+  }
+
+  if (card.inputTokens != null || card.outputTokens != null) {
+    const usageParts: string[] = []
+    if (card.inputTokens != null) usageParts.push(`${formatCompact(card.inputTokens)} in`)
+    if (card.outputTokens != null) usageParts.push(`${formatCompact(card.outputTokens)} out`)
+    if (usageParts.length > 0) parts.push(usageParts.join(' · '))
+  }
+
+  if (card.costAmount != null && card.costCurrency) {
+    parts.push(formatCost(card.costAmount, card.costCurrency))
+  }
+
+  if (card.failureCategory) {
+    parts.push(card.failureCategory)
+  }
+
+  if (card.toolCallCount != null) {
+    const toolText = `${card.toolCallCount} tool${card.toolCallCount !== 1 ? 's' : ''}`
+    if (card.toolErrorCount && card.toolErrorCount > 0) {
+      parts.push(`${toolText} · ${card.toolErrorCount} error${card.toolErrorCount !== 1 ? 's' : ''}`)
+    } else {
+      parts.push(toolText)
+    }
+  }
+
+  if (parts.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1.5 text-[10px] text-gray-400">
+      {parts.map((part, i) => (
+        <span key={i}>{part}</span>
+      ))}
+    </div>
+  )
 }
 
 interface ActiveSessionCardProps {
@@ -111,6 +154,8 @@ export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
             ))}
           </div>
         )}
+
+        <ObservabilityBar card={card} />
 
         {card.taskProgress && (
           <div className="mt-1">
@@ -266,6 +311,8 @@ export function RecentCard({ card }: RecentCardProps) {
             Failed
           </span>
         )}
+
+        <ObservabilityBar card={card} />
       </div>
     </Link>
   )

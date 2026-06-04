@@ -26,6 +26,20 @@ public sealed class WorkflowAgentSession
     public string? FailureReason { get; internal set; }
     public int? ExitCode { get; internal set; }
 
+    public string? ResolvedModel { get; internal set; }
+    public long? InputTokens { get; internal set; }
+    public long? OutputTokens { get; internal set; }
+    public long? TotalTokens { get; internal set; }
+    public long? CachedReadTokens { get; internal set; }
+    public long? ThoughtTokens { get; internal set; }
+    public double? CostAmount { get; internal set; }
+    public string? CostCurrency { get; internal set; }
+    public long? ContextWindowUsed { get; internal set; }
+    public long? ContextWindowSize { get; internal set; }
+    public string? FailureCategory { get; internal set; }
+    public int? ToolCallCount { get; internal set; }
+    public int? ToolErrorCount { get; internal set; }
+
     public static WorkflowAgentSession Create(
         string id,
         string projectId,

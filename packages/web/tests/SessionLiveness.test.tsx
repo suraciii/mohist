@@ -139,7 +139,7 @@ describe('SessionHeader liveness rendering', () => {
   })
 
   it('renders completed session without liveness indicators', async () => {
-    const session = makeSession({ status: 'completed', completedAt: '2024-01-01T11:00:00.000Z' })
+    const session = makeSession({ status: 'completed', completedAt: '2024-01-01T11:00:00Z' })
     renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
 
     expect(screen.queryByText('Checking session')).not.toBeInTheDocument()
@@ -151,6 +151,95 @@ describe('SessionHeader liveness rendering', () => {
     renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
 
     expect(screen.queryByText(/probe_timeout/)).not.toBeInTheDocument()
+  })
+})
+
+describe('SessionHeader observability rendering', () => {
+  it('shows both intent and resolved model when they differ', () => {
+    const session = makeSession({
+      model: 'openai/gpt-4o',
+      resolvedModel: 'anthropic/claude-sonnet-4',
+    })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('openai/gpt-4o')).toBeInTheDocument()
+    expect(screen.getByText('anthropic/claude-sonnet-4')).toBeInTheDocument()
+  })
+
+  it('shows single model badge when intent and resolved model match', () => {
+    const session = makeSession({
+      model: 'claude-3-5-sonnet',
+      resolvedModel: 'claude-3-5-sonnet',
+    })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('claude-3-5-sonnet')).toBeInTheDocument()
+  })
+
+  it('shows total tokens when available', () => {
+    const session = makeSession({ totalTokens: 12400 })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('12.4k tokens')).toBeInTheDocument()
+  })
+
+  it('shows input/output tokens when total is unavailable', () => {
+    const session = makeSession({ inputTokens: 12400, outputTokens: 3100 })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText(/12.4k in/)).toBeInTheDocument()
+    expect(screen.getByText(/3.1k out/)).toBeInTheDocument()
+  })
+
+  it('shows cost when amount and currency are available', () => {
+    const session = makeSession({ costAmount: 0.18, costCurrency: 'USD' })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('$0.18')).toBeInTheDocument()
+  })
+
+  it('shows context window with size when both are available', () => {
+    const session = makeSession({ contextWindowUsed: 14000, contextWindowSize: 200000 })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('14.0k / 200.0k ctx')).toBeInTheDocument()
+  })
+
+  it('shows context window used-only fallback when size is unavailable', () => {
+    const session = makeSession({ contextWindowUsed: 14000 })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('14.0k ctx used')).toBeInTheDocument()
+  })
+
+  it('shows tool count', () => {
+    const session = makeSession({ toolCallCount: 12 })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('12 tools')).toBeInTheDocument()
+  })
+
+  it('shows tool errors with warning styling', () => {
+    const session = makeSession({ toolCallCount: 12, toolErrorCount: 2 })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.getByText('12 tools · 2 errors')).toBeInTheDocument()
+  })
+
+  it('omits unavailable observability values', () => {
+    const session = makeSession({
+      model: null,
+      resolvedModel: null,
+      totalTokens: null,
+      costAmount: null,
+      contextWindowUsed: null,
+      toolCallCount: null,
+    })
+    renderWithProviders(<SessionHeader session={session} issueNumber={1} showTranscriptLink />)
+
+    expect(screen.queryByText(/tokens/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/ctx/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/tool/)).not.toBeInTheDocument()
   })
 })
 
