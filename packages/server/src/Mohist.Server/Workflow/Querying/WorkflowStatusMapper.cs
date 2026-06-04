@@ -2,7 +2,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
 
-namespace Mohist.Server.Workflow.Queries;
+namespace Mohist.Server.Workflow.Querying;
 
 public static class WorkflowStatusMapper
 {

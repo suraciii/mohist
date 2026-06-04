@@ -155,7 +155,7 @@ public class WorkflowSessionSpecs
             projectId = project.Id
         });
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var sessionName = $"task-{Guid.NewGuid():N}";
@@ -179,7 +179,7 @@ public class WorkflowSessionSpecs
     private sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, SessionEventDto[] Events);
     private sealed record SessionEventDto(long Sequence, string Type, string? WorkId);
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title);
+    private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record IssueSessionMetadataTestDto(string Id, string SessionName, IssueSessionMetadataCountsTestDto Metadata);
     private sealed record IssueSessionMetadataCountsTestDto(int EventCount, int ToolCount);
     private sealed record IssueSessionEventsTestResponse(IssueSessionEventTestDto[] Events);

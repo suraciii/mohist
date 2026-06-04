@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Prompts;

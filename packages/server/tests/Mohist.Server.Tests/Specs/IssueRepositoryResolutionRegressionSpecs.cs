@@ -9,16 +9,16 @@ using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Issue;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -160,8 +160,8 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // Then listing issues returns resolved repositories reflecting the latest project config.
         using var scope = _services.CreateScope();
-        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
-        var projectQuery = scope.ServiceProvider.GetRequiredService<ProjectQueryService>();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+        var projectQuery = scope.ServiceProvider.GetRequiredService<ProjectQuerier>();
         var liveProject = await projectQuery.GetByIdAsync(projectId);
         Assert.NotNull(liveProject);
         var list = await issueQuery.ListAsync(projectId, liveProject);
@@ -247,8 +247,9 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var counter = _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
         var number = await counter.NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, number));
-        await issueGrain.CreateAsync(projectId, number, "Ambiguous", body: null, labels: null, priority: null, "main");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        await issueGrain.CreateAsync(projectId, number, "Ambiguous", body: null, labels: null, priority: null, "main", issueId);
 
         // When the client fetches the issue read model.
         using var response = await _client.GetAsync($"/api/issues/{number}?projectId={projectId}");
@@ -278,8 +279,9 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         var counter = _grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId));
         var number = await counter.NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, number));
-        await issueGrain.CreateAsync(projectId, number, "Ambiguous start", body: null, labels: null, priority: null, "main");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        await issueGrain.CreateAsync(projectId, number, "Ambiguous start", body: null, labels: null, priority: null, "main", issueId);
 
         // When the user attempts to start the workflow.
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
@@ -602,8 +604,9 @@ public class IssueRepositoryResolutionRegressionSpecs
             secondaryRepoPath: "/proj/secondary",
             secondaryBaseBranch: "develop");
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, number));
-        await issueGrain.CreateAsync(projectId, number, "Remote drifts", body: null, labels: null, priority: null, "secondary");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        await issueGrain.CreateAsync(projectId, number, "Remote drifts", body: null, labels: null, priority: null, "secondary", issueId);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
         await projectGrain.RemoveRepositoryAsync("secondary");
@@ -785,8 +788,9 @@ public class IssueRepositoryResolutionRegressionSpecs
             secondaryRepoPath: "/proj/secondary-v1",
             secondaryBaseBranch: "develop-v1");
         var number = await _grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, number));
-        await issueGrain.CreateAsync(projectId, number, "Sequential changes", body: null, labels: null, priority: null, "secondary");
+        var issueId = $"issue_{Guid.NewGuid():N}";
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
+        await issueGrain.CreateAsync(projectId, number, "Sequential changes", body: null, labels: null, priority: null, "secondary", issueId);
 
         var projectGrain = _grains.GetGrain<IProjectGrain>(projectId);
 
@@ -832,7 +836,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             secondaryRepoPath: "/proj/secondary-old",
             secondaryBaseBranch: "develop-old");
         var issue = await CreateIssueAsync(projectId, "Reactivation reads latest", "secondary");
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, issue.Number));
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         // Force the issue grain to load and capture its current state.
         var initial = await issueGrain.GetStartEligibilityAsync();
         Assert.NotNull(initial);
@@ -1068,8 +1072,8 @@ public class IssueRepositoryResolutionRegressionSpecs
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)
     {
         using var scope = _services.CreateScope();
-        var projectQuery = scope.ServiceProvider.GetRequiredService<ProjectQueryService>();
-        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var projectQuery = scope.ServiceProvider.GetRequiredService<ProjectQuerier>();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         var project = await projectQuery.GetByIdAsync(projectId);
         return await issueQuery.GetInfoAsync(projectId, number, project);
     }
@@ -1077,7 +1081,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     private async Task<IssueReadModel?> GetIssueReadModelAsync(string projectId, int number)
     {
         using var scope = _services.CreateScope();
-        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var issueQuery = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         return await issueQuery.GetAsync(projectId, number);
     }
 
@@ -1101,6 +1105,7 @@ public class IssueRepositoryResolutionRegressionSpecs
                 repoEl.GetProperty("isDefault").GetBoolean());
         }
         return new CreatedIssueDto(
+            data.GetProperty("id").GetString()!,
             data.GetProperty("number").GetInt32(),
             repository);
     }
@@ -1117,7 +1122,8 @@ public class IssueRepositoryResolutionRegressionSpecs
             projectId,
         });
 
-        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, number));
+        var issue = await _client.GetDataAsync<CreatedIssueDto>($"/api/issues/{number}?projectId={projectId}");
+        var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;
 
@@ -1130,7 +1136,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     private async Task<JsonDocument> LoadWorkflowVariablesAsync(string workflowRunId)
     {
         using var scope = _services.CreateScope();
-        var query = scope.ServiceProvider.GetRequiredService<WorkflowQueryService>();
+        var query = scope.ServiceProvider.GetRequiredService<WorkflowQuerier>();
         var snapshot = await query.GetVariablesAsync(workflowRunId);
         Assert.NotNull(snapshot);
         Assert.False(string.IsNullOrWhiteSpace(snapshot!.Variables));
@@ -1155,7 +1161,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             });
     }
 
-    private sealed record CreatedIssueDto(int Number, RepositoryDto? Repository);
+    private sealed record CreatedIssueDto(string Id, int Number, RepositoryDto? Repository);
 
     private sealed record RepositoryDto(string Name, string? Path, string? Remote, string BaseBranch, bool IsDefault);
 

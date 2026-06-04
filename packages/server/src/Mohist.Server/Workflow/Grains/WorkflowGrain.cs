@@ -1076,8 +1076,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         if (_run is null) return;
 
-        var (projectId, issueNumber) = GetHookContext();
-        var context = new WorkflowCompletionHookContext(GrainKey, projectId, issueNumber);
+        var (projectId, issueId, issueNumber) = GetHookContext();
+        var context = new WorkflowCompletionHookContext(GrainKey, projectId, issueId, issueNumber);
         foreach (var hook in _completionHooks)
         {
             try
@@ -1126,6 +1126,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private string GetProjectId() => _variables?.String("project", "id") ?? "";
 
+    private string? GetIssueId() => _variables?.String("issue", "id");
+
     private string? GetIssueKey()
     {
         var projectId = GetProjectId();
@@ -1157,15 +1159,23 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             annotations["issueKey"] = issueKey;
         }
 
+        var issueId = GetIssueId();
+        if (!string.IsNullOrWhiteSpace(issueId))
+        {
+            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            annotations["issueId"] = issueId;
+        }
+
         return new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, annotations);
     }
 
-    private (string ProjectId, int? IssueNumber) GetHookContext()
+    private (string ProjectId, string? IssueId, int? IssueNumber) GetHookContext()
     {
         var projectId = _variables?.String("project", "id") ?? "";
+        var issueId = GetIssueId();
         var numberStr = _variables?.String("issue", "number");
         var issueNumber = int.TryParse(numberStr, out var n) ? n : (int?)null;
-        return (projectId, issueNumber);
+        return (projectId, issueId, issueNumber);
     }
 
     private async Task SaveAllAsync()

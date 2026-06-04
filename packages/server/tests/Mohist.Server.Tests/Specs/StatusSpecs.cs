@@ -17,7 +17,7 @@ public class StatusSpecs : WorkflowGrainSpecs
 
         var (_, r1) = await PollWorkAnyAsync();
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);
@@ -38,7 +38,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (task1, r1) = await PollWorkAnyAsync();
         Assert.StartsWith("task-1.", task1.WorkId);
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status);
         Assert.NotNull(status.PendingWork);
         Assert.Equal("task", status.PendingWork.WorkType);
@@ -48,7 +48,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (task2, r2) = await PollWorkAnyAsync();
         Assert.StartsWith("task-2.", task2.WorkId);
 
-        var status2 = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status2 = await GetQuerier().GetStatusAsync(_workflowId!);
         Assert.NotNull(status2!.PendingWork);
         Assert.Equal("Task 2", status2.PendingWork.Title);
 
@@ -65,7 +65,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         var (check, r2) = await PollWorkAnyAsync();
         await ReportChecksPassAsync(r2, check, "plan-ok");
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
         Assert.Equal("AwaitingApproval", status.Status);
@@ -87,7 +87,7 @@ public class StatusSpecs : WorkflowGrainSpecs
         await SeedWorkflowTemplateAsync(_workflowId!, SingleStage());
         await wf.StartAsync(TestInput());
 
-        var status = await GetQueryService().GetStatusAsync(_workflowId!);
+        var status = await GetQuerier().GetStatusAsync(_workflowId!);
 
         Assert.NotNull(status);
         Assert.Equal("Running", status.Status);

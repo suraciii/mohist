@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Tests.Support;
 using Xunit;
@@ -28,7 +28,7 @@ public class EpicLifecycleSpecs
     {
         var project = await CreateProjectAsync();
         var delivered = await CreateIssueAsync(project.Id, "Delivered");
-        await CompleteIssueAsync(project.Id, delivered.Number);
+        await CompleteIssueAsync(project.Id, delivered);
         var pending = await CreateIssueAsync(project.Id, "Pending");
         var epic = await CreateEpicAsync(project.Id, "Lifecycle rejection");
         await LinkIssueAsync(project.Id, epic.Id, delivered.Number);
@@ -54,9 +54,9 @@ public class EpicLifecycleSpecs
     {
         var project = await CreateProjectAsync();
         var first = await CreateIssueAsync(project.Id, "First");
-        await CompleteIssueAsync(project.Id, first.Number);
+        await CompleteIssueAsync(project.Id, first);
         var second = await CreateIssueAsync(project.Id, "Second");
-        await CompleteIssueAsync(project.Id, second.Number);
+        await CompleteIssueAsync(project.Id, second);
         var epic = await CreateEpicAsync(project.Id, "Lifecycle success");
         await LinkIssueAsync(project.Id, epic.Id, first.Number);
         await LinkIssueAsync(project.Id, epic.Id, second.Number);
@@ -82,7 +82,7 @@ public class EpicLifecycleSpecs
     {
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
-        await CompleteIssueAsync(project.Id, issue.Number);
+        await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Repeated done");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
         await _client.PostOkAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
@@ -151,7 +151,7 @@ public class EpicLifecycleSpecs
     {
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
-        await CompleteIssueAsync(project.Id, issue.Number);
+        await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Done then close");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
         await _client.PostOkAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
@@ -196,9 +196,9 @@ public class EpicLifecycleSpecs
     {
         var project = await CreateProjectAsync();
         var blocker = await CreateIssueAsync(project.Id, "Blocker");
-        await CompleteIssueAsync(project.Id, blocker.Number);
+        await CompleteIssueAsync(project.Id, blocker);
         var dependent = await CreateIssueAsync(project.Id, "Dependent");
-        var dependentGrain = _grains.GetGrain<IIssueGrain>(GrainKeyIssue(project.Id, dependent.Number));
+        var dependentGrain = _grains.GetGrain<IIssueGrain>(dependent.Id);
         await dependentGrain.AddPrerequisiteAsync(blocker.Number);
 
         var epic = await CreateEpicAsync(project.Id, "Container with deps");
@@ -223,7 +223,7 @@ public class EpicLifecycleSpecs
     {
         var project = await CreateProjectAsync();
         var issue = await CreateIssueAsync(project.Id, "Delivered");
-        await CompleteIssueAsync(project.Id, issue.Number);
+        await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "No auto complete");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
 
@@ -251,9 +251,9 @@ public class EpicLifecycleSpecs
         return await _client.PostDataAsync<IssueDto>("/api/issues", new { title, projectId });
     }
 
-    private async Task CompleteIssueAsync(string projectId, int issueNumber)
+    private async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)
     {
-        var grain = _grains.GetGrain<IIssueGrain>(GrainKeyIssue(projectId, issueNumber));
+        var grain = _grains.GetGrain<IIssueGrain>(issueInfo.Id);
         var wrId = await grain.StartWorkAsync(new WorkflowProjectContext(projectId, "Lifecycle Test", "/tmp/lifecycle", "main"));
         await grain.CompleteWorkAsync(wrId);
     }
@@ -271,11 +271,9 @@ public class EpicLifecycleSpecs
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)
     {
         using var scope = _services.CreateScope();
-        var issues = scope.ServiceProvider.GetRequiredService<IssueQueryService>();
+        var issues = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
         return await issues.GetInfoAsync(projectId, number);
     }
-
-    private static string GrainKeyIssue(string projectId, int number) => $"{projectId}:{number}";
 
     private sealed record ProjectDto(string Id);
     private sealed record IssueDto(int Number, string Id, int[] PrerequisiteNumbers, string Status, string Health, string? WorkflowRunId);

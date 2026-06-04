@@ -1,5 +1,5 @@
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Infrastructure;
 using System.Text.Json;
@@ -12,19 +12,19 @@ public static class ProjectRoutes
     {
         var group = app.MapGroup("/api/projects");
 
-        group.MapGet("/", async (ProjectQueryService projectsQuery) =>
+        group.MapGet("/", async (ProjectQuerier projectsQuery) =>
         {
             var projects = await projectsQuery.ListAllAsync();
             return ApiResults.Ok(projects);
         });
 
-        group.MapGet("/{identifier}", async (string identifier, ProjectQueryService projectsQuery) =>
+        group.MapGet("/{identifier}", async (string identifier, ProjectQuerier projectsQuery) =>
         {
             var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapPost("/", async (CreateProjectRequest req, IGrainFactory grains, ProjectQueryService projectsQuery) =>
+        group.MapPost("/", async (CreateProjectRequest req, IGrainFactory grains, ProjectQuerier projectsQuery) =>
         {
             if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Path))
                 return ApiResults.BadRequest("name and path are required");
@@ -45,7 +45,7 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapPost("/{identifier}/use", async (string identifier, ProjectQueryService projectsQuery) =>
+        group.MapPost("/{identifier}/use", async (string identifier, ProjectQuerier projectsQuery) =>
         {
             var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
@@ -58,7 +58,7 @@ public static class ProjectRoutes
             return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapDelete("/{identifier}", async (string identifier, IGrainFactory grains, ProjectQueryService projectsQuery) =>
+        group.MapDelete("/{identifier}", async (string identifier, IGrainFactory grains, ProjectQuerier projectsQuery) =>
         {
             var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
             if (project is null)
@@ -69,7 +69,7 @@ public static class ProjectRoutes
             return ApiResults.Ok();
         });
 
-        group.MapGet("/{id}/repositories", async (string id, ProjectQueryService projectsQuery) =>
+        group.MapGet("/{id}/repositories", async (string id, ProjectQuerier projectsQuery) =>
         {
             var project = await projectsQuery.GetByIdAsync(id);
             return project is not null ? ApiResults.Ok(project.Repositories) : ApiResults.NotFound("Project not found");

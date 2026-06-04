@@ -81,7 +81,7 @@ public class WorkflowLogApiSpecs
             await store.AppendAsync(new EventInput(project.Id, issue.Number, "workflow", "workflow_started", WorkflowRunId: "wr-1", Status: "started"));
         }
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(project.Id, issue.Number));
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         await issueGrain.StartWorkAsync();
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var sessionName = "plan";
@@ -137,7 +137,7 @@ public class WorkflowLogApiSpecs
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title);
+    private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record WorkflowLogResponse(WorkflowLogEntryDto[] Entries);
     private sealed record WorkflowLogEntryDto(string Id, string ProjectId, int IssueNumber, string Category, string Type, string? Stage, string? TaskId, string? CheckName, string CreatedAt, JsonElement? Payload);
     private sealed record AgentSessionEventsTestResponse(AgentSessionEventTestDto[] Events);

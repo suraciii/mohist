@@ -1,16 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Infrastructure.Persistence.Db;
 
-namespace Mohist.Server.Epic.Queries;
+namespace Mohist.Server.Epic.Querying;
 
-public class EpicQueryService
+public class EpicQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IssueQueryService _issuesQuery;
+    private readonly IssueQuerier _issuesQuery;
 
-    public EpicQueryService(IDbContextFactory<MohistDbContext> dbFactory, IssueQueryService issuesQuery)
+    public EpicQuerier(IDbContextFactory<MohistDbContext> dbFactory, IssueQuerier issuesQuery)
     {
         _dbFactory = dbFactory;
         _issuesQuery = issuesQuery;

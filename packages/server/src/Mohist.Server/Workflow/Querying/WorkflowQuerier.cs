@@ -7,9 +7,9 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Views;
 using Mohist.Server.Workflow.Infrastructure;
 
-namespace Mohist.Server.Workflow.Queries;
+namespace Mohist.Server.Workflow.Querying;
 
-public class WorkflowQueryService
+public class WorkflowQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _db;
     private readonly WorkflowProfileManager _profileManager;
@@ -27,7 +27,7 @@ public class WorkflowQueryService
         PropertyNameCaseInsensitive = true,
     };
 
-    public WorkflowQueryService(IDbContextFactory<MohistDbContext> db, WorkflowProfileManager profileManager)
+    public WorkflowQuerier(IDbContextFactory<MohistDbContext> db, WorkflowProfileManager profileManager)
     {
         _db = db;
         _profileManager = profileManager;

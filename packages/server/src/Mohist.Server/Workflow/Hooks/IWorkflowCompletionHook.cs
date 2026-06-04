@@ -8,4 +8,5 @@ public interface IWorkflowCompletionHook
 public sealed record WorkflowCompletionHookContext(
     string WorkflowRunId,
     string ProjectId,
+    string? IssueId,
     int? IssueNumber);

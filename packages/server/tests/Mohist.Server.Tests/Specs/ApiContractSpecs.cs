@@ -164,6 +164,7 @@ public class ApiContractSpecs
         var issueResponse = await _fixture.Client.PostAsJsonAsync("/api/issues", new { title = "Needs rebase", projectId });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();
+        var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;
 
         await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/start?projectId={projectId}", new { });
 
@@ -177,7 +178,7 @@ public class ApiContractSpecs
 
         try
         {
-            var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId!, number));
+            var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issueId));
             var issueStatus = await issueGrain.GetWorkflowStatusAsync();
             var wrId = issueStatus!.WorkflowRunId!;
 

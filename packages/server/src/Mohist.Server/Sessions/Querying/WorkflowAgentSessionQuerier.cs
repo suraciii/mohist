@@ -8,13 +8,13 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Storage;
 
-namespace Mohist.Server.Sessions.Queries;
+namespace Mohist.Server.Sessions.Querying;
 
-public class WorkflowAgentSessionQueryService
+public class WorkflowAgentSessionQuerier
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
-    public WorkflowAgentSessionQueryService(IDbContextFactory<MohistDbContext> dbFactory)
+    public WorkflowAgentSessionQuerier(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
     }

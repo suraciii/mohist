@@ -4,7 +4,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Views;
 using System.Text.Json.Serialization;
 
-namespace Mohist.Server.Issue.Queries;
+namespace Mohist.Server.Issue.Querying;
 
 public class IssueReadModel
 {

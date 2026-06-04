@@ -29,10 +29,26 @@ Rules:
 
 - `EntityId` is stable and singular.
 - `GrainKey` follows the entity owned by the grain.
-- `ResourceKey` is for routes, event subject, audit target, permission scope, and lock/backlog subjects.
+- `ResourceKey` is only for URL/resource-path naming in the current migration.
 - Parent scope belongs in metadata or `ResourceKey`, not in `EntityId`.
 - Display numbers and route aliases are lookup keys, not entity identity.
 - Avoid ad hoc keys like `projectId:issueNumber` in new designs.
+
+## Role Names
+
+| Suffix | Use For | Example |
+|--------|---------|---------|
+| `Querier` | Read-only projection/query boundary | `IssueQuerier` |
+| `Resolver` | Translate aliases or external keys to canonical identity | `IssueIdentityResolver` |
+| `Manager` | Owns configuration or lifecycle policy | `WorkflowProfileManager` |
+| `Store` | Persistence boundary for one state shape | `WorkflowRunStore` |
+
+Rules:
+
+- Do not introduce new `*QueryService` names.
+- Use `Querier` when the caller asks for read models or projections.
+- Use `Resolver` when the caller asks "what is the canonical id for this route/display key?"
+- Keep resolvers narrow. They should not enrich DTOs or compute workflow state.
 
 ## ResourceKey Format
 
@@ -78,7 +94,18 @@ WorkflowRun.Metadata
 
 `IssueNumber` is a display or route lookup value. It does not need to be stored in workflow metadata.
 
-Event append, event query, locks, and scheduling should use `workflowRunId`, `issueId`, and `ResourceKey`. If an API route still receives issue number, resolve it to `issueId` at the boundary.
+Event append, event query, locks, and scheduling should use `workflowRunId` and `issueId`. If an API route still receives issue number, resolve it to `issueId` at the boundary.
+
+For now, `ResourceKey` is only a URL/resource-path convention. Do not force it into event rows, locks, or audit data until those surfaces are explicitly migrated.
+
+Route identity flow:
+
+```text
+/projects/{projectId}/issues/{number}
+  -> IssueIdentityResolver.GetIdAsync(projectId, number)
+  -> issueId
+  -> GrainKey.Issue(issueId)
+```
 
 ## Runtime Context
 

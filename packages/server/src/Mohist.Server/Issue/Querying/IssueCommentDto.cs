@@ -1,4 +1,4 @@
-namespace Mohist.Server.Issue.Queries;
+namespace Mohist.Server.Issue.Querying;
 
 [GenerateSerializer]
 public sealed record IssueCommentDto(

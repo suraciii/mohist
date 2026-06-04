@@ -1,7 +1,7 @@
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 
 namespace Mohist.Server.Api;
 
@@ -11,7 +11,7 @@ public static class WorkflowRoutes
     {
         app.MapGet("/api/workflow-runs/{workflowRunId}/yaml", async (
             string workflowRunId,
-            WorkflowQueryService reader) =>
+            WorkflowQuerier reader) =>
         {
             var yaml = await reader.GetDefinitionYamlAsync(workflowRunId);
             return yaml is null
@@ -21,7 +21,7 @@ public static class WorkflowRoutes
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/variables/effective", async (
             string workflowRunId,
-            WorkflowQueryService reader,
+            WorkflowQuerier reader,
             WorkflowProfileManager profileManager) =>
         {
             var snapshot = await reader.GetVariablesAsync(workflowRunId);

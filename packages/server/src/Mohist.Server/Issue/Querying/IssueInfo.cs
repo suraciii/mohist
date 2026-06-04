@@ -4,7 +4,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 
-namespace Mohist.Server.Issue.Queries;
+namespace Mohist.Server.Issue.Querying;
 
 public class IssueInfo
 {

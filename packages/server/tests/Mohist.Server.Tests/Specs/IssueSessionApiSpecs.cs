@@ -27,7 +27,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionMetadataEndpoint_ExposesRequiredMetadataAndOmitsProjectedFields()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-shape", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -86,7 +86,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionEventsEndpoint_ReturnsRawEventsInAscendingSequenceAcrossBatches()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events-ordering", sessionName: "build");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -229,7 +229,7 @@ public class IssueSessionApiSpecs
     public async Task IssueSessionApis_DoNotReturnServerProjectedTurnsOrWorkflowLogs()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("removal-assertion", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>($"{project.Id}:{issue.Number}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -332,7 +332,7 @@ public class IssueSessionApiSpecs
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
-    private sealed record IssueDto(int Number, string Title);
+    private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record IssueSessionEventsResponseDto(IssueSessionEventDto[] Events);
     private sealed record IssueSessionEventDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
     private sealed record WorkflowLogResponseDto(WorkflowLogEntryDto[] Entries);

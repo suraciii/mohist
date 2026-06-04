@@ -47,7 +47,7 @@ public class ArchitectureRules
         .As("GrainStorage Layer");
 
     private static readonly IObjectProvider<IType> QueryLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.Queries", useRegularExpressions: true)
+        .That().ResideInNamespace("Mohist.Server.*.Querying", useRegularExpressions: true)
         .As("Query Layer");
 
     private static readonly IObjectProvider<IType> OrleansTypes = Types()
@@ -84,7 +84,7 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void Queries_ShouldNotDependOnGrainInterfaces()
+    public void Querying_ShouldNotDependOnGrainInterfaces()
     {
         Types().That().Are(QueryLayer)
             .Should().NotDependOnAny(GrainInterfaces)
@@ -93,7 +93,7 @@ public class ArchitectureRules
     }
 
     [Fact]
-    public void Queries_ShouldNotDependOnGrainStorage()
+    public void Querying_ShouldNotDependOnGrainStorage()
     {
         Types().That().Are(QueryLayer)
             .Should().NotDependOnAny(GrainStorageLayer)
@@ -246,7 +246,7 @@ public class ArchitectureRules
         }
     }
 
-    [Fact(Skip = "Tech debt: Issue has internal cycles (Storage↔WorkflowProfiles↔Queries, Grains↔WorkflowProfiles)")]
+    [Fact(Skip = "Tech debt: Issue has internal cycles (Storage↔WorkflowProfiles↔Querying, Grains↔WorkflowProfiles)")]
     public void IssueInternalLayers_ShouldBeFreeOfCycles()
     {
         Slices().Matching("Mohist.Server.Issue.(*)")
@@ -254,7 +254,7 @@ public class ArchitectureRules
             .Check(_architecture);
     }
 
-    [Fact(Skip = "Tech debt: Workflow has internal cycles (Storage↔WorkflowProfiles↔Queries, Grains↔WorkflowProfiles)")]
+    [Fact(Skip = "Tech debt: Workflow has internal cycles (Storage↔WorkflowProfiles↔Querying, Grains↔WorkflowProfiles)")]
     public void WorkflowInternalLayers_ShouldBeFreeOfCycles()
     {
         Slices().Matching("Mohist.Server.Workflow.(*)")

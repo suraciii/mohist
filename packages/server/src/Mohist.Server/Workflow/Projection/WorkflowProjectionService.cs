@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Issue.Queries;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
@@ -8,18 +8,18 @@ using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
-using Mohist.Server.Workflow.Queries;
+using Mohist.Server.Workflow.Querying;
 
 namespace Mohist.Server.Workflow.Projection;
 
 public class WorkflowProjectionService
 {
-    private readonly IssueQueryService _issues;
+    private readonly IssueQuerier _issues;
     private readonly IEventStore _events;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly WorkflowQueryService _workflowReader;
+    private readonly WorkflowQuerier _workflowReader;
 
-    public WorkflowProjectionService(IssueQueryService issues, IEventStore events, IDbContextFactory<MohistDbContext> dbFactory, WorkflowQueryService workflowReader)
+    public WorkflowProjectionService(IssueQuerier issues, IEventStore events, IDbContextFactory<MohistDbContext> dbFactory, WorkflowQuerier workflowReader)
     {
         _issues = issues;
         _events = events;

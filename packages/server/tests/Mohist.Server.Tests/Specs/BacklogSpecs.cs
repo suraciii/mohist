@@ -13,7 +13,7 @@ using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Workflow.Storage;
 using Orleans;
 using Orleans.TestingHost;
@@ -61,7 +61,7 @@ public class BacklogFixture : IAsyncLifetime
             siloBuilder.Services.AddScoped<IStateStore<WorkLease>, InMemoryStateStore<WorkLease>>();
             siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
             siloBuilder.Services.AddScoped<IStateStore<WorkflowExecutionContext>, InMemoryStateStore<WorkflowExecutionContext>>();
-            siloBuilder.Services.AddSingleton<ProjectQueryService>();
+            siloBuilder.Services.AddSingleton<ProjectQuerier>();
             siloBuilder.Services.AddScoped<WorkflowProfileManager>();
             siloBuilder.Services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
             siloBuilder.Services.AddSingleton<IEventBus, InMemoryEventBus>();

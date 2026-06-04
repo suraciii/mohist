@@ -198,6 +198,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         return new IssueDto(
+            json.GetProperty("data").GetProperty("id").GetString()!,
             json.GetProperty("data").GetProperty("number").GetInt32());
     }
 
@@ -213,7 +214,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             projectId,
         });
 
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(projectId, number));
+        var issue = await _client.GetDataAsync<IssueDto>($"/api/issues/{number}?projectId={projectId}");
+        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;
 
@@ -223,5 +225,5 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         await runner.PollAsync();
     }
 
-    private sealed record IssueDto(int Number);
+    private sealed record IssueDto(string Id, int Number);
 }

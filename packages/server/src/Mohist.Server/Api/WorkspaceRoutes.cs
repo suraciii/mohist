@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.SignalR;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Queries;
-using Mohist.Server.Project.Queries;
+using Mohist.Server.Issue.Querying;
+using Mohist.Server.Project.Querying;
 using Mohist.Server.Runner.SignalR;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Projection;
@@ -25,7 +26,7 @@ public static class WorkspaceRoutes
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
             IGitService git,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -73,7 +74,7 @@ public static class WorkspaceRoutes
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
             IGitService git,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -123,7 +124,7 @@ public static class WorkspaceRoutes
             int number, string hash, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
             IGitService git,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -158,7 +159,7 @@ public static class WorkspaceRoutes
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
             IGitService git,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -187,7 +188,7 @@ public static class WorkspaceRoutes
             int number, string path, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
             IGitService git,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -215,7 +216,7 @@ public static class WorkspaceRoutes
         workflow.MapGet("/diff", async (
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -264,7 +265,7 @@ public static class WorkspaceRoutes
         workflow.MapGet("/commits", async (
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -313,7 +314,7 @@ public static class WorkspaceRoutes
         workflow.MapGet("/commits/{hash}/diff", async (
             int number, string hash, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -349,7 +350,7 @@ public static class WorkspaceRoutes
         workflow.MapGet("/worktree-status", async (
             int number, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -384,7 +385,7 @@ public static class WorkspaceRoutes
         workflow.MapGet("/file-content", async (
             int number, string path, string? projectId,
             IGrainFactory grains, IHubContext<RunnerHub> hub, RunnerConnectionTracker tracker,
-            IssueQueryService issuesQuery, ProjectQueryService projectsQuery,
+            IssueQuerier issuesQuery, ProjectQuerier projectsQuery,
             CancellationToken ct) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
@@ -416,7 +417,7 @@ public static class WorkspaceRoutes
             }
         });
 
-        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQueryService issuesQuery, ProjectQueryService projectsQuery) =>
+        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -425,7 +426,7 @@ public static class WorkspaceRoutes
 
             try
             {
-                var grain = grains.GetGrain<IIssueGrain>($"{pid}:{number}");
+                var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
                 var workflow = await grain.GetWorkflowStatusAsync();
                 if (IsWorkflowActive(workflow))
                 {
@@ -506,7 +507,7 @@ public static class WorkspaceRoutes
     }
 
     private static async Task<(string? ProjectId, IssueReadModel? Issue)> ResolveIssueAsync(
-        int number, string? projectId, ProjectQueryService projectsQuery, IssueQueryService issuesQuery)
+        int number, string? projectId, ProjectQuerier projectsQuery, IssueQuerier issuesQuery)
     {
         var pid = await ResolveProjectIdAsync(projectId, projectsQuery);
         if (pid is null) return (null, null);
@@ -538,7 +539,7 @@ public static class WorkspaceRoutes
         },
     };
 
-    private static async Task<string?> ResolveProjectIdAsync(string? projectId, ProjectQueryService projectsQuery)
+    private static async Task<string?> ResolveProjectIdAsync(string? projectId, ProjectQuerier projectsQuery)
     {
         if (!string.IsNullOrWhiteSpace(projectId)) return projectId;
         var resolved = await projectsQuery.ResolveSingleAsync();
