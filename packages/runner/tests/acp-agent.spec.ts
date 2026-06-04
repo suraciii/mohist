@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentSideConnection, ClientSideConnection, PROTOCOL_VERSION } from "@agentclientprotocol/sdk"
 import type { Agent, RequestPermissionRequest, RequestPermissionResponse, SessionNotification, Stream } from "@agentclientprotocol/sdk"
@@ -15,6 +18,7 @@ import {
 afterEach(() => {
   setAcpProcessFactoryForTest(null)
   setPromptLoaderRegistryForTest(null)
+  delete process.env.MOHIST_OPENCODE_LOG_DIR
 })
 
 describe("mohist/acp-agent", () => {
@@ -273,6 +277,45 @@ describe("mohist/acp-agent", () => {
     expect(probeState.probeVersion).toBe(probing?.activeProbeVersion)
     expect(probeState.postProbeActivity).toBe(false)
     expect(Number(probeState.dataVersion)).toBe(Number(probeState.probeVersion))
+  })
+
+  it("ProbeTimeoutWithOpencodeProviderError_AppendsProviderDiagnostic", async () => {
+    const logDir = await mkdtemp(join(tmpdir(), "mohist-opencode-log-"))
+    process.env.MOHIST_OPENCODE_LOG_DIR = logDir
+    try {
+      await writeFile(join(logDir, "2026-06-03T164901.log"), [
+        'ERROR 2026-06-03T16:49:06 service=llm providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=fake-session-1 small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"rate_limit_error\\",\\"message\\":\\"usage limit exceeded\\"}}","isRetryable":true}} stream error',
+        "",
+      ].join("\n"))
+      const fixture = createFixture("probe-timeout")
+
+      const result = await acpAgentAction(fixture.context({
+        prompt: "quiet task",
+        session: "timeout-session",
+        livenessQuietThresholdMs: 30,
+        probeTimeoutMs: 60,
+        timeout: 1_000,
+      }))
+
+      expect(result.status).toBe("failure")
+      expect(result.message ?? "").toContain("Session liveness probe timed out")
+      expect(result.message ?? "").toContain("Opencode provider error: 429 rate_limit_error on minimax-coding-plan/MiniMax-M3 - usage limit exceeded")
+
+      const failed = fixture.serverConnection.calls
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_liveness_status")
+        .map((entry) => entry.payload as Record<string, unknown>)
+        .find((payload) => payload.status === "failed")
+      const terminal = fixture.serverConnection.calls
+        .filter((entry) => entry.event === "workflowAgentSessionEvents" && entry.type === "agent_session_terminal")
+        .map((entry) => entry.payload as Record<string, unknown>)
+        .at(-1)
+
+      expect((failed?.providerError as Record<string, unknown>)?.statusCode).toBe(429)
+      expect((failed?.providerError as Record<string, unknown>)?.errorType).toBe("rate_limit_error")
+      expect(String(terminal?.failureReason)).toContain("Opencode provider error: 429 rate_limit_error")
+    } finally {
+      await rm(logDir, { recursive: true, force: true })
+    }
   })
 
   it("ProbePromptSendRejects_LivenessFailsAsProbeSendFailed_InsteadOfTimingOut", async () => {

@@ -9,6 +9,7 @@ import { killProcess, runCommand, sanitizedEnvironment } from "../system/process
 import { verifyExpectations } from "./expectations.js"
 import type { AcpSessionManager, SharedAcpConnection } from "../runtime/acp-connection.js"
 import { acpArgs, acpCommand } from "../runtime/acp-command.js"
+import { appendOpencodeDiagnostic, findOpencodeProviderErrorDiagnostic, type OpencodeProviderErrorDiagnostic } from "../runtime/opencode-log-diagnostics.js"
 
 export interface AcpProcessHandle {
   readonly stream: Stream
@@ -192,6 +193,7 @@ function buildLivenessEventPayload(context: ActionContext, state: SessionLivenes
   activeProbeVersion?: number
   satisfiedProbeVersion?: number
   failureReason?: LivenessFailureReason
+  providerError?: OpencodeProviderErrorDiagnostic
   postProbeActivity?: boolean
 }): JsonObject {
   return cleanJson({
@@ -211,6 +213,7 @@ function buildLivenessEventPayload(context: ActionContext, state: SessionLivenes
     activeProbeVersion: extras?.activeProbeVersion,
     satisfiedProbeVersion: extras?.satisfiedProbeVersion,
     failureReason: extras?.failureReason,
+    providerError: extras?.providerError as JsonObject | undefined,
   })
 }
 
@@ -219,6 +222,7 @@ async function emitLivenessStatusEvent(context: ActionContext, state: SessionLiv
   activeProbeVersion?: number
   satisfiedProbeVersion?: number
   failureReason?: LivenessFailureReason
+  providerError?: OpencodeProviderErrorDiagnostic
   postProbeActivity?: boolean
 }) {
   await emitSessionEvent(context, "agent_liveness_status", buildLivenessEventPayload(context, state, status, extras))
@@ -231,6 +235,7 @@ interface AcpSessionResult {
   acpSessionId?: string
   exitCode?: number | null
   activityCount?: number
+  providerError?: OpencodeProviderErrorDiagnostic
 }
 
 export async function acpAgentAction(context: ActionContext): Promise<ActionResult> {
@@ -248,7 +253,7 @@ export async function acpAgentAction(context: ActionContext): Promise<ActionResu
   return {
     status: ok ? "success" : "failure",
     message: ok ? "ACP agent task completed" : result.error ?? verification.message,
-    output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: agentConfig?.model, text: result.text, error: result.error, expectation: verification }),
+    output: JSON.stringify({ kind: "acp-agent", status: ok ? "success" : "failure", acpSessionId: result.acpSessionId, model: agentConfig?.model, text: result.text, error: result.error, providerError: result.providerError, expectation: verification }),
     exitCode: result.exitCode ?? (ok ? 0 : 1),
   }
 }
@@ -459,7 +464,7 @@ async function runPromptOnExistingWorkflowAgentSession(context: ActionContext, p
       waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: entry.sessionId, exitCode: 1, activityCount, providerError: promptResult.providerError }
     }
     const activityFailure = validatePromptActivity(activityCount)
     if (activityFailure) return { text: agentText, success: false, error: activityFailure, acpSessionId: entry.sessionId, exitCode: 1, activityCount }
@@ -547,7 +552,7 @@ async function runResumedWorkflowAgentSession(context: ActionContext, prompt: st
       waitForData: (version) => waitForData(dataWaiters, () => liveness.dataVersion !== version),
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1, activityCount }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId, exitCode: 1, activityCount, providerError: promptResult.providerError }
     }
 
     const activityFailure = validatePromptActivity(activityCount)
@@ -640,7 +645,7 @@ async function runNewWorkflowAgentSession(context: ActionContext, prompt: string
     })
     if (promptResult !== "completed") {
       try { await connection.closeSession?.({ sessionId }) } catch {}
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1, activityCount }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: 1, activityCount, providerError: promptResult.providerError }
     }
 
     const activityFailure = validatePromptActivity(activityCount)
@@ -745,7 +750,7 @@ async function runEphemeralWorkflowAgentSession(context: ActionContext, prompt: 
       exitFailure: acpProcess.exitFailure,
     })
     if (promptResult !== "completed") {
-      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode(), activityCount }
+      return { text: agentText, success: false, error: promptResult.error, acpSessionId: sessionId, exitCode: acpProcess.exitCode(), activityCount, providerError: promptResult.providerError }
     }
 
     const activityFailure = validatePromptActivity(activityCount)
@@ -764,9 +769,10 @@ function validatePromptActivity(activityCount: number) {
   return activityCount > 0 ? undefined : "ACP agent prompt completed without any session activity"
 }
 
-async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string }> {
+async function monitorPrompt(context: ActionContext, connection: ClientSideConnection, sessionId: string, prompt: string, options: { timeoutMs: number; livenessQuietThresholdMs: number; probeTimeoutMs: number; livenessState: SessionLivenessState; waitForData(version: number): Promise<"data">; exitFailure?: Promise<never> }): Promise<"completed" | { error: string; providerError?: OpencodeProviderErrorDiagnostic }> {
   const startedAt = Date.now()
   const promptPromise = connection.prompt({ sessionId, prompt: [{ type: "text", text: prompt }] })
+  const promptOutcome = promptPromise.then(() => "completed" as const, (error: unknown) => toError(error))
   const exitFailure = options.exitFailure ?? new Promise<never>(() => {})
 
   while (true) {
@@ -776,7 +782,7 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     const quietRemaining = Math.max(0, options.livenessState.lastDataAt + options.livenessQuietThresholdMs - now)
     const waitMs = quietRemaining
     const result = await Promise.race([
-      promptPromise.then(() => "completed" as const),
+      promptOutcome,
       timeout(Math.min(timeoutRemaining, Math.max(waitMs, 1))),
       aborted(context.signal),
       exitFailure.catch((error) => error),
@@ -785,8 +791,9 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     if (result === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
     if (result instanceof Error) {
       const failureReason: LivenessFailureReason = result.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
-      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, postProbeActivity: hasPostProbeActivity(options.livenessState) })
-      return { error: result.message }
+      const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, providerError: diagnostic, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+      return { error: appendOpencodeDiagnostic(result.message, diagnostic), providerError: diagnostic }
     }
     if (Date.now() - options.livenessState.lastDataAt < options.livenessQuietThresholdMs) continue
 
@@ -795,12 +802,13 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     try {
       await ensurePromptAcceptedOrPending(connection.prompt({ sessionId, prompt: [{ type: "text", text: PROBE_PROMPT }] }))
     } catch (error) {
-      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_send_failed", activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
       const message = error instanceof Error ? error.message : String(error)
-      return { error: `Failed to send liveness probe: ${message}` }
+      const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_send_failed", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+      return { error: appendOpencodeDiagnostic(`Failed to send liveness probe: ${message}`, diagnostic), providerError: diagnostic }
     }
     const probeResult = await Promise.race([
-      promptPromise.then(() => "completed" as const),
+      promptOutcome,
       options.waitForData(activeProbe.probeVersion),
       timeout(options.probeTimeoutMs),
       aborted(context.signal),
@@ -815,8 +823,9 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
     if (probeResult === "aborted") return await cancelAndReturn(connection, sessionId, "Agent stopped by user")
     if (probeResult instanceof Error) {
       const failureReason: LivenessFailureReason = probeResult.message.includes("[PROCESS_EXIT]") ? "process_exit" : "protocol_disconnect"
-      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
-      return { error: probeResult.message }
+      const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
+      await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason, providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: hasPostProbeActivity(options.livenessState) })
+      return { error: appendOpencodeDiagnostic(probeResult.message, diagnostic), providerError: diagnostic }
     }
     const probeState: LivenessProbeState = {
       probeSentAt: options.livenessState.probeSentAt,
@@ -827,9 +836,14 @@ async function monitorPrompt(context: ActionContext, connection: ClientSideConne
       dataVersion: options.livenessState.dataVersion,
       postProbeActivity: hasPostProbeActivity(options.livenessState),
     }
-    await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
-    return { error: `Session liveness probe timed out ${JSON.stringify(probeState)}` }
+    const diagnostic = await findOpencodeProviderErrorDiagnostic(sessionId)
+    await emitLivenessStatusEvent(context, options.livenessState, "failed", { acpSessionId: sessionId, failureReason: "probe_timeout", providerError: diagnostic, activeProbeVersion: activeProbe.probeVersion, postProbeActivity: probeState.postProbeActivity })
+    return { error: appendOpencodeDiagnostic(`Session liveness probe timed out ${JSON.stringify(probeState)}`, diagnostic), providerError: diagnostic }
   }
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error))
 }
 
 async function ensurePromptAcceptedOrPending(promptPromise: Promise<unknown>) {
