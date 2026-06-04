@@ -19,7 +19,6 @@ public class ProjectWorkflowProfileManager
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IPromptLoader _promptLoader;
-    private readonly IProjectTemplateStore _promptStore;
     private readonly PromptTemplateEngine _engine;
 
     /// <summary>
@@ -36,12 +35,10 @@ public class ProjectWorkflowProfileManager
     public ProjectWorkflowProfileManager(
         IDbContextFactory<MohistDbContext> dbFactory,
         IPromptLoader promptLoader,
-        IProjectTemplateStore promptStore,
         PromptTemplateEngine engine)
     {
         _dbFactory = dbFactory;
         _promptLoader = promptLoader;
-        _promptStore = promptStore;
         _engine = engine;
     }
 
@@ -56,8 +53,6 @@ public class ProjectWorkflowProfileManager
 
     public static WorkflowDefinition? GetSystemTemplateDefinition(string templateId)
     {
-        // Currently only mohist/default exists.
-        // Add more branches here when adding more system templates.
         if (string.Equals(templateId, "mohist/default", StringComparison.Ordinal))
             return MohistWorkflow.Definition;
         return null;
@@ -157,7 +152,6 @@ public class ProjectWorkflowProfileManager
 
     public async Task<string?> SetDefaultTemplateAsync(string projectId, string? templateId)
     {
-        // templateId = null means "clear default" - caller can reset.
         if (!string.IsNullOrWhiteSpace(templateId))
         {
             var existsInProject = await ProjectTemplateExistsAsync(projectId, templateId);
@@ -258,19 +252,21 @@ public class ProjectWorkflowProfileManager
     public async Task<IReadOnlyList<EffectivePrompt>> ListPromptsAsync(string projectId)
     {
         var systemTemplates = _promptLoader.LoadAllTemplates();
-        var projectPrompts = await _promptStore.GetForProjectAsync(projectId);
-        var projectByKey = projectPrompts.ToDictionary(p => p.Key, StringComparer.Ordinal);
+        var projectRows = await LoadProjectPromptRowsAsync(projectId);
+        var projectByKey = new Dictionary<string, Prompts.Storage.ProjectTemplateRow>(StringComparer.Ordinal);
+        foreach (var row in projectRows)
+            projectByKey[row.Key] = row;
 
         var keys = new SortedSet<string>(systemTemplates.Keys, StringComparer.Ordinal);
-        foreach (var p in projectPrompts)
-            keys.Add(p.Key);
+        foreach (var row in projectRows)
+            keys.Add(row.Key);
 
         return keys.Select(key =>
         {
-            if (projectByKey.TryGetValue(key, out var pp))
+            if (projectByKey.TryGetValue(key, out var row))
             {
                 var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-                return new EffectivePrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source);
+                return ToEffectivePrompt(row, source);
             }
 
             var sys = systemTemplates[key];
@@ -280,22 +276,22 @@ public class ProjectWorkflowProfileManager
 
     public async Task<EffectivePrompt?> GetPromptAsync(string projectId, string key)
     {
-        var pp = await _promptStore.GetAsync(projectId, key);
-        if (pp is not null)
+        var row = await FindProjectPromptRowAsync(projectId, key);
+        if (row is not null)
         {
             var systemTemplates = _promptLoader.LoadAllTemplates();
             var source = systemTemplates.ContainsKey(key) ? "project" : "project-new";
-            return new EffectivePrompt(key, pp.DisplayName, pp.Description, pp.Tags, pp.Stage, pp.Body, source);
+            return ToEffectivePrompt(row, source);
         }
 
-        var systemTemplatesOnly = _promptLoader.LoadAllTemplates();
-        if (systemTemplatesOnly.TryGetValue(key, out var sys))
+        var systemTemplatesMap = _promptLoader.LoadAllTemplates();
+        if (systemTemplatesMap.TryGetValue(key, out var sys))
             return new EffectivePrompt(key, sys.DisplayName, sys.Description, sys.Tags, sys.Stage, sys.Body, "system");
 
         return null;
     }
 
-    public async Task<ProjectTemplate> SetPromptAsync(
+    public async Task<EffectivePrompt> SetPromptAsync(
         string projectId,
         string key,
         string body,
@@ -307,8 +303,40 @@ public class ProjectWorkflowProfileManager
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("key is required", nameof(key));
 
-        return await _promptStore.UpsertAsync(
-            projectId, key, body, displayName, description, tags ?? Array.Empty<string>(), stage);
+        var now = DateTime.UtcNow;
+        var tagsJson = SerializeTags(tags ?? Array.Empty<string>());
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectPromptTemplates
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+
+        if (row is null)
+        {
+            row = new Prompts.Storage.ProjectTemplateRow
+            {
+                ProjectId = projectId,
+                Key = key,
+                DisplayName = displayName,
+                Description = description,
+                TagsJson = tagsJson,
+                Stage = stage,
+                Body = body,
+                UpdatedAt = now,
+            };
+            db.ProjectPromptTemplates.Add(row);
+        }
+        else
+        {
+            row.DisplayName = displayName;
+            row.Description = description;
+            row.TagsJson = tagsJson;
+            row.Stage = stage;
+            row.Body = body;
+            row.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync();
+        return ToEffectivePrompt(row, "project");
     }
 
     public async Task DeletePromptAsync(string projectId, string key)
@@ -316,7 +344,13 @@ public class ProjectWorkflowProfileManager
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("key is required", nameof(key));
 
-        await _promptStore.DeleteAsync(projectId, key);
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.ProjectPromptTemplates
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+        if (row is null) return;
+
+        db.ProjectPromptTemplates.Remove(row);
+        await db.SaveChangesAsync();
     }
 
     public async Task<PromptPreviewResult> PreviewPromptAsync(
@@ -332,6 +366,41 @@ public class ProjectWorkflowProfileManager
     // =======================================================================
     // Helpers
     // =======================================================================
+
+    private async Task<IReadOnlyList<Prompts.Storage.ProjectTemplateRow>> LoadProjectPromptRowsAsync(string projectId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ProjectPromptTemplates.AsNoTracking()
+            .Where(x => x.ProjectId == projectId)
+            .OrderBy(x => x.Key)
+            .ToListAsync();
+    }
+
+    private async Task<Prompts.Storage.ProjectTemplateRow?> FindProjectPromptRowAsync(string projectId, string key)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ProjectPromptTemplates.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.Key == key);
+    }
+
+    internal static EffectivePrompt ToEffectivePrompt(Prompts.Storage.ProjectTemplateRow row, string source) =>
+        new(row.Key, row.DisplayName, row.Description, DeserializeTags(row.TagsJson), row.Stage, row.Body, source);
+
+    internal static IReadOnlyList<string> DeserializeTags(string tagsJson)
+    {
+        if (string.IsNullOrWhiteSpace(tagsJson)) return Array.Empty<string>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(tagsJson) ?? new List<string>();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    internal static string SerializeTags(IReadOnlyList<string> tags) =>
+        JsonSerializer.Serialize(tags.ToList());
 
     private async Task<bool> ProjectTemplateExistsAsync(string projectId, string templateId)
     {
