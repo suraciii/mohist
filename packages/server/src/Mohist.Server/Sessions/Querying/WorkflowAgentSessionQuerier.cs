@@ -4,6 +4,7 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Queries;
@@ -166,11 +167,10 @@ public class WorkflowAgentSessionQuerier
         string sessionName,
         CancellationToken ct)
     {
-        var issue = await db.IssueStates.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Key == $"{projectId}:{issueNumber}", ct);
-        var workflowRunId = issue is null
-            ? null
-            : IssueSnapshot.DeserializeIssue(issue.StateJson)?.WorkflowRunId;
+        var rows = await db.IssueStates.AsNoTracking().ToListAsync(ct);
+        var issue = IssueStateReader.SelectCanonicalOrDefault(IssueStateReader.Deserialize(rows)
+            .Where(row => IssueStateReader.IsIssue(row.Issue, projectId, issueNumber)));
+        var workflowRunId = issue?.WorkflowRunId;
         if (workflowRunId is null) return null;
 
         return await db.WorkflowAgentSessions.AsNoTracking()
@@ -315,18 +315,11 @@ public class WorkflowAgentSessionQuerier
         var numbers = issueNumbers.Distinct().ToArray();
         if (numbers.Length == 0) return [];
 
-        var keys = numbers.Select(n => $"{projectId}:{n}").ToArray();
         var rows = await db.IssueStates.AsNoTracking()
-            .Where(r => keys.Contains(r.Key))
-            .Select(r => r.StateJson)
             .ToListAsync(ct);
 
-        return rows
-            .Select(Issue.Storage.IssueSnapshot.DeserializeIssue)
-            .Where(i => i is not null && i.ProjectId == projectId)
-            .Cast<Issue.Domain.Issue>()
-            .Where(i => numbers.Contains(i.Number))
-            .ToDictionary(i => i.Number, i => i.Title);
+        return IssueStateReader.SelectCanonicalByNumber(rows, projectId, numbers)
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Title);
     }
 
     private static string IssueTitle(IReadOnlyDictionary<int, string> titles, int issueNumber) =>

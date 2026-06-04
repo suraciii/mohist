@@ -103,7 +103,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             _variables = pendingVariables;
             var effectiveDefinition = await LoadEffectiveDefinitionAsync(
                 input?.ProjectId ?? GetProjectId(),
-                input?.IssueKey ?? GetIssueKey());
+                input?.IssueId ?? GetIssueId());
             _run = WorkflowRun.Create(GrainKey, effectiveDefinition,
                 BuildRunMetadata(input));
         }
@@ -118,9 +118,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<WorkflowDefinition> LoadEffectiveDefinitionAsync(
         string? projectId = null,
-        string? issueKey = null)
+        string? issueId = null,
+        string? legacyIssueKey = null)
     {
-        var template = await _profileManager.LoadTemplateAsync(GrainKey, projectId, issueKey);
+        var template = await _profileManager.LoadTemplateAsync(GrainKey, projectId, issueId, legacyIssueKey);
         return template.Structure
             ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no effective workflow template");
     }
@@ -1128,15 +1129,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private string? GetIssueId() => _variables?.String("issue", "id");
 
-    private string? GetIssueKey()
-    {
-        var projectId = GetProjectId();
-        var number = _variables?.String("issue", "number");
-        return string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(number)
-            ? null
-            : $"{projectId}:{number}";
-    }
-
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {
         if (input is null) return null;
@@ -1152,14 +1144,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             annotations["projectId"] = projectId;
         }
 
-        var issueKey = input.IssueKey ?? GetIssueKey();
-        if (!string.IsNullOrWhiteSpace(issueKey))
-        {
-            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            annotations["issueKey"] = issueKey;
-        }
-
-        var issueId = GetIssueId();
+        var issueId = input.IssueId ?? GetIssueId();
         if (!string.IsNullOrWhiteSpace(issueId))
         {
             annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);

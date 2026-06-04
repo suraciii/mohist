@@ -136,11 +136,11 @@ public class IssueGrain : Grain, IIssueGrain
         var projectInfo = await projectGrain.GetAsync();
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
 
-        var issueKey = $"{issue.ProjectId}:{issue.Number}";
+        var legacyIssueKey = $"{issue.ProjectId}:{issue.Number}";
         if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
             await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
 
-        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issueKey);
+        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id, legacyIssueKey);
         var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.DefaultId).Definition;
 
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
@@ -155,7 +155,7 @@ public class IssueGrain : Grain, IIssueGrain
             new WorkflowStartInput(
                 BuildVariables(wrId, issue, projectContext, mergedPrompts),
                 ProjectId: projectContext.Id,
-                IssueKey: issueKey));
+                IssueId: issue.Id));
 
         await SaveIssueAsync();
         await AppendIssueEventAsync("issue_started", "workflow-started", "Issue workflow started", new { workflowRunId = wrId });

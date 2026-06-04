@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Epics;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Issue.WorkflowProfiles;
 using IssueDomain = Mohist.Server.Issue.Domain;
@@ -153,15 +154,9 @@ public class EpicGrain : Grain, IEpicGrain
     {
         if (links.Count == 0) return [];
         var issueNumbers = links.Select(l => l.IssueNumber).Distinct().ToArray();
-        var keys = issueNumbers.Select(n => $"{projectId}:{n}").ToArray();
         var rows = await db.IssueStates.AsNoTracking()
-            .Where(row => keys.Contains(row.Key))
             .ToListAsync();
-        var byNumber = rows
-            .Select(row => IssueSnapshot.DeserializeIssue(row.StateJson))
-            .Where(issue => issue is not null)
-            .Cast<IssueDomain.Issue>()
-            .ToDictionary(i => i.Number);
+        var byNumber = IssueStateReader.SelectCanonicalByNumber(rows, projectId, issueNumbers);
 
         return links
             .OrderBy(l => l.CreatedAt)

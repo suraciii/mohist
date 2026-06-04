@@ -52,7 +52,7 @@ WorkflowGrain 需要 "build" 阶段的 prompt:
 
 LoadPrompt(runId, "build")
   │
-  ├─ 从 WorkflowRun 反查 projectId + issueKey
+  ├─ 从 WorkflowRun 反查 projectId + issueId
   │
   ├─ IssueWorkflowProfileRow.Prompts["build"]   → 命中则返回 (source: issue)
   ├─ ProjectPromptTemplates.Key="build"          → 命中则返回 (source: project)
@@ -84,9 +84,9 @@ ProjectWorkflowProfileManager (已有, 新增 prompt 方法)
   PreviewPromptAsync(projectId, key, vars) → PreviewResult
 
 IssueWorkflowProfileManager (已有, 新增 prompt 方法)
-  GetPromptsAsync(issueKey)              → Dictionary<string, string>
-  SetPromptAsync(issueKey, key, body)
-  DeletePromptAsync(issueKey, key)
+  GetPromptsAsync(issueId)               → Dictionary<string, string>
+  SetPromptAsync(issueId, key, body)
+  DeletePromptAsync(issueId, key)
 ```
 
 ## 数据模型
