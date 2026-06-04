@@ -1,11 +1,19 @@
 import type { ReactNode } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
-import { BotIcon, ClockIcon, FolderTreeIcon, GitBranchIcon, SettingsIcon } from 'lucide-react'
+import {
+  BotIcon,
+  ClockIcon,
+  FileTextIcon,
+  FolderTreeIcon,
+  GitBranchIcon,
+  SettingsIcon,
+} from 'lucide-react'
 import { AiSettingsSection } from './AiSettingsSection'
 import { AgentSettingsSection } from './AgentSettingsSection'
 import { SystemSettingsSection } from './SystemSettingsSection'
 import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 import { RepositoriesSection } from './RepositoriesSection'
+import { TemplatesSection } from './TemplatesSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { useProject } from '../../../entities/project'
 import {
@@ -15,7 +23,7 @@ import {
   TabsTrigger,
 } from '@/shared/ui/components/tabs'
 
-const VALID_SECTIONS = ['ai', 'agent', 'repositories', 'workflows', 'system'] as const
+const VALID_SECTIONS = ['ai', 'agent', 'repositories', 'workflows', 'templates', 'system'] as const
 type Section = (typeof VALID_SECTIONS)[number]
 
 const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
@@ -23,6 +31,7 @@ const SECTION_META: { key: Section; label: string; icon: ReactNode }[] = [
   { key: 'agent', label: 'Runtime', icon: <ClockIcon /> },
   { key: 'repositories', label: 'Repositories', icon: <FolderTreeIcon /> },
   { key: 'workflows', label: 'Workflows', icon: <GitBranchIcon /> },
+  { key: 'templates', label: 'Templates', icon: <FileTextIcon /> },
   { key: 'system', label: 'System', icon: <SettingsIcon /> },
 ]
 
@@ -46,6 +55,8 @@ function SectionContent({ section }: { section: Section }) {
       )
     case 'workflows':
       return <WorkflowProfilesSection />
+    case 'templates':
+      return <TemplatesSection />
     case 'system':
       return <SystemSettingsSection />
   }

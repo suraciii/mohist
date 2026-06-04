@@ -11,6 +11,7 @@ using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Queries;
 using Mohist.Server.Infrastructure.Persistence;
 using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Infrastructure;
 using Mohist.Server.Workflow.Queries;
@@ -118,10 +119,19 @@ public class IssueGrain : Grain, IIssueGrain
         if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
             await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
 
+        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
+        var definition = _profile?.Definition ?? defaultProfile.Definition;
+
+        var mergedPrompts = defaultProfile is MohistDefaultIssueWorkflowProfile mohistDefaultProfile
+            ? await mohistDefaultProfile.GetMergedPromptsAsync(issue.ProjectId)
+            : new Dictionary<string, string>(StringComparer.Ordinal);
+
+        await EnsurePromptsReferencesResolveAsync(definition, mergedPrompts);
+
         var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
         await wfGrain.StartAsync(input:
             new WorkflowStartInput(
-                BuildVariables(wrId, issue, projectContext),
+                BuildVariables(wrId, issue, projectContext, mergedPrompts),
                 ProjectId: projectContext.Id,
                 IssueKey: issueKey));
 
@@ -311,13 +321,8 @@ public class IssueGrain : Grain, IIssueGrain
         return IssueStartEligibility.FromPrerequisites(prerequisites.ToArray());
     }
 
-    private string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project)
+    private string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, IReadOnlyDictionary<string, string> prompts)
     {
-        var profile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
-        var prompts = profile is MohistDefaultIssueWorkflowProfile defaultProfile
-            ? defaultProfile.LoadPrompts()
-            : new Dictionary<string, string>();
-
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {
             ["mohist"] = JsonSerializer.SerializeToElement(new { system = "mohist", runId = workflowRunId }, WorkflowVariableJson.Options),
@@ -330,6 +335,41 @@ public class IssueGrain : Grain, IIssueGrain
         };
 
         return JsonSerializer.Serialize(variables, WorkflowVariableJson.Options);
+    }
+
+    private async Task EnsurePromptsReferencesResolveAsync(Workflow.Domain.Definition.WorkflowDefinition definition, IReadOnlyDictionary<string, string> mergedPrompts)
+    {
+        var referencedKeys = PromptReferenceScanner.Scan(definition);
+        if (referencedKeys.Count == 0) return;
+
+        var missing = new List<string>();
+        foreach (var key in referencedKeys)
+        {
+            var topLevel = key.Split('.', 2)[0];
+            if (!mergedPrompts.ContainsKey(topLevel))
+                missing.Add(key);
+        }
+        if (missing.Count > 0)
+        {
+            var issue = _issue!;
+            await _events.AppendAsync(new EventInput(
+                issue.ProjectId,
+                issue.Number,
+                "issue",
+                "unknown_prompt_key",
+                IssueId: issue.Id,
+                WorkflowRunId: issue.WorkflowRunId,
+                Stage: MohistDefaultWorkflowProjection.IssueStatusName(issue.Status),
+                Status: "failed",
+                Message: "Workflow references unknown prompt template keys",
+                Payload: new
+                {
+                    issueNumber = issue.Number,
+                    missingKeys = missing.ToArray(),
+                    source = "start-work",
+                }));
+            throw new MissingPromptsException(missing);
+        }
     }
 
     private static Dictionary<string, Dictionary<string, string>>? BuildStageVariablesFromDefinition(Workflow.Domain.Definition.WorkflowDefinition definition)

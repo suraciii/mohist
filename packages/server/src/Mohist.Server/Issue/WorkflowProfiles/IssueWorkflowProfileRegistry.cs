@@ -1,12 +1,16 @@
+using Mohist.Server.Workflow.Prompts;
+
 namespace Mohist.Server.Issue.WorkflowProfiles;
 
 public class IssueWorkflowProfileRegistry
 {
     private readonly Dictionary<string, IIssueWorkflowProfile> _profiles;
 
-    public IssueWorkflowProfileRegistry(Workflow.Prompts.IPromptLoader promptLoader)
+    public IssueWorkflowProfileRegistry(
+        Workflow.Prompts.IPromptLoader promptLoader,
+        IProjectTemplateStore templateStore)
     {
-        var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader);
+        var defaults = new MohistDefaultIssueWorkflowProfile(promptLoader, templateStore);
         _profiles = new Dictionary<string, IIssueWorkflowProfile>(StringComparer.OrdinalIgnoreCase)
         {
             [defaults.Id] = defaults,

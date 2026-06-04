@@ -1,3 +1,9 @@
+---
+name: "Create Design"
+description: "Writes the OpenSpec design.md"
+tags: [plan, openspec]
+stage: plan
+---
 <artifact id="design" schema="mohist-default">
 
 <task>

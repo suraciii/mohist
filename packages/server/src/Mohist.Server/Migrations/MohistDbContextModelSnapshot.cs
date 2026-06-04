@@ -321,6 +321,47 @@ namespace Mohist.Server.Migrations
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TagsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("[]");
+
+                    b.Property<string>("Stage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId", "Key");
+
+                    b.HasIndex("ProjectId", "UpdatedAt");
+
+                    b.ToTable("ProjectPromptTemplates");
+                });
+
             modelBuilder.Entity("Mohist.Server.Sessions.Storage.WorkflowAgentSessionEventRow", b =>
                 {
                     b.Property<long>("Id")

@@ -1,3 +1,9 @@
+---
+name: "Auto Fix"
+description: "Fixes review findings within scope"
+tags: [check, review]
+stage: check
+---
 ## Input
 
 Read `${{ openspecChangeDir }}/review.md` directly. It is the authoritative source for what needs to be fixed.

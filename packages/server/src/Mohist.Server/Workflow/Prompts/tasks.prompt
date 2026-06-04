@@ -1,3 +1,9 @@
+---
+name: "Generate Tasks"
+description: "Writes the OpenSpec tasks.json with dependency analysis"
+tags: [plan, openspec]
+stage: plan
+---
 <artifact id="tasks" schema="mohist-default">
 
 <task>

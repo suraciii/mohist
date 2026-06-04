@@ -1,3 +1,9 @@
+---
+name: "AI Code Review"
+description: "5-dimension review of build artifacts"
+tags: [check, review]
+stage: check
+---
 <artifact id="review">
 
 <task>

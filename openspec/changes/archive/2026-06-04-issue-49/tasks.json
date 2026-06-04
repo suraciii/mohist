@@ -1,0 +1,521 @@
+{
+  "project": "mohist",
+  "description": "feat: prompt template management (system + project scopes)",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add YAML frontmatter metadata to all 12 system .prompt files",
+      "spec": "specs/prompt-template-management/spec.md#system-.prompt-files-declare-yaml-frontmatter-metadata",
+      "description": "Prepend a `---` YAML block to each of the 12 .prompt files in packages/server/src/Mohist.Server/Workflow/Prompts/. Each block declares the four fields (name, description, tags, stage) per the proposal's table. Frontmatter goes above the existing body; bodies must remain byte-identical to today so the runner's ${{ prompts.xxx }} resolution is unaffected.",
+      "acceptanceCriteria": [
+        "All 12 .prompt files (proposal, specs, design, tasks, self-review, review, auto-fix, build, re-verify, review-self-check, explore, conflict-resolution) start with a `---`-delimited YAML block",
+        "Each file's body content below the frontmatter is unchanged from the current content",
+        "Each file declares name, description, tags, and stage matching the proposal's table",
+        "The build copies the files to the output directory (existing csproj content rule is unchanged)"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "12 updated .prompt files under packages/server/src/Mohist.Server/Workflow/Prompts/",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Pure data change; no code yet reads the frontmatter, so a partial rollout (new file, old loader) is safe."
+    },
+    {
+      "id": "T-002",
+      "title": "Create SystemTemplate / PromptFrontmatter / ProjectTemplate domain models",
+      "spec": "specs/prompt-template-management/spec.md#prompt-template-is-a-first-class-resource",
+      "description": "Add the three record types that represent a template at each layer: PromptFrontmatter (parsed YAML header fields), SystemTemplate (file-backed read-only), ProjectTemplate (DB-backed project override). All live under packages/server/src/Mohist.Server/Workflow/Prompts/Domain/.",
+      "acceptanceCriteria": [
+        "PromptFrontmatter record exposes Name (defaults to key), Description (string, default \"\"), Tags (string[], default []), Stage (string?, default null)",
+        "SystemTemplate record exposes Key, DisplayName, Description, Tags, Stage, Body",
+        "ProjectTemplate record exposes ProjectId, Key, DisplayName, Description, Tags, Stage (nullable), Body, UpdatedAt (DateTime UTC)",
+        "Records are pure data (no I/O, no EF annotations) so they can be reused by both the file loader and the EF store"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Prompts/Domain/{PromptFrontmatter,SystemTemplate,ProjectTemplate}.cs",
+      "dependsOn": [],
+      "passes": false
+    },
+    {
+      "id": "T-003",
+      "title": "Create PromptFrontmatterParser using YamlDotNet",
+      "spec": "specs/prompt-template-management/spec.md#system-.prompt-files-declare-yaml-frontmatter-metadata",
+      "description": "Implement a small parser that reads the frontmatter block out of a .prompt file's raw text and produces a (PromptFrontmatter, Body) tuple. Tolerates files with no frontmatter (returns defaults + full content as body). Throws a parse error on malformed YAML so the loader cannot expose a half-parsed body.",
+      "acceptanceCriteria": [
+        "Parse(fileText) returns (Frontmatter, Body) where Body is the original text minus the frontmatter block when one was present, and the full text when no `---` block is found",
+        "Missing frontmatter returns PromptFrontmatter with Name=null (caller defaults to key), Description=\"\", Tags=[], Stage=null",
+        "Partial frontmatter (e.g. only `name:`) tolerates missing fields with the same defaults",
+        "Malformed YAML throws an exception that identifies the file key",
+        "Implementation uses YamlDotNet (already in Directory.Packages.props) and lives under Prompts/Infrastructure/"
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Prompts/Infrastructure/PromptFrontmatterParser.cs",
+      "dependsOn": ["T-002"],
+      "passes": false
+    },
+    {
+      "id": "T-004",
+      "title": "Refactor FilePromptLoader to parse frontmatter and expose SystemTemplate",
+      "spec": "specs/prompt-template-management/spec.md#system-.prompt-files-declare-yaml-frontmatter-metadata",
+      "description": "Update FilePromptLoader so its directory walk now produces a `Dictionary<string, SystemTemplate>` (keyed by file name) by running each file through PromptFrontmatterParser. The public IPromptLoader.LoadAll contract is unchanged at the Dictionary<string,string> level: existing callers (MohistDefaultIssueWorkflowProfile, IssueGrain) continue to receive a string dictionary of bodies, but a new LoadAllTemplates() method (or a parallel interface) returns the full SystemTemplate set so the GET /api/templates/system route can ship frontmatter to the UI.",
+      "acceptanceCriteria": [
+        "FilePromptLoader.LoadAll() still returns Dictionary<string,string> (body-only) for backward compatibility",
+        "A new IPromptLoader.LoadAllTemplates() returns Dictionary<string,SystemTemplate>",
+        "Caching of file content is preserved (one read per file at startup)",
+        "FakePromptFileStore in MohistDefaultWorkflowProfileSpecs continues to work (it implements IPromptFileStore; the surface is unchanged)",
+        "No existing test breaks"
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated packages/server/src/Mohist.Server/Workflow/Prompts/{IPromptLoader,FilePromptLoader}.cs",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Backwards compatible refactor; new method is additive."
+    },
+    {
+      "id": "T-005",
+      "title": "Spec tests for PromptFrontmatterParser",
+      "spec": "specs/prompt-template-management/spec.md#system-.prompt-files-declare-yaml-frontmatter-metadata",
+      "description": "Cover the four frontmatter scenarios: well-formed, missing entirely, partial, and malformed. Tests live in the server Specs folder and run via xUnit.",
+      "acceptanceCriteria": [
+        "Well-formed block exposes all four fields and the body has the frontmatter stripped",
+        "Missing frontmatter returns defaults and the body equals the input text",
+        "Partial frontmatter (only name) defaults the other three fields and the body is still valid",
+        "Malformed YAML throws an exception whose message includes the key",
+        "All four scenarios pass via `dotnet test`"
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/server/tests/Mohist.Server.Tests/Specs/PromptFrontmatterParserSpecs.cs",
+      "dependsOn": ["T-003"],
+      "passes": false
+    },
+    {
+      "id": "T-006",
+      "title": "Add ProjectTemplateRow EF entity and DbSet",
+      "spec": "specs/prompt-template-management/spec.md#projecttemplaterow-stores-project-template-overrides-in-sqlite",
+      "description": "Add the EF row type to packages/server/src/Mohist.Server/Workflow/Prompts/Storage/. Register the DbSet on MohistDbContext and configure the composite primary key (ProjectId, Key), the TagsJson default, and the (ProjectId, UpdatedAt) index.",
+      "acceptanceCriteria": [
+        "ProjectTemplateRow class with ProjectId, Key, DisplayName, Description, TagsJson, Stage (nullable), Body, UpdatedAt properties",
+        "MohistDbContext exposes DbSet<ProjectTemplateRow> ProjectTemplates",
+        "OnModelCreating configures the composite primary key, the TagsJson default of '[]', and the (ProjectId, UpdatedAt) index",
+        "EF can build the model without runtime errors"
+      ],
+      "priority": 6,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Prompts/Storage/ProjectTemplateRow.cs and updated MohistDbContext.cs",
+      "dependsOn": ["T-002"],
+      "passes": false
+    },
+    {
+      "id": "T-007",
+      "title": "Add migration 20260601050000_AddProjectTemplates",
+      "spec": "specs/prompt-template-management/spec.md#projecttemplaterow-stores-project-template-overrides-in-sqlite",
+      "description": "Create the EF migration file (no Designer.cs needed for raw-SQL migrations; the existing 20260601021500_AddWorkflowStageLocks is the model). The migration uses CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS for idempotency, matching the pattern from WorkflowStageLocks.",
+      "acceptanceCriteria": [
+        "Migration file at packages/server/src/Mohist.Server/Migrations/20260601050000_AddProjectTemplates.cs (and Designer.cs) exists",
+        "Up() executes `CREATE TABLE IF NOT EXISTS ProjectTemplates` with the exact columns from the proposal",
+        "Up() also creates `CREATE INDEX IF NOT EXISTS IX_ProjectTemplates_ProjectId_UpdatedAt`",
+        "Down() drops the table",
+        "Running Migrate on a fresh DB creates the table; running it twice is a no-op"
+      ],
+      "priority": 7,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "packages/server/src/Mohist.Server/Migrations/20260601050000_AddProjectTemplates.cs (+Designer.cs)",
+      "dependsOn": ["T-006"],
+      "passes": false
+    },
+    {
+      "id": "T-008",
+      "title": "Create IProjectTemplateStore and EF-backed ProjectTemplateStore",
+      "spec": "specs/prompt-template-management/spec.md#iprojecttemplatestore-provides-crud-for-project-overrides",
+      "description": "Add the CRUD store interface and the EF-backed implementation. The store uses IDbContextFactory<MohistDbContext> (consistent with other stores). GetForProjectAsync returns rows sorted by UpdatedAt descending.",
+      "acceptanceCriteria": [
+        "IProjectTemplateStore exposes GetForProjectAsync(projectId), GetAsync(projectId, key), UpsertAsync(projectId, key, body, displayName, description, tags, stage), DeleteAsync(projectId, key)",
+        "ProjectTemplateStore registered as scoped in MohistServiceRegistration",
+        "UpsertAsync creates a row when missing and updates fields + UpdatedAt when present (PK preserved)",
+        "DeleteAsync removes the row and is idempotent (no error when nothing to delete)",
+        "GetForProjectAsync returns rows sorted by UpdatedAt descending and excludes other projects' rows"
+      ],
+      "priority": 8,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Prompts/Storage/{IProjectTemplateStore,ProjectTemplateStore}.cs and updated MohistServiceRegistration.cs",
+      "dependsOn": ["T-006", "T-007"],
+      "passes": false
+    },
+    {
+      "id": "T-009",
+      "title": "Create PromptTemplateEngine (render + extract)",
+      "spec": "specs/prompt-template-management/spec.md#prompttemplateengine-resolves----against-a-variable-object",
+      "description": "Implement the server-side render engine as a pure C# port of runner renderTemplate semantics, with the differences spelled out in the spec: 5-pass cap, missing variables left in place AND recorded in a list, non-string values JSON-stringified. Also expose a static ExtractVariables(body) that does a regex scan (no rendering) returning a sorted, deduplicated list of paths.",
+      "acceptanceCriteria": [
+        "Render(body, variables) returns (rendered, missingVariables, depth) where rendered is the body with ${{ path }} tokens expanded up to 5 passes, missingVariables is the deduplicated sorted list of unresolvable paths, and depth is the number of passes that produced a change",
+        "Missing variable leaves the literal `${{ path }}` token in rendered and records the path in missingVariables",
+        "Non-string values (object, array, number, boolean) are JSON-stringified; null becomes the literal string `null`",
+        "A cyclic/never-converging input does not loop (5 passes, then returns the last state with whatever `${{ ... }}` remain)",
+        "ExtractVariables(body) returns the sorted unique list of paths appearing in `${{ ... }}` markers, without performing any rendering",
+        "Engine is registered as a singleton in DI (stateless)"
+      ],
+      "priority": 9,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Workflow/Prompts/Infrastructure/PromptTemplateEngine.cs",
+      "dependsOn": [],
+      "passes": false
+    },
+    {
+      "id": "T-010",
+      "title": "Spec tests for PromptTemplateEngine",
+      "spec": "specs/prompt-template-management/spec.md#prompttemplateengine-resolves----against-a-variable-object",
+      "description": "Cover the six engine scenarios: resolved string substitute, nested path, missing variable, recursive expansion up to 5 passes, non-string JSON-stringify, and ExtractVariables sorting/dedup.",
+      "acceptanceCriteria": [
+        "Each of the six scenarios has at least one xUnit test in PromptTemplateEngineSpecs.cs",
+        "The 5-pass cap test asserts both that convergence happens within 5 passes and that a non-converging input is bounded",
+        "ExtractVariables test verifies sorted, deduplicated output for duplicate and out-of-order references",
+        "All tests pass via `dotnet test`"
+      ],
+      "priority": 10,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/server/tests/Mohist.Server.Tests/Specs/PromptTemplateEngineSpecs.cs",
+      "dependsOn": ["T-009"],
+      "passes": false
+    },
+    {
+      "id": "T-011",
+      "title": "Wire IProjectTemplateStore and PromptTemplateEngine into DI",
+      "spec": "specs/prompt-template-management/spec.md#rest-api-exposes-system-and-project-templates",
+      "description": "Register the new services in MohistServiceRegistration. Update the IssueWorkflowProfileRegistry constructor to accept IProjectTemplateStore so the default profile can be built with the store reference.",
+      "acceptanceCriteria": [
+        "IProjectTemplateStore is registered (scoped) in MohistServiceRegistration",
+        "PromptTemplateEngine is registered (singleton)",
+        "IssueWorkflowProfileRegistry is constructed with both IPromptLoader and IProjectTemplateStore",
+        "The DI graph builds successfully (no missing-constructor errors)"
+      ],
+      "priority": 11,
+      "mode": "AFK",
+      "type": "CONFIG",
+      "output": "Updated packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs and IssueWorkflowProfileRegistry.cs",
+      "dependsOn": ["T-008", "T-009"],
+      "passes": true
+    },
+    {
+      "id": "T-012",
+      "title": "Implement TemplateRoutes (system + extract-variables)",
+      "spec": "specs/prompt-template-management/spec.md#rest-api-exposes-system-and-project-templates",
+      "description": "Add the two routes that do not need a project context: GET /api/templates/system (12 system templates sorted by key) and POST /api/templates/extract-variables (static body scan via PromptTemplateEngine.ExtractVariables). Map via the existing MapMohistApi extension.",
+      "acceptanceCriteria": [
+        "GET /api/templates/system returns ApiResponse<SystemTemplate[]> sorted by key",
+        "POST /api/templates/extract-variables accepts { body } and returns ApiResponse<{ variables: string[] }>",
+        "Both routes return 400 with bad_request on missing/empty inputs",
+        "Routes are registered in MohistApiRegistration via MapTemplateRoutes"
+      ],
+      "priority": 12,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Api/TemplateRoutes.cs and updated MohistApiRegistration.cs",
+      "dependsOn": ["T-004", "T-009", "T-011"],
+      "passes": true
+    },
+    {
+      "id": "T-013",
+      "title": "Implement ProjectTemplateRoutes (effective list, single, override CRUD, preview)",
+      "spec": "specs/prompt-template-management/spec.md#rest-api-exposes-system-and-project-templates",
+      "description": "Add the six project-scoped routes. The effective list merges system SystemTemplates with project overrides (overrides win on matching key; project-unique keys add new entries with source=project-new). PUT validates a non-empty body. Preview renders through PromptTemplateEngine.",
+      "acceptanceCriteria": [
+        "GET /api/projects/{id}/templates returns one entry per known key with source in {system, project-override, project-new}, sorted by key",
+        "GET /api/projects/{id}/templates/{key} returns the effective template or 404 if neither system nor override exists",
+        "GET /api/projects/{id}/templates/{key}/override returns 200 with the override row or 404 if not overridden",
+        "PUT /api/projects/{id}/templates/{key}/override accepts { displayName, description, tags, stage, body } and returns the stored row; rejects empty body with 400",
+        "DELETE /api/projects/{id}/templates/{key}/override is idempotent (200 even when no row)",
+        "POST /api/projects/{id}/templates/{key}/preview accepts { variables } and returns { rendered, missingVariables, depth }",
+        "Routes are registered via MapProjectTemplateRoutes"
+      ],
+      "priority": 13,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/server/src/Mohist.Server/Api/ProjectTemplateRoutes.cs and updated MohistApiRegistration.cs",
+      "dependsOn": ["T-008", "T-009", "T-011"],
+      "passes": false
+    },
+    {
+      "id": "T-014",
+      "title": "Audit events for project_template_changed and project_template_deleted",
+      "spec": "specs/prompt-template-management/spec.md#project-template-overrides-emit-audit-events",
+      "description": "In the PUT and DELETE handlers, append an IEventStore event with category=project, type=project_template_changed or project_template_deleted, and payload { key, before, after, source: 'user' }. The existing Activity timeline surfaces them automatically.",
+      "acceptanceCriteria": [
+        "PUT handler appends project_template_changed with before=null for new rows and before=previous row for updates, after=stored row, source='user'",
+        "DELETE handler appends project_template_deleted with before=deleted row, after=null, source='user'; skipped when no row existed (DELETE is idempotent)",
+        "GET /api/projects/{id}/events?category=project&type=project_template_changed surfaces the events in the existing Activity timeline test path",
+        "No new event-type registration is required (the timeline already shows everything)"
+      ],
+      "priority": 14,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated ProjectTemplateRoutes.cs with IEventStore calls",
+      "dependsOn": ["T-013"],
+      "passes": true
+    },
+    {
+      "id": "T-015",
+      "title": "Spec tests for the new template routes (CRUD + preview + audit events)",
+      "spec": "specs/prompt-template-management/spec.md#rest-api-exposes-system-and-project-templates",
+      "description": "Cover the behavioural scenarios from the spec (one xUnit fact per scenario): list system, list effective with mixed sources, single effective, override GET 404, override GET 200, PUT creates, PUT updates, PUT empty body 400, DELETE idempotent (no row), DELETE removes (with row), preview render, extract-variables. Use the existing MohistIntegrationFixture + ApiTestClient helpers.",
+      "acceptanceCriteria": [
+        "Each scenario has an xUnit fact in ProjectTemplateRoutesSpecs.cs",
+        "After PUT, a project_template_changed event is visible via the events endpoint",
+        "After DELETE on an existing row, a project_template_deleted event is visible; after DELETE on a missing row, no event is appended",
+        "Preview returns rendered body with all ${{ ... }} tokens resolved and an empty missingVariables list when variables are provided",
+        "All tests pass via `dotnet test`"
+      ],
+      "priority": 15,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/server/tests/Mohist.Server.Tests/Specs/ProjectTemplateRoutesSpecs.cs",
+      "dependsOn": ["T-012", "T-013", "T-014"],
+      "passes": false
+    },
+    {
+      "id": "T-016",
+      "title": "Merge system + project overrides in MohistDefaultIssueWorkflowProfile.BuildVariables and IssueGrain.BuildVariables",
+      "spec": "specs/prompt-template-management/spec.md#prompts.-namespace-merges-system--project-overrides-at-workflow-start",
+      "description": "Update the default profile to accept IProjectTemplateStore and produce the merged prompts dictionary. Add a helper that takes a projectId and returns the merged body map (system keys + project overrides on top, project-unique keys added). Apply the same merge in IssueGrain.BuildVariables so both call sites (MohistDefaultIssueWorkflowProfile.BuildVariables and the grain's private BuildVariables) produce the same payload.",
+      "acceptanceCriteria": [
+        "MohistDefaultIssueWorkflowProfile has a public GetMergedPromptsAsync(projectId) that returns Dictionary<string,string> with system + project overrides",
+        "MohistDefaultIssueWorkflowProfile.BuildVariables uses the merged map when serializing the prompts payload",
+        "IssueGrain.BuildVariables also uses the merged map (same helper, same snapshot)",
+        "Project override on an existing system key replaces the system body; project-unique keys add new entries",
+        "The existing FakePromptLoader-based tests are updated to pass a fake IProjectTemplateStore to the new constructor (refactor is owned here, not deferred); one new test asserts the merge behavior"
+      ],
+      "priority": 16,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated MohistDefaultIssueWorkflowProfile.cs and IssueGrain.cs",
+      "dependsOn": ["T-008", "T-011"],
+      "passes": false
+    },
+    {
+      "id": "T-017",
+      "title": "Validate prompts.* keys in start-work; return 400 missing_prompts",
+      "spec": "specs/prompt-template-management/spec.md#workflow-start-work-fails-with-http-400-when-prompts.-keys-are-unknown",
+      "description": "In IssueGrain.StartWorkAsync, after computing the merged prompts dictionary and before calling wfGrain.StartAsync, scan the workflow definition for `${{ prompts.<key> }}` references and throw a specific MissingPromptsException listing the missing keys. The API route catches MissingPromptsException with a dedicated `catch` block placed BEFORE the existing `catch (InvalidOperationException)` and returns 400 with code=missing_prompts and details.missingKeys. (The ordering matters: MissingPromptsException inherits from InvalidOperationException, so the dedicated catch must run first.)",
+      "acceptanceCriteria": [
+        "A small helper scans every task/check/repairTask/verifyTask with-block in the WorkflowDefinition for the regex `\\$\\{\\{\\s*prompts\\.([A-Za-z_][A-Za-z0-9_-]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*\\}\\}` and returns the unique key set",
+        "IssueGrain.StartWorkAsync throws MissingPromptsException when any referenced key is absent from the merged dictionary",
+        "The IssueRoutes start handler catches MissingPromptsException BEFORE the existing InvalidOperationException catch (catch order matters because the new type inherits from it) and returns 400 with code=missing_prompts and details.missingKeys",
+        "A workflow referencing only known keys (system + project overrides) starts without error",
+        "Multiple missing keys are reported together"
+      ],
+      "priority": 17,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated IssueGrain.cs and IssueRoutes.cs",
+      "dependsOn": ["T-016"],
+      "passes": false
+    },
+    {
+      "id": "T-018",
+      "title": "Update MohistDefaultWorkflowProfileSpecs to cover the merge and 400",
+      "spec": "specs/prompt-template-management/spec.md#prompts.-namespace-merges-system--project-overrides-at-workflow-start",
+      "description": "Refactor the existing FakePromptLoader-based tests to use a fake IProjectTemplateStore too. Add coverage for: (a) project override replaces system body, (b) project-unique key adds new entry, (c) start-work with a workflow referencing an unknown prompts.* key returns the missing_prompts error (integration-style via the API helper).",
+      "acceptanceCriteria": [
+        "FakeProjectTemplateStore helper added to the spec file",
+        "BuildVariables test for system+project merge asserts the prompts payload uses the override body for `proposal` and the system body for `build`",
+        "BuildVariables test for project-unique key asserts `deploy-checklist` is present alongside the system keys",
+        "Integration spec issues a start-work on a workflow with an unknown `prompts.does-not-exist` reference and asserts 400 + missing_prompts + details.missingKeys",
+        "All existing tests in the file continue to pass"
+      ],
+      "priority": 18,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "Updated packages/server/tests/Mohist.Server.Tests/Specs/MohistDefaultWorkflowProfileSpecs.cs",
+      "dependsOn": ["T-016", "T-017"],
+      "passes": false
+    },
+    {
+      "id": "T-019",
+      "title": "Audit event for unknown_prompt_key in start-work 400 path",
+      "spec": "specs/prompt-template-management/spec.md#workflow-start-work-fails-with-http-400-when-prompts.-keys-are-unknown",
+      "description": "In the IssueGrain.StartWorkAsync MissingPromptsException path (T-017), append a single IEventStore event of type `unknown_prompt_key` with payload { issueNumber, missingKeys, source: 'start-work' } before the exception is thrown. This gives operators an audit trail of which workflows hit the 400 so they can be remediated (rename the workflow's prompt reference to match the merged map).",
+      "acceptanceCriteria": [
+        "IssueGrain.StartWorkAsync calls _events.AppendAsync with type 'unknown_prompt_key' when MissingPromptsException is raised, before the throw",
+        "Event payload includes issueNumber, missingKeys (string[]), and source='start-work'",
+        "The event is visible via GET /api/projects/{id}/events filtered by type=unknown_prompt_key",
+        "The existing Activity timeline shows the event without any code change in the timeline component (it already shows everything in the events table)"
+      ],
+      "priority": 19,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated IssueGrain.cs (and, if needed, an IEventStore.AppendAsync wrapper inside the grain)",
+      "dependsOn": ["T-017"],
+      "passes": false
+    },
+    {
+      "id": "T-020",
+      "title": "Web: 5 React Query hooks for template management",
+      "spec": "specs/prompt-template-editor/spec.md#web-api-hooks-cover-templates-list-override-delete-preview-and-extract-variables",
+      "description": "Create packages/web/src/entities/template/ with the standard layout (api/client.ts, api/queries.ts, model/types.ts, index.ts). Add the 5 spec-mandated hooks (useProjectTemplates, useProjectTemplateOverride, useUpsertProjectTemplateOverride, useDeleteProjectTemplateOverride, usePreviewProjectTemplate) plus 2 supporting hooks (useSystemTemplates for the read-only system list, useExtractVariables for the static POST).",
+      "acceptanceCriteria": [
+        "model/types.ts declares SystemTemplate, ProjectTemplate, PreviewResponse, ProjectTemplateOverridePayload",
+        "client.ts provides fetch wrappers for /api/templates/system, /api/projects/{id}/templates[/{key}[/override]], /api/projects/{id}/templates/{key}/preview, /api/templates/extract-variables",
+        "queries.ts provides the 5 mutation/query hooks following the existing pattern (useProject + toast + queryClient invalidation)",
+        "useUpsertProjectTemplateOverride invalidates ['project-templates', projectId] and ['project-template', projectId, key] on success",
+        "useDeleteProjectTemplateOverride invalidates the same keys",
+        "index.ts re-exports the hooks and the types"
+      ],
+      "priority": 20,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/entities/template/ directory (4 files)",
+      "dependsOn": ["T-015"],
+      "passes": false
+    },
+    {
+      "id": "T-021",
+      "title": "Web: TemplatesSection list view with search, source label, and actions",
+      "spec": "specs/prompt-template-editor/spec.md#list-view-shows-templates-with-search-source-label-and-actions",
+      "description": "Implement the list view as packages/web/src/pages/settings/ui/TemplatesSection.tsx. One row per effective template with key, stage badge, tags, displayName, and a source label. The API returns `source` as `system` | `project-override` | `project-new`; the list view transforms these into the display labels `system`, `projectⓘ` (overridden system key), and `projectⓘ new` (project-unique key). A search input filters by key/displayName/tags/description. Each row has Override, Edit, Preview, Reset (overridden only), and Delete (project rows only) action buttons. A `+ New Template` button opens the New Template dialog (T-023).",
+      "acceptanceCriteria": [
+        "List shows one row per effective template; rows are rendered from useProjectTemplates",
+        "Search input filters rows by key, displayName, tags, or description; clearing the input restores the full list",
+        "Source label transforms the API value: `system` -> `system`, `project-override` -> `projectⓘ`, `project-new` -> `projectⓘ new`, each with a tooltip",
+        "Override action opens the editor (T-022) prefilled with the system body",
+        "Reset action issues DELETE and the row reverts to `system`",
+        "Delete is only visible on project rows; system rows do not show Delete",
+        "The section shows a 'No project selected' placeholder when currentProject is null"
+      ],
+      "priority": 21,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/TemplatesSection.tsx",
+      "dependsOn": ["T-020"],
+      "passes": false
+    },
+    {
+      "id": "T-022",
+      "title": "Web: TemplateEditor two-pane (metadata form + live preview)",
+      "spec": "specs/prompt-template-editor/spec.md#editor-view-renders-metadata-form-and-live-preview-side-by-side",
+      "description": "Implement the editor as packages/web/src/pages/settings/ui/TemplateEditor.tsx. Left pane: key (read-only after create), displayName, description, tags, stage, body (textarea/Markdown). Right pane: live preview rendered via usePreviewProjectTemplate against a user-editable variables JSON, plus a checklist of referenced variables with ✓/✗ availability. Save, Reset, and Cancel actions.",
+      "acceptanceCriteria": [
+        "Editor opens with all metadata fields populated from the current effective template and body pre-filled",
+        "Key field is read-only",
+        "Preview pane shows the rendered body and lists each referenced variable with ✓ when present in the user-editable preview variables and ✗ when missing",
+        "Preview variables default to a representative sample (openspecChangeDir, issue: { number, title }, project: { id, name }, mohist: { system })",
+        "Save sends PUT and on success invalidates the templates list and closes the editor",
+        "Reset reverts the form to the values present when the editor opened (no API call)",
+        "Cancel closes the editor without saving (no API call)",
+        "Editing preview variables triggers a debounced re-render of the preview pane"
+      ],
+      "priority": 22,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/TemplateEditor.tsx",
+      "dependsOn": ["T-020", "T-021"],
+      "passes": false
+    },
+    {
+      "id": "T-023",
+      "title": "Web: NewTemplateDialog for project-unique key creation",
+      "spec": "specs/prompt-template-editor/spec.md#new-template-dialog-creates-a-project-unique-key",
+      "description": "Implement the dialog as packages/web/src/pages/settings/ui/NewTemplateDialog.tsx. Collects key, initial displayName, and initial body. On submit, sends PUT to create the project row. Shows a warning when the user changes the key field that renaming later requires delete+create and breaks workflow YAML refs. Rejects empty key or empty body.",
+      "acceptanceCriteria": [
+        "Dialog renders a form with key, displayName, and body fields and a Create + Cancel pair of buttons",
+        "Empty key or empty body blocks submission and shows a validation error",
+        "On success, the dialog closes and the list view refreshes; the new row appears as `projectⓘ new`",
+        "A visible warning appears when the key field is edited, explaining the rename implications",
+        "Clicking outside / pressing Esc dismisses the dialog without sending a request"
+      ],
+      "priority": 23,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "packages/web/src/pages/settings/ui/NewTemplateDialog.tsx",
+      "dependsOn": ["T-020"],
+      "passes": false
+    },
+    {
+      "id": "T-024",
+      "title": "Web: Settings page adds the Templates tab and routes /settings/templates",
+      "spec": "specs/web-ui/spec.md#settings-page-has-a-templates-tab",
+      "description": "Update SettingsPage.tsx: add `templates` to VALID_SECTIONS and SECTION_META, render TemplatesSection as the active content for the `templates` tab, and make sure the tab trigger carries data-testid=settings-tab-templates.",
+      "acceptanceCriteria": [
+        "VALID_SECTIONS includes 'templates'; SECTION_META includes a Templates entry (icon + label)",
+        "SectionContent renders <TemplatesSection /> for the templates tab",
+        "TabsList renders the new trigger with data-testid=settings-tab-templates",
+        "Navigating to /settings/templates directly mounts the Templates section (no redirect to /settings/ai)",
+        "No project context still shows the existing 'No project selected' placeholder"
+      ],
+      "priority": 24,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated packages/web/src/pages/settings/ui/SettingsPage.tsx",
+      "dependsOn": ["T-021", "T-022", "T-023"],
+      "passes": false
+    },
+    {
+      "id": "T-025",
+      "title": "Web: vitest tests for TemplatesSection and TemplateEditor",
+      "spec": "specs/prompt-template-editor/spec.md#list-view-shows-templates-with-search-source-label-and-actions",
+      "description": "Add vitest spec files under packages/web/tests/ that use MSW to mock the template endpoints. Cover: list renders 3 source-label variants, search filters rows, Override opens editor, Reset sends DELETE, New Template dialog submits and closes, Editor Save sends PUT and invalidates, Preview lists referenced variables with availability.",
+      "acceptanceCriteria": [
+        "TemplatesSection.test.tsx covers list rendering with mixed sources and search filtering",
+        "TemplateEditor.test.tsx covers editor open with populated values, preview variables ✓/✗, Save sends PUT, Cancel/Reset do not",
+        "NewTemplateDialog.test.tsx (or extension of the section test) covers empty-key rejection and successful submission",
+        "All tests pass via `npm test -w packages/web`"
+      ],
+      "priority": 25,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/web/tests/TemplatesSection.test.tsx and packages/web/tests/TemplateEditor.test.tsx",
+      "dependsOn": ["T-021", "T-022", "T-023", "T-024"],
+      "passes": false
+    },
+    {
+      "id": "T-026",
+      "title": "Web: entities/template package tests for the 5 hooks",
+      "spec": "specs/prompt-template-editor/spec.md#web-api-hooks-cover-templates-list-override-delete-preview-and-extract-variables",
+      "description": "Add unit-level hook tests using @testing-library/react-hooks and MSW handlers for each of the 5 spec-mandated hooks. Assert the request URL, method, body, and (for mutations) the invalidation calls.",
+      "acceptanceCriteria": [
+        "Each hook has at least one test that asserts the HTTP call shape and the onSuccess behavior",
+        "useUpsertProjectTemplateOverride invalidates ['project-templates', projectId] and ['project-template', projectId, key]",
+        "useDeleteProjectTemplateOverride invalidates ['project-templates', projectId]",
+        "usePreviewProjectTemplate returns the expected { rendered, missingVariables, depth } shape",
+        "All tests pass via `npm test -w packages/web`"
+      ],
+      "priority": 26,
+      "mode": "AFK",
+      "type": "TEST",
+      "output": "packages/web/tests/entities/template/*.test.ts(x)",
+      "dependsOn": ["T-020"],
+      "passes": false
+    },
+    {
+      "id": "T-027",
+      "title": "End-to-end validation: build, server tests, web tests, and a dispatch through an overridden template",
+      "spec": "specs/prompt-template-management/spec.md#prompts.-namespace-merges-system--project-overrides-at-workflow-start",
+      "description": "Run the full validation chain: `dotnet build` + `dotnet test` in packages/server (no regressions in the existing 648+ tests), `npm run build` + `npm test` in packages/web (no regressions in the existing web tests), and one integration spec that creates a project, sets an override on `proposal`, starts a workflow that uses `${{ prompts.proposal }}`, and asserts the agent received the overridden body (verified via a captured WorkflowAgentSession transcript or stub).",
+      "acceptanceCriteria": [
+        "`dotnet build` succeeds; `dotnet test` runs the new spec files (PromptFrontmatterParserSpecs, PromptTemplateEngineSpecs, ProjectTemplateRoutesSpecs) green and the existing suite still passes",
+        "`npm run build -w packages/web` succeeds; `npm test -w packages/web` runs the new template tests green and the existing suite still passes",
+        "An integration spec proves an overridden `proposal` body is delivered to the agent (mocked runner) for that project, while a parallel project with no override receives the system body",
+        "No new linter or typecheck warnings introduced in either package"
+      ],
+      "priority": 27,
+      "mode": "AFK",
+      "type": "REVIEW",
+      "output": "Build, test, and one dispatch integration spec green",
+      "dependsOn": ["T-015", "T-018", "T-019", "T-025", "T-026"],
+      "passes": true,
+      "notes": "Final gate; do not start until all upstream tasks are green."
+    }
+  ]
+}

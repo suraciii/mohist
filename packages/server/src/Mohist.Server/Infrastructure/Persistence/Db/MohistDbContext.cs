@@ -8,6 +8,7 @@ using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Sessions.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db.Entities;
+using Mohist.Server.Workflow.Prompts.Storage;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Infrastructure.Persistence.Db;
@@ -16,7 +17,7 @@ public class MohistDbContext : DbContext
 {
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfileRow> ProjectWorkflowProfiles { get; set; } = null!;
-    public DbSet<ProjectTemplateRow> ProjectTemplates { get; set; } = null!;
+    public DbSet<Mohist.Server.Workflow.Storage.ProjectTemplateRow> ProjectTemplates { get; set; } = null!;
     public DbSet<ConfigRow> Configs { get; set; } = null!;
     public DbSet<WorkflowEventRow> WorkflowEvents { get; set; } = null!;
     public DbSet<WorkflowAgentSessionRow> WorkflowAgentSessions { get; set; } = null!;
@@ -34,6 +35,7 @@ public class MohistDbContext : DbContext
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
+    public DbSet<Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow> ProjectPromptTemplates { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -224,7 +226,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.VariablesJson).IsRequired();
         });
 
-        modelBuilder.Entity<ProjectTemplateRow>(entity =>
+        modelBuilder.Entity<Mohist.Server.Workflow.Storage.ProjectTemplateRow>(entity =>
         {
             entity.ToTable("ProjectTemplates");
             entity.HasKey(e => new { e.ProjectId, e.TemplateId });
@@ -243,5 +245,17 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.VariablesJson).IsRequired();
         });
 
+        modelBuilder.Entity<Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow>(entity =>
+        {
+            entity.ToTable("ProjectPromptTemplates");
+            entity.HasKey(e => new { e.ProjectId, e.Key });
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Key).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.Description).IsRequired();
+            entity.Property(e => e.TagsJson).IsRequired().HasDefaultValue("[]");
+            entity.Property(e => e.Body).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt });
+        });
     }
 }

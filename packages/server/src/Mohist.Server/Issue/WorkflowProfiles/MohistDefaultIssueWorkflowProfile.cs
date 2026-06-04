@@ -4,6 +4,7 @@ using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Prompts;
 using Mohist.Server.Workflow.Views;
 
 namespace Mohist.Server.Issue.WorkflowProfiles;
@@ -11,10 +12,14 @@ namespace Mohist.Server.Issue.WorkflowProfiles;
 public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
 {
     private readonly Workflow.Prompts.IPromptLoader _promptLoader;
+    private readonly IProjectTemplateStore _templateStore;
 
-    public MohistDefaultIssueWorkflowProfile(Workflow.Prompts.IPromptLoader promptLoader)
+    public MohistDefaultIssueWorkflowProfile(
+        Workflow.Prompts.IPromptLoader promptLoader,
+        IProjectTemplateStore templateStore)
     {
         _promptLoader = promptLoader;
+        _templateStore = templateStore;
     }
 
     public string Id => IssueWorkflowProfiles.DefaultId;
@@ -25,10 +30,21 @@ public class MohistDefaultIssueWorkflowProfile : IIssueWorkflowProfile
 
     public Dictionary<string, string> LoadPrompts() => _promptLoader.LoadAll();
 
+    public async Task<Dictionary<string, string>> GetMergedPromptsAsync(string projectId)
+    {
+        var merged = new Dictionary<string, string>(_promptLoader.LoadAll(), StringComparer.Ordinal);
+        var projectOverrides = await _templateStore.GetForProjectAsync(projectId).ConfigureAwait(false);
+        foreach (var t in projectOverrides)
+        {
+            merged[t.Key] = t.Body;
+        }
+        return merged;
+    }
+
     public string BuildVariables(string workflowRunId, Domain.Issue issue, WorkflowProjectContext project, Dictionary<string, object?>? globalAgentConfig = null)
     {
         var agentConfig = BuildAgentConfig(globalAgentConfig);
-        var prompts = _promptLoader.LoadAll();
+        var prompts = GetMergedPromptsAsync(issue.ProjectId).GetAwaiter().GetResult();
 
         var variables = new Dictionary<string, JsonElement?>(StringComparer.Ordinal)
         {

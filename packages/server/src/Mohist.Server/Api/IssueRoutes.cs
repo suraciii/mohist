@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Queries;
 using Mohist.Server.Issue.Storage;
@@ -231,6 +232,10 @@ public static class IssueRoutes
 
                 await grain.StartWorkAsync();
                 return ApiResults.Ok();
+            }
+            catch (MissingPromptsException ex)
+            {
+                return ApiResults.Fail(ex.Message, 400, "missing_prompts", new { missingKeys = ex.MissingKeys });
             }
             catch (InvalidOperationException ex)
             {
