@@ -59,7 +59,7 @@ public sealed class FilePromptLoader : IPromptLoader
         var assemblyDir = Path.GetDirectoryName(assemblyLocation);
         if (assemblyDir is not null)
         {
-            var promptsDir = Path.Combine(assemblyDir, "Workflow", "Prompts");
+            var promptsDir = Path.Combine(assemblyDir, "Workflow", "Prompts", "builtins");
             if (Directory.Exists(promptsDir))
                 return promptsDir;
 
@@ -67,11 +67,11 @@ public sealed class FilePromptLoader : IPromptLoader
             var current = assemblyDir;
             for (var i = 0; i < 5; i++)
             {
-                var candidate = Path.Combine(current, "Workflow", "Prompts");
+                var candidate = Path.Combine(current, "Workflow", "Prompts", "builtins");
                 if (Directory.Exists(candidate))
                     return candidate;
 
-                var srcCandidate = Path.Combine(current, "src", "Mohist.Server", "Workflow", "Prompts");
+                var srcCandidate = Path.Combine(current, "src", "Mohist.Server", "Workflow", "Prompts", "builtins");
                 if (Directory.Exists(srcCandidate))
                     return srcCandidate;
 
@@ -83,7 +83,7 @@ public sealed class FilePromptLoader : IPromptLoader
 
         // Fallback: use the known source location
         var baseDir = AppContext.BaseDirectory;
-        var fallback = Path.Combine(baseDir, "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Prompts");
+        var fallback = Path.Combine(baseDir, "..", "..", "..", "..", "src", "Mohist.Server", "Workflow", "Prompts", "builtins");
         return Path.GetFullPath(fallback);
     }
 }
