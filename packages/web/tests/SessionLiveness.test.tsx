@@ -242,8 +242,8 @@ describe('SessionHeader observability rendering', () => {
   })
 })
 
-describe('coder_session_status_changed SSE event handling', () => {
-  it('updates session status from running to probing via SSE event', async () => {
+describe('coder_session_status_changed live event handling', () => {
+  it('updates session status from running to probing via live event', async () => {
     const initialSession = makeSession({ id: 'session-1', status: 'running' })
     apiMocks.sessions = [initialSession]
 
@@ -275,7 +275,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     })
   })
 
-  it('updates session status from probing back to running via SSE event', async () => {
+  it('updates session status from probing back to running via live event', async () => {
     const initialSession = makeSession({ id: 'session-1', status: 'probing', probeSentAt: '2024-01-01T10:05:00.000Z' })
     apiMocks.sessions = [initialSession]
 
@@ -302,7 +302,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     })
   })
 
-  it('updates session status to failed with failureReason via SSE event', async () => {
+  it('updates session status to failed with failureReason via live event', async () => {
     const initialSession = makeSession({ id: 'session-1', status: 'probing' })
     apiMocks.sessions = [initialSession]
 
@@ -330,7 +330,7 @@ describe('coder_session_status_changed SSE event handling', () => {
     })
   })
 
-  it('ignores SSE event for unknown session ID', async () => {
+  it('ignores live event for unknown session ID', async () => {
     const initialSession = makeSession({ id: 'session-1', status: 'running' })
     apiMocks.sessions = [initialSession]
 

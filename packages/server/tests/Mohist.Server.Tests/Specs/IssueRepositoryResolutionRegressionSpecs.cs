@@ -44,100 +44,6 @@ public class IssueRepositoryResolutionRegressionSpecs
     }
 
     [Fact]
-    public async Task LegacySnapshot_EmbeddedIsDefaultField_DoesNotOverrideProjectDefault()
-    {
-        // Given a project whose only repository is NOT the default.
-        var projectId = await CreateProjectWithDefaultAndSecondaryRepositoryAsync(
-            defaultRepoPath: "/proj/main-current",
-            defaultBaseBranch: "release",
-            secondaryRepoPath: "/proj/secondary",
-            secondaryBaseBranch: "develop");
-        await _grains.GetGrain<IProjectGrain>(projectId).SetDefaultRepositoryAsync("main");
-        await _grains.GetGrain<IProjectGrain>(projectId).SetDefaultRepositoryAsync("secondary");
-
-        // When an issue is stored as a legacy snapshot that claims the main repository
-        // is the default — even though the project configuration marks secondary as default.
-        const string legacyJson = """
-            {
-              "Id": "issue_legacy_default",
-              "ProjectId": "__placeholder__",
-              "Number": 1,
-              "Title": "Legacy default flag",
-              "Body": "claims default on main",
-              "Labels": [],
-              "Priority": "p2",
-              "CreatedAt": "2024-01-01T00:00:00Z",
-              "UpdatedAt": "2024-01-01T00:00:00Z",
-              "Status": 0,
-              "PrerequisiteNumbers": [],
-              "Repository": {
-                "Name": "main",
-                "Path": "/stale/legacy-path",
-                "Remote": "git@stale.example:repo.git",
-                "BaseBranch": "ancient-branch",
-                "IsDefault": true
-              }
-            }
-            """;
-        var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        await SeedIssueAsync(projectId, 1, legacy);
-
-        // Then resolving the issue against the current project ignores the legacy
-        // IsDefault field and reports the project's actual default marker.
-        var info = await GetIssueInfoAsync(projectId, 1);
-        Assert.NotNull(info);
-        Assert.NotNull(info!.Repository);
-        Assert.Equal("main", info.Repository!.Name);
-        Assert.Equal("/proj/main-current", info.Repository.Path);
-        Assert.Equal("release", info.Repository.BaseBranch);
-        Assert.False(
-            info.Repository.IsDefault,
-            "Legacy snapshot's IsDefault=true must not override project configuration");
-    }
-
-    [Fact]
-    public async Task LegacySnapshot_EmbeddedIsFalseDefault_FieldStillMatchesProjectDefault()
-    {
-        // Given a project whose default repository is `main` (IsDefault=true).
-        var projectId = await CreateProjectAsync("Legacy Default False", "/proj/main", "main");
-
-        // When an issue is stored as a legacy snapshot that explicitly says main
-        // is NOT the default, but the project configuration says it IS the default.
-        const string legacyJson = """
-            {
-              "Id": "issue_legacy_false",
-              "ProjectId": "__placeholder__",
-              "Number": 1,
-              "Title": "Legacy false default",
-              "Body": "claims not default",
-              "Labels": [],
-              "Priority": "p2",
-              "CreatedAt": "2024-01-01T00:00:00Z",
-              "UpdatedAt": "2024-01-01T00:00:00Z",
-              "Status": 0,
-              "PrerequisiteNumbers": [],
-              "Repository": {
-                "Name": "main",
-                "Path": "/stale/legacy-path",
-                "Remote": "git@stale.example:repo.git",
-                "BaseBranch": "ancient-branch",
-                "IsDefault": false
-              }
-            }
-            """;
-        var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        await SeedIssueAsync(projectId, 1, legacy);
-
-        // Then the project's IsDefault wins and the issue is reported as the project default.
-        var info = await GetIssueInfoAsync(projectId, 1);
-        Assert.NotNull(info);
-        Assert.NotNull(info!.Repository);
-        Assert.Equal("main", info.Repository!.Name);
-        Assert.True(info.Repository.IsDefault, "Project IsDefault must win over legacy snapshot");
-        Assert.Equal("/proj/main", info.Repository.Path);
-    }
-
-    [Fact]
     public async Task ListAsync_AfterProjectRepositoryConfigChange_ResolvesLatestMetadataForEachIssue()
     {
         // Given two issues bound to two project repositories.
@@ -330,7 +236,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // And the queued rebase task embeds the resolved repository context
         // (name, path, remote, base branch) from the live project configuration,
-        // not the original snapshot.
+        // not the originally resolved repository details.
         var wrId = payload.GetProperty("data").GetProperty("workflowRunId").GetString();
         var run = await LoadWorkflowRunAsync(wrId!);
         var currentStage = run!.Stages.First(s => s.Id == run.CurrentStageId);
@@ -345,7 +251,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     }
 
     [Fact]
-    public async Task RebaseEndpoint_AfterRepositoryPathAndBaseBranchChange_DoesNotFallBackToSnapshot()
+    public async Task RebaseEndpoint_AfterRepositoryPathAndBaseBranchChange_UsesCurrentRepositoryConfiguration()
     {
         // Given an issue bound to a project repository whose path and base branch
         // are subsequently changed.
@@ -446,7 +352,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             $"/api/issues/{issue.Number}/file-content?projectId={projectId}&path=a.txt");
 
         // Then the endpoint returns a repository configuration problem
-        // instead of falling back to a stale snapshot or to "main".
+        // instead of falling back to "main".
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("repository_not_found", payload.GetProperty("code").GetString());
@@ -492,7 +398,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // Then the endpoint returns a successful worktree status — proving the route
         // resolved the live project repository (path + base branch) instead of failing
-        // because of a stale issue snapshot or silently using a fallback.
+        // because of stale issue repository data or silently using a fallback.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
@@ -522,7 +428,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.NotNull(fetched);
         Assert.Equal("secondary", fetched!.Repository!.Name);
         Assert.Equal("/proj/secondary", fetched.Repository.Path);
-        Assert.True(fetched.Repository.IsDefault, "Default flag must follow project config, not the original issue snapshot");
+        Assert.True(fetched.Repository.IsDefault, "Default flag must follow project config, not the original issue repository details");
     }
 
     [Fact]
@@ -626,31 +532,17 @@ public class IssueRepositoryResolutionRegressionSpecs
     }
 
     [Fact]
-    public async Task GetIssue_LegacySnapshotEmptyRepositoryRef_FallsBackToProjectDefault()
+    public async Task GetIssue_WithoutRepositoryRef_FallsBackToProjectDefault()
     {
-        // Given an issue stored as a legacy snapshot that has neither an embedded
-        // Repository.Name nor an explicit RepositoryRef — i.e. an issue that was
-        // created before repository references were tracked.
         var projectId = await CreateProjectAsync("Legacy No Ref", "/proj/main", "main");
-        const string legacyJson = """
-            {
-              "Id": "issue_legacy_noref",
-              "ProjectId": "__placeholder__",
-              "Number": 1,
-              "Title": "Legacy no ref",
-              "Body": "no repository reference at all",
-              "Labels": [],
-              "Priority": "p2",
-              "CreatedAt": "2024-01-01T00:00:00Z",
-              "UpdatedAt": "2024-01-01T00:00:00Z",
-              "Status": 0,
-              "PrerequisiteNumbers": []
-            }
-            """;
-        var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        await SeedIssueAsync(projectId, 1, legacy);
+        var issue = Mohist.Server.Issue.Domain.Issue.Create(
+            "issue_no_ref",
+            projectId,
+            1,
+            "No repository reference",
+            body: "uses project default");
+        await SeedIssueAsync(projectId, 1, IssueStore.Serialize(issue));
 
-        // When the issue is read against the current project configuration.
         var info = await GetIssueInfoAsync(projectId, 1);
 
         // Then the issue resolves to the project default repository.
@@ -684,7 +576,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             "release-new");
 
         // Then GET /api/issues/:number returns the latest resolved repository path
-        // and base branch instead of any stale snapshot.
+        // and base branch instead of stale stored repository details.
         using var response = await _client.GetAsync($"/api/issues/{issue.Number}?projectId={projectId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();

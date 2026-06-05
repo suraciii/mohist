@@ -249,7 +249,7 @@ describe('useSessionTranscript live parity and convergence', () => {
     })
   })
 
-  it('marks live transcript finalizing after completion SSE until refetch', async () => {
+  it('marks live transcript finalizing after completion live event until refetch', async () => {
     const { result } = renderLiveTranscript()
     expect(result.current.isFinalizing).toBe(false)
     act(() => {

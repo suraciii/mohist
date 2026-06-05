@@ -26,7 +26,7 @@ public sealed class IssueIdentityResolver
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.Issues.AsNoTracking()
             .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber, ct);
-        var issue = row is null ? null : IssueSnapshot.DeserializeIssue(row.State);
+        var issue = row is null ? null : IssueStore.Deserialize(row.State);
         return issue is null ? null : ToIdentity(issue);
     }
 
@@ -38,7 +38,7 @@ public sealed class IssueIdentityResolver
         var canonicalRow = await db.Issues
             .AsNoTracking()
             .FirstOrDefaultAsync(r => r.IssueId == issueId, ct);
-        var canonicalIssue = canonicalRow is null ? null : IssueSnapshot.DeserializeIssue(canonicalRow.State);
+        var canonicalIssue = canonicalRow is null ? null : IssueStore.Deserialize(canonicalRow.State);
         return canonicalIssue is not null && string.Equals(canonicalIssue.Id, issueId, StringComparison.Ordinal)
             ? ToIdentity(canonicalIssue)
             : null;

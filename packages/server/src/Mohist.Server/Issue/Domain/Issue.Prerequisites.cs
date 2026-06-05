@@ -1,24 +1,21 @@
 namespace Mohist.Server.Issue.Domain;
 
-public static partial class IssueExtensions
+public sealed partial class Issue
 {
-    extension(Issue issue)
+    public void AddPrerequisite(int prerequisiteNumber, DateTime? now = null)
     {
-        public void AddPrerequisite(int prerequisiteNumber)
-        {
-            if (prerequisiteNumber == issue.Number)
-                throw new InvalidOperationException("Issue cannot depend on itself");
-            if (issue.PrerequisiteNumbers.Contains(prerequisiteNumber)) return;
-            issue.PrerequisiteNumbers = [.. issue.PrerequisiteNumbers, prerequisiteNumber];
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+        if (prerequisiteNumber == Number)
+            throw new InvalidOperationException("Issue cannot depend on itself");
+        if (_prerequisiteNumbers.Contains(prerequisiteNumber)) return;
+        _prerequisiteNumbers = [.. _prerequisiteNumbers, prerequisiteNumber];
+        Touch(now);
+    }
 
-        public void RemovePrerequisite(int prerequisiteNumber)
-        {
-            var next = issue.PrerequisiteNumbers.Where(number => number != prerequisiteNumber).ToArray();
-            if (next.Length == issue.PrerequisiteNumbers.Length) return;
-            issue.PrerequisiteNumbers = next;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+    public void RemovePrerequisite(int prerequisiteNumber, DateTime? now = null)
+    {
+        var next = _prerequisiteNumbers.Where(number => number != prerequisiteNumber).ToArray();
+        if (next.Length == _prerequisiteNumbers.Length) return;
+        _prerequisiteNumbers = next;
+        Touch(now);
     }
 }

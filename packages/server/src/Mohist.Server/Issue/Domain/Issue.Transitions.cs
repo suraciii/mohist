@@ -1,97 +1,94 @@
 namespace Mohist.Server.Issue.Domain;
 
-public static partial class IssueExtensions
+public sealed partial class Issue
 {
-    extension(Issue)
+    public static Issue Create(
+        string id,
+        string projectId,
+        int number,
+        string title,
+        string? body = null,
+        string[]? labels = null,
+        string priority = "p2",
+        string? repositoryRef = null,
+        DateTime? now = null)
     {
-        public static Issue Create(
-            string id,
-            string projectId,
-            int number,
-            string title,
-            string? body = null,
-            string[]? labels = null,
-            string priority = "p2",
-            string? repositoryRef = null)
+        var createdAt = now ?? DateTime.UtcNow;
+        return new Issue
         {
-            return new Issue
-            {
-                Id = id,
-                ProjectId = projectId,
-                Number = number,
-                Title = title,
-                Body = body,
-                Labels = labels ?? [],
-                Priority = priority,
-                RepositoryRef = string.IsNullOrWhiteSpace(repositoryRef) ? null : repositoryRef,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-            };
-        }
+            Id = id,
+            ProjectId = projectId,
+            Number = number,
+            Title = title,
+            Body = body,
+            Labels = labels ?? [],
+            Priority = priority,
+            RepositoryRef = repositoryRef,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt,
+        };
     }
 
-    extension(Issue issue)
+    public void Update(string? title, string? body, string[]? labels, string? priority, DateTime? now = null)
     {
-        public void Update(string? title, string? body, string[]? labels, string? priority)
-        {
-            if (title != null) issue.Title = title;
-            if (body != null) issue.Body = body;
-            if (labels != null) issue.Labels = labels;
-            if (priority != null) issue.Priority = priority;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+        if (title != null) _title = RequireTitle(title);
+        if (body != null) _body = body;
+        if (labels != null) _labels = labels;
+        if (priority != null) _priority = NormalizePriority(priority);
+        Touch(now);
+    }
 
-        public void StartWorkflow(string wrId)
-        {
-            if (issue.Status == IssueStatus.Cancelled || issue.Status == IssueStatus.Done)
-                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}");
-            if (issue.WorkflowRunId is not null)
-                throw new InvalidOperationException($"Issue #{issue.Number} already has workflow {issue.WorkflowRunId}");
-            issue.WorkflowRunId = wrId;
-            issue.Status = IssueStatus.InProgress;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+    public void StartWorkflow(string wrId, DateTime? now = null)
+    {
+        if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}");
+        if (_workflowRunId is not null)
+            throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
+        _workflowRunId = wrId;
+        _status = IssueStatus.InProgress;
+        Touch(now);
+    }
 
-        public bool Complete(string workflowRunId)
-        {
-            if (issue.WorkflowRunId != workflowRunId) return false;
-            if (issue.Status == IssueStatus.Done) return false;
-            if (issue.Status != IssueStatus.InProgress)
-                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}, only InProgress can complete");
-            issue.Status = IssueStatus.Done;
-            issue.UpdatedAt = DateTime.UtcNow;
-            return true;
-        }
+    public bool Complete(string workflowRunId, DateTime? now = null)
+    {
+        if (_workflowRunId != workflowRunId) return false;
+        if (_status == IssueStatus.Done) return false;
+        if (_status != IssueStatus.InProgress)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
+        _status = IssueStatus.Done;
+        Touch(now);
+        return true;
+    }
 
-        public void Archive()
-        {
-            if (issue.Status != IssueStatus.Done)
-                throw new InvalidOperationException($"Issue #{issue.Number} is {issue.Status}, only Done can archive");
-            issue.ArchivedAt = DateTime.UtcNow;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+    public void Archive(DateTime? now = null)
+    {
+        if (_status != IssueStatus.Done)
+            throw new InvalidOperationException($"Issue #{Number} is {_status}, only Done can archive");
+        var archivedAt = now ?? DateTime.UtcNow;
+        _archivedAt = archivedAt;
+        Touch(archivedAt);
+    }
 
-        public void Unarchive()
-        {
-            issue.ArchivedAt = null;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+    public void Unarchive(DateTime? now = null)
+    {
+        _archivedAt = null;
+        Touch(now);
+    }
 
-        public void Close()
-        {
-            if (issue.Status == IssueStatus.Done || issue.ArchivedAt != null)
-                throw new InvalidOperationException($"Issue #{issue.Number} cannot close");
-            issue.Status = IssueStatus.Cancelled;
-            issue.WorkflowRunId = null;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+    public void Close(DateTime? now = null)
+    {
+        if (_status == IssueStatus.Done || _archivedAt != null)
+            throw new InvalidOperationException($"Issue #{Number} cannot close");
+        _status = IssueStatus.Cancelled;
+        _workflowRunId = null;
+        Touch(now);
+    }
 
-        public void Reopen()
-        {
-            if (issue.Status != IssueStatus.Cancelled)
-                throw new InvalidOperationException($"Issue #{issue.Number} is not cancelled");
-            issue.Status = IssueStatus.Backlog;
-            issue.UpdatedAt = DateTime.UtcNow;
-        }
+    public void Reopen(DateTime? now = null)
+    {
+        if (_status != IssueStatus.Cancelled)
+            throw new InvalidOperationException($"Issue #{Number} is not cancelled");
+        _status = IssueStatus.Backlog;
+        Touch(now);
     }
 }

@@ -66,57 +66,7 @@ public class IssueRepositoryReferenceSpecs
     }
 
     [Fact]
-    public async Task LegacySnapshot_DerivesRepositoryReferenceFromEmbeddedName_AndDropsSnapshotFields()
-    {
-        var (projectId, project) = await SetupProjectWithRepositoriesAsync();
-        const string legacyJson = """
-            {
-              "Id": "issue_legacy",
-              "ProjectId": "__placeholder__",
-              "Number": 1,
-              "Title": "Legacy snapshot",
-              "Body": "carries repository snapshot",
-              "Labels": [],
-              "Priority": "p2",
-              "CreatedAt": "2024-01-01T00:00:00Z",
-              "UpdatedAt": "2024-01-01T00:00:00Z",
-              "Status": 0,
-              "PrerequisiteNumbers": [],
-              "Repository": {
-                "Name": "main",
-                "Path": "/stale/legacy-path",
-                "Remote": "git@stale.example:repo.git",
-                "BaseBranch": "ancient-branch",
-                "IsDefault": false
-              }
-            }
-            """;
-
-        var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        using (var scope = _fixture.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            db.Issues.Add(new IssueRow
-            {
-                IssueId = "issue_legacy",
-                State = legacy,
-            });
-            await db.SaveChangesAsync();
-        }
-
-        var info = await GetIssueInfoAsync(projectId, 1);
-        Assert.NotNull(info);
-        Assert.Equal("main", info!.Repository?.Name);
-        Assert.Equal("/proj/main", info.Repository?.Path);
-        Assert.Equal("main", info.Repository?.BaseBranch);
-        Assert.True(info.Repository?.IsDefault);
-        Assert.DoesNotContain("stale/legacy-path", info.Repository?.Path);
-        Assert.DoesNotContain("stale.example", info.Repository?.Remote);
-        Assert.DoesNotContain("ancient-branch", info.Repository?.BaseBranch);
-    }
-
-    [Fact]
-    public void Snapshot_RoundTrip_DropsRepositoryField_AndKeepsReference()
+    public void State_RoundTrip_PersistsOnlyRepositoryReference()
     {
         var issue = new Mohist.Server.Issue.Domain.Issue
         {
@@ -127,8 +77,8 @@ public class IssueRepositoryReferenceSpecs
             Labels = [],
             Priority = "p2",
             RepositoryRef = "secondary",
+            Status = IssueStatus.Backlog,
         };
-        issue.Status = IssueStatus.Backlog;
 
         var json = IssueStore.Serialize(issue);
         using (var doc = JsonDocument.Parse(json))
@@ -159,8 +109,8 @@ public class IssueRepositoryReferenceSpecs
                 Labels = [],
                 Priority = "p2",
                 RepositoryRef = "deleted-repo",
+                Status = IssueStatus.Backlog,
             };
-            orphan.Status = IssueStatus.Backlog;
             db.Issues.Add(new IssueRow
             {
                 IssueId = orphan.Id,
@@ -201,8 +151,8 @@ public class IssueRepositoryReferenceSpecs
                 Labels = [],
                 Priority = "p2",
                 RepositoryRef = "main",
+                Status = IssueStatus.Backlog,
             };
-            issue.Status = IssueStatus.Backlog;
             db.Issues.Add(new IssueRow
             {
                 IssueId = issue.Id,

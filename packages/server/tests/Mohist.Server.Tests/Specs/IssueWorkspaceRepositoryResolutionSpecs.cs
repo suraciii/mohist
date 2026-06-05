@@ -58,11 +58,11 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         Assert.True(data.GetProperty("available").GetBoolean());
         // The diff endpoint exposes the current repository's base branch as "base".
         // After the project repository config change it must reflect the new value
-        // ("release") rather than the original "develop" snapshot.
+        // ("release") rather than the originally resolved "develop" value.
         Assert.Equal("release", data.GetProperty("base").GetString());
 
         // Then the diff git call used the latest path resolved from the current project
-        // configuration, not the original repository snapshot bound at issue creation.
+        // configuration, not the repository fields resolved at issue creation.
         Assert.NotEmpty(_fixture.Git.Diff.Files);
     }
 
@@ -85,7 +85,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         using var cleanup = await _client.PostAsync($"/api/issues/{issue.Number}/cleanup?projectId={projectId}", null);
 
         // Then each endpoint returns a clear repository configuration problem instead of
-        // silently using the issue's stale repository snapshot or falling back to "main".
+        // silently using stale issue repository data or falling back to "main".
         Assert.Equal(HttpStatusCode.Conflict, diff.StatusCode);
         var diffPayload = await diff.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("repository_not_found", diffPayload.GetProperty("code").GetString());
@@ -145,7 +145,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             new { });
 
         // Then the endpoint returns a clear repository configuration problem instead of
-        // silently falling back to the issue's stale repository snapshot or to "main".
+        // silently falling back to stale issue repository data or to "main".
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("repository_not_found", payload.GetProperty("code").GetString());

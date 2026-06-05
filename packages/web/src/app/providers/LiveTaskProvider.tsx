@@ -285,7 +285,3 @@ export function LiveTaskProvider({ children }: { children: React.ReactNode }) {
     </LiveTaskContext.Provider>
   )
 }
-
-export default function useSSE(projectId: string | null) {
-  return useLiveEvents(projectId)
-}

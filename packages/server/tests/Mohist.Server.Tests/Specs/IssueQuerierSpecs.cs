@@ -36,8 +36,9 @@ public class IssueQuerierSpecs
             Title = "Query me",
             Labels = ["bug"],
             Priority = "p1",
+            Status = Issue.Domain.IssueStatus.Todo,
         };
-        issue.Status = Issue.Domain.IssueStatus.Todo;
+
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -69,8 +70,9 @@ public class IssueQuerierSpecs
             Title = "Id keyed issue",
             Labels = ["feature"],
             Priority = "p2",
+            Status = Issue.Domain.IssueStatus.Todo,
         };
-        issue.Status = Issue.Domain.IssueStatus.Todo;
+
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -109,8 +111,8 @@ public class IssueQuerierSpecs
             Title = "Canonical title",
             Labels = [],
             Priority = "p2",
+            Status = Issue.Domain.IssueStatus.Todo,
         };
-        issue.Status = Issue.Domain.IssueStatus.Todo;
 
         db.Issues.Add(new IssueRow
         {
@@ -143,8 +145,8 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
             WorkflowRunId = "wf-run-1",
+            Status = Issue.Domain.IssueStatus.InProgress,
         };
-        issue.Status = Issue.Domain.IssueStatus.InProgress;
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -239,8 +241,8 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
             WorkflowRunId = "wf-run-orch-1",
+            Status = Issue.Domain.IssueStatus.InProgress,
         };
-        issue.Status = Issue.Domain.IssueStatus.InProgress;
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -324,8 +326,8 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
             WorkflowRunId = "wf-run-fail-1",
+            Status = Issue.Domain.IssueStatus.InProgress,
         };
-        issue.Status = Issue.Domain.IssueStatus.InProgress;
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -409,7 +411,7 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
         };
-        issue.Status = Issue.Domain.IssueStatus.Todo;
+
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -439,8 +441,8 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
             WorkflowRunId = "wf-run-done-1",
+            Status = Issue.Domain.IssueStatus.Done,
         };
-        issue.Status = Issue.Domain.IssueStatus.Done;
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -490,8 +492,8 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
             WorkflowRunId = "wf-run-nouser-1",
+            Status = Issue.Domain.IssueStatus.InProgress,
         };
-        issue.Status = Issue.Domain.IssueStatus.InProgress;
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,
@@ -564,8 +566,8 @@ public class IssueQuerierSpecs
             Labels = [],
             Priority = "p2",
             WorkflowRunId = "wf-run-approval-1",
+            Status = Issue.Domain.IssueStatus.InProgress,
         };
-        issue.Status = Issue.Domain.IssueStatus.InProgress;
         db.Issues.Add(new IssueRow
         {
             IssueId = issue.Id,

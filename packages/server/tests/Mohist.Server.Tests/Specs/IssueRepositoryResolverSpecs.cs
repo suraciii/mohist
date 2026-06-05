@@ -63,7 +63,7 @@ public class IssueRepositoryResolverSpecs
     }
 
     [Fact]
-    public void Resolve_ExplicitReference_StaleSnapshotFieldsDoNotOverrideProjectRepository()
+    public void Resolve_ExplicitReference_StaleStoredFieldsDoNotOverrideProjectRepository()
     {
         var project = new ProjectInfo
         {
