@@ -1,6 +1,5 @@
 export enum IssueStatus {
   Backlog = 'backlog',
-  Todo = 'todo',
   InProgress = 'in_progress',
   Done = 'done',
   Cancelled = 'cancelled',
@@ -16,7 +15,6 @@ export enum WorkflowStage {
 
 export const STATUS_ORDER: IssueStatus[] = [
   IssueStatus.Backlog,
-  IssueStatus.Todo,
   IssueStatus.InProgress,
   IssueStatus.Done,
   IssueStatus.Cancelled,

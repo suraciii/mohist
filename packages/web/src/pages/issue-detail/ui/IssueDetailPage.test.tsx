@@ -61,7 +61,7 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
     number: 14,
     title: 'Test Issue',
     body: '',
-    status: 'todo',
+    status: 'backlog',
     health: 'active',
     projectId: 'proj-1',
     labels: [],

@@ -50,7 +50,6 @@ public static class StatusRoutes
                 issuesByStatus = new Dictionary<string, int>
                 {
                     ["backlog"] = allIssues.Count(i => i.Status == "backlog"),
-                    ["ready"] = allIssues.Count(i => i.Status == "ready" || i.Status == "todo"),
                     ["in_progress"] = allIssues.Count(i => i.Status == "in_progress"),
                     ["done"] = allIssues.Count(i => i.Status == "done"),
                     ["cancelled"] = allIssues.Count(i => i.Status == "cancelled"),

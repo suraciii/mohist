@@ -326,7 +326,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     const issues = [
       makeIssue({ number: 1, status: IssueStatus.Backlog }),
       makeIssue({ number: 2, status: IssueStatus.Backlog }),
-      makeIssue({ number: 3, status: IssueStatus.Todo }),
+      makeIssue({ number: 3, status: IssueStatus.Backlog }),
       makeIssue({ number: 4, status: IssueStatus.InProgress }),
     ]
     const queryClient = new QueryClient()
@@ -340,7 +340,6 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
     )
 
     expect(screen.getAllByText('Backlog').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0)
     expect(screen.getAllByText('In Progress').length).toBeGreaterThan(0)
   })
 
@@ -458,7 +457,7 @@ describe('KanbanBoard Component - Filtered Stage Counts', () => {
       makeIssue({ number: 1, status: IssueStatus.Backlog, priority: 'p0' }),
       makeIssue({ number: 2, status: IssueStatus.Backlog, priority: 'p1' }),
       makeIssue({ number: 3, status: IssueStatus.Backlog, priority: 'p2' }),
-      makeIssue({ number: 4, status: IssueStatus.Todo, priority: 'p0' }),
+      makeIssue({ number: 4, status: IssueStatus.Backlog, priority: 'p0' }),
     ]
 
     Object.defineProperty(window, 'location', {
@@ -500,7 +499,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
     it('renders desktop board container with horizontal multi-column layout at md+', () => {
       const issues = [
         makeIssue({ number: 1, status: IssueStatus.Backlog }),
-        makeIssue({ number: 2, status: IssueStatus.Todo }),
+        makeIssue({ number: 2, status: IssueStatus.Backlog }),
         makeIssue({ number: 3, status: IssueStatus.InProgress }),
         makeIssue({ number: 4, status: IssueStatus.InProgress }),
       ]
@@ -522,7 +521,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
     it('does not stack all stage columns vertically in desktop board container', () => {
       const issues = [
         makeIssue({ number: 1, status: IssueStatus.Backlog }),
-        makeIssue({ number: 2, status: IssueStatus.Todo }),
+        makeIssue({ number: 2, status: IssueStatus.Backlog }),
         makeIssue({ number: 3, health: IssueHealth.Done }),
       ]
       const queryClient = new QueryClient()
@@ -573,7 +572,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const approvalAwaitingIssue = makeIssue({
         number: 180,
         title: 'Plan awaits review',
-        status: IssueStatus.Todo,
+        status: IssueStatus.Backlog,
         health: IssueHealth.Active,
         approvalState: { status: 'awaiting', requestedAt: '2026-01-01T00:00:00Z' } as ApprovalState,
       })
@@ -929,7 +928,7 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
       const issues = [
         makeIssue({ number: 1, status: IssueStatus.Backlog, labels: ['reliability'] }),
         makeIssue({ number: 2, status: IssueStatus.Backlog, labels: ['bug'] }),
-        makeIssue({ number: 3, status: IssueStatus.Todo, labels: ['session'] }),
+        makeIssue({ number: 3, status: IssueStatus.Backlog, labels: ['session'] }),
         makeIssue({ number: 4, status: IssueStatus.InProgress, labels: ['agent'] }),
       ]
       const queryClient = new QueryClient()
@@ -958,13 +957,10 @@ describe('KanbanBoard Homepage Regression Coverage', () => {
         expect(desktopBoard).toBeInTheDocument()
 
         const backlogColumn = desktopBoard.children[0] as HTMLElement
-        const readyColumn = desktopBoard.children[1] as HTMLElement
 
         expect(backlogColumn.textContent).toContain('Backlog')
-        expect(backlogColumn.textContent).toContain('No issues')
-        expect(readyColumn.textContent).toContain('Ready')
-        expect(readyColumn.textContent).toContain('#3')
-        expect(readyColumn.textContent).toContain('session')
+        expect(backlogColumn.textContent).toContain('#3')
+        expect(backlogColumn.textContent).toContain('session')
       })
     })
 

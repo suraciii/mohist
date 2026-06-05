@@ -8,7 +8,6 @@ export interface Column {
 
 export const STAGES: { key: IssueStatus; label: string }[] = [
   { key: IssueStatus.Backlog, label: 'Backlog' },
-  { key: IssueStatus.Todo, label: 'Ready' },
   { key: IssueStatus.InProgress, label: 'In Progress' },
   { key: IssueStatus.Done, label: 'Done' },
   { key: IssueStatus.Cancelled, label: 'Cancelled' },
