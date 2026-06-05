@@ -8,7 +8,7 @@ internal static class IssueRowMapper
     {
         foreach (var row in rows)
         {
-            var issue = IssueSnapshot.DeserializeIssue(row.State);
+            var issue = IssueStore.Deserialize(row.State);
             if (issue is not null)
                 yield return issue;
         }

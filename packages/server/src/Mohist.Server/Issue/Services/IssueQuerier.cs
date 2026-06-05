@@ -60,7 +60,7 @@ public class IssueQuerier
     {
         var row = await db.Issues.AsNoTracking()
             .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == number);
-        return row is null ? null : IssueSnapshot.DeserializeIssue(row.State);
+        return row is null ? null : IssueStore.Deserialize(row.State);
     }
 
     public async Task<List<IssueReadModel>> ListAsync(

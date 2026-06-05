@@ -131,7 +131,7 @@ public class IssueRepositoryApiSpecs
     }
 
     [Fact]
-    public async Task GetIssue_AfterReferencedRepositoryRemoved_ReturnsRepositoryProblemInsteadOfStaleSnapshot()
+    public async Task GetIssue_AfterReferencedRepositoryRemoved_ReturnsRepositoryProblemInsteadOfFallbackRepository()
     {
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
         var created = await CreateIssueAsync(projectId, new { title = "Orphaned by repo removal", repositoryName = "secondary" });
