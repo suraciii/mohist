@@ -88,6 +88,7 @@ public class MohistDbContext : DbContext
                 .HasValueGenerator<EventSpecVersionGenerator>()
                 .ValueGeneratedOnAdd();
             entity.Ignore(e => e.WorkflowEvent);
+            entity.Ignore(e => e.AgentSessionEvent);
             entity.HasIndex("Type", nameof(EventRow.Source), nameof(EventRow.Id));
         });
 

@@ -3,21 +3,21 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Domain.Events;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.Db;
 
 namespace Mohist.Server.Sessions.Grains;
 
 public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
-    private readonly IStateStore<AgentSession> _stateStore;
+    private readonly IAgentSessionStore _stateStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventBus _eventBus;
     private readonly ILogger<AgentSessionGrain> _log;
     private AgentSession? _session;
 
-    public AgentSessionGrain(IStateStore<AgentSession> stateStore, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<AgentSessionGrain> log)
+    public AgentSessionGrain(IAgentSessionStore stateStore, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
         _dbFactory = dbFactory;
@@ -43,7 +43,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 _session = existing;
                 wasTerminal = _session.IsTerminal;
                 if (!_session.IsTerminal)
-                    _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+                    _ = _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
             }
             else
                 _session = CreateSession(command);
@@ -51,7 +51,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         else
         {
             if (!_session.IsTerminal)
-                _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
+                _ = _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
@@ -93,10 +93,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetOrCreateAsync();
 
         var now = DateTime.UtcNow;
-        if (!session.AttachAgent(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now))
+        var events = session.AttachAgent(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now);
+        if (events.Count == 0)
             return await ToInfoAsync(session);
 
-        await _stateStore.SaveAsync(SessionId, session);
+        await CommitAsync(session, events);
         await EmitStartedAsync(session);
         return await ToInfoAsync(session);
     }
@@ -109,8 +110,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var wasTerminal = session.IsTerminal;
 
         var now = DateTime.UtcNow;
+        var events = new List<AgentSessionEvent>();
         if (!wasTerminal)
-            session.RecordActivity(now);
+            events.AddRange(session.RecordActivity(now));
         var projection = await LoadProjectionAsync(session.Id);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -129,7 +131,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 {
                     var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
                     var status = GetStringProp(payload, "status") ?? "running";
-                    session.MarkActive(status, now, GetStringProp(payload, "failureReason"));
+                    events.AddRange(session.MarkActive(status, now, GetStringProp(payload, "failureReason")));
                 }
                 else if (e.Type == "agent_session_terminal")
                 {
@@ -139,11 +141,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                     var failureCategory = GetStringProp(payload, "failureCategory");
                     var exitCode = GetIntProp(payload, "exitCode");
                     if (status == "failed")
-                        session.Fail(now, failureReason, exitCode);
+                        events.AddRange(session.Fail(now, failureReason, exitCode));
                     else if (status == "cancelled")
-                        session.Cancel(now, failureReason, exitCode);
+                        events.AddRange(session.Cancel(now, failureReason, exitCode));
                     else
-                        session.Complete(now, exitCode);
+                        events.AddRange(session.Complete(now, exitCode));
                 }
                 else if (e.Type == "agent_usage_update")
                 {
@@ -170,7 +172,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                         contextWindowUsed ??= GetLongProp(cwProp, "used");
                     }
 
-                    session.ApplyUsage(inputTokens, outputTokens, totalTokens, cachedReadTokens, thoughtTokens, costAmount, costCurrency, contextWindowUsed, contextWindowSize);
+                    events.AddRange(session.ApplyUsage(inputTokens, outputTokens, totalTokens, cachedReadTokens, thoughtTokens, costAmount, costCurrency, contextWindowUsed, contextWindowSize));
                 }
                 else if (e.Type == "agent_session_model_resolved")
                 {
@@ -205,14 +207,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         if (!wasTerminal)
-            session.EnsureActive(now);
+            events.AddRange(session.EnsureActive(now));
 
         var isTerminal = session.IsTerminal;
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
 
-        db.AgentSessionRuntimeEvents.AddRange(entries);
-        await db.SaveChangesAsync();
-        await _stateStore.SaveAsync(SessionId, session);
+        IReadOnlyList<StagedAgentSessionEvent> stagedEvents;
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            db.AgentSessionRuntimeEvents.AddRange(entries);
+            stagedEvents = await _stateStore.StageAsync(db, SessionId, session, events);
+            await db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        _stateStore.Publish(stagedEvents);
         _session = session;
 
         foreach (var entry in entries)
@@ -231,8 +239,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetOrCreateAsync();
         if (session.IsTerminal) return await ToInfoAsync(session);
 
-        session.Fail(DateTime.UtcNow, reason);
-        await _stateStore.SaveAsync(SessionId, session);
+        var events = session.Fail(DateTime.UtcNow, reason);
+        await CommitAsync(session, events);
         EmitTerminal(session, "failed");
         return await ToInfoAsync(session);
     }
@@ -267,6 +275,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _session = AgentSession.Create(SessionId, string.Empty, "opencode", null, metadata: metadata);
         await _stateStore.SaveAsync(SessionId, _session);
         return _session;
+    }
+
+    private async Task CommitAsync(AgentSession session, IReadOnlyList<AgentSessionEvent> events)
+    {
+        await _stateStore.SaveAsync(SessionId, session, events);
+        _session = session;
     }
 
     private async Task EmitStartedAsync(AgentSession session)
