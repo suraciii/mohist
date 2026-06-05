@@ -46,7 +46,8 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
         services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
-        services.AddScoped<IStateStore<AgentSession>, AgentSessionStore>();
+        services.AddScoped<IAgentSessionStore, AgentSessionStore>();
+        services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddSingleton<ProjectQuerier>();
         services.AddSingleton<IssueRepositoryResolver>();
         services.AddScoped<IssueIdentityResolver>();

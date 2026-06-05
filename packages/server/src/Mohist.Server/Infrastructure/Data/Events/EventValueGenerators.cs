@@ -11,9 +11,11 @@ public sealed class EventTypeGenerator : ValueGenerator<string>
     public override string Next(EntityEntry entry)
     {
         var row = (EventRow)entry.Entity;
-        if (row.WorkflowEvent is null)
-            throw new InvalidOperationException("EventRow.WorkflowEvent is required to generate event type");
-        return WorkflowEventSerializer.Type(row.WorkflowEvent.Value);
+        if (row.WorkflowEvent is not null)
+            return WorkflowEventSerializer.Type(row.WorkflowEvent.Value);
+        if (row.AgentSessionEvent is not null)
+            return AgentSessionEventSerializer.Type(row.AgentSessionEvent.Value);
+        throw new InvalidOperationException("EventRow requires a domain event to generate event type");
     }
 }
 

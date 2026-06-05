@@ -3,7 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Tests.Support;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
@@ -84,6 +86,70 @@ public class EventStoreSpecs
         var payload = Assert.IsType<TaskCompleted>(e.Data.Value);
         Assert.Equal("build", payload.Stage);
         Assert.Equal("task.1", payload.TaskId);
+    }
+
+    [Fact]
+    public async Task AgentSessionStore_StoresSessionStateAndDomainEventsInOneCommit()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<IAgentSessionStore>();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        var session = CreateAgentSession();
+
+        var events = session.AttachAgent("runtime-session-1", "codex-high", "/work", null, null, DateTime.UtcNow);
+        await store.SaveAsync(session.Id, session, events);
+
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var row = await db.AgentSessions.AsNoTracking().SingleAsync(e => e.Id == session.Id);
+        Assert.Equal("runtime-session-1", row.AgentSessionId);
+        Assert.Equal("running", row.Status);
+
+        var rows = await db.Events.AsNoTracking()
+            .Where(e => e.Source == $"/agent-sessions/{session.Id}")
+            .OrderBy(e => e.Id)
+            .Select(e => new
+            {
+                e.Id,
+                e.Source,
+                e.Data,
+                Type = EF.Property<string>(e, "Type"),
+                SpecVersion = EF.Property<string>(e, "SpecVersion"),
+            })
+            .ToListAsync();
+
+        Assert.Collection(rows,
+            first =>
+            {
+                Assert.Equal(1, first.Id);
+                Assert.Equal(nameof(AgentSessionStarted), first.Type);
+                Assert.Equal("1.0", first.SpecVersion);
+                Assert.Equal("runtime-session-1", first.Data.GetProperty("agentRuntimeSessionId").GetString());
+            },
+            second =>
+            {
+                Assert.Equal(2, second.Id);
+                Assert.Equal($"/agent-sessions/{session.Id}", second.Source);
+                Assert.Equal(nameof(AgentSessionModelChanged), second.Type);
+                Assert.Equal("codex-high", second.Data.GetProperty("model").GetString());
+            });
+    }
+
+    private static AgentSession CreateAgentSession()
+    {
+        var metadata = new AgentSessionMetadata()
+            .WithLabel(AgentSessionMetadataKeys.ProjectId, "proj")
+            .WithLabel(AgentSessionMetadataKeys.IssueNumber, "1")
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
+            .WithLabel(AgentSessionMetadataKeys.SourceId, "wf")
+            .WithLabel(AgentSessionMetadataKeys.SessionName, "plan");
+
+        return AgentSession.Create(
+            $"proj/wf/plan-{Guid.NewGuid():N}",
+            "runner-1",
+            "opencode",
+            "/work",
+            metadata: metadata,
+            now: new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Utc));
     }
 
 }

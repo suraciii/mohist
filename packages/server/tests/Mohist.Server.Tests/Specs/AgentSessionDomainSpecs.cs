@@ -81,14 +81,48 @@ public class AgentSessionDomainSpecs
     {
         var session = CreateSession();
 
-        session.ApplyUsage(10, 5, 15, 2, 1, 0.001, "USD", 100, 200);
-        session.ApplyUsage(20, 10, 30, 3, 2, 0.002, "USD", 150, 200);
+        var firstEvents = session.ApplyUsage(10, 5, 15, 2, 1, 0.001, "USD", 100, 200);
+        var secondEvents = session.ApplyUsage(20, 10, 30, 3, 2, 0.002, "USD", 150, 200);
 
         Assert.Equal(30, Usage(session).InputTokens);
         Assert.Equal(15, Usage(session).OutputTokens);
         Assert.Equal(45, Usage(session).TotalTokens);
         Assert.Equal(5, Usage(session).CachedReadTokens);
         Assert.Equal(3, Usage(session).ThoughtTokens);
+        Assert.IsType<AgentSessionUsageRecorded>(Assert.Single(firstEvents).Value);
+        Assert.IsType<AgentSessionUsageRecorded>(Assert.Single(secondEvents).Value);
+    }
+
+    [Fact]
+    public void AttachAgent_ReturnsStartedAndModelChangedEvents()
+    {
+        var session = CreateSession();
+
+        var events = session.AttachAgent("runtime-session-1", "model-a", "/work", null, null, DateTime.UtcNow);
+
+        Assert.Collection(events,
+            e => Assert.Equal("runtime-session-1", Assert.IsType<AgentSessionStarted>(e.Value).AgentRuntimeSessionId),
+            e => Assert.Equal("model-a", Assert.IsType<AgentSessionModelChanged>(e.Value).Model));
+    }
+
+    [Fact]
+    public void TerminalTransitions_ReturnSessionEvents()
+    {
+        var completed = CreateSession();
+        var completedEvents = completed.Complete(DateTime.UtcNow, 0);
+        Assert.Equal(0, Assert.IsType<AgentSessionCompleted>(Assert.Single(completedEvents).Value).ExitCode);
+
+        var failed = CreateSession();
+        var failedEvents = failed.Fail(DateTime.UtcNow, "error", 1);
+        var failedEvent = Assert.IsType<AgentSessionFailed>(Assert.Single(failedEvents).Value);
+        Assert.Equal("error", failedEvent.Reason);
+        Assert.Equal(1, failedEvent.ExitCode);
+
+        var cancelled = CreateSession();
+        var cancelledEvents = cancelled.Cancel(DateTime.UtcNow, "stopped", 2);
+        var cancelledEvent = Assert.IsType<AgentSessionCancelled>(Assert.Single(cancelledEvents).Value);
+        Assert.Equal("stopped", cancelledEvent.Reason);
+        Assert.Equal(2, cancelledEvent.ExitCode);
     }
 
     [Fact]
