@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Orleans.Serialization;
 
-namespace Mohist.Server.Workflow.Services;
+namespace Mohist.Server.Workflow.Grains.Surrogates;
 
 [GenerateSerializer]
 public struct JsonElementSurrogate
