@@ -2,11 +2,10 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Events;
-using Mohist.Server.Infrastructure.Persistence.Sessions;
-using Mohist.Server.Sessions.Storage;
-using Mohist.Server.Infrastructure.Persistence;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Sessions.Domain.Events;
+using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Db;
 
 namespace Mohist.Server.Sessions.Grains;
 

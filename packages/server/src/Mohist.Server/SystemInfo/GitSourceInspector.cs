@@ -68,7 +68,7 @@ public sealed class GitSourceInspector : IGitSourceInspector
 
     private static async Task<(string Output, int ExitCode)> DefaultRunGit(string workingDir, string command, string[] args)
     {
-        var psi = new ProcessStartInfo("git", [command, ..args])
+        var psi = new ProcessStartInfo("git", [command, .. args])
         {
             WorkingDirectory = workingDir,
             RedirectStandardOutput = true,

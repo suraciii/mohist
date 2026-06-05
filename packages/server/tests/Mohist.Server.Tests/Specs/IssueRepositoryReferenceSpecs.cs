@@ -1,15 +1,14 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Persistence.Db;
-using Mohist.Server.Infrastructure.Persistence.Issue;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Issue.Storage;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Querying;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Tests.Support;
 using Xunit;
 

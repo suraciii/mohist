@@ -2,8 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Tests.Support;
 using Xunit;
 

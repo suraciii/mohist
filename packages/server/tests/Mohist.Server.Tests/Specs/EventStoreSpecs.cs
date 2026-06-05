@@ -2,7 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;

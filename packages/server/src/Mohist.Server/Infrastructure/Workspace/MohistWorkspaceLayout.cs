@@ -18,9 +18,6 @@ public static class MohistWorkspaceLayout
     public static string IssueWorktreePath(string runnerRoot, string projectName, int issueNumber)
         => Path.GetFullPath(Path.Combine(runnerRoot, Slug(projectName), "worktrees", $"issue-{issueNumber}"));
 
-    public static string LegacyIssueWorktreePath(string projectPath, string projectName, int issueNumber)
-        => Path.GetFullPath(Path.Combine(projectPath, "..", ".mohist-worktrees", projectName, issueNumber.ToString()));
-
     private static string Slug(string value)
     {
         var chars = value.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray();

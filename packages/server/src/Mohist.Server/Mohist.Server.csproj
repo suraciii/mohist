@@ -17,8 +17,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Issue/WorkflowProfiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Workflow/Prompts/builtins/*.prompt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Issue/Services/WorkflowProfiles/*.workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Workflow/Services/Prompts/builtins/*.prompt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="BuildWebAssets" BeforeTargets="Build" Condition="'$(SkipWebBuild)' != 'true'">

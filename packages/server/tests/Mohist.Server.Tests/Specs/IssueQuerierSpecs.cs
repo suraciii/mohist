@@ -1,14 +1,13 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Infrastructure.Persistence.Issue;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Issue.Storage;
-using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Project.Querying;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Workflow.Storage;
-using Mohist.Server.Workflow.Views;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

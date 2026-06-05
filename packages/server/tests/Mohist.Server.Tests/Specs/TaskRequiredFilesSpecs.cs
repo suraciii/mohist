@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Views;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

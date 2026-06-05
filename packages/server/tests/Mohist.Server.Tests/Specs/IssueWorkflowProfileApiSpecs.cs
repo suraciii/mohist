@@ -5,7 +5,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

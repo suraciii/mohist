@@ -1,12 +1,12 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Querying;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Workflow.Querying;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

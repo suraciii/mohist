@@ -1,4 +1,5 @@
-using Mohist.Server.Infrastructure.Persistence;
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Workflow;
 
 namespace Mohist.Server.Workflow.Grains;
 

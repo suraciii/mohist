@@ -92,7 +92,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MohistWorkflowUsesExpressionInputs()
     {
-        await StartWorkflowAsync(Mohist.Server.Issue.WorkflowProfiles.MohistWorkflow.Definition);
+        await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
 
         var (proposal, r1) = await PollWorkAnyAsync();
         Assert.DoesNotContain("changeDir", proposal.With);
@@ -129,7 +129,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MohistWorkflowUsesCoreActionsForGenericChecks()
     {
-        await StartWorkflowAsync(Mohist.Server.Issue.WorkflowProfiles.MohistWorkflow.Definition);
+        await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
 
         for (var i = 0; i < 5; i++)
         {
@@ -150,7 +150,7 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
     [Fact]
     public async Task MohistWorkflowDispatchesAgentWorkWithoutExecutingAgent()
     {
-        await StartWorkflowAsync(Mohist.Server.Issue.WorkflowProfiles.MohistWorkflow.Definition);
+        await StartWorkflowAsync(Mohist.Server.Issue.Services.WorkflowProfiles.MohistWorkflow.Definition);
 
         var (proposal, _) = await PollWorkAnyAsync();
 

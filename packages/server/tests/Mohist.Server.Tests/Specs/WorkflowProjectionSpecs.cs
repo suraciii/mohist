@@ -1,8 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Projection;
-using Mohist.Server.Workflow.Querying;
-using Mohist.Server.Workflow.Views;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -10,11 +8,11 @@ namespace Mohist.Server.Tests.Specs;
 public class WorkflowProjectionSpecs
 {
     [Fact]
-    public void WorkflowStatusReader_ProjectsTaskRequiredFiles()
+    public void WorkflowStatusMapper_ProjectsTaskRequiredFiles()
     {
         var run = CreateRunWithTaskRequiredFiles();
 
-        var view = WorkflowStatusReader.Read(run, lease: null);
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null, lease: null);
 
         var task = view!.Stages[0].Tasks[0];
         Assert.NotNull(task.RequiredFiles);
@@ -25,11 +23,11 @@ public class WorkflowProjectionSpecs
     }
 
     [Fact]
-    public void WorkflowStatusReader_ProjectsTaskClassification()
+    public void WorkflowStatusMapper_ProjectsTaskClassification()
     {
         var run = CreateRunWithTaskRequiredFiles();
 
-        var view = WorkflowStatusReader.Read(run, lease: null);
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null, lease: null);
 
         var userTask = view!.Stages[0].Tasks[0];
         var orchTask = view.Stages[0].Tasks[1];
@@ -38,7 +36,7 @@ public class WorkflowProjectionSpecs
     }
 
     [Fact]
-    public void WorkflowStatusReader_ProjectsMultipleRequiredFiles()
+    public void WorkflowStatusMapper_ProjectsMultipleRequiredFiles()
     {
         var run = new WorkflowRun
         {
@@ -78,7 +76,7 @@ public class WorkflowProjectionSpecs
             ]
         };
 
-        var view = WorkflowStatusReader.Read(run, lease: null);
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null, lease: null);
 
         var task = view!.Stages[0].Tasks[0];
         Assert.NotNull(task.RequiredFiles);
@@ -89,7 +87,7 @@ public class WorkflowProjectionSpecs
     }
 
     [Fact]
-    public void WorkflowStatusReader_WithoutRequiredFiles_ReturnsNullRequiredFiles()
+    public void WorkflowStatusMapper_WithoutRequiredFiles_ReturnsNullRequiredFiles()
     {
         var run = new WorkflowRun
         {
@@ -123,7 +121,7 @@ public class WorkflowProjectionSpecs
             ]
         };
 
-        var view = WorkflowStatusReader.Read(run, lease: null);
+        var view = WorkflowStatusMapper.BuildStatusView(run, definition: null, lease: null);
 
         var task = view!.Stages[0].Tasks[0];
         Assert.Null(task.RequiredFiles);

@@ -1,6 +1,5 @@
-using Mohist.Server.Workflow.Prompts;
-using Mohist.Server.Workflow.Prompts.Domain;
-using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Services.Prompts;
+using Mohist.Server.Workflow.Domain.Prompts;
 
 namespace Mohist.Server.Api;
 

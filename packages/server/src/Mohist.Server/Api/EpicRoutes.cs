@@ -1,7 +1,6 @@
 using Mohist.Server.Epic.Grains;
-using Mohist.Server.Epic.Querying;
-using Mohist.Server.Epics;
-using Mohist.Server.Issue.Querying;
+using Mohist.Server.Epic.Services;
+using Mohist.Server.Issue.Services;
 
 namespace Mohist.Server.Api;
 

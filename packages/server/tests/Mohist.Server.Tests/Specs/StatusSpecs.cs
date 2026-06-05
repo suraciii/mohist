@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Views;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

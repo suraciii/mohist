@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Querying;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Project.Grains;
 

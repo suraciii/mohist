@@ -3,8 +3,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Runner.Projection;
-using Mohist.Server.Runner.SignalR;
+using Mohist.Server.Runner.Services;
+using Mohist.Server.Runner.Services.SignalR;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -13,9 +13,9 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
 {
     public RunnerStatusProjectionSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
-    private static RunnerStatusProjectionService CreateService(IGrainFactory grains, RunnerConnectionTracker tracker, TimeProvider timeProvider)
+    private static RunnerStatusService CreateService(IGrainFactory grains, RunnerConnectionTracker tracker, TimeProvider timeProvider)
     {
-        return new RunnerStatusProjectionService(grains, tracker, timeProvider);
+        return new RunnerStatusService(grains, tracker, timeProvider);
     }
 
     private static FixedTimeProvider TimeAt(DateTimeOffset now)

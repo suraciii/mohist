@@ -1,5 +1,7 @@
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Issue;
+
 namespace Mohist.Server.Issue.Grains;
-using Mohist.Server.Infrastructure.Persistence;
 
 public class IssueCounterGrain : Grain, IIssueCounterGrain
 {

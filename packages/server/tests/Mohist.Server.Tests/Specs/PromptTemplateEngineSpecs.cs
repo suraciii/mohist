@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

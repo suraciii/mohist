@@ -1,4 +1,4 @@
-using Mohist.Server.Runner.Projection;
+using Mohist.Server.Runner.Services;
 
 namespace Mohist.Server.Api;
 
@@ -8,7 +8,7 @@ public static class RunnerStatusRoutes
     {
         var group = app.MapGroup("/api/runners");
 
-        group.MapGet("/", async (string? projectId, RunnerStatusProjectionService projection) =>
+        group.MapGet("/", async (string? projectId, RunnerStatusService projection) =>
         {
             if (string.IsNullOrWhiteSpace(projectId))
             {

@@ -1,5 +1,5 @@
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Microsoft.EntityFrameworkCore;

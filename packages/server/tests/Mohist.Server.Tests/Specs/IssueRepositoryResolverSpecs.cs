@@ -1,6 +1,6 @@
-using Mohist.Server.Issue.Querying;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Querying;
+using Mohist.Server.Project.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

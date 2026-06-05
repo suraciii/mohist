@@ -2,7 +2,7 @@ using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
 using ArchUnitNET.Loader;
 using ArchUnitNET.xUnit;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Db;
 using Xunit;
 using static ArchUnitNET.Fluent.ArchRuleDefinition;
 using static ArchUnitNET.Fluent.Slices.SliceRuleDefinition;
@@ -32,23 +32,23 @@ public class ArchitectureRules
         .That().ResideInNamespace("Mohist.Server.*.Grains", useRegularExpressions: true)
         .As("Grain Layer");
 
+    private static readonly IObjectProvider<IType> ApplicationLayer = Types()
+        .That().ResideInNamespace("Mohist.Server.*.(Grains|Services)", useRegularExpressions: true)
+        .And().DoNotResideInNamespace("Mohist.Server.Infrastructure", useRegularExpressions: true)
+        .As("Application Layer");
+
     private static readonly IObjectProvider<IType> GrainInterfaces = Interfaces()
         .That().ResideInNamespace("Mohist.Server.*.Grains", useRegularExpressions: true)
         .As("Grain Interfaces");
 
-    private static readonly IObjectProvider<IType> StorageLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.Storage", useRegularExpressions: true)
-        .And().DoNotResideInNamespace("Mohist.Server.Infrastructure.Persistence", useRegularExpressions: true)
-        .As("Storage Layer");
+    private static readonly IObjectProvider<IType> DataLayer = Types()
+        .That().ResideInNamespace("Mohist.Server.Infrastructure.Data", useRegularExpressions: true)
+        .As("Data Layer");
 
-    private static readonly IObjectProvider<IType> GrainStorageLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.Infrastructure.Persistence", useRegularExpressions: true)
-        .And().HaveNameEndingWith("Store")
-        .As("GrainStorage Layer");
-
-    private static readonly IObjectProvider<IType> QueryLayer = Types()
-        .That().ResideInNamespace("Mohist.Server.*.Querying", useRegularExpressions: true)
-        .As("Query Layer");
+    private static readonly IObjectProvider<IType> QuerierLayer = Types()
+        .That().ResideInNamespace("Mohist.Server.*.Services", useRegularExpressions: true)
+        .And().HaveNameEndingWith("Querier")
+        .As("Querier Layer");
 
     private static readonly IObjectProvider<IType> OrleansTypes = Types()
         .That().ResideInNamespace("Orleans")
@@ -69,8 +69,8 @@ public class ArchitectureRules
     public void Domain_ShouldNotDependOnStorage()
     {
         Types().That().Are(DomainLayer)
-            .Should().NotDependOnAny(StorageLayer)
-            .Because("Domain layer must not depend on storage implementation")
+            .Should().NotDependOnAny(DataLayer)
+            .Because("Domain layer must not depend on database implementation")
             .Check(_architecture);
     }
 
@@ -78,46 +78,116 @@ public class ArchitectureRules
     public void Api_ShouldNotDependOnStorage()
     {
         Types().That().Are(ApiLayer)
-            .Should().NotDependOnAny(Types().That().Are(StorageLayer).Or().Are(GrainStorageLayer))
+            .Should().NotDependOnAny(DataLayer)
             .Because("API layer should use grain for writes and query services for reads")
             .Check(_architecture);
     }
 
     [Fact]
-    public void Querying_ShouldNotDependOnGrainInterfaces()
+    public void Queriers_ShouldNotDependOnGrainInterfaces()
     {
-        Types().That().Are(QueryLayer)
+        Types().That().Are(QuerierLayer)
             .Should().NotDependOnAny(GrainInterfaces)
-            .Because("Query layer should read from EF directly, not through grain interfaces")
+            .Because("queriers should read from EF directly, not through grain interfaces")
             .Check(_architecture);
     }
 
     [Fact]
-    public void Querying_ShouldNotDependOnGrainStorage()
+    public void InfrastructureData_ShouldNotDependOnApplicationLayer()
     {
-        Types().That().Are(QueryLayer)
-            .Should().NotDependOnAny(GrainStorageLayer)
-            .Because("Query layer should not depend on grain storage implementations")
+        Types().That().Are(DataLayer)
+            .Should().NotDependOnAny(ApplicationLayer)
+            .Because("Infrastructure.Data is the persistence boundary and must not depend on application services, grains, or queriers")
             .Check(_architecture);
     }
 
     [Fact]
-    public void Storage_ShouldNotDependOnGrainInterfaces()
-    {
-        Types().That().Are(StorageLayer)
-            .Should().NotDependOnAny(GrainInterfaces)
-            .Because("Storage layer should not depend on grain interfaces")
-            .Check(_architecture);
-    }
-
-    [Fact]
-    public void GrainStorage_IsInInfrastructurePersistence()
+    public void DataStores_AreInInfrastructureData()
     {
         Classes().That().HaveNameEndingWith("Store")
-            .And().ResideInNamespace("Mohist.Server.Infrastructure.Persistence", useRegularExpressions: true)
+            .And().ResideInNamespace("Mohist.Server.Infrastructure.Data", useRegularExpressions: true)
             .Should().Exist()
-            .Because("Grain storage implementations should be in Infrastructure.Persistence namespace")
+            .Because("database-backed stores should be in Infrastructure.Data namespace")
             .Check(_architecture);
+    }
+
+    [Fact]
+    public void RowModels_AreInInfrastructureData()
+    {
+        Classes().That().HaveNameEndingWith("Row")
+            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data(\\..*)?", useRegularExpressions: true)
+            .Because("EF row models are persistence data models and belong under Infrastructure.Data")
+            .Check(_architecture);
+    }
+
+    [Fact]
+    public void DbContexts_AreInInfrastructureData()
+    {
+        Classes().That().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.DbContext))
+            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data(\\..*)?", useRegularExpressions: true)
+            .Because("database contexts are infrastructure data concerns")
+            .Check(_architecture);
+    }
+
+    [Fact]
+    public void Migrations_AreInInfrastructureData()
+    {
+        Classes().That().AreAssignableTo(typeof(Microsoft.EntityFrameworkCore.Migrations.Migration))
+            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data.Migrations", useRegularExpressions: true)
+            .Because("EF migrations should live with database schema artifacts under Infrastructure.Data")
+            .Check(_architecture);
+    }
+
+    [Fact]
+    public void ModelSnapshots_AreInInfrastructureData()
+    {
+        Classes().That().HaveNameEndingWith("ModelSnapshot")
+            .Should().ResideInNamespace("Mohist.Server.Infrastructure.Data.Migrations", useRegularExpressions: true)
+            .Because("EF model snapshots should live with database schema artifacts under Infrastructure.Data")
+            .Check(_architecture);
+    }
+
+    [Fact]
+    public void FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices()
+    {
+        var sourceRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "Mohist.Server"));
+
+        var sourceFiles = Directory
+            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            .Select(Path.GetFullPath)
+            .ToArray();
+
+        var featureRoots = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Epic",
+            "Issue",
+            "Project",
+            "Runner",
+            "Sessions",
+            "Workflow"
+        };
+
+        var allowedFeatureSegments = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Domain",
+            "Grains",
+            "Services"
+        };
+
+        var violations = sourceFiles
+            .Select(path => Path.GetRelativePath(sourceRoot, path))
+            .Select(path => path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            .Where(parts => parts.Length >= 2 && featureRoots.Contains(parts[0]))
+            .Where(parts => !allowedFeatureSegments.Contains(parts[1]))
+            .Select(parts => string.Join("/", parts))
+            .OrderBy(path => path)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Feature directories must only contain Domain, Grains, and Services. Violations: " + string.Join(", ", violations));
     }
 
     [Fact]
@@ -171,7 +241,7 @@ public class ArchitectureRules
     [Fact]
     public void EfEntities_ShouldEndWithRow()
     {
-        var dbSetProperties = typeof(Mohist.Server.Infrastructure.Persistence.Db.MohistDbContext)
+        var dbSetProperties = typeof(Mohist.Server.Infrastructure.Data.Db.MohistDbContext)
             .GetProperties()
             .Where(p => p.PropertyType.IsGenericType &&
                         p.PropertyType.GetGenericTypeDefinition() == typeof(Microsoft.EntityFrameworkCore.DbSet<>))
@@ -247,7 +317,7 @@ public class ArchitectureRules
         }
     }
 
-    [Fact(Skip = "Tech debt: Issue has internal cycles (Storage↔WorkflowProfiles↔Querying, Grains↔WorkflowProfiles)")]
+    [Fact(Skip = "Tech debt: Issue has internal cycles (Grains↔Services)")]
     public void IssueInternalLayers_ShouldBeFreeOfCycles()
     {
         Slices().Matching("Mohist.Server.Issue.(*)")
@@ -255,7 +325,7 @@ public class ArchitectureRules
             .Check(_architecture);
     }
 
-    [Fact(Skip = "Tech debt: Workflow has internal cycles (Storage↔WorkflowProfiles↔Querying, Grains↔WorkflowProfiles)")]
+    [Fact(Skip = "Tech debt: Workflow has internal cycles (Grains↔Services)")]
     public void WorkflowInternalLayers_ShouldBeFreeOfCycles()
     {
         Slices().Matching("Mohist.Server.Workflow.(*)")

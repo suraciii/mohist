@@ -167,21 +167,15 @@ public class GitService : IGitService
     private string GetIssueWorktreePath(string projectName, int issueNumber)
         => MohistWorkspaceLayout.IssueWorktreePath(_runnerRoot, projectName, issueNumber);
 
-    private static string GetLegacyIssueWorktreePath(string projectPath, string projectName, int issueNumber)
-        => MohistWorkspaceLayout.LegacyIssueWorktreePath(projectPath, projectName, issueNumber);
-
     private string? GetExistingIssueWorktreePath(string projectPath, string projectName, int issueNumber)
     {
         var worktreePath = GetIssueWorktreePath(projectName, issueNumber);
-        if (Directory.Exists(worktreePath)) return worktreePath;
-
-        var legacyWorktreePath = GetLegacyIssueWorktreePath(projectPath, projectName, issueNumber);
-        return Directory.Exists(legacyWorktreePath) ? legacyWorktreePath : null;
+        return Directory.Exists(worktreePath) ? worktreePath : null;
     }
 
     private static async Task<(string Output, string Error, int ExitCode)> RunGitAsync(string workingDir, string command, params string[] args)
     {
-        var psi = new ProcessStartInfo("git", [command, ..args])
+        var psi = new ProcessStartInfo("git", [command, .. args])
         {
             WorkingDirectory = workingDir,
             RedirectStandardOutput = true,

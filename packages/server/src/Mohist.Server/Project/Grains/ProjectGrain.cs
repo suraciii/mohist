@@ -1,12 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Querying;
-using Mohist.Server.Project.Storage;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using System.Text.Json;
 
 namespace Mohist.Server.Project.Grains;

@@ -1,16 +1,14 @@
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
+using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Project.Querying;
-using Mohist.Server.Sessions.Querying;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Errors;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Projection;
-using Mohist.Server.Workflow.Querying;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 using System.Text.Json;
 using YamlDotNet.Core;
@@ -126,7 +124,7 @@ public static class IssueRoutes
             }
 
             // Issue preview: use a local engine instance (simple var expansion)
-            var engine = new Mohist.Server.Workflow.Prompts.Infrastructure.PromptTemplateEngine();
+            var engine = new Mohist.Server.Workflow.Services.Prompts.PromptTemplateEngine();
             var (rendered, missing, depth) = engine.Render(body, variables);
             return ApiResults.Ok(new { rendered, missing, depth });
         });
@@ -584,7 +582,7 @@ public static class IssueRoutes
             }
         });
 
-         return app;
+        return app;
     }
 
     private static async Task<IIssueGrain?> GetIssueGrainAsync(

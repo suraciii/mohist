@@ -1,7 +1,6 @@
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Querying;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
