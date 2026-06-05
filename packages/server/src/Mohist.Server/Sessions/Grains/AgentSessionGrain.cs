@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Domain.Events;
-using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -212,15 +211,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var isTerminal = session.IsTerminal;
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
 
-        IReadOnlyList<StagedAgentSessionEvent> stagedEvents;
-        await using (var transaction = await db.Database.BeginTransactionAsync())
-        {
-            db.AgentSessionRuntimeEvents.AddRange(entries);
-            stagedEvents = await _stateStore.StageAsync(db, SessionId, session, events);
-            await db.SaveChangesAsync();
-            await transaction.CommitAsync();
-        }
-        _stateStore.Publish(stagedEvents);
+        await _stateStore.SaveAsync(SessionId, session, events, entries);
         _session = session;
 
         foreach (var entry in entries)
