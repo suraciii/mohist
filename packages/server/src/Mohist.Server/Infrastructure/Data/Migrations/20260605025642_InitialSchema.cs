@@ -253,7 +253,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "WorkflowAgentSessionEvents",
+                name: "AgentSessionEvents",
                 columns: table => new
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
@@ -274,14 +274,15 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_WorkflowAgentSessionEvents", x => x.Id);
+                    table.PrimaryKey("PK_AgentSessionEvents", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
-                name: "WorkflowAgentSessions",
+                name: "AgentSessions",
                 columns: table => new
                 {
                     Id = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
+                    State = table.Column<string>(type: "TEXT", nullable: false),
                     ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
                     IssueNumber = table.Column<int>(type: "INTEGER", nullable: false),
                     WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
@@ -289,38 +290,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     WorkId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
                     WorkType = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
                     Stage = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
-                    Title = table.Column<string>(type: "TEXT", maxLength: 512, nullable: true),
                     RunnerId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
                     AgentSessionId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
                     Status = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    Model = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    WorkDir = table.Column<string>(type: "TEXT", nullable: true),
-                    ChangeDir = table.Column<string>(type: "TEXT", nullable: true),
-                    ProcessPid = table.Column<int>(type: "INTEGER", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    StartedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     LastDataAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    LastHeartbeatAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    FailureReason = table.Column<string>(type: "TEXT", nullable: true),
-                    ExitCode = table.Column<int>(type: "INTEGER", nullable: true),
-                    ResolvedModel = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    InputTokens = table.Column<long>(type: "INTEGER", nullable: true),
-                    OutputTokens = table.Column<long>(type: "INTEGER", nullable: true),
-                    TotalTokens = table.Column<long>(type: "INTEGER", nullable: true),
-                    CachedReadTokens = table.Column<long>(type: "INTEGER", nullable: true),
-                    ThoughtTokens = table.Column<long>(type: "INTEGER", nullable: true),
-                    CostAmount = table.Column<double>(type: "REAL", nullable: true),
-                    CostCurrency = table.Column<string>(type: "TEXT", maxLength: 16, nullable: true),
-                    ContextWindowUsed = table.Column<long>(type: "INTEGER", nullable: true),
-                    ContextWindowSize = table.Column<long>(type: "INTEGER", nullable: true),
-                    FailureCategory = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
-                    ToolCallCount = table.Column<int>(type: "INTEGER", nullable: true),
-                    ToolErrorCount = table.Column<int>(type: "INTEGER", nullable: true)
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_WorkflowAgentSessions", x => x.Id);
+                    table.PrimaryKey("PK_AgentSessions", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -432,45 +412,45 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 column: "ProjectId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessionEvents_ProjectId_IssueNumber_Id",
-                table: "WorkflowAgentSessionEvents",
+                name: "IX_AgentSessionEvents_ProjectId_IssueNumber_Id",
+                table: "AgentSessionEvents",
                 columns: new[] { "ProjectId", "IssueNumber", "Id" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessionEvents_SessionId_Sequence",
-                table: "WorkflowAgentSessionEvents",
+                name: "IX_AgentSessionEvents_SessionId_Sequence",
+                table: "AgentSessionEvents",
                 columns: new[] { "SessionId", "Sequence" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessionEvents_WorkflowRunId_SessionName_Sequence",
-                table: "WorkflowAgentSessionEvents",
+                name: "IX_AgentSessionEvents_WorkflowRunId_SessionName_Sequence",
+                table: "AgentSessionEvents",
                 columns: new[] { "WorkflowRunId", "SessionName", "Sequence" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessions_AgentSessionId",
-                table: "WorkflowAgentSessions",
+                name: "IX_AgentSessions_AgentSessionId",
+                table: "AgentSessions",
                 column: "AgentSessionId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessions_ProjectId_IssueNumber_CreatedAt",
-                table: "WorkflowAgentSessions",
+                name: "IX_AgentSessions_ProjectId_IssueNumber_CreatedAt",
+                table: "AgentSessions",
                 columns: new[] { "ProjectId", "IssueNumber", "CreatedAt" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessions_ProjectId_Status_CreatedAt",
-                table: "WorkflowAgentSessions",
+                name: "IX_AgentSessions_ProjectId_Status_CreatedAt",
+                table: "AgentSessions",
                 columns: new[] { "ProjectId", "Status", "CreatedAt" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessions_WorkflowRunId_SessionName",
-                table: "WorkflowAgentSessions",
+                name: "IX_AgentSessions_WorkflowRunId_SessionName",
+                table: "AgentSessions",
                 columns: new[] { "WorkflowRunId", "SessionName" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowAgentSessions_WorkflowRunId_WorkId",
-                table: "WorkflowAgentSessions",
+                name: "IX_AgentSessions_WorkflowRunId_WorkId",
+                table: "AgentSessions",
                 columns: new[] { "WorkflowRunId", "WorkId" });
 
             migrationBuilder.CreateIndex(
@@ -615,10 +595,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 name: "ProjectWorkflowTemplates");
 
             migrationBuilder.DropTable(
-                name: "WorkflowAgentSessionEvents");
+                name: "AgentSessionEvents");
 
             migrationBuilder.DropTable(
-                name: "WorkflowAgentSessions");
+                name: "AgentSessions");
 
             migrationBuilder.DropTable(
                 name: "WorkflowLeases");

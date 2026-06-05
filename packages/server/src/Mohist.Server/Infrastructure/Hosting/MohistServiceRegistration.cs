@@ -46,7 +46,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<IStateStore<WorkLease>, WorkflowLeaseStore>();
         services.AddScoped<IStateStore<WorkflowExecutionContext>, WorkflowVariablesStore>();
-        services.AddScoped<IStateStore<WorkflowAgentSession>, WorkflowAgentSessionStore>();
+        services.AddScoped<IStateStore<AgentSession>, AgentSessionStore>();
         services.AddSingleton<ProjectQuerier>();
         services.AddSingleton<IssueRepositoryResolver>();
         services.AddScoped<IssueIdentityResolver>();
@@ -57,7 +57,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();
         services.AddScoped<IEventStore, EventStore>();
-        services.AddScoped<WorkflowAgentSessionQuerier>();
+        services.AddScoped<AgentSessionQuerier>();
         services.AddScoped<WorkflowActivityQuerier>();
         services.AddScoped<WorkflowQuerier>();
         services.AddScoped<WorkflowProfileManager>();

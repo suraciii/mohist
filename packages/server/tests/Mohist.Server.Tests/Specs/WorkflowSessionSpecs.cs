@@ -85,7 +85,7 @@ public class WorkflowSessionSpecs
             "Repeating the body to make sure the assertion fails on any truncation.";
         const string failureReason = "model refused to continue";
         var (project, issue, sessionName, workflowRunId) = await CreateIssueWorkflowSessionAsync("workflow-mohist-prompt");
-        var sessionId = GrainKey.WorkflowAgentSession(project.Id, workflowRunId, sessionName);
+        var sessionId = GrainKey.AgentSession(project.Id, workflowRunId, sessionName);
 
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{workflowRunId}/{sessionName}/attach", new
         {
@@ -159,9 +159,9 @@ public class WorkflowSessionSpecs
         await issueGrain.StartWorkAsync();
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var sessionName = $"task-{Guid.NewGuid():N}";
-        var sessionId = GrainKey.WorkflowAgentSession(project.Id, workflowRunId, sessionName);
-        await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(sessionId)
-            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+        var sessionId = GrainKey.AgentSession(project.Id, workflowRunId, sessionName);
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .EnsureAsync(new EnsureAgentSessionCommand(
                 project.Id, issue.Number, workflowRunId, sessionName, _runnerId,
                 sessionName, "task", "Build", issueTitle));
 

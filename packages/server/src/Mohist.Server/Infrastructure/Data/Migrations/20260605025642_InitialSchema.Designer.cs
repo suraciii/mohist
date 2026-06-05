@@ -288,7 +288,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.WorkflowAgentSessionEventRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionEventRow", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -357,10 +357,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("WorkflowRunId", "SessionName", "Sequence");
 
-                    b.ToTable("WorkflowAgentSessionEvents", (string)null);
+                    b.ToTable("AgentSessionEvents", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.WorkflowAgentSessionRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(512)
@@ -370,43 +370,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("CachedReadTokens")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ChangeDir")
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<long?>("ContextWindowSize")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long?>("ContextWindowUsed")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<double?>("CostAmount")
-                        .HasColumnType("REAL");
-
-                    b.Property<string>("CostCurrency")
-                        .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("ExitCode")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("FailureCategory")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FailureReason")
-                        .HasColumnType("TEXT");
-
-                    b.Property<long?>("InputTokens")
-                        .HasColumnType("INTEGER");
 
                     b.Property<int>("IssueNumber")
                         .HasColumnType("INTEGER");
@@ -414,25 +382,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime?>("LastHeartbeatAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Model")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<long?>("OutputTokens")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("ProcessPid")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("ProjectId")
                         .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResolvedModel")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -449,7 +400,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime?>("StartedAt")
+                    b.Property<string>("State")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
@@ -457,23 +409,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<long?>("ThoughtTokens")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Title")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("ToolCallCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int?>("ToolErrorCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long?>("TotalTokens")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("WorkDir")
+                    b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("WorkId")
@@ -502,7 +438,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("WorkflowAgentSessions", (string)null);
+                    b.ToTable("AgentSessions", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.Prompts.ProjectPromptTemplateRow", b =>
