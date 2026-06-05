@@ -29,7 +29,7 @@ public class AgentSessionQuerier
             .Where(s => s.WorkflowRunId == workflowRunId)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
-        return ToDomain(rows).Select(ToAgentSessionDto).ToList();
+        return ToDomain(rows).Select(x => ToAgentSessionDto(x.Session, x.Row)).ToList();
     }
 
     public async Task<WorkflowSessionDetailDto?> GetByWorkflowAsync(string workflowRunId, string sessionName, CancellationToken ct = default)
@@ -54,7 +54,7 @@ public class AgentSessionQuerier
             .Where(s => s.ProjectId == projectId && s.IssueNumber == issueNumber)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
-        return ToDomain(rows).Select(ToWorkflowDto).ToList();
+        return ToDomain(rows).Select(x => ToWorkflowDto(x.Session)).ToList();
     }
 
     public async Task<IReadOnlyList<AgentSessionInfoDto>> ListCurrentAsync(string projectId, string? status = null, int limit = 50, CancellationToken ct = default)
@@ -67,18 +67,20 @@ public class AgentSessionQuerier
         rows = await ReconcileActiveSessionsAsync(db, rows, ct);
         var issueTitles = await LoadIssueTitlesAsync(db, projectId, rows.Select(r => r.IssueNumber), ct);
         var eventSummaries = await LoadEventSummariesAsync(db, rows.Select(r => r.Id), ct);
-        return ToDomain(rows).Select(s =>
+        return ToDomain(rows).Select(x =>
         {
+            var s = x.Session;
+            var row = x.Row;
             var events = eventSummaries.GetValueOrDefault(s.Id);
             var usage = Usage(s);
             return new AgentSessionInfoDto(
             IssueNumber(s),
             IssueTitle(issueTitles, IssueNumber(s)),
-            s.Phase ?? string.Empty,
+            row.Stage ?? string.Empty,
             s.Id,
             StatusName(s),
             s.Settings.Model,
-            s.Title,
+            null,
             s.Status.CreatedAt.ToString("o"),
             s.Status.CompletedAt?.ToString("o"),
             LastActivityAt(s).ToString("o"),
@@ -105,7 +107,7 @@ public class AgentSessionQuerier
             .Where(s => s.ProjectId == projectId && s.IssueNumber == issueNumber)
             .OrderBy(s => s.CreatedAt)
             .ToListAsync(ct);
-        return ToDomain(rows).Select(ToSummaryDto).ToList();
+        return ToDomain(rows).Select(x => ToSummaryDto(x.Session, x.Row)).ToList();
     }
 
     public async Task<AgentSessionMetadataDto?> GetSessionMetadataAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
@@ -129,8 +131,8 @@ public class AgentSessionQuerier
             domainSession.Status.AgentRuntimeSessionId ?? domainSession.Id,
             StatusName(domainSession),
             domainSession.Settings.Model,
-            domainSession.Phase,
-            domainSession.Title,
+            session.Stage,
+            null,
             domainSession.Status.CreatedAt.ToString("o"),
             domainSession.Status.CompletedAt?.ToString("o"),
             eventSummary.ResolvedModel,
@@ -211,7 +213,7 @@ public class AgentSessionQuerier
         var taskProgressMap = await BuildTaskProgressMapAsync(sessions, ct);
 
         var cards = ToDomain(sessions)
-            .Select(s => ToActivityCard(s, latestEvents.GetValueOrDefault(s.Id), eventSummaries.GetValueOrDefault(s.Id), IssueTitle(issueTitles, IssueNumber(s)), taskProgressMap.GetValueOrDefault(s.Id)))
+            .Select(x => ToActivityCard(x.Session, x.Row, latestEvents.GetValueOrDefault(x.Session.Id), eventSummaries.GetValueOrDefault(x.Session.Id), IssueTitle(issueTitles, IssueNumber(x.Session)), taskProgressMap.GetValueOrDefault(x.Session.Id)))
             .ToList();
 
         waiting ??= [];
@@ -338,7 +340,7 @@ public class AgentSessionQuerier
             toolErrors == 0 ? null : Math.Min(toolErrors, Math.Max(toolCalls, toolErrors)));
     }
 
-    private static ActivityCardDto ToActivityCard(AgentSession s, AgentSessionEventRow? latestEvent, AgentSessionEventSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
+    private static ActivityCardDto ToActivityCard(AgentSession s, AgentSessionRow row, AgentSessionEventRow? latestEvent, AgentSessionEventSummary? eventSummary, string issueTitle, ActivityTaskProgressDto? taskProgress)
     {
         var lastActivityAt = LastActivityAt(s).ToString("o");
         var usage = Usage(s);
@@ -346,16 +348,16 @@ public class AgentSessionQuerier
             $"issue_{s.ProjectId}_{IssueNumber(s)}",
             IssueNumber(s),
             issueTitle,
-            s.Phase ?? string.Empty,
+            row.Stage ?? string.Empty,
             null,
             s.Id,
             StatusName(s),
             s.Settings.Model,
-            s.Title,
+            null,
             s.Status.CreatedAt.ToString("o"),
             s.Status.CompletedAt?.ToString("o"),
             lastActivityAt,
-            new ActivityWorkItemDto(s.TaskKind ?? "task", s.TaskId ?? s.SessionName, s.Title ?? s.SessionName, s.Phase, null),
+            new ActivityWorkItemDto(row.WorkType ?? "task", row.WorkId ?? s.SessionName, row.WorkId ?? s.SessionName, row.Stage, null),
             taskProgress,
             latestEvent is null ? null : ToPreview(latestEvent),
             s.Status.FailureReason,
@@ -447,12 +449,12 @@ public class AgentSessionQuerier
             : null;
     }
 
-    private static AgentSessionDto ToAgentSessionDto(AgentSession s)
+    private static AgentSessionDto ToAgentSessionDto(AgentSession s, AgentSessionRow row)
     {
         var usage = Usage(s);
         return new AgentSessionDto(
             s.Id, s.ProjectId, IssueNumber(s), s.RunId, s.SessionName,
-            s.TaskId, s.TaskKind, s.Phase, s.Title, s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
+            row.WorkId, row.WorkType, row.Stage, null, s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
             StatusName(s), s.Settings.Model, s.Runtime.WorkDir, s.ChangeDir, null,
             s.Status.CreatedAt.ToString("o"), s.Status.StartedAt?.ToString("o"), s.Status.CompletedAt?.ToString("o"),
             s.Status.LastDataAt?.ToString("o"), s.Status.FailureReason, s.Status.ExitCode,
@@ -470,13 +472,13 @@ public class AgentSessionQuerier
         s.Status.CreatedAt.ToString("o"), s.Status.StartedAt?.ToString("o"), s.Status.LastDataAt?.ToString("o"),
         s.Status.CompletedAt?.ToString("o"), s.Status.FailureReason, s.Status.ExitCode);
 
-    private static AgentSessionSummaryDto ToSummaryDto(AgentSession s)
+    private static AgentSessionSummaryDto ToSummaryDto(AgentSession s, AgentSessionRow row)
     {
         var usage = Usage(s);
         return new AgentSessionSummaryDto(
-            s.Id, s.SessionName, s.Status.AgentRuntimeSessionId ?? s.Id, s.TaskId, s.Title,
+            s.Id, s.SessionName, s.Status.AgentRuntimeSessionId ?? s.Id, row.WorkId, null,
             StatusName(s), s.Status.CreatedAt.ToString("o"), s.Status.CompletedAt?.ToString("o"),
-            s.Settings.Model, null, s.Phase, s.Title,
+            s.Settings.Model, null, row.Stage, null,
             s.Status.LastDataAt?.ToString("o"), null, null, s.Status.FailureReason,
             null, usage.InputTokens, usage.OutputTokens,
             usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,
@@ -496,8 +498,17 @@ public class AgentSessionQuerier
         e.SessionName, e.AgentSessionId, e.WorkId, e.WorkType, e.Stage,
         e.Sequence, e.Type, ParsePayload(e.PayloadJson), e.CreatedAt.ToString("o"));
 
-    private static List<AgentSession> ToDomain(IEnumerable<AgentSessionRow> rows) =>
-        rows.Select(AgentSessionJson.Deserialize).OfType<AgentSession>().ToList();
+    private static List<AgentSessionProjection> ToDomain(IEnumerable<AgentSessionRow> rows)
+    {
+        var result = new List<AgentSessionProjection>();
+        foreach (var row in rows)
+        {
+            var session = AgentSessionJson.Deserialize(row);
+            if (session is not null)
+                result.Add(new AgentSessionProjection(row, session));
+        }
+        return result;
+    }
 
     private static async Task<List<AgentSessionRow>> ReconcileActiveSessionsAsync(
         MohistDbContext db,
@@ -558,3 +569,5 @@ internal sealed record AgentSessionEventSummary(
     string? FailureCategory,
     int? ToolCallCount,
     int? ToolErrorCount);
+
+internal sealed record AgentSessionProjection(AgentSessionRow Row, AgentSession Session);

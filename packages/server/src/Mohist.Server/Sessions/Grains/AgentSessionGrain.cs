@@ -34,15 +34,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command)
     {
+        var wasTerminal = _session?.IsTerminal ?? false;
         if (_session is null)
         {
             var existing = await LoadByWorkflowAndSessionAsync(command.WorkflowRunId, command.SessionName);
             if (existing is not null)
             {
                 _session = existing;
-                if (_session.IsTerminal && command.SessionName != command.WorkId)
-                    _session.StartNewWork(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
-                else if (!_session.IsTerminal)
+                wasTerminal = _session.IsTerminal;
+                if (!_session.IsTerminal)
                     _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
             }
             else
@@ -50,13 +50,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         else
         {
-            if (_session.IsTerminal && command.SessionName != command.WorkId)
-                _session.StartNewWork(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber, DateTime.UtcNow);
-            else
+            if (!_session.IsTerminal)
                 _session.MergeContext(command.RunnerId, command.WorkId, command.WorkType, command.Stage, command.Title, command.IssueNumber);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
+        if (!wasTerminal)
+            await UpdateProjectionAsync(command);
         return await ToInfoAsync(_session);
     }
 
@@ -72,13 +72,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         new AgentSessionMetadata()
             .WithLabel(AgentSessionMetadataKeys.ProjectId, command.ProjectId)
             .WithLabel(AgentSessionMetadataKeys.IssueNumber, command.IssueNumber is > 0 ? command.IssueNumber.Value.ToString() : null)
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
             .WithLabel(AgentSessionMetadataKeys.SourceId, command.WorkflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, command.SessionName)
-            .WithAnnotation(AgentSessionMetadataKeys.TaskId, command.WorkId)
-            .WithAnnotation(AgentSessionMetadataKeys.TaskKind, command.WorkType)
-            .WithAnnotation(AgentSessionMetadataKeys.Phase, command.Stage)
-            .WithAnnotation(AgentSessionMetadataKeys.Title, command.Title);
+            .WithLabel(AgentSessionMetadataKeys.SessionName, command.SessionName);
+
+    private async Task UpdateProjectionAsync(EnsureAgentSessionCommand command)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var row = await db.AgentSessions.FindAsync(SessionId);
+        if (row is null) return;
+
+        row.WorkId ??= command.WorkId;
+        row.WorkType ??= command.WorkType;
+        row.Stage ??= command.Stage;
+        await db.SaveChangesAsync();
+    }
 
     public async Task<AgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
     {
@@ -89,7 +97,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return await ToInfoAsync(session);
 
         await _stateStore.SaveAsync(SessionId, session);
-        EmitStarted(session);
+        await EmitStartedAsync(session);
         return await ToInfoAsync(session);
     }
 
@@ -103,6 +111,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var now = DateTime.UtcNow;
         if (!wasTerminal)
             session.RecordActivity(now);
+        var projection = await LoadProjectionAsync(session.Id);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var nextSequence = await db.AgentSessionEvents
@@ -185,9 +194,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 WorkflowRunId = session.RunId,
                 SessionName = session.SessionName,
                 AgentSessionId = session.Status.AgentRuntimeSessionId,
-                WorkId = command.WorkId ?? session.TaskId,
-                WorkType = command.WorkType ?? session.TaskKind,
-                Stage = command.Stage ?? session.Phase,
+                WorkId = command.WorkId ?? projection?.WorkId,
+                WorkType = command.WorkType ?? projection?.WorkType,
+                Stage = command.Stage ?? projection?.Stage,
                 Sequence = ++nextSequence,
                 Type = e.Type,
                 PayloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson,
@@ -252,7 +261,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         var metadata = new AgentSessionMetadata()
             .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
             .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
             .WithLabel(AgentSessionMetadataKeys.SessionName, sessionName);
         _session = AgentSession.Create(SessionId, string.Empty, "opencode", null, metadata: metadata);
@@ -260,16 +269,20 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return _session;
     }
 
-    private void EmitStarted(AgentSession session) => _eventBus.Emit("coder_session_started", new CoderSessionStartedEvent(
-        session.IssueNumber.ToString(),
-        session.ProjectId,
-        session.Id,
-        session.Status.AgentRuntimeSessionId ?? session.Id,
-        session.TaskId,
-        session.Settings.Model,
-        session.Phase,
-        session.Title,
-        session.Title));
+    private async Task EmitStartedAsync(AgentSession session)
+    {
+        var row = await LoadProjectionAsync(session.Id);
+        _eventBus.Emit("coder_session_started", new CoderSessionStartedEvent(
+            session.IssueNumber.ToString(),
+            session.ProjectId,
+            session.Id,
+            session.Status.AgentRuntimeSessionId ?? session.Id,
+            row?.WorkId,
+            session.Settings.Model,
+            row?.Stage,
+            null,
+            null));
+    }
 
     private void EmitTranscriptEntry(AgentSession session, AgentSessionEventRow entry)
     {
@@ -279,7 +292,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             _eventBus.Emit("coder_text_chunk", new CoderTranscriptEntryEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
-                session.TaskId,
+                entry.WorkId,
                 session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
                 text));
@@ -289,7 +302,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             _eventBus.Emit("coder_thought_chunk", new CoderTranscriptEntryEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
-                session.TaskId,
+                entry.WorkId,
                 session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
                 text));
@@ -302,7 +315,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             _eventBus.Emit("coder_tool_call", new CoderToolCallEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
-                session.TaskId,
+                entry.WorkId,
                 session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
                 tool.ToolName,
@@ -352,6 +365,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)
     {
         var eventSummary = await LoadEventSummaryAsync(s.Id);
+        var row = await LoadProjectionAsync(s.Id);
         var usage = s.Status.UsageSummary ?? new AgentUsageSummary();
         return new AgentSessionInfo(
         s.Id,
@@ -359,16 +373,16 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         s.IssueNumber == 0 ? null : s.IssueNumber,
         s.RunId,
         s.SessionName,
-        s.TaskId,
-        s.TaskKind,
-        s.Phase,
-        s.Title,
+        row?.WorkId,
+        row?.WorkType,
+        row?.Stage,
+        null,
         s.Runtime.RunnerId,
         s.Status.AgentRuntimeSessionId,
         AgentSessionStatusNames.ToName(s.Status.Phase),
         s.Settings.Model,
         s.Runtime.WorkDir,
-        s.ChangeDir,
+        null,
         null,
         s.Status.CreatedAt.ToString("o"),
         s.Status.StartedAt?.ToString("o"),
@@ -434,6 +448,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             failureCategory,
             toolCalls == 0 ? null : toolCalls,
             toolErrors == 0 ? null : Math.Min(toolErrors, Math.Max(toolCalls, toolErrors)));
+    }
+
+    private async Task<AgentSessionRow?> LoadProjectionAsync(string sessionId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId);
     }
 
     private static AgentSessionEventInfo ToEventInfo(AgentSessionEventRow e) => new(

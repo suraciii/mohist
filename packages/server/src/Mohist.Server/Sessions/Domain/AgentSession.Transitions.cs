@@ -16,41 +16,13 @@ public static partial class AgentSessionExtensions
             string? title,
             int? issueNumber)
         {
-            session.Metadata = session.Metadata
-                .WithAnnotation(AgentSessionMetadataKeys.TaskId, session.TaskId is null ? workId : null)
-                .WithAnnotation(AgentSessionMetadataKeys.TaskKind, session.TaskKind is null ? workType : null)
-                .WithAnnotation(AgentSessionMetadataKeys.Phase, session.Phase is null ? stage : null)
-                .WithAnnotation(AgentSessionMetadataKeys.Title, session.Title is null ? title : null);
+            _ = runnerId;
+            _ = workType;
+            _ = stage;
+            _ = title;
+            _ = workId;
             if (session.IssueNumber == 0 && issueNumber is > 0)
                 session.Metadata = session.Metadata.WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.Value.ToString());
-        }
-
-        public void StartNewWork(
-            string? runnerId,
-            string? workId,
-            string? workType,
-            string? stage,
-            string? title,
-            int? issueNumber,
-            DateTime now)
-        {
-            session.Metadata = session.Metadata
-                .WithAnnotation(AgentSessionMetadataKeys.TaskId, workId)
-                .WithAnnotation(AgentSessionMetadataKeys.TaskKind, workType)
-                .WithAnnotation(AgentSessionMetadataKeys.Phase, stage)
-                .WithAnnotation(AgentSessionMetadataKeys.Title, title);
-            if (session.IssueNumber == 0 && issueNumber is > 0)
-                session.Metadata = session.Metadata.WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.Value.ToString());
-
-            session.Status = session.Status with
-            {
-                Phase = AgentSessionStatus.Created,
-                StartedAt = null,
-                CompletedAt = null,
-                FailureReason = null,
-                ExitCode = null,
-                LastDataAt = now
-            };
         }
 
         public bool AttachAgent(
@@ -62,13 +34,14 @@ public static partial class AgentSessionExtensions
             DateTime now)
         {
             if (session.IsTerminal) return false;
+            _ = changeDir;
+            _ = processPid;
 
             session.Runtime = session.Runtime with
             {
                 WorkDir = session.Runtime.WorkDir ?? workDir
             };
             session.Status = session.Status with { AgentRuntimeSessionId = agentSessionId };
-            session.Metadata = session.Metadata.WithAnnotation(AgentSessionMetadataKeys.ChangeDir, changeDir);
             session.Start(model, now);
             return true;
         }

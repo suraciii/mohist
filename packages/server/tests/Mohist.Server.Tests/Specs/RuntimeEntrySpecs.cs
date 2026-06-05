@@ -283,13 +283,9 @@ public class RuntimeEntrySpecs
         var metadata = new AgentSessionMetadata()
             .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
             .WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.ToString())
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
             .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, workId)
-            .WithAnnotation(AgentSessionMetadataKeys.TaskId, workId)
-            .WithAnnotation(AgentSessionMetadataKeys.TaskKind, "task")
-            .WithAnnotation(AgentSessionMetadataKeys.Phase, "Build")
-            .WithAnnotation(AgentSessionMetadataKeys.Title, title);
+            .WithLabel(AgentSessionMetadataKeys.SessionName, workId);
         var session = AgentSession.Create(
             $"session-{Guid.NewGuid():N}",
             runnerId,

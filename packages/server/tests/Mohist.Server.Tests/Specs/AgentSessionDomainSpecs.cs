@@ -11,13 +11,9 @@ public class AgentSessionDomainSpecs
         var metadata = new AgentSessionMetadata()
             .WithLabel(AgentSessionMetadataKeys.ProjectId, "proj")
             .WithLabel(AgentSessionMetadataKeys.IssueNumber, "1")
-            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
             .WithLabel(AgentSessionMetadataKeys.SourceId, "wf")
-            .WithLabel(AgentSessionMetadataKeys.SessionName, "session")
-            .WithAnnotation(AgentSessionMetadataKeys.TaskId, "work-1")
-            .WithAnnotation(AgentSessionMetadataKeys.TaskKind, "task")
-            .WithAnnotation(AgentSessionMetadataKeys.Phase, "Build")
-            .WithAnnotation(AgentSessionMetadataKeys.Title, "Build work");
+            .WithLabel(AgentSessionMetadataKeys.SessionName, "session");
 
         return AgentSession.Create(
             "proj/wf/session",
@@ -40,10 +36,10 @@ public class AgentSessionDomainSpecs
         Assert.Equal("wf", session.RunId);
         Assert.Equal("session", session.SessionName);
         Assert.Equal(1, session.IssueNumber);
-        Assert.Equal("work-1", session.TaskId);
-        Assert.Equal("task", session.TaskKind);
-        Assert.Equal("Build", session.Phase);
-        Assert.Equal("Build work", session.Title);
+        Assert.Null(session.TaskId);
+        Assert.Null(session.TaskKind);
+        Assert.Null(session.Phase);
+        Assert.Null(session.Title);
         Assert.Equal("runner-1", session.Runtime.RunnerId);
         Assert.Equal("opencode", session.Runtime.AgentRuntime);
         Assert.Equal("/work", session.Runtime.WorkDir);
@@ -169,17 +165,4 @@ public class AgentSessionDomainSpecs
         Assert.Null(Usage(session).CostAmount);
     }
 
-    [Fact]
-    public void StartNewWork_KeepsRuntimeAndUsageForSessionHistory()
-    {
-        var session = CreateSession();
-        session.Settings = session.Settings with { Model = "intent" };
-        session.Status = session.Status with { UsageSummary = Usage(session) with { InputTokens = 10 } };
-
-        session.StartNewWork("runner-2", "work-2", "task", "Build", "Title", 1, DateTime.UtcNow);
-
-        Assert.Equal("runner-1", session.Runtime.RunnerId);
-        Assert.Equal("intent", session.Settings.Model);
-        Assert.Equal(10, Usage(session).InputTokens);
-    }
 }
