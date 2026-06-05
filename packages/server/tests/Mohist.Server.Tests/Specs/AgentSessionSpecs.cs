@@ -179,7 +179,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var response = await _client.GetDataAsync<AgentSessionEventsTestResponse>($"/api/issues/{issue.Number}/sessions/plan/events?projectId={project.Id}");
+        var response = await _client.GetDataAsync<AgentSessionRuntimeEventsTestResponse>($"/api/issues/{issue.Number}/sessions/plan/events?projectId={project.Id}");
 
         Assert.Equal(3, response.Events.Length);
         Assert.Equal(new[] { "mohist_prompt", "agent_message_chunk", "agent_message_chunk" }, response.Events.Select(e => e.Type).ToArray());
@@ -238,7 +238,7 @@ public class AgentSessionSpecs
             PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "second"));
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var sequences = await db.AgentSessionEvents.AsNoTracking()
+        var sequences = await db.AgentSessionRuntimeEvents.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
@@ -532,7 +532,7 @@ public class AgentSessionSpecs
         Assert.Null(grainSession.CostAmount);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var events = await db.AgentSessionEvents
+        var events = await db.AgentSessionRuntimeEvents
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
@@ -1014,6 +1014,6 @@ public class AgentSessionSpecs
     private sealed record ActivityTaskProgressDto(int Completed, int Total);
     private sealed record ActivityPreviewDto(string Kind, string Text, string CreatedAt);
     private sealed record ActivityWaitingDto(int IssueNumber, string IssueTitle, string Label);
-    private sealed record AgentSessionEventsTestResponse(AgentSessionEventTestDto[] Events);
-    private sealed record AgentSessionEventTestDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
+    private sealed record AgentSessionRuntimeEventsTestResponse(AgentSessionRuntimeEventTestDto[] Events);
+    private sealed record AgentSessionRuntimeEventTestDto(long Id, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
 }

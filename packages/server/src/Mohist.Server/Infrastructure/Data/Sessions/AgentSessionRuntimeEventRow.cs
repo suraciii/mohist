@@ -1,6 +1,6 @@
 namespace Mohist.Server.Infrastructure.Data.Sessions;
 
-public class AgentSessionEventRow
+public class AgentSessionRuntimeEventRow
 {
     public long Id { get; set; }
     public string SessionId { get; set; } = string.Empty;

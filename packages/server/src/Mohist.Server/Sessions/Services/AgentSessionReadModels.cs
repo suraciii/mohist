@@ -40,7 +40,7 @@ public sealed record AgentSessionDto(
     int? ToolCallCount,
     int? ToolErrorCount);
 
-public sealed record AgentSessionLogEventDto(string Id, string SessionId, string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName, string? AgentSessionId, string? WorkId, string? WorkType, string? Stage, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
+public sealed record AgentSessionRuntimeEventLogDto(string Id, string SessionId, string ProjectId, int IssueNumber, string WorkflowRunId, string SessionName, string? AgentSessionId, string? WorkId, string? WorkType, string? Stage, long Sequence, string Type, JsonElement? Payload, string CreatedAt);
 
 public sealed record AgentSessionMetadataDto(
     string Id,
@@ -71,15 +71,15 @@ public sealed record AgentSessionMetadataCounts(
     [property: JsonPropertyName("eventCount")] int EventCount,
     [property: JsonPropertyName("toolCount")] int ToolCount);
 
-public sealed record AgentSessionEventDto(
+public sealed record AgentSessionRuntimeEventDto(
     [property: JsonPropertyName("id")] long Id,
     [property: JsonPropertyName("sequence")] long Sequence,
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("payload")] JsonElement? Payload,
     [property: JsonPropertyName("createdAt")] string CreatedAt);
 
-public sealed record AgentSessionEventsResponse(
-    [property: JsonPropertyName("events")] IReadOnlyList<AgentSessionEventDto> Events);
+public sealed record AgentSessionRuntimeEventsResponse(
+    [property: JsonPropertyName("events")] IReadOnlyList<AgentSessionRuntimeEventDto> Events);
 
 public sealed record AgentSessionSummaryDto(
     string Id,
@@ -133,7 +133,7 @@ public sealed record WorkflowSessionDto(
     string? FailureReason,
     int? ExitCode);
 
-public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IReadOnlyList<AgentSessionLogEventDto> Events);
+public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, IReadOnlyList<AgentSessionRuntimeEventLogDto> Events);
 
 public sealed record ActivityDto(
     ActivitySummaryDto Summary,

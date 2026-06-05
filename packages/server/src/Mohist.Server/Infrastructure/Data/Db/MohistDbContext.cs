@@ -27,7 +27,7 @@ public class MohistDbContext : DbContext
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
     public DbSet<EventRow> Events { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
-    public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
+    public DbSet<AgentSessionRuntimeEventRow> AgentSessionRuntimeEvents { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
@@ -113,9 +113,9 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
         });
 
-        modelBuilder.Entity<AgentSessionEventRow>(entity =>
+        modelBuilder.Entity<AgentSessionRuntimeEventRow>(entity =>
         {
-            entity.ToTable("AgentSessionEvents");
+            entity.ToTable("AgentSessionRuntimeEvents");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
