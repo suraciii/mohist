@@ -1,10 +1,10 @@
 using Mohist.Server.Infrastructure.Events;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Issue.WorkflowProfiles;
-using Mohist.Server.Infrastructure.Persistence.Db;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

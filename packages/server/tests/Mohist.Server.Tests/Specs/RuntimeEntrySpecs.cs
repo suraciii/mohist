@@ -5,9 +5,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Sessions.Storage;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
@@ -202,7 +202,7 @@ public class RuntimeEntrySpecs
                     StartedAt = DateTime.UtcNow
                 });
 
-                db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow
+                db.WorkflowLeases.Add(new Mohist.Server.Infrastructure.Data.Workflow.WorkflowLeaseRow
                 {
                     WorkflowRunId = workflowRunId,
                     State = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
@@ -257,7 +257,7 @@ public class RuntimeEntrySpecs
                     StartedAt = DateTime.UtcNow
                 });
 
-                db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow
+                db.WorkflowLeases.Add(new Mohist.Server.Infrastructure.Data.Workflow.WorkflowLeaseRow
                 {
                     WorkflowRunId = workflowRunId,
                     State = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status runner", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))

@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Xunit;

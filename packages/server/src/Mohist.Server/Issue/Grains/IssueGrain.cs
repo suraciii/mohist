@@ -1,18 +1,19 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Issue.Storage;
-using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Querying;
-using Mohist.Server.Infrastructure.Persistence;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Querying;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -21,7 +22,7 @@ public class IssueGrain : Grain, IIssueGrain
     private Domain.Issue? _issue;
     private readonly IStateStore<Domain.Issue> _issueStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
-    private readonly WorkflowQuerier _workflowReader;
+    private readonly WorkflowQuerier _workflowQuerier;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly IssueIdentityResolver _identityResolver;
@@ -32,7 +33,7 @@ public class IssueGrain : Grain, IIssueGrain
     public IssueGrain(
         IStateStore<Domain.Issue> issueStore,
         IssueWorkflowProfileRegistry profiles,
-        WorkflowQuerier workflowReader,
+        WorkflowQuerier workflowQuerier,
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueRepositoryResolver repositoryResolver,
         IssueIdentityResolver identityResolver,
@@ -42,7 +43,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         _issueStore = issueStore;
         _profiles = profiles;
-        _workflowReader = workflowReader;
+        _workflowQuerier = workflowQuerier;
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
         _identityResolver = identityResolver;
@@ -217,7 +218,7 @@ public class IssueGrain : Grain, IIssueGrain
         var wrId = _issue!.WorkflowRunId;
         if (wrId is null) return null;
 
-        var wfStatus = await _workflowReader.GetStatusAsync(wrId);
+        var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
         var projection = defaultProfile.ProjectWorkflowState(_issue, wfStatus);
 

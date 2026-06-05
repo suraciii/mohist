@@ -1,6 +1,6 @@
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Workflow.Views;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Grains;
 

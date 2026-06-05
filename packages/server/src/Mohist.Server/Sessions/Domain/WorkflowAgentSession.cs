@@ -52,18 +52,18 @@ public sealed class WorkflowAgentSession
         string? stage = null,
         string? title = null,
         DateTime? now = null) => new()
-    {
-        Id = id,
-        ProjectId = projectId,
-        IssueNumber = issueNumber,
-        WorkflowRunId = workflowRunId,
-        SessionName = sessionName,
-        WorkId = workId,
-        WorkType = workType,
-        Stage = stage,
-        Title = title,
-        RunnerId = runnerId,
-        Status = AgentSessionStatus.Created,
-        CreatedAt = now ?? DateTime.UtcNow,
-    };
+        {
+            Id = id,
+            ProjectId = projectId,
+            IssueNumber = issueNumber,
+            WorkflowRunId = workflowRunId,
+            SessionName = sessionName,
+            WorkId = workId,
+            WorkType = workType,
+            Stage = stage,
+            Title = title,
+            RunnerId = runnerId,
+            Status = AgentSessionStatus.Created,
+            CreatedAt = now ?? DateTime.UtcNow,
+        };
 }

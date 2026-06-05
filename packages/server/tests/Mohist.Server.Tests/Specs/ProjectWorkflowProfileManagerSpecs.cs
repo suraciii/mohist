@@ -1,10 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Workflow.Domain;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Prompts;
-using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

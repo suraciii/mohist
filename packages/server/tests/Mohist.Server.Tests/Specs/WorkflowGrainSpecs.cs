@@ -3,22 +3,20 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Infrastructure.Persistence;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Querying;
-using Mohist.Server.Infrastructure.Persistence.Workflow;
-using Mohist.Server.Workflow.Storage;
-using Mohist.Server.Project.Querying;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Prompts;
-using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Workflow.Services.Prompts;
 using Microsoft.Extensions.Hosting;
 using Orleans.TestingHost;
 using Xunit;
@@ -125,7 +123,7 @@ public abstract class WorkflowGrainSpecs
             .UseSqlite(_fixture.ConnectionString)
             .Options;
         var factory = new PooledDbContextFactory<MohistDbContext>(options);
-        return new WorkflowQuerier(factory, new Mohist.Server.Workflow.Infrastructure.WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
+        return new WorkflowQuerier(factory, new Mohist.Server.Workflow.Services.WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
     }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)

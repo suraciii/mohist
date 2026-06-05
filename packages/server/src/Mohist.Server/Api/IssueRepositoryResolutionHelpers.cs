@@ -1,4 +1,4 @@
-using Mohist.Server.Issue.Querying;
+using Mohist.Server.Issue.Services;
 
 namespace Mohist.Server.Api;
 

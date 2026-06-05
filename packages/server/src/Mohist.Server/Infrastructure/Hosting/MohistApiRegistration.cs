@@ -1,6 +1,6 @@
 using Mohist.Server.Api;
 using Mohist.Server.Events.Hub;
-using Mohist.Server.Runner.SignalR;
+using Mohist.Server.Runner.Services.SignalR;
 using Microsoft.AspNetCore.Http.Extensions;
 
 namespace Mohist.Server.Infrastructure.Hosting;

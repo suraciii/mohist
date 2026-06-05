@@ -1,5 +1,5 @@
 using Mohist.Server.Workflow.Domain.Definition;
-using Mohist.Server.Workflow.Errors;
+using Mohist.Server.Workflow.Domain;
 using System.Text.Json;
 
 namespace Mohist.Server.Workflow.Domain.Run;

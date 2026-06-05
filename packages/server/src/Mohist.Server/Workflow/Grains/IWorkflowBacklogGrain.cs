@@ -12,8 +12,3 @@ public static class WorkflowBacklogKeys
 {
     public static string ForProject(string projectId) => projectId;
 }
-
-[GenerateSerializer]
-public sealed record WorkflowBacklogState(
-    [property: Id(0)] List<string> Waiting,
-    [property: Id(1)] HashSet<string> All);

@@ -1,5 +1,5 @@
-using Mohist.Server.Workflow.Prompts.Domain;
-using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Domain.Prompts;
+using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

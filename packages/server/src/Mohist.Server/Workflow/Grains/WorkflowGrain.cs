@@ -3,22 +3,20 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Orleans;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Infrastructure.Persistence;
+using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Errors;
-using Mohist.Server.Workflow.Hooks;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Infrastructure.Persistence.Workflow;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Workflow.Grains;
 
 public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 {
-    private const string LegacyRecoveryReminderName = "workflow-scheduling-recovery";
     private const string WorkHeartbeatReminderName = "heartbeat";
     private static readonly TimeSpan WorkHeartbeatReminderDueTime = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan WorkHeartbeatReminderPeriod = TimeSpan.FromMinutes(1);
@@ -77,12 +75,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
-        if (string.Equals(reminderName, LegacyRecoveryReminderName, StringComparison.Ordinal))
-        {
-            await DisableLegacyRecoveryReminderAsync();
-            return;
-        }
-
         if (!string.Equals(reminderName, WorkHeartbeatReminderName, StringComparison.Ordinal))
             return;
 
@@ -301,13 +293,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
         await this.UnregisterReminder(_workHeartbeatReminder);
         _workHeartbeatReminder = null;
-    }
-
-    private async Task DisableLegacyRecoveryReminderAsync()
-    {
-        var legacyReminder = await this.GetReminder(LegacyRecoveryReminderName);
-        if (legacyReminder is not null)
-            await this.UnregisterReminder(legacyReminder);
     }
 
     private bool IsRunnable()

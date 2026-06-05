@@ -1,10 +1,11 @@
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Epics;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Epic.Services;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Issue.Storage;
-using Mohist.Server.Issue.WorkflowProfiles;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
 using IssueDomain = Mohist.Server.Issue.Domain;
 
 namespace Mohist.Server.Epic.Grains;
@@ -157,7 +158,7 @@ public class EpicGrain : Grain, IEpicGrain
         var rows = await db.Issues.AsNoTracking()
             .Where(row => row.ProjectId == projectId && row.Number != null && issueNumbers.Contains(row.Number.Value))
             .ToListAsync();
-        var byNumber = IssueReader.ByNumber(rows, projectId, issueNumbers);
+        var byNumber = IssueRowMapper.ByNumber(rows, projectId, issueNumbers);
 
         return links
             .OrderBy(l => l.CreatedAt)

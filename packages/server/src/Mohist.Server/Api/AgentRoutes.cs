@@ -1,7 +1,7 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
-using Mohist.Server.Sessions.Querying;
-using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Api;
 
@@ -11,7 +11,7 @@ public static class AgentRoutes
     {
         var group = app.MapGroup("/api/agent");
 
-        group.MapGet("/status", async (string? projectId, IGrainFactory grains, WorkflowProjectionService projection) =>
+        group.MapGet("/status", async (string? projectId, IGrainFactory grains, WorkflowActivityQuerier projection) =>
         {
             if (string.IsNullOrWhiteSpace(projectId))
             {
@@ -29,7 +29,7 @@ public static class AgentRoutes
             return ApiResults.Ok(await sessions.ListCurrentAsync(projectId, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (string projectId, int? limit, WorkflowAgentSessionQuerier sessions, IGrainFactory grains, WorkflowProjectionService projection, CancellationToken ct) =>
+        group.MapGet("/activity", async (string projectId, int? limit, WorkflowAgentSessionQuerier sessions, IGrainFactory grains, WorkflowActivityQuerier projection, CancellationToken ct) =>
         {
             var runnerIds = (await ListAvailableRunnersAsync(grains, projectId)).Select(r => r.RunnerId).ToArray();
             return ApiResults.Ok(await sessions.GetActivityAsync(projectId, limit, runnerIds: runnerIds, ct: ct));

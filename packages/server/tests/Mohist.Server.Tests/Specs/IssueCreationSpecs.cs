@@ -2,16 +2,16 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Project.Querying;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Infrastructure;
-using Mohist.Server.Workflow.Storage;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
@@ -303,7 +303,7 @@ public class IssueCreationSpecs
 
         Assert.NotNull(status);
         Assert.Equal($"openspec/changes/issue-{created.Number}", status.ChangeDir);
-        Assert.DoesNotContain("ChangeDir", typeof(Mohist.Server.Workflow.Views.WorkflowStatusView).GetProperties().Select(p => p.Name));
+        Assert.DoesNotContain("ChangeDir", typeof(Mohist.Server.Workflow.Services.WorkflowStatusView).GetProperties().Select(p => p.Name));
     }
 
     [Fact]

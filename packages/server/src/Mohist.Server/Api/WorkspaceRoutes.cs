@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Project.Querying;
-using Mohist.Server.Runner.SignalR;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Workflow.Grains;
-using Mohist.Server.Workflow.Projection;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 
 namespace Mohist.Server.Api;
@@ -417,7 +417,7 @@ public static class WorkspaceRoutes
             }
         });
 
-        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowProjectionService projection, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        issues.MapPost("/cleanup", async (int number, string? projectId, IGrainFactory grains, IGitService git, WorkflowActivityQuerier projection, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
         {
             var (pid, issue) = await ResolveIssueAsync(number, projectId, projectsQuery, issuesQuery);
             if (pid is null) return ApiResults.BadRequest("No active project");

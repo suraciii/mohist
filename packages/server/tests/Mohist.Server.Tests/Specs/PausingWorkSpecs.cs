@@ -1,6 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Workflow.Errors;
+using Mohist.Server.Workflow.Domain;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;

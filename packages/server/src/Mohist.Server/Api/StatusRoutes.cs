@@ -1,6 +1,6 @@
 using Mohist.Server.Issue.Grains;
-using Mohist.Server.Issue.Querying;
-using Mohist.Server.Project.Querying;
+using Mohist.Server.Issue.Services;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
 

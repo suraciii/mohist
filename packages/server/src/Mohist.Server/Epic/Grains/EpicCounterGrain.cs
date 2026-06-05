@@ -1,5 +1,7 @@
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Epic;
+
 namespace Mohist.Server.Epic.Grains;
-using Mohist.Server.Infrastructure.Persistence;
 
 public class EpicCounterGrain : Grain, IEpicCounterGrain
 {

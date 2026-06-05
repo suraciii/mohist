@@ -20,7 +20,6 @@ public class ConfigService
         ["stageTimeout"] = ("number", 3600),
         ["maxGracePeriods"] = ("number", 3),
         ["model"] = ("string", null),
-        ["stageModels"] = ("json", null),
         ["agent"] = ("json", null),
         ["stageAgents"] = ("json", null),
         ["logLevel"] = ("string", "INFO"),
@@ -146,33 +145,6 @@ public class ConfigService
                 {
                     foreach (var (stage, config) in stageAgents)
                         result[stage] = new Dictionary<string, object?>(config, StringComparer.Ordinal);
-                }
-            }
-            catch
-            {
-                // ignore parse errors
-            }
-        }
-
-        // Legacy compatibility: stageModels maps to per-stage agent.model overrides.
-        var stageModelsJson = GetConfigValue("stageModels", fileValues);
-        if (!string.IsNullOrWhiteSpace(stageModelsJson))
-        {
-            try
-            {
-                var stageModels = JsonSerializer.Deserialize<Dictionary<string, string>>(stageModelsJson);
-                if (stageModels is not null)
-                {
-                    foreach (var (stage, model) in stageModels)
-                    {
-                        if (string.IsNullOrWhiteSpace(model)) continue;
-                        if (!result.TryGetValue(stage, out var config))
-                        {
-                            config = new Dictionary<string, object?>(StringComparer.Ordinal);
-                            result[stage] = config;
-                        }
-                        config["model"] = model;
-                    }
                 }
             }
             catch

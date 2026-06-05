@@ -50,21 +50,6 @@ public static class ConfigRoutes
             return ApiResults.Ok(new { agent = await svc.GetAgentConfigAsync(), stageAgents = await svc.GetStageAgentConfigsAsync() });
         });
 
-        app.MapGet("/api/stage-models", async (ConfigService svc) =>
-        {
-            var all = await svc.GetAllAsync();
-            if (!all.TryGetValue("stageModels", out var json) || string.IsNullOrWhiteSpace(json))
-                return ApiResults.Ok(new { stageModels = (Dictionary<string, string>?)null });
-            return ApiResults.Ok(new { stageModels = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) });
-        });
-
-        app.MapPut("/api/stage-models", async (StageModelsRequest req, ConfigService svc) =>
-        {
-            if (req.StageModels is null) await svc.ClearAsync("stageModels");
-            else await svc.SetAsync("stageModels", req.StageModels);
-            return ApiResults.Ok(new { req.StageModels });
-        });
-
         var config = app.MapGroup("/api/config");
 
         config.MapGet("/", async (ConfigService svc) =>
@@ -108,5 +93,4 @@ public static class ConfigRoutes
 
 public record ConfigValueRequest(object? Value);
 public record ModelRequest(string? Model);
-public record StageModelsRequest(Dictionary<string, string>? StageModels);
 public record AgentConfigRequest(Dictionary<string, object?>? Agent, Dictionary<string, Dictionary<string, object?>>? StageAgents = null);
