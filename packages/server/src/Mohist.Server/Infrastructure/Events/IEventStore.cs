@@ -1,5 +1,4 @@
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Infrastructure.Events;
 
@@ -14,13 +13,5 @@ public sealed record WorkflowDomainEventDto(
     string Source,
     string Type,
     WorkflowEvent Data,
-    DateTime Time,
-    string SpecVersion);
-
-public sealed record AgentSessionDomainEventDto(
-    long Id,
-    string Source,
-    string Type,
-    AgentSessionEvent Data,
     DateTime Time,
     string SpecVersion);

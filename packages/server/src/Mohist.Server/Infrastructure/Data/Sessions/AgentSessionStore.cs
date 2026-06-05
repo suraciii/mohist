@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -11,19 +10,16 @@ namespace Mohist.Server.Infrastructure.Data.Sessions;
 public interface IAgentSessionStore : IStateStore<AgentSession>
 {
     Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
-    Task<IReadOnlyList<StagedAgentSessionEvent>> StageAsync(MohistDbContext db, string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default);
-    void Publish(IReadOnlyList<StagedAgentSessionEvent> stagedEvents);
+    Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, IReadOnlyList<AgentSessionRuntimeEventRow> runtimeEvents, CancellationToken ct = default);
 }
 
 public class AgentSessionStore : IAgentSessionStore
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly IEventBus _eventBus;
 
-    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus)
+    public AgentSessionStore(IDbContextFactory<MohistDbContext> dbFactory)
     {
         _dbFactory = dbFactory;
-        _eventBus = eventBus;
     }
 
     public async Task<AgentSession?> LoadAsync(string key)
@@ -53,10 +49,9 @@ public class AgentSessionStore : IAgentSessionStore
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            var stagedEvents = await StageAsync(db, key, state, events, ct);
+            await StageAsync(db, key, state, events, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            Publish(stagedEvents);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -65,10 +60,28 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
-    public async Task<IReadOnlyList<StagedAgentSessionEvent>> StageAsync(MohistDbContext db, string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
+    public async Task SaveAsync(string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, IReadOnlyList<AgentSessionRuntimeEventRow> runtimeEvents, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            db.AgentSessionRuntimeEvents.AddRange(runtimeEvents);
+            await StageAsync(db, key, state, events, ct);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    private static async Task StageAsync(MohistDbContext db, string key, AgentSession state, IReadOnlyList<AgentSessionEvent> events, CancellationToken ct = default)
     {
         await StageSessionAsync(db, key, state, ct);
-        return await AgentSessionEventPersistence.StageAsync(db, key, events, ct);
+        await AgentSessionEventPersistence.StageAsync(db, key, events, ct);
     }
 
     private static async Task StageSessionAsync(MohistDbContext db, string key, AgentSession state, CancellationToken ct = default)
@@ -100,14 +113,6 @@ public class AgentSessionStore : IAgentSessionStore
         }
     }
 
-    public void Publish(IReadOnlyList<StagedAgentSessionEvent> stagedEvents)
-    {
-        foreach (var e in stagedEvents)
-        {
-            var dto = AgentSessionEventPersistence.ToDto(e);
-            _eventBus.Emit(dto.Type, dto);
-        }
-    }
 }
 
 public static class AgentSessionJson
