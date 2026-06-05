@@ -255,24 +255,6 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("${{ config.deep.value }}", result!["x"]!.Value.GetString());
     }
 
-    [Fact]
-    public async Task LoadTemplate_FallsBackToLegacyIssueKey_ForOldRuns()
-    {
-        var runId = "wr_legacy01";
-        await SeedAsync(
-            projectId: "proj-legacy",
-            issueId: "issue_legacy01",
-            runId: runId,
-            issueTemplateJson: SerializeDefinition("legacy-issue-custom", stageCount: 2),
-            legacyIssueKey: "proj-legacy:1",
-            writeIssueIdAnnotation: false);
-
-        var result = await _manager.LoadTemplateAsync(runId);
-
-        Assert.NotNull(result.Structure);
-        Assert.Equal("legacy-issue-custom", result.Structure.Id);
-    }
-
     // --- helpers ---
 
     private static string SerializeDefinition(string id, int stageCount)
@@ -292,12 +274,10 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         string? issueTemplateJson,
         string? issueSourceTemplateId = null,
         string? projectDefaultTemplateId = null,
-        string? projectTemplateJson = null,
-        string? legacyIssueKey = null,
-        bool writeIssueIdAnnotation = true)
+        string? projectTemplateJson = null)
     {
         await using var db = new MohistDbContext(_options);
-        SeedRunContext(db, projectId, issueId, runId, legacyIssueKey, writeIssueIdAnnotation);
+        SeedRunContext(db, projectId, issueId, runId);
 
         db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
         {
@@ -308,7 +288,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         if (projectDefaultTemplateId is not null && projectTemplateJson is not null)
         {
-            db.ProjectTemplates.Add(new ProjectTemplateRow
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
                 TemplateId = projectDefaultTemplateId,
@@ -317,7 +297,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         }
         if (issueSourceTemplateId is not null && projectTemplateJson is not null)
         {
-            db.ProjectTemplates.Add(new ProjectTemplateRow
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
                 TemplateId = issueSourceTemplateId,
@@ -327,7 +307,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
 
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueKey = legacyIssueKey ?? issueId,
+            IssueId = issueId,
             SourceTemplateId = issueSourceTemplateId,
             Template = issueTemplateJson,
             Variables = "{}",
@@ -349,7 +329,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueKey = issueId,
+            IssueId = issueId,
             Variables = "{}",
         });
 
@@ -370,7 +350,7 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         });
         db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
         {
-            IssueKey = issueId,
+            IssueId = issueId,
             Variables = issue.ToJson(),
         });
 
@@ -381,11 +361,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         MohistDbContext db,
         string projectId,
         string issueId,
-        string runId,
-        string? legacyIssueKey = null,
-        bool writeIssueIdAnnotation = true)
+        string runId)
     {
-        var number = legacyIssueKey is null ? 1 : int.Parse(legacyIssueKey.Split(':')[1]);
         db.WorkflowRuns.Add(new WorkflowRunRow
         {
             WorkflowRunId = runId,
@@ -395,22 +372,20 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
                 Metadata = new
                 {
                     CreatedAt = DateTimeOffset.UtcNow,
-                    Annotations = writeIssueIdAnnotation
-                        ? new Dictionary<string, string> { ["issueId"] = issueId }
-                        : new Dictionary<string, string> { ["issueKey"] = legacyIssueKey! },
+                    Annotations = new Dictionary<string, string> { ["issueId"] = issueId },
                 },
                 Status = "Failed",
                 Stages = Array.Empty<object>(),
             }),
         });
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = issueId,
-            StateJson = JsonSerializer.Serialize(new
+            IssueId = issueId,
+            State = JsonSerializer.Serialize(new
             {
                 Id = issueId,
                 ProjectId = projectId,
-                Number = number,
+                Number = 1,
                 WorkflowRunId = runId,
             }),
         });

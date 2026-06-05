@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Querying;
 using Mohist.Server.Issue.Storage;
@@ -20,44 +19,34 @@ namespace Mohist.Server.Issue.Grains;
 public class IssueGrain : Grain, IIssueGrain
 {
     private Domain.Issue? _issue;
-    private IssueWorkflowProfile? _profile;
     private readonly IStateStore<Domain.Issue> _issueStore;
-    private readonly IStateStore<IssueWorkflowProfile> _profileStore;
     private readonly IssueWorkflowProfileRegistry _profiles;
-    private readonly ConfigService _config;
     private readonly WorkflowQuerier _workflowReader;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IssueRepositoryResolver _repositoryResolver;
     private readonly IssueIdentityResolver _identityResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
-    private readonly IssueWorkflowProfileManager _issueProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly ILogger<IssueGrain> _log;
 
     public IssueGrain(
         IStateStore<Domain.Issue> issueStore,
-        IStateStore<IssueWorkflowProfile> profileStore,
         IssueWorkflowProfileRegistry profiles,
-        ConfigService config,
         WorkflowQuerier workflowReader,
         IDbContextFactory<MohistDbContext> dbFactory,
         IssueRepositoryResolver repositoryResolver,
         IssueIdentityResolver identityResolver,
         WorkflowProfileManager workflowProfileManager,
-        IssueWorkflowProfileManager issueProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
-        _profileStore = profileStore;
         _profiles = profiles;
-        _config = config;
         _workflowReader = workflowReader;
         _dbFactory = dbFactory;
         _repositoryResolver = repositoryResolver;
         _identityResolver = identityResolver;
         _workflowProfileManager = workflowProfileManager;
-        _issueProfileManager = issueProfileManager;
         _projectProfileManager = projectProfileManager;
         _log = log;
     }
@@ -67,22 +56,6 @@ public class IssueGrain : Grain, IIssueGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _issue = await _issueStore.LoadAsync(GrainKey);
-        _profile = await _profileStore.LoadAsync(GrainKey);
-        if (_issue is null && TryParseLegacyKey(GrainKey, out var projectId, out var number))
-        {
-            _issue = await _issueStore.LoadAsync(IssueIdentityResolver.LegacyKey(projectId, number));
-            _profile = await _profileStore.LoadAsync(IssueIdentityResolver.LegacyKey(projectId, number));
-        }
-        if (_issue is null)
-        {
-            var identity = await _identityResolver.GetByIdAsync(GrainKey, ct);
-            if (identity is not null)
-            {
-                var legacyKey = IssueIdentityResolver.LegacyKey(identity.ProjectId, identity.Number);
-                _issue = await _issueStore.LoadAsync(legacyKey);
-                _profile ??= await _profileStore.LoadAsync(legacyKey);
-            }
-        }
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
@@ -132,11 +105,10 @@ public class IssueGrain : Grain, IIssueGrain
         var projectInfo = await projectGrain.GetAsync();
         var projectContext = BuildWorkflowProjectContext(issue, project, projectInfo, repo);
 
-        var legacyIssueKey = $"{issue.ProjectId}:{issue.Number}";
         if (string.IsNullOrWhiteSpace(await _projectProfileManager.GetDefaultTemplateAsync(projectContext.Id)))
             await _projectProfileManager.SetDefaultTemplateAsync(projectContext.Id, "mohist/default");
 
-        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id, legacyIssueKey);
+        var resolvedTemplate = await _workflowProfileManager.LoadTemplateAsync(wrId, projectContext.Id, issue.Id);
         var definition = resolvedTemplate.Structure ?? _profiles.Get(IssueWorkflowProfiles.DefaultId).Definition;
 
         var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
@@ -278,19 +250,8 @@ public class IssueGrain : Grain, IIssueGrain
             priority ?? "p2",
             resolvedRef);
 
-        var globalAgentConfig = await _config.GetAgentConfigAsync();
-        var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
-        var profile = IssueWorkflowProfile.CopyFrom(
-            IssueWorkflowProfiles.DefaultId,
-            defaultProfile.Definition,
-            globalAgentConfig,
-            globalStageAgentConfigs);
-
         _issue = issue;
-        _profile = profile;
         await SaveIssueAsync();
-        await SaveProfileAsync();
         return issue.Id;
     }
 
@@ -383,20 +344,6 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null) return;
         await _issueStore.SaveAsync(_issue.Id, _issue);
-        await _issueStore.SaveAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, _issue.Number), _issue);
-    }
-
-    private async Task SaveProfileAsync()
-    {
-        if (_profile is null) return;
-        if (_issue is null)
-        {
-            await _profileStore.SaveAsync(GrainKey, _profile);
-            return;
-        }
-
-        await _profileStore.SaveAsync(_issue.Id, _profile);
-        await _profileStore.SaveAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, _issue.Number), _profile);
     }
 
     private void EnsureIssue()
@@ -412,25 +359,13 @@ public class IssueGrain : Grain, IIssueGrain
         {
             var issueId = await _identityResolver.GetIdAsync(_issue.ProjectId, issueNumber);
             if (issueId is null) return null;
-            var issue = await _issueStore.LoadAsync(issueId)
-                ?? await _issueStore.LoadAsync(IssueIdentityResolver.LegacyKey(_issue.ProjectId, issueNumber));
+            var issue = await _issueStore.LoadAsync(issueId);
             return issue is null ? null : IssuePrerequisiteSummary.FromDomain(issue);
         }
         catch (InvalidOperationException)
         {
             return null;
         }
-    }
-
-    private static bool TryParseLegacyKey(string key, out string projectId, out int number)
-    {
-        projectId = string.Empty;
-        number = 0;
-        var parts = key.Split(':', 2);
-        if (parts.Length != 2 || !int.TryParse(parts[1], out number))
-            return false;
-        projectId = parts[0];
-        return !string.IsNullOrWhiteSpace(projectId);
     }
 
     public async Task<IssueCommentResult> AddCommentAsync(string body)
@@ -453,50 +388,6 @@ public class IssueGrain : Grain, IIssueGrain
         return new IssueCommentResult(comment.Id, comment.Body);
     }
 
-    public async Task UpdateWorkflowProfileAsync(WorkflowProfileUpdateRequest request)
-    {
-        EnsureIssue();
-
-        var hasProfileId = !string.IsNullOrWhiteSpace(request.ProfileId);
-        var hasYaml = !string.IsNullOrWhiteSpace(request.DefinitionYaml);
-
-        if (hasProfileId && hasYaml)
-            throw new ArgumentException("Specify either ProfileId or DefinitionYaml, not both.");
-        if (!hasProfileId && !hasYaml)
-            throw new ArgumentException("Specify either ProfileId or DefinitionYaml.");
-
-        var globalAgentConfig = await _config.GetAgentConfigAsync();
-        var globalStageAgentConfigs = await _config.GetStageAgentConfigsAsync();
-        var defaultProfile = _profiles.Get(IssueWorkflowProfiles.DefaultId);
-
-        if (_profile is null)
-        {
-            _profile = IssueWorkflowProfile.CopyFrom(
-                IssueWorkflowProfiles.DefaultId,
-                defaultProfile.Definition,
-                globalAgentConfig,
-                globalStageAgentConfigs);
-        }
-
-        if (hasProfileId)
-        {
-            if (!_profiles.Exists(request.ProfileId))
-                throw new ArgumentException($"Workflow profile '{request.ProfileId}' not found");
-            var template = _profiles.Get(request.ProfileId!);
-            _profile.SwitchTo(request.ProfileId!, template.Definition, globalAgentConfig, globalStageAgentConfigs);
-        }
-        else
-        {
-            var parsed = WorkflowYamlSerializer.FromYaml(request.DefinitionYaml!, _profile.SourceProfileId);
-            _profile.ApplyCustomDefinition(parsed.Id, parsed);
-        }
-
-        await SaveProfileAsync();
-        _log.LogInformation(
-            "Issue {Key} workflow profile updated (mode={Mode})",
-            GrainKey,
-            _profile.UpdateMode);
-    }
 }
 
 [GenerateSerializer]

@@ -230,6 +230,6 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
         await using var db = new MohistDbContext(options);
         var lease = await db.WorkflowLeases.FindAsync(workflowRunId);
-        return lease?.StateJson;
+        return lease?.State;
     }
 }

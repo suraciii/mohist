@@ -110,24 +110,6 @@ namespace Mohist.Server.Migrations
                     b.ToTable("Epics");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Persistence.Db.Entities.ConfigRow", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Key");
-
-                    b.ToTable("Configs");
-                });
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Persistence.Events.EventRow", b =>
                 {
                     b.Property<string>("Source")
@@ -143,14 +125,17 @@ namespace Mohist.Server.Migrations
 
                     b.Property<string>("SpecVersion")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("Time")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Type")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -158,7 +143,7 @@ namespace Mohist.Server.Migrations
 
                     b.HasIndex("Type", "Source", "Id");
 
-                    b.ToTable("Events");
+                    b.ToTable("Events", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Issue.Storage.IssueCommentRow", b =>
@@ -228,34 +213,39 @@ namespace Mohist.Server.Migrations
                     b.ToTable("IssuePrerequisites");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Issue.Storage.IssueProfileRow", b =>
+            modelBuilder.Entity("Mohist.Server.Issue.Storage.IssueRow", b =>
                 {
-                    b.Property<string>("Key")
-                        .HasMaxLength(512)
+                    b.Property<string>("IssueId")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("StateJson")
+                    b.Property<int?>("Number")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("INTEGER")
+                        .HasComputedColumnSql("json_extract(State, '$.Number')", true);
+
+                    b.Property<string>("ProjectId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(State, '$.ProjectId')", true);
+
+                    b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Key");
+                    b.Property<string>("WorkflowRunId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(State, '$.WorkflowRunId')", true);
 
-                    b.ToTable("IssueProfiles");
-                });
+                    b.HasKey("IssueId");
 
-            modelBuilder.Entity("Mohist.Server.Issue.Storage.IssueStateRow", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
+                    b.HasIndex("WorkflowRunId");
 
-                    b.Property<string>("StateJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                    b.HasIndex("ProjectId", "Number")
+                        .IsUnique();
 
-                    b.HasKey("Key");
-
-                    b.ToTable("IssueStates");
+                    b.ToTable("Issues", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Project.Storage.ProjectRow", b =>
@@ -285,10 +275,6 @@ namespace Mohist.Server.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("VariablesJson")
-                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -516,7 +502,7 @@ namespace Mohist.Server.Migrations
                     b.ToTable("WorkflowAgentSessions", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow", b =>
+            modelBuilder.Entity("Mohist.Server.Workflow.Prompts.Storage.ProjectPromptTemplateRow", b =>
                 {
                     b.Property<string>("ProjectId")
                         .HasMaxLength(256)
@@ -564,7 +550,7 @@ namespace Mohist.Server.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("StateJson")
+                    b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -575,12 +561,8 @@ namespace Mohist.Server.Migrations
 
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.IssueWorkflowProfile", b =>
                 {
-                    b.Property<string>("IssueKey")
+                    b.Property<string>("IssueId")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SourceTemplateId")
-                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Prompts")
@@ -588,6 +570,10 @@ namespace Mohist.Server.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
                         .HasDefaultValue("{}");
+
+                    b.Property<string>("SourceTemplateId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Template")
                         .HasColumnType("TEXT");
@@ -599,36 +585,9 @@ namespace Mohist.Server.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.HasKey("IssueKey");
+                    b.HasKey("IssueId");
 
                     b.ToTable("IssueWorkflowProfiles", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Workflow.Storage.ProjectTemplateRow", b =>
-                {
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TemplateId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Template")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ProjectId", "TemplateId");
-
-                    b.HasIndex("ProjectId");
-
-                    b.ToTable("ProjectTemplates", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.ProjectWorkflowProfile", b =>
@@ -659,13 +618,40 @@ namespace Mohist.Server.Migrations
                     b.ToTable("ProjectWorkflowProfiles", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Workflow.Storage.ProjectWorkflowTemplateRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TemplateId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Template")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId", "TemplateId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("ProjectWorkflowTemplates", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowLeaseRow", b =>
                 {
                     b.Property<string>("WorkflowRunId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("StateJson")
+                    b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -697,7 +683,7 @@ namespace Mohist.Server.Migrations
 
                     b.HasIndex("MetadataProjectId");
 
-                    b.ToTable("workflow_runs");
+                    b.ToTable("WorkflowRuns");
                 });
 
             modelBuilder.Entity("Mohist.Server.Workflow.Storage.WorkflowStageLockRow", b =>
@@ -706,7 +692,7 @@ namespace Mohist.Server.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("StateJson")
+                    b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -721,7 +707,7 @@ namespace Mohist.Server.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("StateJson")
+                    b.Property<string>("State")
                         .IsRequired()
                         .HasColumnType("TEXT");
 

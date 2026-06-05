@@ -81,7 +81,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             }
             """;
         var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        await SeedIssueStateAsync(projectId, 1, legacy);
+        await SeedIssueAsync(projectId, 1, legacy);
 
         // Then resolving the issue against the current project ignores the legacy
         // IsDefault field and reports the project's actual default marker.
@@ -127,7 +127,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             }
             """;
         var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        await SeedIssueStateAsync(projectId, 1, legacy);
+        await SeedIssueAsync(projectId, 1, legacy);
 
         // Then the project's IsDefault wins and the issue is reported as the project default.
         var info = await GetIssueInfoAsync(projectId, 1);
@@ -649,7 +649,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             }
             """;
         var legacy = legacyJson.Replace("__placeholder__", projectId, StringComparison.Ordinal);
-        await SeedIssueStateAsync(projectId, 1, legacy);
+        await SeedIssueAsync(projectId, 1, legacy);
 
         // When the issue is read against the current project configuration.
         var info = await GetIssueInfoAsync(projectId, 1);
@@ -981,7 +981,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // And the issue row only stores the stable reference — it does not carry
         // any of the previously-observed mutable fields as authority.
-        var storedJson = await LoadStateJsonAsync(projectId, issue.Number);
+        var storedJson = await LoadStateAsync(projectId, issue.Number);
         using var doc = JsonDocument.Parse(storedJson);
         Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
         Assert.Equal("secondary", refElement.GetString());
@@ -1048,25 +1048,27 @@ public class IssueRepositoryResolutionRegressionSpecs
         return projectId;
     }
 
-    private async Task SeedIssueStateAsync(string projectId, int number, string stateJson)
+    private async Task SeedIssueAsync(string projectId, int number, string state)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.IssueStates.Add(new IssueStateRow
+        var issue = IssueStore.Deserialize(state)
+            ?? throw new InvalidOperationException("Issue seed state must deserialize.");
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{projectId}:{number}",
-            StateJson = stateJson,
+            IssueId = issue.Id,
+            State = state,
         });
         await db.SaveChangesAsync();
     }
 
-    private async Task<string> LoadStateJsonAsync(string projectId, int number)
+    private async Task<string> LoadStateAsync(string projectId, int number)
     {
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.IssueStates.AsNoTracking()
-            .FirstAsync(r => r.Key == $"{projectId}:{number}");
-        return row.StateJson;
+        var row = await db.Issues.AsNoTracking()
+            .FirstAsync(r => r.ProjectId == projectId && r.Number == number);
+        return row.State;
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)

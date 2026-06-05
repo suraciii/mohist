@@ -1,10 +1,10 @@
 namespace Mohist.Server.Workflow.Storage;
 
 /// <summary>
-/// 项目模板 (key: ProjectId + TemplateId)。
+/// 项目 workflow 模板 (key: ProjectId + TemplateId)。
 /// 每个项目可以拥有多个自定义模板, 与系统模板并存。
 /// </summary>
-public class ProjectTemplateRow
+public class ProjectWorkflowTemplateRow
 {
     public string ProjectId { get; set; } = string.Empty;
     public string TemplateId { get; set; } = string.Empty;

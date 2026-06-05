@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Mohist.Server.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialSchema : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -16,7 +16,7 @@ namespace Mohist.Server.Migrations
                 columns: table => new
                 {
                     ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    StateJson = table.Column<string>(type: "TEXT", nullable: false)
+                    State = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -24,16 +24,15 @@ namespace Mohist.Server.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "Configs",
+                name: "EpicCounters",
                 columns: table => new
                 {
-                    Key = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    Value = table.Column<string>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                    ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Next = table.Column<int>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_Configs", x => x.Key);
+                    table.PrimaryKey("PK_EpicCounters", x => x.ProjectId);
                 });
 
             migrationBuilder.CreateTable(
@@ -57,6 +56,7 @@ namespace Mohist.Server.Migrations
                 {
                     Id = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
                     ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Number = table.Column<int>(type: "INTEGER", nullable: true),
                     Title = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
                     Description = table.Column<string>(type: "TEXT", nullable: false),
                     Priority = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
@@ -67,6 +67,22 @@ namespace Mohist.Server.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Epics", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "Events",
+                columns: table => new
+                {
+                    Id = table.Column<long>(type: "INTEGER", nullable: false),
+                    Source = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Data = table.Column<string>(type: "JSON", nullable: false),
+                    Time = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    SpecVersion = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
+                    Type = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Events", x => new { x.Source, x.Id });
                 });
 
             migrationBuilder.CreateTable(
@@ -112,27 +128,81 @@ namespace Mohist.Server.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "IssueProfiles",
+                name: "Issues",
                 columns: table => new
                 {
-                    Key = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
-                    StateJson = table.Column<string>(type: "TEXT", nullable: false)
+                    IssueId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    State = table.Column<string>(type: "TEXT", nullable: false),
+                    ProjectId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.ProjectId')", stored: true),
+                    Number = table.Column<int>(type: "INTEGER", nullable: true, computedColumnSql: "json_extract(State, '$.Number')", stored: true),
+                    WorkflowRunId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.WorkflowRunId')", stored: true)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_IssueProfiles", x => x.Key);
+                    table.PrimaryKey("PK_Issues", x => x.IssueId);
                 });
 
             migrationBuilder.CreateTable(
-                name: "IssueStates",
+                name: "IssueWorkflowProfiles",
                 columns: table => new
                 {
-                    Key = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
-                    StateJson = table.Column<string>(type: "TEXT", nullable: false)
+                    IssueId = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
+                    SourceTemplateId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
+                    Template = table.Column<string>(type: "TEXT", nullable: true),
+                    Variables = table.Column<string>(type: "TEXT", nullable: false),
+                    Prompts = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "{}"),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_IssueStates", x => x.Key);
+                    table.PrimaryKey("PK_IssueWorkflowProfiles", x => x.IssueId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "OrleansQuery",
+                columns: table => new
+                {
+                    QueryKey = table.Column<string>(type: "TEXT", nullable: false),
+                    QueryText = table.Column<string>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_OrleansQuery", x => x.QueryKey);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "OrleansRemindersTable",
+                columns: table => new
+                {
+                    ServiceId = table.Column<string>(type: "TEXT", nullable: false),
+                    GrainId = table.Column<string>(type: "TEXT", nullable: false),
+                    ReminderName = table.Column<string>(type: "TEXT", nullable: false),
+                    StartTime = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    Period = table.Column<long>(type: "INTEGER", nullable: false),
+                    GrainHash = table.Column<int>(type: "INTEGER", nullable: false),
+                    Version = table.Column<int>(type: "INTEGER", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_OrleansRemindersTable", x => new { x.ServiceId, x.GrainId, x.ReminderName });
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ProjectPromptTemplates",
+                columns: table => new
+                {
+                    ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Key = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    DisplayName = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
+                    Description = table.Column<string>(type: "TEXT", nullable: false),
+                    TagsJson = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "[]"),
+                    Stage = table.Column<string>(type: "TEXT", nullable: true),
+                    Body = table.Column<string>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ProjectPromptTemplates", x => new { x.ProjectId, x.Key });
                 });
 
             migrationBuilder.CreateTable(
@@ -153,16 +223,33 @@ namespace Mohist.Server.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "workflow_runs",
+                name: "ProjectWorkflowProfiles",
                 columns: table => new
                 {
-                    WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
-                    State = table.Column<string>(type: "TEXT", nullable: false),
-                    MetadataProjectId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.Metadata.Annotations.projectId')", stored: true)
+                    ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    DefaultTemplateId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
+                    Variables = table.Column<string>(type: "TEXT", nullable: false),
+                    Prompts = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "{}"),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_workflow_runs", x => x.WorkflowRunId);
+                    table.PrimaryKey("PK_ProjectWorkflowProfiles", x => x.ProjectId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ProjectWorkflowTemplates",
+                columns: table => new
+                {
+                    ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    TemplateId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Template = table.Column<string>(type: "TEXT", nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTimeOffset>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_ProjectWorkflowTemplates", x => new { x.ProjectId, x.TemplateId });
                 });
 
             migrationBuilder.CreateTable(
@@ -216,7 +303,20 @@ namespace Mohist.Server.Migrations
                     LastHeartbeatAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     FailureReason = table.Column<string>(type: "TEXT", nullable: true),
-                    ExitCode = table.Column<int>(type: "INTEGER", nullable: true)
+                    ExitCode = table.Column<int>(type: "INTEGER", nullable: true),
+                    ResolvedModel = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
+                    InputTokens = table.Column<long>(type: "INTEGER", nullable: true),
+                    OutputTokens = table.Column<long>(type: "INTEGER", nullable: true),
+                    TotalTokens = table.Column<long>(type: "INTEGER", nullable: true),
+                    CachedReadTokens = table.Column<long>(type: "INTEGER", nullable: true),
+                    ThoughtTokens = table.Column<long>(type: "INTEGER", nullable: true),
+                    CostAmount = table.Column<double>(type: "REAL", nullable: true),
+                    CostCurrency = table.Column<string>(type: "TEXT", maxLength: 16, nullable: true),
+                    ContextWindowUsed = table.Column<long>(type: "INTEGER", nullable: true),
+                    ContextWindowSize = table.Column<long>(type: "INTEGER", nullable: true),
+                    FailureCategory = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
+                    ToolCallCount = table.Column<int>(type: "INTEGER", nullable: true),
+                    ToolErrorCount = table.Column<int>(type: "INTEGER", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -224,37 +324,11 @@ namespace Mohist.Server.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "WorkflowEvents",
-                columns: table => new
-                {
-                    Id = table.Column<long>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    ProjectId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    IssueId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    IssueNumber = table.Column<int>(type: "INTEGER", nullable: false),
-                    WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    Category = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    Type = table.Column<string>(type: "TEXT", maxLength: 128, nullable: false),
-                    Stage = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
-                    TaskId = table.Column<string>(type: "TEXT", maxLength: 128, nullable: true),
-                    CheckName = table.Column<string>(type: "TEXT", maxLength: 128, nullable: true),
-                    RunnerId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    Status = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
-                    Message = table.Column<string>(type: "TEXT", nullable: true),
-                    PayloadJson = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_WorkflowEvents", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "WorkflowLeases",
                 columns: table => new
                 {
                     WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    StateJson = table.Column<string>(type: "TEXT", nullable: false)
+                    State = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -262,15 +336,29 @@ namespace Mohist.Server.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "WorkflowRunProfiles",
+                name: "WorkflowRuns",
                 columns: table => new
                 {
-                    Key = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    StateJson = table.Column<string>(type: "TEXT", nullable: false)
+                    WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
+                    State = table.Column<string>(type: "TEXT", nullable: false),
+                    MetadataProjectId = table.Column<string>(type: "TEXT", nullable: true, computedColumnSql: "json_extract(State, '$.Metadata.Annotations.projectId')", stored: true),
+                    ETag = table.Column<long>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_WorkflowRunProfiles", x => x.Key);
+                    table.PrimaryKey("PK_WorkflowRuns", x => x.WorkflowRunId);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "WorkflowStageLocks",
+                columns: table => new
+                {
+                    Key = table.Column<string>(type: "TEXT", maxLength: 512, nullable: false),
+                    State = table.Column<string>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_WorkflowStageLocks", x => x.Key);
                 });
 
             migrationBuilder.CreateTable(
@@ -278,7 +366,7 @@ namespace Mohist.Server.Migrations
                 columns: table => new
                 {
                     WorkflowRunId = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    StateJson = table.Column<string>(type: "TEXT", nullable: false)
+                    State = table.Column<string>(type: "TEXT", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -297,14 +385,40 @@ namespace Mohist.Server.Migrations
                 columns: new[] { "ProjectId", "IssueNumber" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_Epics_ProjectId_Number",
+                table: "Epics",
+                columns: new[] { "ProjectId", "Number" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Epics_ProjectId_Status_CreatedAt",
                 table: "Epics",
                 columns: new[] { "ProjectId", "Status", "CreatedAt" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_Events_Type_Source_Id",
+                table: "Events",
+                columns: new[] { "Type", "Source", "Id" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_IssueComments_ProjectId_IssueNumber_CreatedAt",
                 table: "IssueComments",
                 columns: new[] { "ProjectId", "IssueNumber", "CreatedAt" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Issues_ProjectId_Number",
+                table: "Issues",
+                columns: new[] { "ProjectId", "Number" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Issues_WorkflowRunId",
+                table: "Issues",
+                column: "WorkflowRunId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProjectPromptTemplates_ProjectId_UpdatedAt",
+                table: "ProjectPromptTemplates",
+                columns: new[] { "ProjectId", "UpdatedAt" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_Projects_Name",
@@ -313,9 +427,9 @@ namespace Mohist.Server.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_workflow_runs_MetadataProjectId",
-                table: "workflow_runs",
-                column: "MetadataProjectId");
+                name: "IX_ProjectWorkflowTemplates_ProjectId",
+                table: "ProjectWorkflowTemplates",
+                column: "ProjectId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_WorkflowAgentSessionEvents_ProjectId_IssueNumber_Id",
@@ -360,24 +474,93 @@ namespace Mohist.Server.Migrations
                 columns: new[] { "WorkflowRunId", "WorkId" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_WorkflowEvents_ProjectId_Id",
-                table: "WorkflowEvents",
-                columns: new[] { "ProjectId", "Id" });
+                name: "IX_WorkflowRuns_MetadataProjectId",
+                table: "WorkflowRuns",
+                column: "MetadataProjectId");
 
-            migrationBuilder.CreateIndex(
-                name: "IX_WorkflowEvents_ProjectId_IssueNumber_Id",
-                table: "WorkflowEvents",
-                columns: new[] { "ProjectId", "IssueNumber", "Id" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_WorkflowEvents_Type_CreatedAt",
-                table: "WorkflowEvents",
-                columns: new[] { "Type", "CreatedAt" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_WorkflowEvents_WorkflowRunId_Id",
-                table: "WorkflowEvents",
-                columns: new[] { "WorkflowRunId", "Id" });
+            migrationBuilder.Sql(
+                """
+                INSERT INTO OrleansQuery (QueryKey, QueryText) VALUES
+                ('DeleteReminderRowKey', 'DELETE FROM OrleansRemindersTable
+                WHERE
+                    ServiceId = @ServiceId AND @ServiceId IS NOT NULL
+                    AND GrainId = @GrainId AND @GrainId IS NOT NULL
+                    AND ReminderName = @ReminderName AND @ReminderName IS NOT NULL
+                    AND Version = @Version AND @Version IS NOT NULL
+                RETURNING 1;'),
+                ('DeleteReminderRowsKey', 'DELETE FROM OrleansRemindersTable
+                WHERE
+                    ServiceId = @ServiceId AND @ServiceId IS NOT NULL;'),
+                ('ReadRangeRows1Key', 'SELECT
+                    GrainId,
+                    ReminderName,
+                    StartTime,
+                    Period,
+                    Version
+                FROM OrleansRemindersTable
+                WHERE
+                    ServiceId = @ServiceId AND @ServiceId IS NOT NULL
+                    AND GrainHash > @BeginHash AND @BeginHash IS NOT NULL
+                    AND GrainHash <= @EndHash AND @EndHash IS NOT NULL;'),
+                ('ReadRangeRows2Key', 'SELECT
+                    GrainId,
+                    ReminderName,
+                    StartTime,
+                    Period,
+                    Version
+                FROM OrleansRemindersTable
+                WHERE
+                    ServiceId = @ServiceId AND @ServiceId IS NOT NULL
+                    AND ((GrainHash > @BeginHash AND @BeginHash IS NOT NULL)
+                    OR (GrainHash <= @EndHash AND @EndHash IS NOT NULL));'),
+                ('ReadReminderRowKey', 'SELECT
+                    GrainId,
+                    ReminderName,
+                    StartTime,
+                    Period,
+                    Version
+                FROM OrleansRemindersTable
+                WHERE
+                    ServiceId = @ServiceId AND @ServiceId IS NOT NULL
+                    AND GrainId = @GrainId AND @GrainId IS NOT NULL
+                    AND ReminderName = @ReminderName AND @ReminderName IS NOT NULL;'),
+                ('ReadReminderRowsKey', 'SELECT
+                    GrainId,
+                    ReminderName,
+                    StartTime,
+                    Period,
+                    Version
+                FROM OrleansRemindersTable
+                WHERE
+                    ServiceId = @ServiceId AND @ServiceId IS NOT NULL
+                    AND GrainId = @GrainId AND @GrainId IS NOT NULL;'),
+                ('UpsertReminderRowKey', 'INSERT INTO OrleansRemindersTable
+                (
+                    ServiceId,
+                    GrainId,
+                    ReminderName,
+                    StartTime,
+                    Period,
+                    GrainHash,
+                    Version
+                )
+                VALUES
+                (
+                    @ServiceId,
+                    @GrainId,
+                    @ReminderName,
+                    @StartTime,
+                    @Period,
+                    @GrainHash,
+                    0
+                )
+                ON CONFLICT(ServiceId, GrainId, ReminderName) DO UPDATE SET
+                    StartTime = excluded.StartTime,
+                    Period = excluded.Period,
+                    GrainHash = excluded.GrainHash,
+                    Version = OrleansRemindersTable.Version + 1
+                RETURNING Version;');
+                """);
         }
 
         /// <inheritdoc />
@@ -387,13 +570,16 @@ namespace Mohist.Server.Migrations
                 name: "BacklogStates");
 
             migrationBuilder.DropTable(
-                name: "Configs");
+                name: "EpicCounters");
 
             migrationBuilder.DropTable(
                 name: "EpicIssues");
 
             migrationBuilder.DropTable(
                 name: "Epics");
+
+            migrationBuilder.DropTable(
+                name: "Events");
 
             migrationBuilder.DropTable(
                 name: "IssueComments");
@@ -405,16 +591,28 @@ namespace Mohist.Server.Migrations
                 name: "IssuePrerequisites");
 
             migrationBuilder.DropTable(
-                name: "IssueProfiles");
+                name: "Issues");
 
             migrationBuilder.DropTable(
-                name: "IssueStates");
+                name: "IssueWorkflowProfiles");
+
+            migrationBuilder.DropTable(
+                name: "OrleansQuery");
+
+            migrationBuilder.DropTable(
+                name: "OrleansRemindersTable");
+
+            migrationBuilder.DropTable(
+                name: "ProjectPromptTemplates");
 
             migrationBuilder.DropTable(
                 name: "Projects");
 
             migrationBuilder.DropTable(
-                name: "workflow_runs");
+                name: "ProjectWorkflowProfiles");
+
+            migrationBuilder.DropTable(
+                name: "ProjectWorkflowTemplates");
 
             migrationBuilder.DropTable(
                 name: "WorkflowAgentSessionEvents");
@@ -423,13 +621,13 @@ namespace Mohist.Server.Migrations
                 name: "WorkflowAgentSessions");
 
             migrationBuilder.DropTable(
-                name: "WorkflowEvents");
-
-            migrationBuilder.DropTable(
                 name: "WorkflowLeases");
 
             migrationBuilder.DropTable(
-                name: "WorkflowRunProfiles");
+                name: "WorkflowRuns");
+
+            migrationBuilder.DropTable(
+                name: "WorkflowStageLocks");
 
             migrationBuilder.DropTable(
                 name: "WorkflowVariables");

@@ -61,7 +61,7 @@ public class IssueCreationSpecs
 
         await using var db = new MohistDbContext(options);
         var row = await db.BacklogStates.FindAsync(projectId);
-        return row is null ? null : JsonSerializer.Deserialize<WorkflowBacklogState>(row.StateJson);
+        return row is null ? null : JsonSerializer.Deserialize<WorkflowBacklogState>(row.State);
     }
 
     private async Task<string?> LoadLeaseJsonAsync(string workflowId)
@@ -72,7 +72,7 @@ public class IssueCreationSpecs
 
         await using var db = new MohistDbContext(options);
         var row = await db.WorkflowLeases.FindAsync(workflowId);
-        return row?.StateJson;
+        return row?.State;
     }
 
     private async Task<IReadOnlyList<WorkflowDomainEventDto>> GetWorkflowEventsAsync(string workflowRunId)

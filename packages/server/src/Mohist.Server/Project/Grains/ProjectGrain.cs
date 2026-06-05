@@ -3,6 +3,10 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Querying;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Infrastructure.Persistence.Db;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Infrastructure;
+using Mohist.Server.Workflow.Storage;
 using System.Text.Json;
 
 namespace Mohist.Server.Project.Grains;
@@ -10,12 +14,17 @@ namespace Mohist.Server.Project.Grains;
 public class ProjectGrain : Grain, IProjectGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly ProjectWorkflowProfileManager _workflowProfiles;
     private readonly ILogger<ProjectGrain> _log;
     private ProjectInfo? _project;
 
-    public ProjectGrain(IDbContextFactory<MohistDbContext> dbFactory, ILogger<ProjectGrain> log)
+    public ProjectGrain(
+        IDbContextFactory<MohistDbContext> dbFactory,
+        ProjectWorkflowProfileManager workflowProfiles,
+        ILogger<ProjectGrain> log)
     {
         _dbFactory = dbFactory;
+        _workflowProfiles = workflowProfiles;
         _log = log;
     }
 
@@ -55,7 +64,6 @@ public class ProjectGrain : Grain, IProjectGrain
             Path = path,
             BaseBranch = branch,
             RepositoriesJson = JsonSerializer.Serialize(repos),
-            VariablesJson = ProjectVariablesBag.Empty.ToJson(),
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync();
@@ -235,8 +243,45 @@ public class ProjectGrain : Grain, IProjectGrain
         var entry = await db.Projects.FindAsync(GrainKey);
         if (entry is null) return;
 
-        entry.VariablesJson = _project.Variables.ToJson();
+        var bundle = new VariableBundle(
+            ToJsonObject(_project.Variables.Vars),
+            _project.Variables.Stages?.ToDictionary(
+                kv => kv.Key,
+                kv => new StageVariables(ToJsonObject(kv.Value?.Vars)),
+                StringComparer.OrdinalIgnoreCase));
+        await UpsertWorkflowProfileVariablesAsync(db, GrainKey, bundle);
         entry.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
+    }
+
+    private static async Task UpsertWorkflowProfileVariablesAsync(
+        MohistDbContext db,
+        string projectId,
+        VariableBundle bundle)
+    {
+        var row = await db.ProjectWorkflowProfiles
+            .FirstOrDefaultAsync(x => x.ProjectId == projectId);
+
+        if (row is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                Variables = bundle.ToJson(),
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
+            return;
+        }
+
+        row.Variables = bundle.ToJson();
+        row.UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    private static JsonElement? ToJsonObject(Dictionary<string, JsonElement?>? values)
+    {
+        if (values is null || values.Count == 0)
+            return null;
+
+        return JsonSerializer.SerializeToElement(values, WorkflowVariableJson.Options);
     }
 }

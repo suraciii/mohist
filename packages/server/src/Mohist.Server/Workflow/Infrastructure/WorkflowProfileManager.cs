@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Workflow.Domain;
@@ -35,15 +34,13 @@ public class WorkflowProfileManager
     public async Task<ResolvedTemplate> LoadTemplateAsync(
         string runId,
         string? projectId = null,
-        string? issueId = null,
-        string? legacyIssueKey = null)
+        string? issueId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var resolvedContext = await ResolveRunContextAsync(db, runId);
         var context = new RunContext(
             string.IsNullOrWhiteSpace(projectId) ? resolvedContext.ProjectId : projectId,
-            string.IsNullOrWhiteSpace(issueId) ? resolvedContext.IssueId : issueId,
-            string.IsNullOrWhiteSpace(legacyIssueKey) ? resolvedContext.LegacyIssueKey : legacyIssueKey);
+            string.IsNullOrWhiteSpace(issueId) ? resolvedContext.IssueId : issueId);
 
         var issueProfile = await LoadIssueProfileAsync(db, context);
 
@@ -51,7 +48,7 @@ public class WorkflowProfileManager
         {
             var issueDef = DeserializeDefinition(issueProfile.Template);
             if (issueDef is not null && !string.IsNullOrWhiteSpace(issueDef.Id))
-                return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.IssueKey}", issueDef);
+                return ResolvedTemplate.FromDefinition($"issue-custom:{issueProfile.IssueId}", issueDef);
         }
 
         if (issueProfile is not null
@@ -106,15 +103,11 @@ public class WorkflowProfileManager
 
         var projectId = workflowRun?.MetadataProjectId;
         var issueId = TryReadAnnotation(workflowRun?.State, "issueId");
-        var issueKey = TryReadAnnotation(workflowRun?.State, "issueKey");
         var issue = await FindIssueForRunAsync(db, runId);
         projectId = string.IsNullOrWhiteSpace(projectId) ? issue?.ProjectId : projectId;
         issueId = string.IsNullOrWhiteSpace(issueId) ? issue?.IssueId : issueId;
-        issueKey = string.IsNullOrWhiteSpace(issueKey) && issue is not null
-            ? $"{issue.ProjectId}:{issue.Number}"
-            : issueKey;
 
-        return new RunContext(projectId, issueId, issueKey);
+        return new RunContext(projectId, issueId);
     }
 
     private static string? TryReadAnnotation(string? stateJson, string key)
@@ -143,13 +136,13 @@ public class WorkflowProfileManager
 
     private static async Task<IssueRunRef?> FindIssueForRunAsync(MohistDbContext db, string runId)
     {
-        var rows = await db.IssueStates.AsNoTracking()
-            .Where(x => x.StateJson.Contains(runId))
+        var rows = await db.Issues.AsNoTracking()
+            .Where(x => x.WorkflowRunId == runId)
             .ToListAsync();
 
         foreach (var row in rows)
         {
-            var issue = TryParseIssueRunRef(row.StateJson, runId);
+            var issue = TryParseIssueRunRef(row.State, runId);
             if (issue is not null)
                 return issue;
         }
@@ -190,14 +183,7 @@ public class WorkflowProfileManager
         if (string.IsNullOrWhiteSpace(projectId)) return VariableBundle.Empty;
         var projectProfile = await db.ProjectWorkflowProfiles.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId);
-        var bundle = VariableBundle.FromJson(projectProfile?.Variables);
-        if (!bundle.Vars.HasValue && bundle.Stages is null)
-        {
-            var legacyBag = await LoadLegacyProjectVariablesAsync(db, projectId);
-            if (legacyBag is not null)
-                bundle = ConvertProjectVariablesBag(legacyBag);
-        }
-        return bundle;
+        return VariableBundle.FromJson(projectProfile?.Variables);
     }
 
     private static async Task<VariableBundle> LoadIssueLayerAsync(MohistDbContext db, RunContext context)
@@ -211,32 +197,27 @@ public class WorkflowProfileManager
         if (!string.IsNullOrWhiteSpace(context.IssueId))
         {
             var byId = await db.IssueWorkflowProfiles.AsNoTracking()
-                .FirstOrDefaultAsync(x => x.IssueKey == context.IssueId);
+                .FirstOrDefaultAsync(x => x.IssueId == context.IssueId);
             if (byId is not null)
                 return byId;
         }
 
-        if (string.IsNullOrWhiteSpace(context.LegacyIssueKey))
-            return null;
-
-        return await db.IssueWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IssueKey == context.LegacyIssueKey);
+        return null;
     }
 
     // =======================================================================
     // Prompts
     // =======================================================================
 
-    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null, string? issueId = null, string? legacyIssueKey = null)
+    public async Task<ResolvedPrompt?> LoadPromptAsync(string runId, string key, string? projectId = null, string? issueId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
         var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
-        var lk = string.IsNullOrWhiteSpace(legacyIssueKey) ? context.LegacyIssueKey : legacyIssueKey;
 
         // 1. issue prompts
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid));
         if (issueProfile is not null)
         {
             if (issueProfile.Prompts.TryGetValue(key, out var body))
@@ -267,13 +248,12 @@ public class WorkflowProfileManager
         return null;
     }
 
-    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null, string? issueId = null, string? legacyIssueKey = null)
+    public async Task<IReadOnlyList<ResolvedPrompt>> LoadPromptsAsync(string runId, string? stage = null, string? projectId = null, string? issueId = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var context = await ResolveRunContextAsync(db, runId);
         var pid = string.IsNullOrWhiteSpace(projectId) ? context.ProjectId : projectId;
         var iid = string.IsNullOrWhiteSpace(issueId) ? context.IssueId : issueId;
-        var lk = string.IsNullOrWhiteSpace(legacyIssueKey) ? context.LegacyIssueKey : legacyIssueKey;
 
         var systemTemplates = _promptLoader.LoadAllTemplates();
         Dictionary<string, string> projectPrompts;
@@ -291,7 +271,7 @@ public class WorkflowProfileManager
         }
 
         Dictionary<string, string> issuePrompts;
-        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid, lk));
+        var issueProfile = await LoadIssueProfileAsync(db, new RunContext(pid, iid));
         if (issueProfile is not null)
             issuePrompts = issueProfile.Prompts;
         else
@@ -381,7 +361,7 @@ public class WorkflowProfileManager
     private static async Task<ResolvedTemplate?> LoadProjectTemplateAsync(
         MohistDbContext db, string projectId, string templateId)
     {
-        var row = await db.ProjectTemplates.AsNoTracking()
+        var row = await db.ProjectWorkflowTemplates.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
@@ -400,66 +380,6 @@ public class WorkflowProfileManager
         return systemDefinition is null
             ? null
             : ResolvedTemplate.FromDefinition($"system-template:{templateId}", systemDefinition);
-    }
-
-    private static readonly JsonSerializerOptions LegacyJsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
-    private static async Task<LegacyProjectVars?> LoadLegacyProjectVariablesAsync(
-        MohistDbContext db, string projectId)
-    {
-        var conn = db.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
-            await conn.OpenAsync();
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT VariablesJson FROM Projects WHERE Id = @id";
-
-        var param = cmd.CreateParameter();
-        param.ParameterName = "@id";
-        param.Value = projectId;
-        cmd.Parameters.Add(param);
-
-        var result = await cmd.ExecuteScalarAsync();
-        if (result is not string json || string.IsNullOrWhiteSpace(json))
-            return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<LegacyProjectVars>(json, LegacyJsonOptions);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static VariableBundle ConvertProjectVariablesBag(LegacyProjectVars bag)
-    {
-        JsonElement? varsEl = null;
-        if (bag.Vars is { Count: > 0 })
-        {
-            varsEl = JsonSerializer.Deserialize<JsonElement>(
-                JsonSerializer.Serialize(bag.Vars, LegacyJsonOptions));
-        }
-
-        Dictionary<string, StageVariables>? stages = null;
-        if (bag.Stages is { Count: > 0 })
-        {
-            stages = new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (stage, sbag) in bag.Stages)
-            {
-                if (sbag is null || sbag.Vars is null || sbag.Vars.Count == 0) continue;
-                var stageEl = JsonSerializer.Deserialize<JsonElement>(
-                    JsonSerializer.Serialize(sbag.Vars, LegacyJsonOptions));
-                stages[stage] = new StageVariables(stageEl);
-            }
-            if (stages.Count == 0) stages = null;
-        }
-
-        return new VariableBundle(varsEl, stages);
     }
 
     private static WorkflowDefinition? DeserializeDefinition(string json)
@@ -481,12 +401,6 @@ public class WorkflowProfileManager
         }
     }
 
-    private sealed record RunContext(string? ProjectId, string? IssueId, string? LegacyIssueKey);
+    private sealed record RunContext(string? ProjectId, string? IssueId);
     private sealed record IssueRunRef(string IssueId, string ProjectId, int Number);
-    private sealed record LegacyProjectVars(
-        Dictionary<string, JsonElement?>? Vars = null,
-        Dictionary<string, LegacyProjectStageVars?>? Stages = null);
-
-    private sealed record LegacyProjectStageVars(
-        Dictionary<string, JsonElement?>? Vars = null);
 }

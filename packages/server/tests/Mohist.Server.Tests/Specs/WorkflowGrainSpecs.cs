@@ -201,12 +201,12 @@ public abstract class WorkflowGrainSpecs
             db.WorkflowLeases.Add(new WorkflowLeaseRow
             {
                 WorkflowRunId = workflowId,
-                StateJson = json
+                State = json
             });
         }
         else
         {
-            row.StateJson = json;
+            row.State = json;
         }
 
         await db.SaveChangesAsync();
@@ -396,10 +396,10 @@ public abstract class WorkflowGrainSpecs
         var templateId = definition.Id;
         var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
 
-        var existingTemplate = await db.ProjectTemplates.FindAsync(projectId, templateId);
+        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
         if (existingTemplate is null)
         {
-            db.ProjectTemplates.Add(new ProjectTemplateRow
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
                 TemplateId = templateId,

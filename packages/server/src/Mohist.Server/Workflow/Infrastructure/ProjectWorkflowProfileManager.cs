@@ -7,8 +7,8 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Prompts;
 using Mohist.Server.Workflow.Prompts.Domain;
 using Mohist.Server.Workflow.Prompts.Infrastructure;
+using Mohist.Server.Workflow.Prompts.Storage;
 using Mohist.Server.Workflow.Storage;
-using ProjectPromptTemplateRow = Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow;
 
 namespace Mohist.Server.Workflow.Infrastructure;
 
@@ -66,7 +66,7 @@ public class ProjectWorkflowProfileManager
     public async Task<IReadOnlyList<ProjectTemplateInfo>> ListTemplatesAsync(string projectId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var rows = await db.ProjectTemplates.AsNoTracking()
+        var rows = await db.ProjectWorkflowTemplates.AsNoTracking()
             .Where(x => x.ProjectId == projectId)
             .OrderBy(x => x.TemplateId)
             .ToListAsync();
@@ -77,7 +77,7 @@ public class ProjectWorkflowProfileManager
     public async Task<WorkflowDefinition?> GetTemplateAsync(string projectId, string templateId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectTemplates.AsNoTracking()
+        var row = await db.ProjectWorkflowTemplates.AsNoTracking()
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         return row is null ? null : DeserializeDefinition(row.Template);
     }
@@ -95,12 +95,12 @@ public class ProjectWorkflowProfileManager
 
         await using var db = await _dbFactory.CreateDbContextAsync();
 
-        var exists = await db.ProjectTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == def.Id);
+        var exists = await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == def.Id);
         if (exists)
             throw new InvalidOperationException($"Template '{def.Id}' already exists in project '{projectId}'");
 
         var now = DateTimeOffset.UtcNow;
-        var row = new ProjectTemplateRow
+        var row = new ProjectWorkflowTemplateRow
         {
             ProjectId = projectId,
             TemplateId = def.Id,
@@ -108,7 +108,7 @@ public class ProjectWorkflowProfileManager
             CreatedAt = now,
             UpdatedAt = now,
         };
-        db.ProjectTemplates.Add(row);
+        db.ProjectWorkflowTemplates.Add(row);
         await db.SaveChangesAsync();
 
         return new ProjectTemplateInfo(row.ProjectId, row.TemplateId, row.CreatedAt, row.UpdatedAt);
@@ -124,7 +124,7 @@ public class ProjectWorkflowProfileManager
             throw new InvalidOperationException($"Template id mismatch: expected '{templateId}' but YAML declares '{def.Id}'");
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectTemplates
+        var row = await db.ProjectWorkflowTemplates
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return null;
 
@@ -138,11 +138,11 @@ public class ProjectWorkflowProfileManager
     public async Task<bool> DeleteTemplateAsync(string projectId, string templateId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.ProjectTemplates
+        var row = await db.ProjectWorkflowTemplates
             .FirstOrDefaultAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
         if (row is null) return false;
 
-        db.ProjectTemplates.Remove(row);
+        db.ProjectWorkflowTemplates.Remove(row);
         await db.SaveChangesAsync();
         return true;
     }
@@ -444,7 +444,7 @@ public class ProjectWorkflowProfileManager
     private async Task<bool> ProjectTemplateExistsAsync(string projectId, string templateId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.ProjectTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
+        return await db.ProjectWorkflowTemplates.AnyAsync(x => x.ProjectId == projectId && x.TemplateId == templateId);
     }
 
     private static string SerializeDefinition(WorkflowDefinition def) =>

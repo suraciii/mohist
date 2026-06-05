@@ -205,7 +205,7 @@ public class RuntimeEntrySpecs
                 db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow
                 {
                     WorkflowRunId = workflowRunId,
-                    StateJson = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                    State = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 });
 
                 await db.SaveChangesAsync();
@@ -260,7 +260,7 @@ public class RuntimeEntrySpecs
                 db.WorkflowLeases.Add(new Mohist.Server.Workflow.Storage.WorkflowLeaseRow
                 {
                     WorkflowRunId = workflowRunId,
-                    StateJson = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status runner", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                    State = JsonSerializer.Serialize(new WorkLease(workId, "task", "Build", workId, "Lease-owned status runner", runnerId), new JsonSerializerOptions(JsonSerializerDefaults.Web))
                 });
 
                 await db.SaveChangesAsync();

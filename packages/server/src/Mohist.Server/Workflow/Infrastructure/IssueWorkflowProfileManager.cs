@@ -28,10 +28,10 @@ public class IssueWorkflowProfileManager
     // Template
     // =======================================================================
 
-    public async Task<WorkflowDefinition?> GetTemplateAsync(string issueId, string? legacyIssueKey = null)
+    public async Task<WorkflowDefinition?> GetTemplateAsync(string issueId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await FindProfileAsync(db, issueId, legacyIssueKey);
+        var row = await FindProfileAsync(db, issueId);
         if (row is null) return null;
         if (!string.IsNullOrWhiteSpace(row.Template))
             return DeserializeDefinition(row.Template);
@@ -39,15 +39,15 @@ public class IssueWorkflowProfileManager
         return null;
     }
 
-    public async Task<IssueWorkflowProfileState> GetStateAsync(string issueId, string? legacyIssueKey = null)
+    public async Task<IssueWorkflowProfileState> GetStateAsync(string issueId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await FindProfileAsync(db, issueId, legacyIssueKey);
+        var row = await FindProfileAsync(db, issueId);
 
         return row is null
             ? new IssueWorkflowProfileState(issueId, null, false, null, VariableBundle.Empty, null)
             : new IssueWorkflowProfileState(
-                row.IssueKey,
+                row.IssueId,
                 row.SourceTemplateId,
                 !string.IsNullOrWhiteSpace(row.Template),
                 string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeDefinition(row.Template),
@@ -55,10 +55,10 @@ public class IssueWorkflowProfileManager
                 row.UpdatedAt);
     }
 
-    internal async Task<IssueWorkflowProfile?> GetProfileAsync(string issueId, string? legacyIssueKey = null)
+    internal async Task<IssueWorkflowProfile?> GetProfileAsync(string issueId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await FindProfileAsync(db, issueId, legacyIssueKey);
+        return await FindProfileAsync(db, issueId);
     }
 
     /// <summary>
@@ -70,8 +70,7 @@ public class IssueWorkflowProfileManager
     /// </summary>
     public async Task<IssueWorkflowProfileState> UpdateTemplateAsync(
         string issueId,
-        IssueTemplateUpdateRequest request,
-        string? legacyIssueKey = null)
+        IssueTemplateUpdateRequest request)
     {
         if (request is null)
             throw new ArgumentNullException(nameof(request));
@@ -87,18 +86,13 @@ public class IssueWorkflowProfileManager
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
-
-        if (row is null)
-        {
-            row = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
-        }
+            .FirstOrDefaultAsync(x => x.IssueId == issueId);
 
         if (row is null)
         {
             row = new IssueWorkflowProfile
             {
-                IssueKey = issueId,
+                IssueId = issueId,
                 SourceTemplateId = request.ProjectTemplateId,
                 Template = parsed is null ? null : SerializeDefinition(parsed),
                 Variables = VariableBundle.Empty.ToJson(),
@@ -121,29 +115,24 @@ public class IssueWorkflowProfileManager
     // Variables (Set + Patch)
     // =======================================================================
 
-    public async Task<VariableBundle> GetVariablesAsync(string issueId, string? legacyIssueKey = null)
+    public async Task<VariableBundle> GetVariablesAsync(string issueId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await FindProfileAsync(db, issueId, legacyIssueKey);
+        var row = await FindProfileAsync(db, issueId);
         return row is null ? VariableBundle.Empty : VariableBundle.FromJson(row.Variables);
     }
 
-    public async Task<VariableBundle> SetVariablesAsync(string issueId, VariableBundle bundle, string? legacyIssueKey = null)
+    public async Task<VariableBundle> SetVariablesAsync(string issueId, VariableBundle bundle)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
-
-        if (row is null)
-        {
-            row = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
-        }
+            .FirstOrDefaultAsync(x => x.IssueId == issueId);
 
         if (row is null)
         {
             row = new IssueWorkflowProfile
             {
-                IssueKey = issueId,
+                IssueId = issueId,
                 Variables = bundle.ToJson(),
                 UpdatedAt = DateTimeOffset.UtcNow,
             };
@@ -159,43 +148,38 @@ public class IssueWorkflowProfileManager
         return bundle;
     }
 
-    public async Task<VariableBundle> PatchVariablesAsync(string issueId, VariableBundle patch, string? legacyIssueKey = null)
+    public async Task<VariableBundle> PatchVariablesAsync(string issueId, VariableBundle patch)
     {
-        var current = await GetVariablesAsync(issueId, legacyIssueKey);
+        var current = await GetVariablesAsync(issueId);
         var merged = VariableBundle.Patch(current, patch);
-        return await SetVariablesAsync(issueId, merged, legacyIssueKey);
+        return await SetVariablesAsync(issueId, merged);
     }
 
     // =======================================================================
     // Prompts
     // =======================================================================
 
-    public async Task<Dictionary<string, string>> GetPromptsAsync(string issueId, string? legacyIssueKey = null)
+    public async Task<Dictionary<string, string>> GetPromptsAsync(string issueId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var profile = await FindProfileAsync(db, issueId, legacyIssueKey);
+        var profile = await FindProfileAsync(db, issueId);
         return profile?.Prompts ?? new(StringComparer.Ordinal);
     }
 
-    public async Task SetPromptAsync(string issueId, string key, string body, string? legacyIssueKey = null)
+    public async Task SetPromptAsync(string issueId, string key, string body)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("key is required", nameof(key));
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var profile = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
-
-        if (profile is null)
-        {
-            profile = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
-        }
+            .FirstOrDefaultAsync(x => x.IssueId == issueId);
 
         if (profile is null)
         {
             profile = new IssueWorkflowProfile
             {
-                IssueKey = issueId,
+                IssueId = issueId,
                 Variables = VariableBundle.Empty.ToJson(),
                 Prompts = new Dictionary<string, string>(StringComparer.Ordinal) { [key] = body },
                 UpdatedAt = DateTimeOffset.UtcNow,
@@ -211,19 +195,14 @@ public class IssueWorkflowProfileManager
         await db.SaveChangesAsync();
     }
 
-    public async Task DeletePromptAsync(string issueId, string key, string? legacyIssueKey = null)
+    public async Task DeletePromptAsync(string issueId, string key)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("key is required", nameof(key));
 
         await using var db = await _dbFactory.CreateDbContextAsync();
         var profile = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
-
-        if (profile is null)
-        {
-            profile = await MigrateLegacyProfileAsync(db, issueId, legacyIssueKey);
-        }
+            .FirstOrDefaultAsync(x => x.IssueId == issueId);
 
         if (profile is null) return;
 
@@ -241,42 +220,9 @@ public class IssueWorkflowProfileManager
 
     private static async Task<IssueWorkflowProfile?> FindProfileAsync(
         MohistDbContext db,
-        string issueId,
-        string? legacyIssueKey)
-    {
-        var row = await db.IssueWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IssueKey == issueId);
-        if (row is not null || string.IsNullOrWhiteSpace(legacyIssueKey))
-            return row;
-
-        return await db.IssueWorkflowProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.IssueKey == legacyIssueKey);
-    }
-
-    private static async Task<IssueWorkflowProfile?> MigrateLegacyProfileAsync(
-        MohistDbContext db,
-        string issueId,
-        string? legacyIssueKey)
-    {
-        if (string.IsNullOrWhiteSpace(legacyIssueKey)) return null;
-
-        var legacy = await db.IssueWorkflowProfiles
-            .FirstOrDefaultAsync(x => x.IssueKey == legacyIssueKey);
-        if (legacy is null) return null;
-
-        var migrated = new IssueWorkflowProfile
-        {
-            IssueKey = issueId,
-            SourceTemplateId = legacy.SourceTemplateId,
-            Template = legacy.Template,
-            Variables = legacy.Variables,
-            Prompts = legacy.Prompts,
-            UpdatedAt = legacy.UpdatedAt,
-        };
-        db.IssueWorkflowProfiles.Remove(legacy);
-        db.IssueWorkflowProfiles.Add(migrated);
-        return migrated;
-    }
+        string issueId) =>
+        await db.IssueWorkflowProfiles.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.IssueId == issueId);
 
     private static WorkflowDefinition? DeserializeDefinition(string json)
     {
@@ -293,7 +239,7 @@ public class IssueWorkflowProfileManager
 
     private static IssueWorkflowProfileState ToState(IssueWorkflowProfile row) =>
         new(
-            row.IssueKey,
+            row.IssueId,
             row.SourceTemplateId,
             !string.IsNullOrWhiteSpace(row.Template),
             string.IsNullOrWhiteSpace(row.Template) ? null : DeserializeDefinition(row.Template),
@@ -310,7 +256,7 @@ public sealed record IssueTemplateUpdateRequest(
     string? Template = null);
 
 public sealed record IssueWorkflowProfileState(
-    string IssueKey,
+    string IssueId,
     string? SourceTemplateId,
     bool HasCustomTemplate,
     WorkflowDefinition? Template,

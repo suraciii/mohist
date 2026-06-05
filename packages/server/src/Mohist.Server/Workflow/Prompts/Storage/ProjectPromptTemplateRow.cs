@@ -1,6 +1,6 @@
 namespace Mohist.Server.Workflow.Prompts.Storage;
 
-public class ProjectTemplateRow
+public class ProjectPromptTemplateRow
 {
     public string ProjectId { get; set; } = "";
     public string Key { get; set; } = "";

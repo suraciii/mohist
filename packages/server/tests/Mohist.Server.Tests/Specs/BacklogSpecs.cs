@@ -152,10 +152,10 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
 
         await using var db = new MohistDbContext(options);
         var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-        var template = await db.ProjectTemplates.FindAsync(projectId, definition.Id);
+        var template = await db.ProjectWorkflowTemplates.FindAsync(projectId, definition.Id);
         if (template is null)
         {
-            db.ProjectTemplates.Add(new ProjectTemplateRow
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = projectId,
                 TemplateId = definition.Id,

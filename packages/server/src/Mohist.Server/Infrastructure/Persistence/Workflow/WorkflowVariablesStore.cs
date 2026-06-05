@@ -21,7 +21,7 @@ public class WorkflowVariablesStore : IStateStore<WorkflowExecutionContext>
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.WorkflowVariables.FindAsync(key);
-        return row is null ? null : Deserialize(row.StateJson);
+        return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, WorkflowExecutionContext state)
@@ -30,9 +30,9 @@ public class WorkflowVariablesStore : IStateStore<WorkflowExecutionContext>
         var row = await db.WorkflowVariables.FindAsync(key);
         var json = Serialize(state);
         if (row is null)
-            db.WorkflowVariables.Add(new WorkflowVariablesRow { WorkflowRunId = key, StateJson = json });
+            db.WorkflowVariables.Add(new WorkflowVariablesRow { WorkflowRunId = key, State = json });
         else
-            row.StateJson = json;
+            row.State = json;
         await db.SaveChangesAsync();
     }
 

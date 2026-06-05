@@ -2,13 +2,11 @@ namespace Mohist.Server.Workflow.Storage;
 
 /// <summary>
 /// Issue workflow profile.
-/// IssueKey is the persisted column name; new rows store issueId.
-/// Legacy rows may still contain projectId:issueNumber and are migrated on write.
 /// 存储 issue 级模板引用/自定义模板 + issue 级变量配置。
 /// </summary>
 public class IssueWorkflowProfile
 {
-    public string IssueKey { get; set; } = string.Empty;
+    public string IssueId { get; set; } = string.Empty;
 
     /// <summary>
     /// 引用的项目模板 ID (当用户为 issue 选择了特定项目模板时)。

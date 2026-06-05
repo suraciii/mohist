@@ -102,7 +102,7 @@ public class WorkflowProjectionService
         var rows = await db.WorkflowLeases.AsNoTracking()
             .Where(row => workflowIds.Contains(row.WorkflowRunId))
             .ToListAsync(ct);
-        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.StateJson), StringComparer.Ordinal);
+        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.State), StringComparer.Ordinal);
     }
 
     private static bool IsLeaseOwnedActiveSession(WorkflowAgentSession session, IReadOnlyDictionary<string, WorkLease?> leases)

@@ -49,7 +49,7 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         var row = await _manager.UpdateTemplateAsync("issue_1",
             new IssueTemplateUpdateRequest(ProjectTemplateId: "some-template"));
 
-        Assert.Equal("issue_1", row.IssueKey);
+        Assert.Equal("issue_1", row.IssueId);
         Assert.Equal("some-template", row.SourceTemplateId);
         Assert.Null(row.Template);
     }
@@ -190,26 +190,6 @@ public class IssueWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(got.Vars);
         using var doc = JsonDocument.Parse(got.Vars.Value.GetRawText());
         Assert.Equal(1, doc.RootElement.GetProperty("keep").GetInt32());
-    }
-
-    [Fact]
-    public async Task UpdateTemplate_MigratesLegacyIssueKeyToIssueId()
-    {
-        await _manager.SetVariablesAsync("legacy_proj:1",
-            new VariableBundle(Vars: JsonSerializer.SerializeToElement(new { keep = true })));
-
-        var row = await _manager.UpdateTemplateAsync(
-            "issue_migrated",
-            new IssueTemplateUpdateRequest(ProjectTemplateId: "some-template"),
-            legacyIssueKey: "legacy_proj:1");
-
-        Assert.Equal("issue_migrated", row.IssueKey);
-        Assert.Equal("some-template", row.SourceTemplateId);
-
-        var legacy = await _manager.GetProfileAsync("legacy_proj:1");
-        Assert.Null(legacy);
-        var variables = await _manager.GetVariablesAsync("issue_migrated");
-        Assert.True(variables.Vars.HasValue);
     }
 
     // ===================== helpers =====================
