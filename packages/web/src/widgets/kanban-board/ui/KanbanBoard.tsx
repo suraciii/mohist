@@ -23,7 +23,7 @@ import {
   type SortMode,
 } from '../model/board-query'
 import { useLabels } from '../../../entities/issue'
-import { useProject } from '../../../entities/project'
+import { useProjectPath } from '../../../entities/project'
 import { getPriorityStyle } from '../../../shared/lib/label-colors'
 import { deriveAttentionItems } from '../model/homepage-attention'
 import { getStageColors } from '../model/stage-colors'
@@ -40,12 +40,6 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: 'number', label: '#' },
   { value: 'updated', label: 'Updated' },
 ]
-
-function withProjectSearch(path: string, projectId?: string | null) {
-  if (!projectId) return path
-  const separator = path.includes('?') ? '&' : '?'
-  return `${path}${separator}projectId=${encodeURIComponent(projectId)}`
-}
 
 function PriorityChips({
   active,
@@ -398,7 +392,7 @@ function NeedsAttentionSummary({
 }: {
   items: Array<{ issueNumber: number; issueId: string; label: string; detail?: string }>
 }) {
-  const { projectId } = useProject()
+  const toProjectPath = useProjectPath()
 
   if (items.length === 0) return null
 
@@ -424,7 +418,7 @@ function NeedsAttentionSummary({
           {items.slice(0, 6).map((item) => (
             <a
               key={item.issueId}
-              href={withProjectSearch(`/issues/${item.issueNumber}`, projectId)}
+              href={toProjectPath(`/issues/${item.issueNumber}`)}
               data-testid={`attention-link-${item.issueNumber}`}
               className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs shadow-sm hover:shadow border border-amber-200 transition-shadow"
             >
@@ -456,13 +450,13 @@ function RunnerUnavailableBanner({
   agentStatus: AgentStatus
 }) {
   const { hasConnectedCapacity } = useRunnerSummary()
-  const { projectId } = useProject()
+  const toProjectPath = useProjectPath()
   if (hasConnectedCapacity) return null
 
   return (
     <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
       {agentStatus.runnerMessage ?? 'No runner is connected.'}{' '}
-      <Link to={withProjectSearch('/activity', projectId)} className="underline hover:no-underline">
+      <Link to={toProjectPath('/activity')} className="underline hover:no-underline">
         View runner status
       </Link>{' '}
       or start a runner before starting workflow work.

@@ -52,7 +52,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
         Assert.NotNull(card.LastActivity);
         Assert.Equal("agent_session_terminal", card.LastActivity!.Text);
@@ -122,7 +122,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var raw = await _client.GetRawAsync($"/api/issues/{issue.Number}/sessions/plan?projectId={project.Id}");
+        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
 
@@ -179,7 +179,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var response = await _client.GetDataAsync<AgentSessionRuntimeEventsTestResponse>($"/api/issues/{issue.Number}/sessions/plan/events?projectId={project.Id}");
+        var response = await _client.GetDataAsync<AgentSessionRuntimeEventsTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/events");
 
         Assert.Equal(3, response.Events.Length);
         Assert.Equal(new[] { "mohist_prompt", "agent_message_chunk", "agent_message_chunk" }, response.Events.Select(e => e.Type).ToArray());
@@ -208,9 +208,9 @@ public class AgentSessionSpecs
     {
         var projectName = $"metadata-not-found-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Metadata not found", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Metadata not found", projectId = project.Id });
 
-        using var response = await _client.GetAsync($"/api/issues/{issue.Number}/sessions/does-not-exist?projectId={project.Id}");
+        using var response = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/does-not-exist");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -688,7 +688,7 @@ public class AgentSessionSpecs
 
         await SaveLeaseAsync(work.WorkflowRunId, new WorkLease(work.WorkId, work.WorkType, work.Stage ?? "Build", work.WorkId, work.Title, _runnerId));
 
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
 
         Assert.Equal(0, activity.Summary.Active);
         Assert.DoesNotContain(activity.Sessions, s => s.SessionId == session.Id && s.Status is "created" or "running" or "probing");
@@ -743,7 +743,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
 
         Assert.Equal("anthropic/claude-sonnet-4", card.ResolvedModel);
@@ -809,7 +809,7 @@ public class AgentSessionSpecs
                 issue.Id, issueState);
         }
 
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
 
         Assert.NotNull(card.TaskProgress);
@@ -885,7 +885,7 @@ public class AgentSessionSpecs
                 issue.Id, issueState);
         }
 
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         var card = Assert.Single(activity.Sessions, s => s.SessionId == session.Id);
 
         Assert.NotNull(card.TaskProgress);
@@ -898,9 +898,9 @@ public class AgentSessionSpecs
     {
         var projectName = $"session-report-failure-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Report closes failed session", body = "track report failure", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Report closes failed session", body = "track report failure", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), projectId = project.Id });
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", new { });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", new { });
         var work = await PollUntilAgentWorkAsync(issue.Number);
 
         var sessionName = work.WorkId;
@@ -929,7 +929,7 @@ public class AgentSessionSpecs
         Assert.Equal("failed", grainSession.Status);
         Assert.Equal("ACP agent requires 'prompt'", grainSession.FailureReason);
 
-        var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
+        var activity = await _client.GetDataAsync<ActivityDto>($"/api/projects/{project.Id}/agent/activity");
         Assert.Equal(0, activity.Summary.Active);
         Assert.Equal(1, activity.Summary.Failed);
         Assert.Contains(activity.Sessions, s => s.IssueNumber == issue.Number && s.Status == "failed");
@@ -986,7 +986,7 @@ public class AgentSessionSpecs
         var projectName = $"asg-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issueTitle = title ?? $"Session grain {name}";
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = issueTitle, body = "track sessions", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = issueTitle, body = "track sessions", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
 
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",

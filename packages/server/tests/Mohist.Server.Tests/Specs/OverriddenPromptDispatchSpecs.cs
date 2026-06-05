@@ -27,7 +27,7 @@ public class OverriddenPromptDispatchSpecs : IAsyncLifetime
     {
         foreach (var entry in _tracked)
         {
-            using var _ = await _client.PostAsync($"/api/issues/{entry.IssueNumber}/stop?projectId={entry.ProjectId}", null);
+            using var _ = await _client.PostAsync($"/api/projects/{entry.ProjectId}/issues/{entry.IssueNumber}/stop", null);
         }
     }
 
@@ -59,15 +59,15 @@ public class OverriddenPromptDispatchSpecs : IAsyncLifetime
             "/api/projects",
             new { name = $"prompt-dispatch-{label}-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issue = await _client.PostDataAsync<IssueDto>(
-            "/api/issues",
-            new { title = $"Prompt dispatch {label}", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+            $"/api/projects/{project.Id}/issues",
+            new { title = $"Prompt dispatch {label}", body = "body", labels = Array.Empty<string>(), priority = "p1" });
         _tracked.Add(new TrackedIssue(project.Id, issue.Number));
         return (project.Id, issue.Number);
     }
 
     private async Task<string> StartIssueWithRunnerAsync(string projectId, int issueNumber, string label)
     {
-        await _client.PostOkAsync($"/api/issues/{issueNumber}/start?projectId={projectId}");
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issueNumber}/start");
         var runnerId = $"prompt-dispatch-runner-{label}-{Guid.NewGuid():N}";
         await _client.PostOkAsync(
             $"/api/runner/{runnerId}/register",

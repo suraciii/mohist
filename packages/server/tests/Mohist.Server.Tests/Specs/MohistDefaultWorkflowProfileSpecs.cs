@@ -486,7 +486,7 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
     public async Task StartWork_WithUnknownPromptReference_Returns400MissingPromptsWithMissingKeysDetails()
     {
         var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references unknown prompt", projectId = project.Id });
+        var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references unknown prompt", projectId = project.Id });
 
         var customYaml = """
             id: missing-prompt-workflow
@@ -500,9 +500,9 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
                       prompt: ${{ prompts.does-not-exist }}
                 checks: []
             """;
-        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+        await _client.PutAsJsonOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
 
-        using var response = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -517,7 +517,7 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
     public async Task StartWork_WithMultipleUnknownPromptReferences_ReturnsAllMissingKeysInDetails()
     {
         var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"multi-missing-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references multiple unknown prompts", projectId = project.Id });
+        var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references multiple unknown prompts", projectId = project.Id });
 
         var customYaml = """
             id: multi-missing-prompt-workflow
@@ -531,9 +531,9 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
                       prompt: ${{ prompts.ghost-one }} and ${{ prompts.ghost-two }}
                 checks: []
             """;
-        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+        await _client.PutAsJsonOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
 
-        using var response = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -549,7 +549,7 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
     public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitMissingPromptsError()
     {
         var project = await _client.PostDataAsync<StartProjectDto>("/api/projects", new { name = $"known-prompts-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<StartIssueDto>("/api/issues", new { title = "Workflow references known prompt", projectId = project.Id });
+        var issue = await _client.PostDataAsync<StartIssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow references known prompt", projectId = project.Id });
 
         var customYaml = """
             id: known-prompt-workflow
@@ -563,9 +563,9 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
                       prompt: ${{ prompts.proposal }}
                 checks: []
             """;
-        await _client.PutAsJsonOkAsync($"/api/issues/{issue.Number}/workflow/profile/yaml?projectId={project.Id}", new { yaml = customYaml });
+        await _client.PutAsJsonOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
 
-        using var response = await _client.PostAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", null);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }

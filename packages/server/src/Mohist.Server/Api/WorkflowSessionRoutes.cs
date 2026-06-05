@@ -1,4 +1,5 @@
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
 
@@ -15,8 +16,13 @@ public static class WorkflowSessionRoutes
             return detail is null ? ApiResults.NotFound($"Session {sessionName} not found") : ApiResults.Ok(detail);
         });
 
-        app.MapGet("/api/issues/{number:int}/workflow-sessions", async (int number, string projectId, AgentSessionQuerier sessions) =>
-            ApiResults.Ok(await sessions.ListByIssueAsync(projectId, number)));
+        app.MapGet("/api/projects/{projectRef}/issues/{number:int}/workflow-sessions", async (string projectRef, int number, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
+        {
+            var project = await projects.ResolveAsync(projectRef);
+            return project is null
+                ? ApiResults.NotFound("Project not found")
+                : ApiResults.Ok(await sessions.ListByIssueAsync(project.Id, number));
+        });
 
         return app;
     }

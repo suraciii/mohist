@@ -22,12 +22,12 @@ public class WorkspaceSpecs
         // Given a project and an issue that has not produced a workspace branch yet.
         _fixture.Git.BranchExists = false;
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"workspace-{Guid.NewGuid():N}", path = "/fake/project", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Workspace issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workspace issue", projectId = project.Id });
 
         // When the user opens the diff, commit list, and commit diff review views.
-        var diff = await _client.GetDataAsync<UnavailableDto>($"/api/issues/{issue.Number}/diff?projectId={project.Id}");
-        var commits = await _client.GetDataAsync<UnavailableDto>($"/api/issues/{issue.Number}/commits?projectId={project.Id}");
-        var commitDiff = await _client.GetDataAsync<CommitDiffUnavailableDto>($"/api/issues/{issue.Number}/commits/deadbeef/diff?projectId={project.Id}");
+        var diff = await _client.GetDataAsync<UnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/diff");
+        var commits = await _client.GetDataAsync<UnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/commits");
+        var commitDiff = await _client.GetDataAsync<CommitDiffUnavailableDto>($"/api/projects/{project.Id}/issues/{issue.Number}/commits/deadbeef/diff");
 
         // Then Mohist keeps the review UI usable and explains that no change branch exists yet.
         Assert.False(diff.Available);
@@ -48,11 +48,11 @@ public class WorkspaceSpecs
         // Given an issue has an active local worktree.
         var projectName = $"workspace-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/fake/project", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Cleanup issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Cleanup issue", projectId = project.Id });
         _fixture.Git.WorktreeRemoval = new WorktreeRemovalResultDto(true, "removed", "/fake/worktree", null, "Worktree removed").ToDomain();
 
         // When the user asks Mohist to clean up the issue workspace.
-        var cleanup = await _client.PostDataAsync<CleanupDto>($"/api/issues/{issue.Number}/cleanup?projectId={project.Id}");
+        var cleanup = await _client.PostDataAsync<CleanupDto>($"/api/projects/{project.Id}/issues/{issue.Number}/cleanup");
 
         // Then Mohist removes the worktree and reports the cleanup as completed.
         Assert.True(cleanup.Removed);
@@ -67,11 +67,11 @@ public class WorkspaceSpecs
         // Given an issue whose local workspace has already been removed.
         var projectName = $"workspace-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/fake/project", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Missing cleanup issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Missing cleanup issue", projectId = project.Id });
         _fixture.Git.WorktreeRemoval = new WorktreeRemovalResultDto(false, "missing", "/fake/worktree", "worktree_missing", "Worktree already removed").ToDomain();
 
         // When the user runs cleanup.
-        var cleanup = await _client.PostDataAsync<CleanupDto>($"/api/issues/{issue.Number}/cleanup?projectId={project.Id}");
+        var cleanup = await _client.PostDataAsync<CleanupDto>($"/api/projects/{project.Id}/issues/{issue.Number}/cleanup");
 
         // Then Mohist treats cleanup as idempotent and tells the user nothing needed removal.
         Assert.False(cleanup.Removed);

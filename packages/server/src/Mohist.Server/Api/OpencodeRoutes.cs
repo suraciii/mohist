@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Api;
@@ -8,16 +9,16 @@ public static class OpencodeRoutes
 {
     public static WebApplication MapOpencodeRoutes(this WebApplication app)
     {
-        app.MapGet("/api/opencode/models", async (string? projectId, IGrainFactory grains) =>
+        app.MapGet("/api/projects/{projectRef}/opencode/models", async (string projectRef, IGrainFactory grains, ProjectRefResolver projects) =>
         {
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
             var globalRegistry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             var models = await globalRegistry.ListCoderModelsAsync();
 
-            if (!string.IsNullOrWhiteSpace(projectId))
-            {
-                var projectRegistry = grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(projectId));
-                models = models.Concat(await projectRegistry.ListCoderModelsAsync()).ToArray();
-            }
+            var projectRegistry = grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(project.Id));
+            models = models.Concat(await projectRegistry.ListCoderModelsAsync()).ToArray();
 
             var visibleModels = models
                 .Where(model => !string.IsNullOrWhiteSpace(model))

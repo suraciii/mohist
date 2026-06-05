@@ -84,7 +84,7 @@ public class ProjectCliSpecs
             new NoopCommandExecutor());
 
         Assert.Equal(0, exitCode);
-        Assert.Equal("/api/issues?projectId=proj_123", http.Requests.Single().RequestUri!.PathAndQuery);
+        Assert.Equal("/api/projects/proj_123/issues", http.Requests.Single().RequestUri!.PathAndQuery);
     }
 
     private sealed class FakeFileSystem : IFileSystem

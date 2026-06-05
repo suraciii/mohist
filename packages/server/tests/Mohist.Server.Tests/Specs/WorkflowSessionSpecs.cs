@@ -121,13 +121,13 @@ public class WorkflowSessionSpecs
             }
         });
 
-        var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/issues/{issue.Number}/sessions/{sessionName}?projectId={project.Id}");
+        var metadata = await _client.GetDataAsync<IssueSessionMetadataTestDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}");
         Assert.Equal(sessionId, metadata.Id);
         Assert.Equal(sessionName, metadata.SessionName);
         Assert.Equal(5, metadata.Metadata.EventCount);
         Assert.Equal(0, metadata.Metadata.ToolCount);
 
-        var events = await _client.GetDataAsync<IssueSessionEventsTestResponse>($"/api/issues/{issue.Number}/sessions/{sessionName}/events?projectId={project.Id}");
+        var events = await _client.GetDataAsync<IssueSessionEventsTestResponse>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/{sessionName}/events");
         Assert.Equal(5, events.Events.Length);
         Assert.Equal("mohist_prompt", events.Events[0].Type);
         Assert.Equal(promptBody, events.Events[0].Payload?.GetProperty("text").GetString());
@@ -146,13 +146,12 @@ public class WorkflowSessionSpecs
             baseBranch = "main"
         });
         var issueTitle = title ?? $"Workflow session {name}";
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new
         {
             title = issueTitle,
             body = "track workflow session",
             labels = Array.Empty<string>(),
-            priority = "p1",
-            projectId = project.Id
+            priority = "p1"
         });
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(issue.Id);

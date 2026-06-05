@@ -1,6 +1,7 @@
 using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Api;
 
@@ -8,20 +9,21 @@ public static class EpicRoutes
 {
     public static WebApplication MapEpicRoutes(this WebApplication app)
     {
-        var epics = app.MapGroup("/api/epics");
+        var epics = app.MapGroup("/api/projects/{projectRef}/epics");
 
-        epics.MapGet("/", async (string projectId, EpicQuerier queryService) =>
+        epics.MapGet("/", async (string projectRef, EpicQuerier queryService, ProjectRefResolver projects) =>
         {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            return ApiResults.Ok(await queryService.ListAsync(pid));
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+            return ApiResults.Ok(await queryService.ListAsync(project.Id));
         });
 
-        epics.MapPost("/", async (EpicCreateRequest req, string? projectId, IGrainFactory grains) =>
+        epics.MapPost("/", async (string projectRef, EpicCreateRequest req, IGrainFactory grains, ProjectRefResolver projects) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title)) return ApiResults.BadRequest("title is required");
-            var pid = projectId ?? req.ProjectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+            var pid = project.Id;
 
             var tempId = $"epic_{Guid.NewGuid():N}";
             var grain = grains.GetGrain<IEpicGrain>($"{pid}:{tempId}");
@@ -29,28 +31,22 @@ public static class EpicRoutes
             return Results.Json(new ApiResponse<EpicDto>(true, dto), statusCode: 201);
         });
 
-        epics.MapGet("/by-number/{number:int}", async (int number, string projectId, EpicQuerier queryService) =>
+        epics.MapGet("/{id}", async (string projectRef, string id, EpicQuerier queryService, ProjectRefResolver projects) =>
         {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
-            var result = await queryService.GetByNumberAsync(pid, number);
-            return result is null ? ApiResults.NotFound($"Epic #{number} not found") : ApiResults.Ok(result);
-        });
-
-        epics.MapGet("/{id}", async (string id, string projectId, EpicQuerier queryService) =>
-        {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+            var pid = project.Id;
             var result = int.TryParse(id, out var number)
                 ? await queryService.GetByNumberAsync(pid, number)
                 : await queryService.GetAsync(pid, id);
             return result is null ? ApiResults.NotFound($"Epic {id} not found") : ApiResults.Ok(result);
         });
 
-        epics.MapPatch("/{id}", async (string id, string projectId, UpdateEpicRequest req, EpicQuerier queryService, IGrainFactory grains) =>
+        epics.MapPatch("/{id}", async (string projectRef, string id, UpdateEpicRequest req, EpicQuerier queryService, IGrainFactory grains, ProjectRefResolver projects) =>
         {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+            var pid = project.Id;
 
             var resolved = int.TryParse(id, out var number)
                 ? await queryService.GetByNumberAsync(pid, number)
@@ -62,10 +58,11 @@ public static class EpicRoutes
             return updated is null ? ApiResults.NotFound($"Epic {id} not found") : ApiResults.Ok(updated);
         });
 
-        epics.MapPost("/{id}/issues", async (string id, string projectId, EpicIssueRequest req, IGrainFactory grains, IssueQuerier issuesQuery, EpicQuerier queryService) =>
+        epics.MapPost("/{id}/issues", async (string projectRef, string id, EpicIssueRequest req, IGrainFactory grains, IssueQuerier issuesQuery, EpicQuerier queryService, ProjectRefResolver projects) =>
         {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+            var pid = project.Id;
 
             var resolved = int.TryParse(id, out var number)
                 ? await queryService.GetByNumberAsync(pid, number)
@@ -91,10 +88,11 @@ public static class EpicRoutes
             return ApiResults.Ok(new { epicId = resolvedId, issueId = issue.Id });
         });
 
-        epics.MapDelete("/{id}/issues/{issueId}", async (string id, string issueId, string projectId, IGrainFactory grains, EpicQuerier queryService) =>
+        epics.MapDelete("/{id}/issues/{issueId}", async (string projectRef, string id, string issueId, IGrainFactory grains, EpicQuerier queryService, ProjectRefResolver projects) =>
         {
-            var pid = projectId;
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+            var pid = project.Id;
             var resolved = int.TryParse(id, out var number)
                 ? await queryService.GetByNumberAsync(pid, number)
                 : await queryService.GetAsync(pid, id);
@@ -104,16 +102,17 @@ public static class EpicRoutes
             return ApiResults.Ok(new { epicId = resolved.Id, issueId });
         });
 
-        epics.MapPost("/{id}/done", async (string id, string projectId, IGrainFactory grains, EpicQuerier queryService) => await SetStatusRouteAsync(id, projectId, "done", grains, queryService));
-        epics.MapPost("/{id}/close", async (string id, string projectId, IGrainFactory grains, EpicQuerier queryService) => await SetStatusRouteAsync(id, projectId, "closed", grains, queryService));
+        epics.MapPost("/{id}/done", async (string projectRef, string id, IGrainFactory grains, EpicQuerier queryService, ProjectRefResolver projects) => await SetStatusRouteAsync(projectRef, id, "done", grains, queryService, projects));
+        epics.MapPost("/{id}/close", async (string projectRef, string id, IGrainFactory grains, EpicQuerier queryService, ProjectRefResolver projects) => await SetStatusRouteAsync(projectRef, id, "closed", grains, queryService, projects));
 
         return app;
     }
 
-    private static async Task<IResult> SetStatusRouteAsync(string id, string projectId, string status, IGrainFactory grains, EpicQuerier queryService)
+    private static async Task<IResult> SetStatusRouteAsync(string projectRef, string id, string status, IGrainFactory grains, EpicQuerier queryService, ProjectRefResolver projects)
     {
-        var pid = projectId;
-        if (pid is null) return ApiResults.BadRequest("No active project");
+        var project = await projects.ResolveAsync(projectRef);
+        if (project is null) return ApiResults.NotFound("Project not found");
+        var pid = project.Id;
         var resolved = int.TryParse(id, out var number)
             ? await queryService.GetByNumberAsync(pid, number)
             : await queryService.GetAsync(pid, id);
@@ -140,6 +139,6 @@ public static class EpicRoutes
     }
 }
 
-public record EpicCreateRequest(string Title, string? Description, string? Priority, string? ProjectId = null);
+public record EpicCreateRequest(string Title, string? Description, string? Priority);
 public record EpicIssueRequest(string IssueId);
 public record UpdateEpicRequest(string? Title = null, string? Description = null, string? Priority = null);

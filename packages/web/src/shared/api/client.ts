@@ -52,11 +52,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return json.data as T
 }
 
-export function withProject(init: RequestInit | undefined, projectId?: string | null): RequestInit | undefined {
-  if (!projectId) return init
-  const headers = new Headers(init?.headers)
-  headers.set('X-Mohist-Project-Id', projectId)
-  return { ...init, headers }
+export function projectApiPath(projectRef: string | null | undefined, path: string) {
+  if (!projectRef) throw new ApiError('Project is required', 400)
+  return `/projects/${encodeURIComponent(projectRef)}${path.startsWith('/') ? path : `/${path}`}`
 }
 
 export { ApiError }

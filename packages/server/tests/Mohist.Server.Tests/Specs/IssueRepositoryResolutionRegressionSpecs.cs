@@ -106,7 +106,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         await projectGrain.AddRepositoryAsync("secondary", "/proj/secondary-new", "git@secondary.example:repo-new.git", "develop-new");
 
         // Then the list endpoint returns the resolved repository from the live project config.
-        using var response = await _client.GetAsync($"/api/issues?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
@@ -128,7 +128,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the client posts an issue with the case-insensitive ambiguous reference.
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues?projectId={projectId}",
+            $"/api/projects/{projectId}/issues",
             new { title = "Ambiguous repo", repositoryName = "main" },
             JsonOptions);
 
@@ -157,7 +157,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         await issueGrain.CreateAsync(projectId, number, "Ambiguous", body: null, labels: null, priority: null, "main", issueId);
 
         // When the client fetches the issue read model.
-        using var response = await _client.GetAsync($"/api/issues/{number}?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{number}");
 
         // Then the response surfaces an AmbiguousReference problem.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -226,7 +226,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the user queues a rebase without specifying a base branch.
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues/{issue.Number}/rebase?projectId={projectId}",
+            $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
 
         // Then the response uses the current base branch.
@@ -276,7 +276,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the user queues a rebase.
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues/{issue.Number}/rebase?projectId={projectId}",
+            $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
 
@@ -321,7 +321,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             "release-new");
 
         // When the user opens the workspace commits view.
-        using var response = await _client.GetAsync($"/api/issues/{issue.Number}/commits?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/commits");
 
         // Then the endpoint reports the current project repository base branch.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -349,7 +349,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the user requests the file content.
         using var response = await _client.GetAsync(
-            $"/api/issues/{issue.Number}/file-content?projectId={projectId}&path=a.txt");
+            $"/api/projects/{projectId}/issues/{issue.Number}/file-content?path=a.txt");
 
         // Then the endpoint returns a repository configuration problem
         // instead of falling back to "main".
@@ -394,7 +394,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the user requests the worktree status after the project repository config change.
         using var response = await _client.GetAsync(
-            $"/api/issues/{issue.Number}/worktree-status?projectId={projectId}");
+            $"/api/projects/{projectId}/issues/{issue.Number}/worktree-status");
 
         // Then the endpoint returns a successful worktree status — proving the route
         // resolved the live project repository (path + base branch) instead of failing
@@ -575,9 +575,9 @@ public class IssueRepositoryResolutionRegressionSpecs
             "git@secondary.example:repo-new.git",
             "release-new");
 
-        // Then GET /api/issues/:number returns the latest resolved repository path
+        // Then GET /api/projects/:projectRef/issues/:number returns the latest resolved repository path
         // and base branch instead of stale stored repository details.
-        using var response = await _client.GetAsync($"/api/issues/{issue.Number}?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
@@ -609,9 +609,9 @@ public class IssueRepositoryResolutionRegressionSpecs
             "git@secondary.example:repo-new.git",
             "release-new");
 
-        // When the same issue is fetched by GET /api/issues/:number and via the list endpoint.
-        using var singleResponse = await _client.GetAsync($"/api/issues/{issue.Number}?projectId={projectId}");
-        using var listResponse = await _client.GetAsync($"/api/issues?projectId={projectId}");
+        // When the same issue is fetched by GET /api/projects/:projectRef/issues/:number and via the list endpoint.
+        using var singleResponse = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}");
+        using var listResponse = await _client.GetAsync($"/api/projects/{projectId}/issues");
 
         Assert.Equal(HttpStatusCode.OK, singleResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
@@ -651,10 +651,10 @@ public class IssueRepositoryResolutionRegressionSpecs
         // When the referenced repository is removed.
         await _grains.GetGrain<IProjectGrain>(projectId).RemoveRepositoryAsync("secondary");
 
-        // Then GET /api/issues surfaces a RepositoryNotFound problem in the list entry
+        // Then GET /api/projects/:projectRef/issues surfaces a RepositoryNotFound problem in the list entry
         // for the orphaned issue, so the list view can render the same configuration
         // problem the single-issue endpoint already shows.
-        using var response = await _client.GetAsync($"/api/issues?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = payload.GetProperty("data");
@@ -709,7 +709,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-final", repository.GetProperty("baseBranch").GetString());
 
         // And the issue read model agrees with the workflow variables for the same change.
-        using var response = await _client.GetAsync($"/api/issues/{number}?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{number}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var readRepository = payload.GetProperty("data").GetProperty("repository");
@@ -749,7 +749,7 @@ public class IssueRepositoryResolutionRegressionSpecs
         var after = await issueGrain.GetStartEligibilityAsync();
         Assert.NotNull(after);
 
-        using var response = await _client.GetAsync($"/api/issues/{issue.Number}?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var repository = payload.GetProperty("data").GetProperty("repository");
@@ -783,7 +783,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the user queues a rebase (without an explicit baseBranch override).
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues/{issue.Number}/rebase?projectId={projectId}",
+            $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
 
         // Then the rebase response itself reports the latest base branch and the
@@ -814,7 +814,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // Then the list endpoint still returns all issues in the same order and
         // both the orphan issues carry the same RepositoryNotFound problem payload.
-        using var response = await _client.GetAsync($"/api/issues?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var items = payload.GetProperty("data").EnumerateArray().ToList();
@@ -861,7 +861,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
         // When the same-named repository is re-added with different fields.
         // Then the issue read resolves to the same name but with the updated fields.
-        using var response = await _client.GetAsync($"/api/issues/{issue.Number}?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         var repository = payload.GetProperty("data").GetProperty("repository");
@@ -981,7 +981,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     private async Task<CreatedIssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null)
     {
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues?projectId={projectId}",
+            $"/api/projects/{projectId}/issues",
             new { title, repositoryName },
             JsonOptions);
         response.EnsureSuccessStatusCode();
@@ -1005,7 +1005,7 @@ public class IssueRepositoryResolutionRegressionSpecs
 
     private async Task StartIssueAndClaimRunnerAsync(string projectId, int number)
     {
-        await _client.PostOkAsync($"/api/issues/{number}/start?projectId={projectId}");
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
 
         var runnerId = $"regression-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -1015,7 +1015,7 @@ public class IssueRepositoryResolutionRegressionSpecs
             projectId,
         });
 
-        var issue = await _client.GetDataAsync<CreatedIssueDto>($"/api/issues/{number}?projectId={projectId}");
+        var issue = await _client.GetDataAsync<CreatedIssueDto>($"/api/projects/{projectId}/issues/{number}");
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;

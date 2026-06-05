@@ -27,8 +27,8 @@ public class WorkflowEventApiSpecs
     public async Task IssueEvents_ReturnsDomainEventsForCurrentWorkflowRunOnly()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"workflow-events-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Workflow events", projectId = project.Id });
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow events", projectId = project.Id });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -41,7 +41,7 @@ public class WorkflowEventApiSpecs
             await store.AppendTestWorkflowEventAsync(workflowRunId, new TaskCompleted("plan", "T-1"));
         }
 
-        var events = await _client.GetDataAsync<WorkflowEventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
+        var events = await _client.GetDataAsync<WorkflowEventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
 
         Assert.Contains(events, e => e.Type == nameof(WorkflowRunStarted));
         Assert.Contains(events, e => e.Type == nameof(StageStarted));
@@ -62,8 +62,8 @@ public class WorkflowEventApiSpecs
     public async Task WorkflowRunEvents_DoesNotIncludeAgentSessionStreamEvents()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"workflow-event-session-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Workflow events exclude session events", projectId = project.Id });
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Workflow events exclude session events", projectId = project.Id });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
 
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
@@ -88,11 +88,11 @@ public class WorkflowEventApiSpecs
     }
 
     [Fact]
-    public async Task IssueEvents_WithNoProject_ReturnsBadRequest()
+    public async Task IssueEvents_OnLegacyRoute_ReturnsNotFound()
     {
         using var response = await _client.GetAsync("/api/issues/1/events");
 
-        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);

@@ -36,7 +36,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
 
         if (!string.IsNullOrWhiteSpace(_projectId) && _issueNumber > 0)
         {
-            using var _ = await _client.PostAsync($"/api/issues/{_issueNumber}/stop?projectId={_projectId}", null);
+            using var _ = await _client.PostAsync($"/api/projects/{_projectId}/issues/{_issueNumber}/stop", null);
         }
     }
 
@@ -44,7 +44,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task GetWorkflowProfileYaml_ReturnsNormalizedYaml_ForBacklogIssue()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-get-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for profile get", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for profile get", projectId = project.Id });
 
         var response = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
 
@@ -60,7 +60,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task GetWorkflowProfileYaml_ExposesTemplateSourceLabel_ForInheritedProjectAndCustomModes()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-source-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for template source", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for template source", projectId = project.Id });
 
         var initial = await _client.GetAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile");
         Assert.Equal(HttpStatusCode.OK, initial.StatusCode);
@@ -113,7 +113,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task SaveWorkflowProfileYaml_UpdatesIssueProfile_WithoutMutatingProjectProfile()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-save-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for profile save", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for profile save", projectId = project.Id });
 
         var customYaml = """
             id: custom-issue-workflow
@@ -155,7 +155,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task SaveWorkflowProfileYaml_RejectsInvalidYamlSyntax()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-yaml-err-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for yaml error", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for yaml error", projectId = project.Id });
 
         var invalidYaml = """
             id: broken
@@ -185,7 +185,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task SaveWorkflowProfileYaml_RejectsInvalidWorkflowShape()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-shape-err-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Backlog issue for shape error", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Backlog issue for shape error", projectId = project.Id });
 
         var invalidShapeYaml = """
             id: no-stages-workflow
@@ -208,11 +208,11 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task SaveWorkflowProfileYaml_SynchronizesActiveRunProfile_AndPreservesInitializedStageWork()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-sync-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Active run profile sync issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Active run profile sync issue", projectId = project.Id });
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-sync-runner-{Guid.NewGuid():N}");
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
-        var statusBeforeSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var statusBeforeSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var planStageBeforeSave = Assert.Single(statusBeforeSave.Workflow!.Stages, s => s.Stage == "plan");
         var planTaskIdsBeforeSave = planStageBeforeSave.Tasks.Select(t => t.Id).ToArray();
         var planCheckNamesBeforeSave = planStageBeforeSave.Checks.Select(c => c.Name).ToArray();
@@ -249,14 +249,14 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var savedYaml = savedData.GetProperty("yaml").GetString();
         Assert.Contains("synced-workflow", savedYaml!);
 
-        var statusAfterSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var statusAfterSave = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var planStageAfterSave = Assert.Single(statusAfterSave.Workflow!.Stages, s => s.Stage == "plan");
         Assert.Equal(planTaskIdsBeforeSave, planStageAfterSave.Tasks.Select(t => t.Id).ToArray());
         Assert.Equal(planCheckNamesBeforeSave, planStageAfterSave.Checks.Select(c => c.Name).ToArray());
         Assert.DoesNotContain(planStageAfterSave.Tasks, t => t.Id == "replacement-plan-task");
         Assert.DoesNotContain(planStageAfterSave.Checks, c => c.Name == "replacement-plan-check");
 
-        var activeIssue = await _client.GetDataAsync<IssueWithWorkflowDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var activeIssue = await _client.GetDataAsync<IssueWithWorkflowDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.False(string.IsNullOrWhiteSpace(activeIssue.WorkflowRunId));
         var updatedRunYamlResponse = await _client.GetAsync($"/api/workflow-runs/{activeIssue.WorkflowRunId}/yaml");
         updatedRunYamlResponse.EnsureSuccessStatusCode();
@@ -274,7 +274,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     public async Task NextStageInitialization_UsesUpdatedDefinition_AfterProfileSave()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"profile-next-stage-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Next stage init issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Next stage init issue", projectId = project.Id });
         await StartWorkflowWithRunnerAsync(project.Id, issue.Number, $"profile-next-stage-runner-{Guid.NewGuid():N}");
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
@@ -301,17 +301,17 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         var saveResponse = await _client.PutAsJsonAsync($"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/template", new { yaml = customYaml });
         Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
         for (var i = 0; i < 100; i++)
         {
-            var buildStatusAttempt = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+            var buildStatusAttempt = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
             var buildStageAttempt = buildStatusAttempt.Workflow?.Stages.FirstOrDefault(s => s.Stage == "build");
             if (buildStageAttempt is not null && buildStageAttempt.Tasks.Any(t => t.Id == "brand-new-build-task"))
                 break;
             await Task.Delay(20);
         }
 
-        var buildStatus = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var buildStatus = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var buildStage = Assert.Single(buildStatus.Workflow!.Stages, s => s.Stage == "build");
         Assert.Contains(buildStage.Tasks, t => t.Id == "brand-new-build-task");
         Assert.Contains(buildStage.Checks, c => c.Name == "build-definition-check");
@@ -323,9 +323,9 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
         _issueNumber = issueNumber;
         _runnerId = runnerId;
 
-        await _client.PostOkAsync($"/api/issues/{issueNumber}/start?projectId={projectId}", null);
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{issueNumber}/start", null);
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId });
-        var startedIssue = await _client.GetDataAsync<IssueWithWorkflowDto>($"/api/issues/{issueNumber}?projectId={projectId}");
+        var startedIssue = await _client.GetDataAsync<IssueWithWorkflowDto>($"/api/projects/{projectId}/issues/{issueNumber}");
         Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
     }
 
@@ -333,7 +333,7 @@ public class IssueWorkflowProfileApiSpecs : IAsyncLifetime
     {
         for (var i = 0; i < 100; i++)
         {
-            var status = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/issues/{issueNumber}/workflow/status?projectId={projectId}");
+            var status = await _client.GetDataAsync<IssueWorkflowEnvelopeDto>($"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
             if (status.Workflow?.Status == "AwaitingApproval" && status.Workflow.CurrentStage == stage)
                 return;
             await CompleteNextWorkAsync();

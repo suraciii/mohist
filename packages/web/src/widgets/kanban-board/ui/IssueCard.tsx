@@ -8,7 +8,7 @@ import { IssueStatus, WorkflowStage, IssueHealth, type Issue, type WorkflowStage
 import { archiveIssue, rerunIssue, resumeIssue } from '../../../entities/issue'
 import { getStripColor, getLabelStyle, formatPriority, getPriorityStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { getStageColors } from '../model/stage-colors'
 
 export const APPROVAL_STAGES = new Set<string>([WorkflowStage.Plan, WorkflowStage.Build, WorkflowStage.Check])
@@ -177,6 +177,7 @@ function WorkflowStageProgressIndicator({
 export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
+  const toProjectPath = useProjectPath()
   const isAgentRunning = agentStatus.activeAgents?.some(
     (a) => a.issueNumber === issue.number,
   ) ?? false
@@ -228,7 +229,7 @@ export function IssueCard({ issue, agentStatus, showArchiveButton }: Props) {
 
   return (
     <Link
-      to={`/issues/${issue.number}`}
+      to={toProjectPath(`/issues/${issue.number}`)}
       data-testid="issue-card"
       className={`block rounded-lg border border-l-4 bg-background shadow-sm hover:border-muted hover:shadow-md transition-colors relative overflow-hidden ${
         isDone ? 'opacity-70' : ''

@@ -19,7 +19,6 @@ public static class IssueRoutes
 {
     public static WebApplication MapIssueRoutes(this WebApplication app)
     {
-        var issues = app.MapGroup("/api/issues");
         var projectIssues = app.MapGroup("/api/projects/{projectRef}/issues");
 
         projectIssues.MapGet("/{number:int}/workflow-profile", async (string projectRef, int number, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectRefResolver projects, ProjectQuerier projectsQuery) =>
@@ -36,14 +35,6 @@ public static class IssueRoutes
             var project = await projects.ResolveAsync(projectRef);
             return project is null
                 ? ApiResults.NotFound("Project not found")
-                : await UpdateIssueWorkflowTemplateAsync(project.Id, number, req, issueProfileManager, issuesQuery, projectsQuery);
-        });
-
-        issues.MapPut("/{number:int}/workflow/profile/yaml", async (int number, string? projectId, IssueTemplateRequest req, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectRefResolver projects, ProjectQuerier projectsQuery) =>
-        {
-            var project = await projects.ResolveAsync(projectId);
-            return project is null
-                ? ApiResults.BadRequest("No active project")
                 : await UpdateIssueWorkflowTemplateAsync(project.Id, number, req, issueProfileManager, issuesQuery, projectsQuery);
         });
 
@@ -163,8 +154,8 @@ public static class IssueRoutes
             return ApiResults.Ok(new { rendered, missing, depth });
         });
 
-        issues.MapGet("/", async (
-            string? projectId,
+        projectIssues.MapGet("/", async (
+            string projectRef,
             string? stage,
             string? label,
             string? priority,
@@ -172,20 +163,10 @@ public static class IssueRoutes
             bool? all,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
-            ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+            ProjectRefResolver projects) =>
         {
-            if (all == true && string.IsNullOrWhiteSpace(projectId))
-            {
-                var allProjects = await projectsQuery.ListAllAsync();
-                var allIssues = new List<IssueReadModel>();
-                foreach (var listedProject in allProjects)
-                    allIssues.AddRange(await issuesQuery.ListAsync(listedProject.Id, listedProject, stage, label, priority, archived, all));
-
-                return ApiResults.Ok(allIssues.OrderBy(i => i.Number).ToList());
-            }
-
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var list = await issuesQuery.ListAsync(pid, project, stage, label, priority, archived, all);
@@ -193,12 +174,11 @@ public static class IssueRoutes
             return ApiResults.Ok(list);
         });
 
-        issues.MapPost("/", async (CreateIssueRequest req, string? projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectRefResolver projects, IssueRepositoryResolver repositoryResolver) =>
+        projectIssues.MapPost("/", async (string projectRef, CreateIssueRequest req, IGrainFactory grains, IssueQuerier issuesQuery, ProjectRefResolver projects, IssueRepositoryResolver repositoryResolver) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
 
-            var projectRef = projectId ?? req.ProjectId;
             var project = await projects.ResolveAsync(projectRef);
             if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
@@ -216,20 +196,20 @@ public static class IssueRoutes
             return Results.Json(new { success = true, data = issue }, statusCode: 201);
         });
 
-        issues.MapGet("/{number:int}", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapGet("/{number:int}", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var info = await issuesQuery.GetAsync(pid, number, project);
             return info is not null ? ApiResults.Ok(info) : ApiResults.NotFound($"Issue #{number} not found");
         });
 
-        issues.MapPatch("/{number:int}", async (int number, string projectId, UpdateIssueRequest req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPatch("/{number:int}", async (string projectRef, int number, UpdateIssueRequest req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -247,10 +227,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/prerequisites", async (int number, string projectId, AddPrerequisiteRequest req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/prerequisites", async (string projectRef, int number, AddPrerequisiteRequest req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -270,10 +250,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapDelete("/{number:int}/prerequisites/{prerequisiteNumber:int}", async (int number, int prerequisiteNumber, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapDelete("/{number:int}/prerequisites/{prerequisiteNumber:int}", async (string projectRef, int number, int prerequisiteNumber, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -290,10 +270,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/start", async (int number, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/start", async (string projectRef, int number, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -317,10 +297,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/comments", async (int number, string projectId, AddCommentRequest req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/comments", async (string projectRef, int number, AddCommentRequest req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -336,10 +316,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/close", async (int number, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/close", async (string projectRef, int number, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -355,10 +335,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/reopen", async (int number, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/reopen", async (string projectRef, int number, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -374,10 +354,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/archive", async (int number, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IGitService git, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/archive", async (string projectRef, int number, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IGitService git, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var issue = await issuesQuery.GetAsync(pid, number);
@@ -408,10 +388,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/{number:int}/unarchive", async (int number, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/unarchive", async (string projectRef, int number, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -427,10 +407,10 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapPost("/archive-completed", async (string projectId, IGrainFactory grains, IssueQuerier issuesQuery, IGitService git, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/archive-completed", async (string projectRef, IGrainFactory grains, IssueQuerier issuesQuery, IGitService git, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var all = await issuesQuery.ListAsync(pid, null, all: true);
@@ -470,10 +450,10 @@ public static class IssueRoutes
             });
         });
 
-        issues.MapGet("/{number:int}/workflow/status", async (int number, string projectId, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapGet("/{number:int}/workflow/status", async (string projectRef, int number, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, pid, number);
@@ -489,36 +469,36 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
+        projectIssues.MapGet("/{number:int}/coder-sessions", async (string projectRef, int number, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(pid, number));
         });
 
-        issues.MapGet("/{number:int}/sessions/{name}", async (int number, string name, string projectId, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
+        projectIssues.MapGet("/{number:int}/sessions/{name}", async (string projectRef, int number, string name, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var metadata = await sessions.GetSessionMetadataAsync(pid, number, name);
             return metadata is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(metadata);
         });
 
-        issues.MapGet("/{number:int}/sessions/{name}/events", async (int number, string name, string projectId, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
+        projectIssues.MapGet("/{number:int}/sessions/{name}/events", async (string projectRef, int number, string name, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var events = await sessions.GetSessionEventsAsync(pid, number, name);
             return events is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(events);
         });
 
-        issues.MapPost("/{number:int}/resume", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/resume", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -526,10 +506,10 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/rebase", async (int number, string projectId, RebaseRequest? req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/rebase", async (string projectRef, int number, RebaseRequest? req, IGrainFactory grains, IssueIdentityResolver issueIdentityResolver, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = await ResolveWorkflowRunIdAsync(grains, issueIdentityResolver, issuesQuery, pid, number);
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -566,10 +546,10 @@ public static class IssueRoutes
             });
         });
 
-        issues.MapPost("/{number:int}/approve", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/approve", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -577,10 +557,10 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/reject", async (int number, string projectId, RejectRequest? req, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/reject", async (string projectRef, int number, RejectRequest? req, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -588,10 +568,10 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/retry", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/retry", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -599,10 +579,10 @@ public static class IssueRoutes
             return ApiResults.Ok();
         });
 
-        issues.MapPost("/{number:int}/rerun", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/rerun", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -612,10 +592,10 @@ public static class IssueRoutes
 
         // Force-stop is implemented as workflow pause. The user can resume afterwards.
         // For terminal disposal, use /close (issue close -> workflow Stopped) or /stop.
-        issues.MapPost("/{number:int}/force-stop", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/force-stop", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -625,10 +605,10 @@ public static class IssueRoutes
 
         // Stop is a terminal pause: the workflow run is permanently stopped (cannot be resumed).
         // The issue itself is NOT closed; the user can re-open or close it separately.
-        issues.MapPost("/{number:int}/stop", async (int number, string projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
+        projectIssues.MapPost("/{number:int}/stop", async (string projectRef, int number, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery, ProjectRefResolver projects) =>
         {
-            var project = await projects.ResolveAsync(projectId);
-            if (project is null) return MissingProjectResult(projectId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return MissingProjectResult(projectRef);
             var pid = project.Id;
             var wrId = (await issuesQuery.GetInfoAsync(pid, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
@@ -798,8 +778,7 @@ public record CreateIssueRequest(
     Dictionary<string, object?>? AgentConfig = null,
     Dictionary<string, string>? StageModels = null,
     string? WorkflowProfileId = null,
-    string? RepositoryName = null,
-    string? ProjectId = null);
+    string? RepositoryName = null);
 
 public record UpdateIssueRequest(
     string? Title = null,

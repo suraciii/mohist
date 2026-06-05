@@ -47,7 +47,7 @@ public class RuntimeEntrySpecs
         {
             await _fixture.Client.PostOkAsync("/api/runner/runtime-test-runner/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 2 });
 
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
             Assert.False(status.Running);
             Assert.True(status.RunnerAvailable);
@@ -76,7 +76,7 @@ public class RuntimeEntrySpecs
         {
             await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host" });
 
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
             Assert.True(status.RunnerAvailable);
             Assert.Null(status.RunnerMessage);
@@ -98,7 +98,7 @@ public class RuntimeEntrySpecs
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(GrainKey.RunnerRegistry(project.Id));
         await registry.RegisterAsync(new RunnerInfo(runnerId, [], "test-host", project.Id, MaxWorkflowSlots: 4));
 
-        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+        var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
         Assert.DoesNotContain(status.Runners, r => r.Id == runnerId);
         Assert.DoesNotContain(status.Runners, r => r.Max == 4 && r.Id == runnerId);
@@ -147,7 +147,7 @@ public class RuntimeEntrySpecs
             using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/heartbeat", content: null);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
             Assert.True(status.RunnerAvailable);
             Assert.Contains(status.Runners, r => r.Id == runnerId && r.Max == 1);
         }
@@ -175,7 +175,7 @@ public class RuntimeEntrySpecs
     {
         var runnerId = $"runtime-lease-runner-{Guid.NewGuid():N}";
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"runtime-lease-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _fixture.Client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lease-owned status", body = "status read consistency", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lease-owned status", body = "status read consistency", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
         var staleRunnerId = $"stale-runner-{Guid.NewGuid():N}";
@@ -197,7 +197,7 @@ public class RuntimeEntrySpecs
                 await db.SaveChangesAsync();
             }
 
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
             var runner = Assert.Single(status.Runners, r => r.Id == runnerId);
             Assert.Equal(0, runner.Active);
@@ -215,7 +215,7 @@ public class RuntimeEntrySpecs
     {
         var runnerId = $"runtime-status-owner-{Guid.NewGuid():N}";
         var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"runtime-owner-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _fixture.Client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lease-owned status runner", body = "status owner consistency", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lease-owned status runner", body = "status owner consistency", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         var workflowRunId = $"wf-{Guid.NewGuid():N}";
         var workId = $"work-{Guid.NewGuid():N}";
         var staleRunnerId = $"stale-runner-{Guid.NewGuid():N}";
@@ -237,7 +237,7 @@ public class RuntimeEntrySpecs
                 await db.SaveChangesAsync();
             }
 
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={project.Id}");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{project.Id}/agent/status");
 
             Assert.DoesNotContain(status.Runners, r => r.Id == staleRunnerId && r.Active > 0);
             var leaseOwner = Assert.Single(status.Runners, r => r.Id == runnerId);
@@ -251,15 +251,11 @@ public class RuntimeEntrySpecs
     }
 
     [Fact]
-    public async Task AgentStatus_WhenProjectIdMissing_ReturnsJsonError()
+    public async Task AgentStatus_OnLegacyRoute_ReturnsNotFound()
     {
         using var response = await _fixture.Client.GetAsync("/api/agent/status");
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var payload = await response.Content.ReadFromJsonAsync<ApiErrorDto>();
-        Assert.NotNull(payload);
-        Assert.False(payload!.Success);
-        Assert.Equal("No active project", payload.Error);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

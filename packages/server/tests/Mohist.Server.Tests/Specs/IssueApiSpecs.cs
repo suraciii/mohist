@@ -19,77 +19,61 @@ public class IssueApiSpecs
     public async Task Comments_RoundTripThroughIssueDetailShape()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-compat-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Commented issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Commented issue", projectId = project.Id });
 
-        var comment = await _client.PostDataAsync<CommentDto>($"/api/issues/{issue.Number}/comments?projectId={project.Id}", new { body = "Looks good" });
-        var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var comment = await _client.PostDataAsync<CommentDto>($"/api/projects/{project.Id}/issues/{issue.Number}/comments", new { body = "Looks good" });
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         Assert.Equal("Looks good", comment.Body);
         Assert.Contains(detail.Comments, c => c.Id == comment.Id && c.Body == "Looks good");
     }
 
     [Fact]
-    public async Task CreateIssue_WithMultipleProjectsAndNoProjectId_ReturnsBadRequest()
+    public async Task CreateIssue_OnLegacyCollectionRoute_ReturnsNotFound()
     {
         await _client.PostOkAsync("/api/projects", new { name = $"web-multi-a-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         await _client.PostOkAsync("/api/projects", new { name = $"web-multi-b-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 
         using var response = await _client.PostAsJsonAsync("/api/issues", new { title = "Ambiguous issue" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task CreateIssue_WhenProjectHeaderProvided_UsesHeaderProjectContext()
+    public async Task CreateIssue_OnProjectRoute_UsesRouteProjectContext()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-header-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/issues")
-        {
-            Content = JsonContent.Create(new { title = "Header scoped issue" }),
-        };
-        request.Headers.Add("X-Mohist-Project-Id", project.Id);
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Project scoped issue" });
 
-        using var response = await _client.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        var issue = await response.ReadDataAsync<IssueDto>();
-
-        var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         Assert.Equal(issue.Id, detail.Id);
     }
 
     [Fact]
-    public async Task CreateEpic_WhenProjectHeaderProvided_UsesHeaderProjectContext()
+    public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"epic-header-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/epics")
-        {
-            Content = JsonContent.Create(new { title = "Header scoped epic", description = "Runtime model", priority = "p2" }),
-        };
-        request.Headers.Add("X-Mohist-Project-Id", project.Id);
-
-        using var response = await _client.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        var epic = await response.ReadDataAsync<EpicDto>();
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Project scoped epic", description = "Runtime model", priority = "p2" });
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
 
         Assert.NotNull(detail);
     }
 
     [Fact]
-    public async Task ListIssues_WithAllAcrossMultipleProjects_ReturnsIssues()
+    public async Task ListIssues_ReturnsOnlyIssuesInRouteProject()
     {
         var firstProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-a-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var secondProject = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-list-all-b-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var firstIssue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "First listed issue", projectId = firstProject.Id });
-        var secondIssue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Second listed issue", projectId = secondProject.Id });
+        var firstIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{firstProject.Id}/issues", new { title = "First listed issue" });
+        var secondIssue = await _client.PostDataAsync<IssueDto>($"/api/projects/{secondProject.Id}/issues", new { title = "Second listed issue" });
 
-        var issues = await _client.GetDataAsync<IssueDto[]>("/api/issues?all=true");
+        var issues = await _client.GetDataAsync<IssueDto[]>($"/api/projects/{firstProject.Id}/issues?all=true");
 
         Assert.Contains(issues, issue => issue.Id == firstIssue.Id);
-        Assert.Contains(issues, issue => issue.Id == secondIssue.Id);
+        Assert.DoesNotContain(issues, issue => issue.Id == secondIssue.Id);
     }
 
     [Fact]
@@ -97,8 +81,8 @@ public class IssueApiSpecs
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-profile-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
 
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/default" });
-        var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Profile issue", projectId = project.Id, workflowProfileId = "mohist/default" });
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         Assert.Equal("mohist/default", detail.WorkflowProfileId);
     }
@@ -118,11 +102,11 @@ public class IssueApiSpecs
     public async Task Prerequisites_ProjectIntoStartEligibility()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var prereq = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Prereq", projectId = project.Id });
-        var dependent = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Dependent", projectId = project.Id });
+        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Prereq", projectId = project.Id });
+        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dependent", projectId = project.Id });
 
-        await _client.PostOkAsync($"/api/issues/{dependent.Number}/prerequisites?projectId={project.Id}", new { prerequisiteNumber = prereq.Number });
-        var detail = await _client.GetDataAsync<IssueDto>($"/api/issues/{dependent.Number}?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
+        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{dependent.Number}");
 
         Assert.False(detail.StartEligibility.Startable);
         Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
@@ -132,11 +116,11 @@ public class IssueApiSpecs
     public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-prereq-gate-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var prereq = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Gate prereq", projectId = project.Id });
-        var dependent = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Gate dependent", projectId = project.Id });
-        await _client.PostOkAsync($"/api/issues/{dependent.Number}/prerequisites?projectId={project.Id}", new { prerequisiteNumber = prereq.Number });
+        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate prereq", projectId = project.Id });
+        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Gate dependent", projectId = project.Id });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
 
-        using var response = await _client.PostAsync($"/api/issues/{dependent.Number}/start?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/start", null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
@@ -169,12 +153,12 @@ public class IssueApiSpecs
     public async Task ProjectStatus_UsesIssueLifecycleStages()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-status-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Lifecycle status issue", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lifecycle status issue", projectId = project.Id });
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}", new { });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", new { });
         try
         {
-            var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/status?projectId={project.Id}");
+            var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/projects/{project.Id}/status");
 
             Assert.Equal(1, status.Issues);
             Assert.Equal(1, status.IssuesByStatus["in_progress"]);
@@ -185,7 +169,7 @@ public class IssueApiSpecs
         }
         finally
         {
-            using var _ = await _client.PostAsync($"/api/issues/{issue.Number}/stop?projectId={project.Id}", null);
+            using var _ = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop", null);
         }
     }
 
@@ -193,12 +177,12 @@ public class IssueApiSpecs
     public async Task Epics_LinkIssueAndExposePrimaryEpic()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"web-epic-{Guid.NewGuid():N}", path = Directory.GetCurrentDirectory(), baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Epic issue", projectId = project.Id });
-        var epic = await _client.PostDataAsync<EpicDto>("/api/epics", new { title = "Runtime model", description = "Ship runtime", priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Epic issue", projectId = project.Id });
+        var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Runtime model", description = "Ship runtime", priority = "p1", projectId = project.Id });
 
-        await _client.PostOkAsync($"/api/epics/{epic.Id}/issues?projectId={project.Id}", new { issueId = issue.Id });
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
-        var issueDetail = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/issues", new { issueId = issue.Id });
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
+        var issueDetail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         Assert.Contains(detail.LinkedIssues, i => i.Id == issue.Id);
         Assert.Equal(epic.Id, issueDetail.PrimaryEpic?.Id);

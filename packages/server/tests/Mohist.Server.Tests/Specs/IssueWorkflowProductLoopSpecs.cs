@@ -35,7 +35,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         if (string.IsNullOrWhiteSpace(_projectId) || _issueNumber <= 0)
             return;
 
-        using var _ = await _client.PostAsync($"/api/issues/{_issueNumber}/stop?projectId={_projectId}", null);
+        using var _ = await _client.PostAsync($"/api/projects/{_projectId}/issues/{_issueNumber}/stop", null);
     }
 
     [Fact]
@@ -43,34 +43,34 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     {
         var projectName = $"project-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-product-loop", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Ship product loop", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         _runnerId = $"product-loop-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
-        var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.False(string.IsNullOrWhiteSpace(startedIssue.WorkflowRunId));
 
-        var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
+        var startEvents = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
         Assert.Contains(startEvents, e => e.Type == "WorkflowRunStarted");
 
-        var initialStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var initialStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         Assert.Contains(initialStatus.Workflow!.Stages, s => s.Stage == "plan" && s.Tasks.Any(t => t.Id == "proposal"));
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
 
-        var planStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issue.Number}/workflow/status?projectId={project.Id}");
+        var planStatus = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{project.Id}/issues/{issue.Number}/workflow/status");
         var planStage = Assert.Single(planStatus.Workflow!.Stages, s => s.Stage == "plan");
         Assert.Contains(planStage.Tasks, t => t.Id.StartsWith("proposal", StringComparison.Ordinal) && t.Status == "Completed");
         Assert.Null(planStage.ApprovalStatus?.Result);
 
-        var planEvents = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
+        var planEvents = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
         Assert.Contains(planEvents, e => e.Type == "TaskCompleted");
         Assert.Contains(planEvents, e => e.Type == "CheckPassed");
 
-        var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var listedAtApproval = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.Equal("in_progress", listedAtApproval.Status);
         Assert.Equal("plan", listedAtApproval.WorkflowStage);
         Assert.Equal("AwaitingApproval", listedAtApproval.WorkflowStatus);
@@ -78,19 +78,19 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal("review_required", listedAtApproval.Attention?.Reason);
         Assert.Equal("awaiting", listedAtApproval.ApprovalState?.Status);
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "check");
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
 
         await DrainUntilDoneAsync(project.Id, issue.Number);
 
-        var completed = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var completed = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.Equal("done", completed.Status);
         Assert.Equal("done", completed.Health);
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/archive?projectId={project.Id}");
-        var events = await _client.GetDataAsync<EventDto[]>($"/api/issues/{issue.Number}/events?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/archive");
+        var events = await _client.GetDataAsync<EventDto[]>($"/api/projects/{project.Id}/issues/{issue.Number}/events");
         Assert.Contains(events, e => e.Type == "WorkflowRunCompleted");
     }
 
@@ -98,14 +98,14 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task IssueWorkflowVariablesPatch_AppliesToFutureDispatches()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"variables-{Guid.NewGuid():N}", path = "/tmp/mohist-variable-patch", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Patch workflow variables", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch workflow variables", body = "body", labels = Array.Empty<string>(), priority = "p1", model = "openai/gpt-4o", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         _runnerId = $"variable-patch-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
-        var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var startedIssue = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
 
         var patched = await _client.PatchDataAsync<ProjectVariablesDto>(
             $"/api/projects/{project.Id}/issues/{issue.Number}/workflow-profile/variables",
@@ -126,11 +126,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-variable-patch", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Patch project variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         _runnerId = $"project-variable-patch-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
@@ -146,7 +146,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
             new { stages = new { build = new { vars = new { agent = new { model = "project/build-model" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
         var tasks = await PollWorkAnyAsync();
         Assert.Equal("mohist/openspec-tasks", tasks.Uses);
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
@@ -171,11 +171,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"project-stage-variables-{Guid.NewGuid():N}", path = "/tmp/mohist-project-stage-variable-patch", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Patch project stage variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Patch project stage variables", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         _runnerId = $"project-stage-variable-patch-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id });
 
@@ -191,7 +191,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
             new { stages = new { build = new { vars = new { agent = new { model = "minimax-coding-plan/MiniMax-M3" } } } } });
 
         await DrainUntilApprovalAsync(project.Id, issue.Number, "plan");
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/approve?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/approve");
         var tasks = await PollWorkAnyAsync();
         var tasksWorkflow = _fixture.Grains.GetGrain<IWorkflowGrain>(tasks.WorkflowRunId);
         await tasksWorkflow.AddTasksAsync(new AddTasksBatchRequest([
@@ -216,11 +216,11 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     {
         var projectName = $"global-runner-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/mohist-global-runner", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dispatch to global runner", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
         _runnerId = $"global-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{_runnerId}/register", new { capabilities = Array.Empty<string>(), hostname = "test-host", projectId = project.Id, maxWorkflowSlots = 16 });
 
@@ -257,13 +257,13 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
     {
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = $"yaml-{Guid.NewGuid():N}", path = "/tmp/mohist-yaml", baseBranch = "main" });
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = "Show workflow yaml", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Show workflow yaml", body = "body", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
         _projectId = project.Id;
         _issueNumber = issue.Number;
 
-        await _client.PostOkAsync($"/api/issues/{issue.Number}/start?projectId={project.Id}");
+        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
 
-        var current = await _client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Id}");
+        var current = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
         Assert.False(string.IsNullOrWhiteSpace(current.WorkflowRunId));
         var response = await _client.GetDataAsync<WorkflowYamlDto>($"/api/workflow-runs/{current.WorkflowRunId}/yaml");
 
@@ -277,7 +277,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     {
         for (var i = 0; i < 100; i++)
         {
-            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status?projectId={projectId}");
+            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
             if (status.Workflow?.Status == "AwaitingApproval" && status.Workflow.CurrentStage == stage)
                 return;
             await CompleteNextWorkAsync();
@@ -290,7 +290,7 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
     {
         for (var i = 0; i < 100; i++)
         {
-            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/issues/{issueNumber}/workflow/status?projectId={projectId}");
+            var status = await _client.GetDataAsync<IssueWorkflowStatusDto>($"/api/projects/{projectId}/issues/{issueNumber}/workflow/status");
             if (status.Workflow?.Status == "Completed")
                 return;
             await CompleteNextWorkAsync();
