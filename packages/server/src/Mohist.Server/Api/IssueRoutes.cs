@@ -44,7 +44,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            await issueProfileManager.UpdateTemplateAsync(issue.Id, new IssueTemplateUpdateRequest(), LegacyIssueKey(projectId, number));
+            await issueProfileManager.UpdateTemplateAsync(issue.Id, new IssueTemplateUpdateRequest());
             var response = await BuildIssueWorkflowProfileResponseAsync(projectId, number, issueProfileManager, issuesQuery, projectsQuery);
             return ApiResults.Ok(response!);
         });
@@ -54,7 +54,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.GetVariablesAsync(issue.Id, LegacyIssueKey(projectId, number)));
+            return ApiResults.Ok(await issueProfileManager.GetVariablesAsync(issue.Id));
         });
 
         projectIssues.MapPut("/{number:int}/workflow-profile/variables", async (string projectId, int number, VariableBundle bundle, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
@@ -62,7 +62,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(issue.Id, bundle, LegacyIssueKey(projectId, number)));
+            return ApiResults.Ok(await issueProfileManager.SetVariablesAsync(issue.Id, bundle));
         });
 
         projectIssues.MapPatch("/{number:int}/workflow-profile/variables", async (string projectId, int number, VariableBundle patch, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
@@ -70,7 +70,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(issue.Id, patch, LegacyIssueKey(projectId, number)));
+            return ApiResults.Ok(await issueProfileManager.PatchVariablesAsync(issue.Id, patch));
         });
 
         projectIssues.MapGet("/{number:int}/workflow-profile/prompts", async (string projectId, int number, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
@@ -78,7 +78,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            return ApiResults.Ok(await issueProfileManager.GetPromptsAsync(issue.Id, LegacyIssueKey(projectId, number)));
+            return ApiResults.Ok(await issueProfileManager.GetPromptsAsync(issue.Id));
         });
 
         projectIssues.MapPut("/{number:int}/workflow-profile/prompts/{key}", async (string projectId, int number, string key, IssuePromptUpsertRequest? req, IssueWorkflowProfileManager issueProfileManager, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
@@ -91,7 +91,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            await issueProfileManager.SetPromptAsync(issue.Id, key, req.Body, LegacyIssueKey(projectId, number));
+            await issueProfileManager.SetPromptAsync(issue.Id, key, req.Body);
             return ApiResults.Ok(new { key, body = req.Body });
         });
 
@@ -103,7 +103,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            await issueProfileManager.DeletePromptAsync(issue.Id, key, LegacyIssueKey(projectId, number));
+            await issueProfileManager.DeletePromptAsync(issue.Id, key);
             return ApiResults.Ok();
         });
 
@@ -112,7 +112,7 @@ public static class IssueRoutes
             var issue = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
 
-            var prompts = await issueProfileManager.GetPromptsAsync(issue.Id, LegacyIssueKey(projectId, number));
+            var prompts = await issueProfileManager.GetPromptsAsync(issue.Id);
             if (!prompts.TryGetValue(key, out var body))
                 return ApiResults.NotFound($"Prompt '{key}' not found");
 
@@ -633,7 +633,7 @@ public static class IssueRoutes
         {
             await issueProfileManager.UpdateTemplateAsync(issue.Id, new IssueTemplateUpdateRequest(
                 ProjectTemplateId: req.ProjectTemplateId,
-                Template: yaml), LegacyIssueKey(projectId, number));
+                Template: yaml));
         }
         catch (YamlException ex)
         {
@@ -692,8 +692,7 @@ public static class IssueRoutes
         var info = await issuesQuery.GetInfoAsync(projectId, number, await projectsQuery.GetByIdAsync(projectId));
         if (info is null) return null;
 
-        var legacyIssueKey = LegacyIssueKey(projectId, number);
-        var state = await issueProfileManager.GetStateAsync(info.Id, legacyIssueKey);
+        var state = await issueProfileManager.GetStateAsync(info.Id);
         var variables = state.Variables;
         var template = state.Template;
         var yaml = template is null ? null : WorkflowYamlSerializer.ToYaml(template);
@@ -719,8 +718,6 @@ public static class IssueRoutes
             UpdatedAt: state.UpdatedAt?.ToString("O") ?? info.UpdatedAt,
             TemplateSource: templateSource);
     }
-
-    private static string LegacyIssueKey(string projectId, int number) => $"{projectId}:{number}";
 
     private static Dictionary<string, object?> DefaultConflictResolverWith() => new()
     {

@@ -20,7 +20,7 @@ public class WorkflowBacklogStore : IStateStore<WorkflowBacklogState>
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.BacklogStates.FindAsync(key);
-        return row is null ? null : Deserialize(row.StateJson);
+        return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, WorkflowBacklogState state)
@@ -30,11 +30,11 @@ public class WorkflowBacklogStore : IStateStore<WorkflowBacklogState>
         var json = Serialize(state);
         if (row is null)
         {
-            db.BacklogStates.Add(new BacklogStateRow { ProjectId = key, StateJson = json });
+            db.BacklogStates.Add(new BacklogStateRow { ProjectId = key, State = json });
         }
         else
         {
-            row.StateJson = json;
+            row.State = json;
         }
         await db.SaveChangesAsync();
     }

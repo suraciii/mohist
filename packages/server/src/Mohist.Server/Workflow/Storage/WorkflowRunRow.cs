@@ -3,7 +3,6 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Mohist.Server.Workflow.Storage;
 
-[Table("workflow_runs")]
 public class WorkflowRunRow
 {
     [Key]

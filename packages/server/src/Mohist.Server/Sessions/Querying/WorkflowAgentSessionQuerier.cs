@@ -167,9 +167,11 @@ public class WorkflowAgentSessionQuerier
         string sessionName,
         CancellationToken ct)
     {
-        var rows = await db.IssueStates.AsNoTracking().ToListAsync(ct);
-        var issue = IssueStateReader.SelectCanonicalOrDefault(IssueStateReader.Deserialize(rows)
-            .Where(row => IssueStateReader.IsIssue(row.Issue, projectId, issueNumber)));
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number == issueNumber)
+            .ToListAsync(ct);
+        var issue = IssueReader.Deserialize(rows)
+            .FirstOrDefault(issue => IssueReader.IsIssue(issue, projectId, issueNumber));
         var workflowRunId = issue?.WorkflowRunId;
         if (workflowRunId is null) return null;
 
@@ -315,10 +317,11 @@ public class WorkflowAgentSessionQuerier
         var numbers = issueNumbers.Distinct().ToArray();
         if (numbers.Length == 0) return [];
 
-        var rows = await db.IssueStates.AsNoTracking()
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number != null && numbers.Contains(row.Number.Value))
             .ToListAsync(ct);
 
-        return IssueStateReader.SelectCanonicalByNumber(rows, projectId, numbers)
+        return IssueReader.ByNumber(rows, projectId, numbers)
             .ToDictionary(kv => kv.Key, kv => kv.Value.Title);
     }
 
@@ -443,7 +446,7 @@ public class WorkflowAgentSessionQuerier
         var rows = await db.WorkflowLeases.AsNoTracking()
             .Where(row => workflowIds.Contains(row.WorkflowRunId))
             .ToListAsync(ct);
-        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.StateJson), StringComparer.Ordinal);
+        return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.State), StringComparer.Ordinal);
     }
 
     private static bool MatchesLease(WorkflowAgentSessionRow session, WorkLease lease) =>

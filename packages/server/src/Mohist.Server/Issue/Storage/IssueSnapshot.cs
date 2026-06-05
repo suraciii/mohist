@@ -1,33 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
-using Mohist.Server.Workflow.Domain.Definition;
 
 namespace Mohist.Server.Issue.Storage;
-
-public sealed class IssueWorkflowProfileSnapshot
-{
-    public string SourceProfileId { get; set; } = IssueWorkflowProfiles.DefaultId;
-    public WorkflowDefinition Definition { get; set; } = null!;
-    public WorkflowProfileUpdateMode UpdateMode { get; set; } = WorkflowProfileUpdateMode.Reference;
-
-    public IssueWorkflowProfile ToDomain() => new(SourceProfileId, Definition, UpdateMode);
-
-    public static IssueWorkflowProfileSnapshot FromDomain(IssueWorkflowProfile profile) => new()
-    {
-        SourceProfileId = profile.SourceProfileId,
-        Definition = profile.Definition,
-        UpdateMode = profile.UpdateMode,
-    };
-
-    public static IssueWorkflowProfile? Deserialize(string json) =>
-        JsonSerializer.Deserialize<IssueWorkflowProfileSnapshot>(json)?.ToDomain();
-
-    public static string Serialize(IssueWorkflowProfile profile) =>
-        JsonSerializer.Serialize(FromDomain(profile));
-}
 
 public sealed class IssueSnapshot
 {

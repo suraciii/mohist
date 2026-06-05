@@ -19,22 +19,22 @@ public class IssueStore : IStateStore<DomainIssue>
     public async Task<DomainIssue?> LoadAsync(string key)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.IssueStates.FindAsync(key);
-        return row is null ? null : Deserialize(row.StateJson);
+        var row = await db.Issues.FindAsync(key);
+        return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, DomainIssue state)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.IssueStates.FindAsync(key);
+        var row = await db.Issues.FindAsync(state.Id);
         var json = Serialize(state);
         if (row is null)
         {
-            db.IssueStates.Add(new IssueStateRow { Key = key, StateJson = json });
+            db.Issues.Add(new IssueRow { IssueId = state.Id, State = json });
         }
         else
         {
-            row.StateJson = json;
+            row.State = json;
         }
         await db.SaveChangesAsync();
     }

@@ -18,11 +18,11 @@ public class DatabaseInitializationSpecs
             .Options;
 
         await using var db = new MohistDbContext(options);
-        MohistDatabaseMigrator.Migrate(db);
+        db.Database.Migrate();
 
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
         Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessionEvents"));
-        Assert.True(await ColumnExistsAsync(connection, "workflow_runs", "ETag"));
+        Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
         Assert.True(await TableExistsAsync(connection, "OrleansQuery"));
         Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
         Assert.True(await OrleansQueryExistsAsync(connection, "UpsertReminderRowKey"));
@@ -47,7 +47,7 @@ public class DatabaseInitializationSpecs
 
         Assert.True(await TableExistsAsync(connection, "ProjectPromptTemplates"));
         Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
-        Assert.True(await MigrationRecordedAsync(connection, "20260601050000_AddProjectTemplates"));
+        Assert.Single(await RecordedMigrationsAsync(connection));
     }
 
     [Fact]
@@ -86,52 +86,16 @@ public class DatabaseInitializationSpecs
 
         await using (var db1 = new MohistDbContext(options))
         {
-            MohistDatabaseMigrator.Migrate(db1);
+            db1.Database.Migrate();
         }
 
         await using (var db2 = new MohistDbContext(options))
         {
-            MohistDatabaseMigrator.Migrate(db2);
+            db2.Database.Migrate();
         }
 
         Assert.True(await TableExistsAsync(connection, "Projects"));
-        Assert.True(await ColumnExistsAsync(connection, "workflow_runs", "ETag"));
-    }
-
-    [Fact]
-    public async Task MohistMigrator_WhenLegacyDatabaseHasTablesWithoutMigrationHistory_CompletesInitialMigration()
-    {
-        await using var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                CREATE TABLE "__EFMigrationsHistory" (
-                    "MigrationId" TEXT NOT NULL CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY,
-                    "ProductVersion" TEXT NOT NULL
-                );
-                CREATE TABLE "Configs" (
-                    "Key" TEXT NOT NULL CONSTRAINT "PK_Configs" PRIMARY KEY,
-                    "Value" TEXT NOT NULL,
-                    "UpdatedAt" TEXT NOT NULL
-                );
-                """;
-            await command.ExecuteNonQueryAsync();
-        }
-
-        var options = new DbContextOptionsBuilder<MohistDbContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        await using var db = new MohistDbContext(options);
-        MohistDatabaseMigrator.Migrate(db);
-
-        Assert.True(await TableExistsAsync(connection, "Projects"));
-        Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
-        Assert.True(await ColumnExistsAsync(connection, "workflow_runs", "ETag"));
-        Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
-        Assert.True(await MigrationRecordedAsync(connection, "20260530040459_InitialCreate"));
+        Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
     }
 
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, string name)
@@ -147,17 +111,19 @@ public class DatabaseInitializationSpecs
         return await command.ExecuteScalarAsync() is not null;
     }
 
-    private static async Task<bool> MigrationRecordedAsync(SqliteConnection connection, string migrationId)
+    private static async Task<IReadOnlyList<string>> RecordedMigrationsAsync(SqliteConnection connection)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT 1
+            SELECT "MigrationId"
             FROM "__EFMigrationsHistory"
-            WHERE "MigrationId" = $migrationId
-            LIMIT 1;
+            ORDER BY "MigrationId";
             """;
-        command.Parameters.AddWithValue("$migrationId", migrationId);
-        return await command.ExecuteScalarAsync() is not null;
+        var result = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            result.Add(reader.GetString(0));
+        return result;
     }
 
     private static async Task<bool> ColumnExistsAsync(SqliteConnection connection, string tableName, string columnName)

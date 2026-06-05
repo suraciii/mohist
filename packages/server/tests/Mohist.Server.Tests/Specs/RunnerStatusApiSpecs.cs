@@ -54,10 +54,10 @@ public class RunnerStatusApiSpecs
 
         await using var db = new MohistDbContext(options);
         var templateJson = System.Text.Json.JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
-        var template = await db.ProjectTemplates.FindAsync("test-project", definition.Id);
+        var template = await db.ProjectWorkflowTemplates.FindAsync("test-project", definition.Id);
         if (template is null)
         {
-            db.ProjectTemplates.Add(new ProjectTemplateRow
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
             {
                 ProjectId = "test-project",
                 TemplateId = definition.Id,

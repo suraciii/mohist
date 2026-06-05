@@ -115,10 +115,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task<WorkflowDefinition> LoadEffectiveDefinitionAsync(
         string? projectId = null,
-        string? issueId = null,
-        string? legacyIssueKey = null)
+        string? issueId = null)
     {
-        var template = await _profileManager.LoadTemplateAsync(GrainKey, projectId, issueId, legacyIssueKey);
+        var template = await _profileManager.LoadTemplateAsync(GrainKey, projectId, issueId);
         return template.Structure
             ?? throw new InvalidOperationException($"Workflow '{GrainKey}' has no effective workflow template");
     }

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
@@ -10,7 +11,6 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Storage;
 using Mohist.Server.Project.Storage;
 using Mohist.Server.Sessions.Storage;
-using Mohist.Server.Infrastructure.Persistence.Db.Entities;
 using Mohist.Server.Workflow.Prompts.Storage;
 using Mohist.Server.Workflow.Storage;
 
@@ -18,10 +18,14 @@ namespace Mohist.Server.Infrastructure.Persistence.Db;
 
 public class MohistDbContext : DbContext
 {
+    private static readonly ValueComparer<Dictionary<string, string>> DictionaryStringComparer = new(
+        (left, right) => DictionaryEqual(left, right),
+        value => DictionaryHash(value),
+        value => value.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal));
+
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
-    public DbSet<Mohist.Server.Workflow.Storage.ProjectTemplateRow> ProjectTemplates { get; set; } = null!;
-    public DbSet<ConfigRow> Configs { get; set; } = null!;
+    public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
     public DbSet<EventRow> Events { get; set; } = null!;
     public DbSet<WorkflowAgentSessionRow> WorkflowAgentSessions { get; set; } = null!;
     public DbSet<WorkflowAgentSessionEventRow> WorkflowAgentSessionEvents { get; set; } = null!;
@@ -29,8 +33,7 @@ public class MohistDbContext : DbContext
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<EpicIssueRow> EpicIssues { get; set; } = null!;
-    public DbSet<IssueStateRow> IssueStates { get; set; } = null!;
-    public DbSet<IssueProfileRow> IssueProfiles { get; set; } = null!;
+    public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
     public DbSet<WorkflowLeaseRow> WorkflowLeases { get; set; } = null!;
@@ -38,7 +41,7 @@ public class MohistDbContext : DbContext
     public DbSet<BacklogStateRow> BacklogStates { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
     public DbSet<IssueCounterRow> IssueCounters { get; set; } = null!;
-    public DbSet<Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow> ProjectPromptTemplates { get; set; } = null!;
+    public DbSet<ProjectPromptTemplateRow> ProjectPromptTemplates { get; set; } = null!;
     public DbSet<EpicCounterRow> EpicCounters { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
@@ -53,15 +56,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Id).HasMaxLength(256);
             entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
             entity.Property(e => e.RepositoriesJson).IsRequired();
-            entity.Property(e => e.VariablesJson).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
-        });
-
-        modelBuilder.Entity<ConfigRow>(entity =>
-        {
-            entity.HasKey(e => e.Key);
-            entity.Property(e => e.Key).HasMaxLength(256);
-            entity.Property(e => e.Value).IsRequired();
         });
 
         modelBuilder.Entity<EventRow>(entity =>
@@ -180,18 +175,20 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber });
         });
 
-        modelBuilder.Entity<IssueStateRow>(entity =>
+        modelBuilder.Entity<IssueRow>(entity =>
         {
-            entity.HasKey(e => e.Key);
-            entity.Property(e => e.Key).HasMaxLength(512);
-            entity.Property(e => e.StateJson).IsRequired();
-        });
-
-        modelBuilder.Entity<IssueProfileRow>(entity =>
-        {
-            entity.HasKey(e => e.Key);
-            entity.Property(e => e.Key).HasMaxLength(512);
-            entity.Property(e => e.StateJson).IsRequired();
+            entity.ToTable("Issues");
+            entity.HasKey(e => e.IssueId);
+            entity.Property(e => e.IssueId).HasMaxLength(256);
+            entity.Property(e => e.State).IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasComputedColumnSql("json_extract(State, '$.ProjectId')", stored: true);
+            entity.Property(e => e.Number)
+                .HasComputedColumnSql("json_extract(State, '$.Number')", stored: true);
+            entity.Property(e => e.WorkflowRunId)
+                .HasComputedColumnSql("json_extract(State, '$.WorkflowRunId')", stored: true);
+            entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique();
+            entity.HasIndex(e => e.WorkflowRunId);
         });
 
         modelBuilder.Entity<WorkflowRunRow>(entity =>
@@ -209,28 +206,28 @@ public class MohistDbContext : DbContext
         {
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.StateJson).IsRequired();
+            entity.Property(e => e.State).IsRequired();
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>
         {
             entity.HasKey(e => e.WorkflowRunId);
             entity.Property(e => e.WorkflowRunId).HasMaxLength(256);
-            entity.Property(e => e.StateJson).IsRequired();
+            entity.Property(e => e.State).IsRequired();
         });
 
         modelBuilder.Entity<BacklogStateRow>(entity =>
         {
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
-            entity.Property(e => e.StateJson).IsRequired();
+            entity.Property(e => e.State).IsRequired();
         });
 
         modelBuilder.Entity<WorkflowStageLockRow>(entity =>
         {
             entity.HasKey(e => e.Key);
             entity.Property(e => e.Key).HasMaxLength(512);
-            entity.Property(e => e.StateJson).IsRequired();
+            entity.Property(e => e.State).IsRequired();
         });
 
         modelBuilder.Entity<IssueCounterRow>(entity =>
@@ -252,11 +249,12 @@ public class MohistDbContext : DbContext
                     v => JSON.DeserializeDictionary(v))
                 .IsRequired()
                 .HasDefaultValue(new Dictionary<string, string>());
+            entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
         });
 
-        modelBuilder.Entity<Mohist.Server.Workflow.Storage.ProjectTemplateRow>(entity =>
+        modelBuilder.Entity<ProjectWorkflowTemplateRow>(entity =>
         {
-            entity.ToTable("ProjectTemplates");
+            entity.ToTable("ProjectWorkflowTemplates");
             entity.HasKey(e => new { e.ProjectId, e.TemplateId });
             entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.TemplateId).HasMaxLength(256);
@@ -267,8 +265,8 @@ public class MohistDbContext : DbContext
         modelBuilder.Entity<IssueWorkflowProfile>(entity =>
         {
             entity.ToTable("IssueWorkflowProfiles");
-            entity.HasKey(e => e.IssueKey);
-            entity.Property(e => e.IssueKey).HasMaxLength(512);
+            entity.HasKey(e => e.IssueId);
+            entity.Property(e => e.IssueId).HasMaxLength(512);
             entity.Property(e => e.SourceTemplateId).HasMaxLength(256);
             entity.Property(e => e.Variables).IsRequired();
             entity.Property(e => e.Prompts)
@@ -277,9 +275,10 @@ public class MohistDbContext : DbContext
                     v => JSON.DeserializeDictionary(v))
                 .IsRequired()
                 .HasDefaultValue(new Dictionary<string, string>());
+            entity.Property(e => e.Prompts).Metadata.SetValueComparer(DictionaryStringComparer);
         });
 
-        modelBuilder.Entity<Mohist.Server.Workflow.Prompts.Storage.ProjectTemplateRow>(entity =>
+        modelBuilder.Entity<ProjectPromptTemplateRow>(entity =>
         {
             entity.ToTable("ProjectPromptTemplates");
             entity.HasKey(e => new { e.ProjectId, e.Key });
@@ -297,5 +296,29 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.ProjectId);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
         });
+    }
+
+    private static bool DictionaryEqual(Dictionary<string, string>? left, Dictionary<string, string>? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left is null || right is null || left.Count != right.Count) return false;
+        foreach (var (key, value) in left)
+        {
+            if (!right.TryGetValue(key, out var rightValue) || !string.Equals(value, rightValue, StringComparison.Ordinal))
+                return false;
+        }
+        return true;
+    }
+
+    private static int DictionaryHash(Dictionary<string, string>? value)
+    {
+        if (value is null) return 0;
+        var hash = new HashCode();
+        foreach (var entry in value.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+        {
+            hash.Add(entry.Key, StringComparer.Ordinal);
+            hash.Add(entry.Value, StringComparer.Ordinal);
+        }
+        return hash.ToHashCode();
     }
 }

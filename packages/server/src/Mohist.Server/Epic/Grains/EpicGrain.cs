@@ -154,9 +154,10 @@ public class EpicGrain : Grain, IEpicGrain
     {
         if (links.Count == 0) return [];
         var issueNumbers = links.Select(l => l.IssueNumber).Distinct().ToArray();
-        var rows = await db.IssueStates.AsNoTracking()
+        var rows = await db.Issues.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Number != null && issueNumbers.Contains(row.Number.Value))
             .ToListAsync();
-        var byNumber = IssueStateReader.SelectCanonicalByNumber(rows, projectId, issueNumbers);
+        var byNumber = IssueReader.ByNumber(rows, projectId, issueNumbers);
 
         return links
             .OrderBy(l => l.CreatedAt)

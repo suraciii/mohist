@@ -33,7 +33,7 @@ public class IssueRepositoryReferenceSpecs
         var grain = _fixture.Grains.GetGrain<IIssueGrain>(issueId);
         await grain.CreateAsync(projectId, 1, "Explicit", "body", null, "p2", "secondary", issueId);
 
-        var storedJson = await LoadStateJsonAsync(projectId, 1);
+        var storedJson = await LoadStateAsync(projectId, 1);
         using var doc = JsonDocument.Parse(storedJson);
 
         Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
@@ -57,7 +57,7 @@ public class IssueRepositoryReferenceSpecs
         Assert.Equal("/proj/main", info.Repository?.Path);
         Assert.True(info.Repository?.IsDefault);
 
-        var storedJson = await LoadStateJsonAsync(projectId, 1);
+        var storedJson = await LoadStateAsync(projectId, 1);
         using var doc = JsonDocument.Parse(storedJson);
         Assert.True(doc.RootElement.TryGetProperty("RepositoryRef", out var refElement));
         Assert.Equal(project.DefaultRepository?.Name, refElement.GetString());
@@ -97,10 +97,10 @@ public class IssueRepositoryReferenceSpecs
         using (var scope = _fixture.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            db.IssueStates.Add(new IssueStateRow
+            db.Issues.Add(new IssueRow
             {
-                Key = $"{projectId}:1",
-                StateJson = legacy,
+                IssueId = "issue_legacy",
+                State = legacy,
             });
             await db.SaveChangesAsync();
         }
@@ -162,10 +162,10 @@ public class IssueRepositoryReferenceSpecs
                 RepositoryRef = "deleted-repo",
             };
             orphan.Status = IssueStatus.Backlog;
-            db.IssueStates.Add(new IssueStateRow
+            db.Issues.Add(new IssueRow
             {
-                Key = $"{projectId}:2",
-                StateJson = IssueStore.Serialize(orphan),
+                IssueId = orphan.Id,
+                State = IssueStore.Serialize(orphan),
             });
             await db.SaveChangesAsync();
         }
@@ -204,10 +204,10 @@ public class IssueRepositoryReferenceSpecs
                 RepositoryRef = "main",
             };
             issue.Status = IssueStatus.Backlog;
-            db.IssueStates.Add(new IssueStateRow
+            db.Issues.Add(new IssueRow
             {
-                Key = $"{projectId}:1",
-                StateJson = IssueStore.Serialize(issue),
+                IssueId = issue.Id,
+                State = IssueStore.Serialize(issue),
             });
             await db.SaveChangesAsync();
         }
@@ -237,12 +237,12 @@ public class IssueRepositoryReferenceSpecs
         return (projectId, project);
     }
 
-    private async Task<string> LoadStateJsonAsync(string projectId, int number)
+    private async Task<string> LoadStateAsync(string projectId, int number)
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.IssueStates.AsNoTracking().FirstAsync(r => r.Key == $"{projectId}:{number}");
-        return row.StateJson;
+        var row = await db.Issues.AsNoTracking().FirstAsync(r => r.ProjectId == projectId && r.Number == number);
+        return row.State;
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)

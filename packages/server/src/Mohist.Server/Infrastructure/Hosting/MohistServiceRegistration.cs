@@ -43,7 +43,6 @@ public static class MohistServiceRegistration
             options.UseSqlite(connectionString));
 
         services.AddScoped<IStateStore<Mohist.Server.Issue.Domain.Issue>, IssueStore>();
-        services.AddScoped<IStateStore<IssueWorkflowProfile>, IssueProfileStore>();
         services.AddScoped<IStateStore<IssueCounterState>, IssueCounterStore>();
         services.AddScoped<IStateStore<EpicCounterState>, EpicCounterStore>();
         services.AddScoped<IStateStore<WorkflowBacklogState>, WorkflowBacklogStore>();

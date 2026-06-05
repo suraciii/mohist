@@ -24,23 +24,9 @@ public sealed class IssueIdentityResolver
         if (string.IsNullOrWhiteSpace(projectId)) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var legacyRow = await db.IssueStates
-            .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Key == LegacyKey(projectId, issueNumber), ct);
-        var legacyIssue = legacyRow is null ? null : IssueSnapshot.DeserializeIssue(legacyRow.StateJson);
-        if (legacyIssue is not null)
-        {
-            var canonicalRow = await db.IssueStates
-                .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Key == legacyIssue.Id, ct);
-            var canonicalIssue = canonicalRow is null ? null : IssueSnapshot.DeserializeIssue(canonicalRow.StateJson);
-            var resolvedIssue = IssueStateReader.IsIssue(canonicalIssue, projectId, issueNumber) ? canonicalIssue! : legacyIssue;
-            return ToIdentity(resolvedIssue);
-        }
-
-        var rows = await db.IssueStates.AsNoTracking().ToListAsync(ct);
-        var issue = IssueStateReader.SelectCanonicalOrDefault(IssueStateReader.Deserialize(rows)
-            .Where(row => IssueStateReader.IsIssue(row.Issue, projectId, issueNumber)));
+        var row = await db.Issues.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Number == issueNumber, ct);
+        var issue = row is null ? null : IssueSnapshot.DeserializeIssue(row.State);
         return issue is null ? null : ToIdentity(issue);
     }
 
@@ -49,27 +35,18 @@ public sealed class IssueIdentityResolver
         if (string.IsNullOrWhiteSpace(issueId)) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var canonicalRow = await db.IssueStates
+        var canonicalRow = await db.Issues
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Key == issueId, ct);
-        var canonicalIssue = canonicalRow is null ? null : IssueSnapshot.DeserializeIssue(canonicalRow.StateJson);
-        if (canonicalIssue is not null && string.Equals(canonicalIssue.Id, issueId, StringComparison.Ordinal))
-            return ToIdentity(canonicalIssue);
-
-        var rows = await db.IssueStates.AsNoTracking().ToListAsync(ct);
-        foreach (var row in IssueStateReader.Deserialize(rows))
-        {
-            if (string.Equals(row.Issue.Id, issueId, StringComparison.Ordinal))
-                return ToIdentity(row.Issue);
-        }
-
-        return null;
+            .FirstOrDefaultAsync(r => r.IssueId == issueId, ct);
+        var canonicalIssue = canonicalRow is null ? null : IssueSnapshot.DeserializeIssue(canonicalRow.State);
+        return canonicalIssue is not null && string.Equals(canonicalIssue.Id, issueId, StringComparison.Ordinal)
+            ? ToIdentity(canonicalIssue)
+            : null;
     }
 
     private static IssueIdentity ToIdentity(Domain.Issue issue) =>
         new(issue.Id, issue.ProjectId, issue.Number);
 
-    public static string LegacyKey(string projectId, int issueNumber) => $"{projectId}:{issueNumber}";
 }
 
 public sealed record IssueIdentity(string IssueId, string ProjectId, int Number);

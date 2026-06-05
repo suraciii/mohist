@@ -717,7 +717,7 @@ public class AgentSessionSpecs
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("activity-task-progress");
 
-        var runStateJson = JsonSerializer.Serialize(new
+        var runState = JsonSerializer.Serialize(new
         {
             Id = work.WorkflowRunId,
             Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
@@ -741,9 +741,9 @@ public class AgentSessionSpecs
                 }
             }
         });
-        var issueKey = $"{project.Id}:{issue.Number}";
-        var issueStateJson = JsonSerializer.Serialize(new
+        var issueState = JsonSerializer.Serialize(new
         {
+            Id = issue.Id,
             ProjectId = project.Id,
             Number = issue.Number,
             WorkflowRunId = work.WorkflowRunId,
@@ -753,11 +753,11 @@ public class AgentSessionSpecs
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
             await db.Database.ExecuteSqlRawAsync(
-                "INSERT OR REPLACE INTO workflow_runs (WorkflowRunId, State) VALUES ({0}, {1})",
-                work.WorkflowRunId, runStateJson);
+                "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+                work.WorkflowRunId, runState);
             await db.Database.ExecuteSqlRawAsync(
-                "INSERT OR REPLACE INTO IssueStates (Key, StateJson) VALUES ({0}, {1})",
-                issueKey, issueStateJson);
+                "INSERT OR REPLACE INTO Issues (IssueId, State) VALUES ({0}, {1})",
+                issue.Id, issueState);
         }
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
@@ -780,7 +780,7 @@ public class AgentSessionSpecs
             await db.SaveChangesAsync();
         }
 
-        var runStateJson = JsonSerializer.Serialize(new
+        var runState = JsonSerializer.Serialize(new
         {
             Id = work.WorkflowRunId,
             Metadata = new { CreatedAt = DateTimeOffset.UtcNow, Name = "test" },
@@ -817,9 +817,9 @@ public class AgentSessionSpecs
                 }
             }
         });
-        var issueKey = $"{project.Id}:{issue.Number}";
-        var issueStateJson = JsonSerializer.Serialize(new
+        var issueState = JsonSerializer.Serialize(new
         {
+            Id = issue.Id,
             ProjectId = project.Id,
             Number = issue.Number,
             WorkflowRunId = work.WorkflowRunId,
@@ -829,11 +829,11 @@ public class AgentSessionSpecs
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
             await db.Database.ExecuteSqlRawAsync(
-                "INSERT OR REPLACE INTO workflow_runs (WorkflowRunId, State) VALUES ({0}, {1})",
-                work.WorkflowRunId, runStateJson);
+                "INSERT OR REPLACE INTO WorkflowRuns (WorkflowRunId, State, ETag) VALUES ({0}, {1}, 0)",
+                work.WorkflowRunId, runState);
             await db.Database.ExecuteSqlRawAsync(
-                "INSERT OR REPLACE INTO IssueStates (Key, StateJson) VALUES ({0}, {1})",
-                issueKey, issueStateJson);
+                "INSERT OR REPLACE INTO Issues (IssueId, State) VALUES ({0}, {1})",
+                issue.Id, issueState);
         }
 
         var activity = await _client.GetDataAsync<ActivityDto>($"/api/agent/activity?projectId={project.Id}");
@@ -965,12 +965,12 @@ public class AgentSessionSpecs
             db.WorkflowLeases.Add(new WorkflowLeaseRow
             {
                 WorkflowRunId = workflowRunId,
-                StateJson = json
+                State = json
             });
         }
         else
         {
-            row.StateJson = json;
+            row.State = json;
         }
         await db.SaveChangesAsync();
     }

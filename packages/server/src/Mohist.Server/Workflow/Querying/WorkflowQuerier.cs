@@ -50,7 +50,7 @@ public class WorkflowQuerier
 
         var leaseJson = await db.WorkflowLeases.AsNoTracking()
             .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.StateJson)
+            .Select(e => e.State)
             .FirstOrDefaultAsync();
         var lease = leaseJson is not null && leaseJson != "null"
             ? JsonSerializer.Deserialize<WorkLease>(leaseJson, StorageJsonOptions)
@@ -64,7 +64,7 @@ public class WorkflowQuerier
         await using var db = await _db.CreateDbContextAsync();
         var json = await db.WorkflowVariables.AsNoTracking()
             .Where(e => e.WorkflowRunId == workflowRunId)
-            .Select(e => e.StateJson)
+            .Select(e => e.State)
             .FirstOrDefaultAsync();
 
         if (json is null) return null;

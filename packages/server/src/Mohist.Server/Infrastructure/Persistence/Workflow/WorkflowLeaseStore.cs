@@ -21,7 +21,7 @@ public class WorkflowLeaseStore : IStateStore<WorkLease>
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.WorkflowLeases.FindAsync(key);
-        return row is null ? null : Deserialize(row.StateJson);
+        return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, WorkLease state)
@@ -30,9 +30,9 @@ public class WorkflowLeaseStore : IStateStore<WorkLease>
         var row = await db.WorkflowLeases.FindAsync(key);
         var json = Serialize(state);
         if (row is null)
-            db.WorkflowLeases.Add(new WorkflowLeaseRow { WorkflowRunId = key, StateJson = json });
+            db.WorkflowLeases.Add(new WorkflowLeaseRow { WorkflowRunId = key, State = json });
         else
-            row.StateJson = json;
+            row.State = json;
         await db.SaveChangesAsync();
     }
 

@@ -20,7 +20,7 @@ public class WorkflowStageLockStore : IStateStore<WorkflowStageLockState>
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.WorkflowStageLocks.FindAsync(key);
-        return row is null ? null : Deserialize(row.StateJson);
+        return row is null ? null : Deserialize(row.State);
     }
 
     public async Task SaveAsync(string key, WorkflowStageLockState state)
@@ -29,9 +29,9 @@ public class WorkflowStageLockStore : IStateStore<WorkflowStageLockState>
         var row = await db.WorkflowStageLocks.FindAsync(key);
         var json = Serialize(state);
         if (row is null)
-            db.WorkflowStageLocks.Add(new WorkflowStageLockRow { Key = key, StateJson = json });
+            db.WorkflowStageLocks.Add(new WorkflowStageLockRow { Key = key, State = json });
         else
-            row.StateJson = json;
+            row.State = json;
         await db.SaveChangesAsync();
     }
 

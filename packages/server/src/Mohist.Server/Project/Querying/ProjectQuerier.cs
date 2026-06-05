@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Storage;
+using Mohist.Server.Workflow.Domain;
 using System.Text.Json;
 
 namespace Mohist.Server.Project.Querying;
@@ -19,28 +20,35 @@ public class ProjectQuerier
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entries = await db.Projects.OrderBy(p => p.Name).ToListAsync();
-        return entries.Select(ToInfo).ToList();
+        var profiles = await LoadProjectVariablesAsync(db, entries.Select(e => e.Id));
+        return entries.Select(e => ToInfo(e, profiles.GetValueOrDefault(e.Id))).ToList();
     }
 
     public async Task<ProjectInfo?> GetByIdAsync(string id)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FindAsync(id);
-        return entry is null ? null : ToInfo(entry);
+        if (entry is null) return null;
+        var variables = await LoadProjectVariablesAsync(db, entry.Id);
+        return ToInfo(entry, variables);
     }
 
     public async Task<ProjectInfo?> GetByNameAsync(string name)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FirstOrDefaultAsync(p => p.Name == name);
-        return entry is null ? null : ToInfo(entry);
+        if (entry is null) return null;
+        var variables = await LoadProjectVariablesAsync(db, entry.Id);
+        return ToInfo(entry, variables);
     }
 
     public async Task<ProjectInfo?> ResolveByIdOrNameAsync(string identifier)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var entry = await db.Projects.FirstOrDefaultAsync(p => p.Id == identifier || p.Name == identifier);
-        return entry is null ? null : ToInfo(entry);
+        if (entry is null) return null;
+        var variables = await LoadProjectVariablesAsync(db, entry.Id);
+        return ToInfo(entry, variables);
     }
 
     public async Task<bool> ExistsAsync(string name)
@@ -55,14 +63,75 @@ public class ProjectQuerier
         return all.Count == 1 ? all[0] : null;
     }
 
-    internal static ProjectInfo ToInfo(ProjectRow e) => new()
+    private static async Task<Dictionary<string, ProjectVariablesBag>> LoadProjectVariablesAsync(
+        MohistDbContext db,
+        IEnumerable<string> projectIds)
+    {
+        var ids = projectIds.Distinct(StringComparer.Ordinal).ToArray();
+        if (ids.Length == 0) return [];
+
+        var rows = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .Where(p => ids.Contains(p.ProjectId))
+            .Select(p => new { p.ProjectId, p.Variables })
+            .ToListAsync();
+
+        return rows.ToDictionary(
+            row => row.ProjectId,
+            row => ToProjectVariablesBag(row.Variables),
+            StringComparer.Ordinal);
+    }
+
+    private static async Task<ProjectVariablesBag> LoadProjectVariablesAsync(MohistDbContext db, string projectId)
+    {
+        var variables = await db.ProjectWorkflowProfiles.AsNoTracking()
+            .Where(p => p.ProjectId == projectId)
+            .Select(p => p.Variables)
+            .FirstOrDefaultAsync();
+        return ToProjectVariablesBag(variables);
+    }
+
+    private static ProjectVariablesBag ToProjectVariablesBag(string? json)
+    {
+        var bundle = VariableBundle.FromJson(json);
+        return new ProjectVariablesBag(
+            ToDictionary(bundle.Vars),
+            ToProjectStages(bundle.Stages));
+    }
+
+    private static Dictionary<string, ProjectStageVariablesBag?>? ToProjectStages(
+        Dictionary<string, StageVariables>? stages)
+    {
+        if (stages is null || stages.Count == 0)
+            return null;
+
+        return stages.ToDictionary(
+            kv => kv.Key,
+            kv => (ProjectStageVariablesBag?)new ProjectStageVariablesBag(ToDictionary(kv.Value.Vars)),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, JsonElement?>? ToDictionary(JsonElement? element)
+    {
+        if (!element.HasValue || element.Value.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var result = element.Value.EnumerateObject()
+            .ToDictionary(
+                property => property.Name,
+                property => (JsonElement?)property.Value.Clone(),
+                StringComparer.Ordinal);
+
+        return result.Count == 0 ? null : result;
+    }
+
+    internal static ProjectInfo ToInfo(ProjectRow e, ProjectVariablesBag? variables = null) => new()
     {
         Id = e.Id,
         Name = e.Name,
         Path = e.Path,
         BaseBranch = e.BaseBranch,
         Repositories = JsonSerializer.Deserialize<List<RepositoryInfo>>(e.RepositoriesJson) ?? [],
-        Variables = ProjectVariablesBag.FromJson(e.VariablesJson),
+        Variables = variables ?? ProjectVariablesBag.Empty,
         CreatedAt = e.CreatedAt.ToString("o"),
         UpdatedAt = e.UpdatedAt.ToString("o"),
     };

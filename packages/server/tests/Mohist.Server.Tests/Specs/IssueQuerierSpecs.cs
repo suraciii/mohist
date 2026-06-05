@@ -7,7 +7,6 @@ using Mohist.Server.Issue.WorkflowProfiles;
 using Mohist.Server.Project.Querying;
 using Mohist.Server.Infrastructure.Persistence.Db;
 using Mohist.Server.Tests.Support;
-using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Storage;
 using Mohist.Server.Workflow.Views;
 using Xunit;
@@ -40,10 +39,10 @@ public class IssueQuerierSpecs
             Priority = "p1",
         };
         issue.Status = Issue.Domain.IssueStatus.Todo;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -73,15 +72,10 @@ public class IssueQuerierSpecs
             Priority = "p2",
         };
         issue.Status = Issue.Domain.IssueStatus.Todo;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = issue.Id,
-            StateJson = IssueStore.Serialize(issue),
-        });
-        db.IssueProfiles.Add(new IssueProfileRow
-        {
-            Key = issue.Id,
-            StateJson = IssueProfileStore.Serialize(new Mohist.Server.Issue.WorkflowProfiles.IssueWorkflowProfile("custom", new WorkflowDefinition("custom", []), WorkflowProfileUpdateMode.Custom)),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -94,16 +88,16 @@ public class IssueQuerierSpecs
 
         Assert.NotNull(loaded);
         Assert.Equal(issue.Id, loaded.Id);
-        Assert.Equal("custom", loaded.WorkflowProfileId);
+        Assert.Equal(IssueWorkflowProfiles.DefaultId, loaded.WorkflowProfileId);
         Assert.NotNull(identity);
         Assert.Equal(issue.Id, identity.IssueId);
         var item = Assert.Single(listed);
         Assert.Equal(issue.Id, item.Id);
-        Assert.Equal("custom", item.WorkflowProfileId);
+        Assert.Equal(IssueWorkflowProfiles.DefaultId, item.WorkflowProfileId);
     }
 
     [Fact]
-    public async Task ListAsync_WithLegacyAndCanonicalRowsForSameNumber_ReturnsCanonicalIssueOnce()
+    public async Task ListAsync_WithCanonicalRows_ReturnsIssueOnce()
     {
         using var scope = _fixture.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -119,28 +113,11 @@ public class IssueQuerierSpecs
         };
         issue.Status = Issue.Domain.IssueStatus.Todo;
 
-        var legacyIssue = new Issue.Domain.Issue
+        db.Issues.Add(new IssueRow
         {
-            Id = issue.Id,
-            ProjectId = project.Id,
-            Number = issue.Number,
-            Title = "Legacy title",
-            Labels = [],
-            Priority = "p2",
-        };
-        legacyIssue.Status = Issue.Domain.IssueStatus.Todo;
-
-        db.IssueStates.AddRange(
-            new IssueStateRow
-            {
-                Key = IssueIdentityResolver.LegacyKey(project.Id, issue.Number),
-                StateJson = IssueStore.Serialize(legacyIssue),
-            },
-            new IssueStateRow
-            {
-                Key = issue.Id,
-                StateJson = IssueStore.Serialize(issue),
-            });
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
+        });
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
@@ -169,10 +146,10 @@ public class IssueQuerierSpecs
             WorkflowRunId = "wf-run-1",
         };
         issue.Status = Issue.Domain.IssueStatus.InProgress;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -231,7 +208,7 @@ public class IssueQuerierSpecs
         db.WorkflowLeases.Add(new WorkflowLeaseRow
         {
             WorkflowRunId = "wf-run-1",
-            StateJson = "null",
+            State = "null",
         });
         await db.SaveChangesAsync();
 
@@ -265,10 +242,10 @@ public class IssueQuerierSpecs
             WorkflowRunId = "wf-run-orch-1",
         };
         issue.Status = Issue.Domain.IssueStatus.InProgress;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -319,7 +296,7 @@ public class IssueQuerierSpecs
         db.WorkflowLeases.Add(new WorkflowLeaseRow
         {
             WorkflowRunId = "wf-run-orch-1",
-            StateJson = "null",
+            State = "null",
         });
         await db.SaveChangesAsync();
 
@@ -350,10 +327,10 @@ public class IssueQuerierSpecs
             WorkflowRunId = "wf-run-fail-1",
         };
         issue.Status = Issue.Domain.IssueStatus.InProgress;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -404,7 +381,7 @@ public class IssueQuerierSpecs
         db.WorkflowLeases.Add(new WorkflowLeaseRow
         {
             WorkflowRunId = "wf-run-fail-1",
-            StateJson = "null",
+            State = "null",
         });
         await db.SaveChangesAsync();
 
@@ -434,10 +411,10 @@ public class IssueQuerierSpecs
             Priority = "p2",
         };
         issue.Status = Issue.Domain.IssueStatus.Todo;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -465,10 +442,10 @@ public class IssueQuerierSpecs
             WorkflowRunId = "wf-run-done-1",
         };
         issue.Status = Issue.Domain.IssueStatus.Done;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -488,7 +465,7 @@ public class IssueQuerierSpecs
         db.WorkflowLeases.Add(new WorkflowLeaseRow
         {
             WorkflowRunId = "wf-run-done-1",
-            StateJson = "null",
+            State = "null",
         });
         await db.SaveChangesAsync();
 
@@ -516,10 +493,10 @@ public class IssueQuerierSpecs
             WorkflowRunId = "wf-run-nouser-1",
         };
         issue.Status = Issue.Domain.IssueStatus.InProgress;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -562,7 +539,7 @@ public class IssueQuerierSpecs
         db.WorkflowLeases.Add(new WorkflowLeaseRow
         {
             WorkflowRunId = "wf-run-nouser-1",
-            StateJson = "null",
+            State = "null",
         });
         await db.SaveChangesAsync();
 
@@ -590,10 +567,10 @@ public class IssueQuerierSpecs
             WorkflowRunId = "wf-run-approval-1",
         };
         issue.Status = Issue.Domain.IssueStatus.InProgress;
-        db.IssueStates.Add(new IssueStateRow
+        db.Issues.Add(new IssueRow
         {
-            Key = $"{project.Id}:1",
-            StateJson = IssueStore.Serialize(issue),
+            IssueId = issue.Id,
+            State = IssueStore.Serialize(issue),
         });
         await db.SaveChangesAsync();
 
@@ -647,7 +624,7 @@ public class IssueQuerierSpecs
         db.WorkflowLeases.Add(new WorkflowLeaseRow
         {
             WorkflowRunId = "wf-run-approval-1",
-            StateJson = "null",
+            State = "null",
         });
         await db.SaveChangesAsync();
 
