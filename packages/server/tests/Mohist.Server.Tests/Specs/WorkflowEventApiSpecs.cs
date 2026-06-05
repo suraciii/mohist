@@ -68,8 +68,8 @@ public class WorkflowEventApiSpecs
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var workflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var sessionName = "plan";
-        var session = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(project.Id, workflowRunId, sessionName))
-            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, workflowRunId, sessionName, _runnerId, "work-1", "task", "plan", issue.Title));
+        var session = await _fixture.Grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(project.Id, workflowRunId, sessionName))
+            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, workflowRunId, sessionName, _runnerId, "work-1", "task", "plan", issue.Title));
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/events", new
         {

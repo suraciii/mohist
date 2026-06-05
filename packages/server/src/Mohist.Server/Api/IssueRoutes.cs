@@ -447,14 +447,14 @@ public static class IssueRoutes
             }
         });
 
-        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, WorkflowAgentSessionQuerier sessions) =>
+        issues.MapGet("/{number:int}/coder-sessions", async (int number, string projectId, AgentSessionQuerier sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
             return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(pid, number));
         });
 
-        issues.MapGet("/{number:int}/sessions/{name}", async (int number, string name, string projectId, WorkflowAgentSessionQuerier sessions) =>
+        issues.MapGet("/{number:int}/sessions/{name}", async (int number, string name, string projectId, AgentSessionQuerier sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");
@@ -462,7 +462,7 @@ public static class IssueRoutes
             return metadata is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(metadata);
         });
 
-        issues.MapGet("/{number:int}/sessions/{name}/events", async (int number, string name, string projectId, WorkflowAgentSessionQuerier sessions) =>
+        issues.MapGet("/{number:int}/sessions/{name}/events", async (int number, string name, string projectId, AgentSessionQuerier sessions) =>
         {
             var pid = projectId;
             if (pid is null) return ApiResults.BadRequest("No active project");

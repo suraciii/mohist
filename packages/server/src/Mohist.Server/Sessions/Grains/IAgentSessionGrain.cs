@@ -1,16 +1,16 @@
 namespace Mohist.Server.Sessions.Grains;
 
-public interface IWorkflowAgentSessionGrain : IGrainWithStringKey
+public interface IAgentSessionGrain : IGrainWithStringKey
 {
-    Task<WorkflowAgentSessionInfo> EnsureAsync(EnsureWorkflowAgentSessionCommand command);
-    Task<WorkflowAgentSessionInfo> AttachAgentAsync(AttachAgentCommand command);
-    Task<IReadOnlyList<WorkflowAgentSessionEventInfo>> AppendEventsAsync(AppendWorkflowAgentSessionEventsCommand command);
-    Task<WorkflowAgentSessionInfo?> FailIfRunningAsync(string reason);
-    Task<WorkflowAgentSessionInfo?> GetAsync();
+    Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command);
+    Task<AgentSessionInfo> AttachAgentAsync(AttachAgentCommand command);
+    Task<IReadOnlyList<AgentSessionEventInfo>> AppendEventsAsync(AppendAgentSessionEventsCommand command);
+    Task<AgentSessionInfo?> FailIfRunningAsync(string reason);
+    Task<AgentSessionInfo?> GetAsync();
 }
 
 [GenerateSerializer]
-public sealed record EnsureWorkflowAgentSessionCommand(
+public sealed record EnsureAgentSessionCommand(
     [property: Id(0)] string ProjectId,
     [property: Id(1)] int? IssueNumber,
     [property: Id(2)] string WorkflowRunId,
@@ -30,19 +30,19 @@ public sealed record AttachAgentCommand(
     [property: Id(4)] int? ProcessPid = null);
 
 [GenerateSerializer]
-public sealed record AppendWorkflowAgentSessionEventsCommand(
+public sealed record AppendAgentSessionEventsCommand(
     [property: Id(0)] string? WorkId = null,
     [property: Id(1)] string? WorkType = null,
     [property: Id(2)] string? Stage = null,
-    [property: Id(3)] IReadOnlyList<WorkflowAgentSessionEventInput> Events = null!);
+    [property: Id(3)] IReadOnlyList<AgentSessionEventInput> Events = null!);
 
 [GenerateSerializer]
-public sealed record WorkflowAgentSessionEventInput(
+public sealed record AgentSessionEventInput(
     [property: Id(0)] string Type,
     [property: Id(1)] string PayloadJson);
 
 [GenerateSerializer]
-public sealed record WorkflowAgentSessionInfo(
+public sealed record AgentSessionInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string ProjectId,
     [property: Id(2)] int? IssueNumber,
@@ -80,7 +80,7 @@ public sealed record WorkflowAgentSessionInfo(
     [property: Id(34)] int? ToolErrorCount);
 
 [GenerateSerializer]
-public sealed record WorkflowAgentSessionEventInfo(
+public sealed record AgentSessionEventInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
     [property: Id(2)] string ProjectId,

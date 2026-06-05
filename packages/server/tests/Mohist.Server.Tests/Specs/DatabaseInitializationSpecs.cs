@@ -20,15 +20,15 @@ public class DatabaseInitializationSpecs
         await using var db = new MohistDbContext(options);
         db.Database.Migrate();
 
-        Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessions"));
-        Assert.True(await TableExistsAsync(connection, "WorkflowAgentSessionEvents"));
+        Assert.True(await TableExistsAsync(connection, "AgentSessions"));
+        Assert.True(await TableExistsAsync(connection, "AgentSessionEvents"));
         Assert.True(await ColumnExistsAsync(connection, "WorkflowRuns", "ETag"));
         Assert.True(await TableExistsAsync(connection, "OrleansQuery"));
         Assert.True(await TableExistsAsync(connection, "OrleansRemindersTable"));
         Assert.True(await OrleansQueryExistsAsync(connection, "UpsertReminderRowKey"));
-        Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_SessionName"));
-        Assert.False(await IndexIsUniqueAsync(connection, "IX_WorkflowAgentSessions_WorkflowRunId_WorkId"));
-        Assert.True(await IndexExistsAsync(connection, "IX_WorkflowAgentSessionEvents_SessionId_Sequence"));
+        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessions_WorkflowRunId_SessionName"));
+        Assert.False(await IndexIsUniqueAsync(connection, "IX_AgentSessions_WorkflowRunId_WorkId"));
+        Assert.True(await IndexExistsAsync(connection, "IX_AgentSessionEvents_SessionId_Sequence"));
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
 
@@ -165,7 +165,7 @@ public class DatabaseInitializationSpecs
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT [unique]
-            FROM pragma_index_list('WorkflowAgentSessions')
+            FROM pragma_index_list('AgentSessions')
             WHERE name = $name
             LIMIT 1;
             """;

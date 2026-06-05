@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Tests.Support;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
@@ -185,22 +186,7 @@ public class RuntimeEntrySpecs
         {
             await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
             {
-                db.WorkflowAgentSessions.Add(new WorkflowAgentSessionRow
-                {
-                    Id = $"session-{Guid.NewGuid():N}",
-                    ProjectId = project.Id,
-                    IssueNumber = issue.Number,
-                    WorkflowRunId = workflowRunId,
-                    SessionName = workId,
-                    WorkId = workId,
-                    WorkType = "task",
-                    Stage = "Build",
-                    Title = "Lease-owned status",
-                    RunnerId = staleRunnerId,
-                    Status = "running",
-                    CreatedAt = DateTime.UtcNow,
-                    StartedAt = DateTime.UtcNow
-                });
+                db.AgentSessions.Add(CreateRunningSessionRow(project.Id, issue.Number, workflowRunId, workId, staleRunnerId, "Lease-owned status"));
 
                 db.WorkflowLeases.Add(new Mohist.Server.Infrastructure.Data.Workflow.WorkflowLeaseRow
                 {
@@ -240,22 +226,7 @@ public class RuntimeEntrySpecs
         {
             await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
             {
-                db.WorkflowAgentSessions.Add(new WorkflowAgentSessionRow
-                {
-                    Id = $"session-{Guid.NewGuid():N}",
-                    ProjectId = project.Id,
-                    IssueNumber = issue.Number,
-                    WorkflowRunId = workflowRunId,
-                    SessionName = workId,
-                    WorkId = workId,
-                    WorkType = "task",
-                    Stage = "Build",
-                    Title = "Lease-owned status runner",
-                    RunnerId = staleRunnerId,
-                    Status = "running",
-                    CreatedAt = DateTime.UtcNow,
-                    StartedAt = DateTime.UtcNow
-                });
+                db.AgentSessions.Add(CreateRunningSessionRow(project.Id, issue.Number, workflowRunId, workId, staleRunnerId, "Lease-owned status runner"));
 
                 db.WorkflowLeases.Add(new Mohist.Server.Infrastructure.Data.Workflow.WorkflowLeaseRow
                 {
@@ -305,4 +276,28 @@ public class RuntimeEntrySpecs
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(int Number, string Title);
     private sealed record ApiErrorDto(bool Success, string? Error);
+
+    private static AgentSessionRow CreateRunningSessionRow(string projectId, int issueNumber, string workflowRunId, string workId, string runnerId, string title)
+    {
+        var now = DateTime.UtcNow;
+        var metadata = new AgentSessionMetadata()
+            .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.ToString())
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
+            .WithLabel(AgentSessionMetadataKeys.SessionName, workId)
+            .WithAnnotation(AgentSessionMetadataKeys.TaskId, workId)
+            .WithAnnotation(AgentSessionMetadataKeys.TaskKind, "task")
+            .WithAnnotation(AgentSessionMetadataKeys.Phase, "Build")
+            .WithAnnotation(AgentSessionMetadataKeys.Title, title);
+        var session = AgentSession.Create(
+            $"session-{Guid.NewGuid():N}",
+            runnerId,
+            "opencode",
+            null,
+            metadata: metadata,
+            now: now);
+        session.Start(null, now);
+        return AgentSessionJson.ToRow(session, now);
+    }
 }

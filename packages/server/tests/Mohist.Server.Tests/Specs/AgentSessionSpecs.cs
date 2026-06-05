@@ -5,8 +5,10 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Tests.Support;
@@ -64,9 +66,9 @@ public class AgentSessionSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(
-                GrainKey.WorkflowAgentSession(project.Id, currentWorkflowRunId, "plan"))
-            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
+        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
+                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "plan"))
+            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
         {
@@ -163,9 +165,9 @@ public class AgentSessionSpecs
         await issueGrain.StartWorkAsync();
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(
-                GrainKey.WorkflowAgentSession(project.Id, currentWorkflowRunId, "plan"))
-            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
+        var currentSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(
+                GrainKey.AgentSession(project.Id, currentWorkflowRunId, "plan"))
+            .EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, currentWorkflowRunId, "plan", _runnerId, work.WorkId, work.WorkType, work.Stage, "Plan session"));
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/attach", new { agentSessionId = currentSession.Id, workDir = project.Path, processPid = 1234 });
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{currentSession.WorkflowRunId}/{currentSession.SessionName}/events", new
         {
@@ -214,13 +216,13 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task WorkflowAgentSessionGrain_ForAgentWork_CreatesDeterministicSessionAndKeepsPollIdempotent()
+    public async Task AgentSessionGrain_ForAgentWork_CreatesDeterministicSessionAndKeepsPollIdempotent()
     {
         var (_, _, work, session) = await CreateStartedAgentSessionAsync("idempotent", start: false);
-        Assert.Equal(GrainKey.WorkflowAgentSession(work.Issue!.ProjectId, work.WorkflowRunId, work.WorkId), session.Id);
+        Assert.Equal(GrainKey.AgentSession(work.Issue!.ProjectId, work.WorkflowRunId, work.WorkId), session.Id);
 
         var repeated = await _fixture.Grains
-            .GetGrain<IWorkflowAgentSessionGrain>(session.Id)
+            .GetGrain<IAgentSessionGrain>(session.Id)
             .GetAsync();
         Assert.NotNull(repeated);
         Assert.Equal(session.Id, repeated.Id);
@@ -236,7 +238,7 @@ public class AgentSessionSpecs
             PostEventEntriesAsync(project.Id, session.WorkflowRunId, session.SessionName, "second"));
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var sequences = await db.WorkflowAgentSessionEvents.AsNoTracking()
+        var sequences = await db.AgentSessionEvents.AsNoTracking()
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
@@ -271,7 +273,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("completed", grainSession.Status);
         Assert.Equal(0, grainSession.ExitCode);
@@ -279,7 +281,7 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task WorkflowAgentSessionEnsure_TerminalSessionExists_ReopensSameSessionForRetry()
+    public async Task AgentSessionEnsure_TerminalSessionExists_ReopensSameSessionForRetry()
     {
         var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-reuse");
 
@@ -292,8 +294,8 @@ public class AgentSessionSpecs
         });
 
         var retryRunnerId = $"{_runnerId}-retry";
-        var grain = _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id);
-        var reopened = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        var reopened = await grain.EnsureAsync(new EnsureAgentSessionCommand(
             project.Id,
             session.IssueNumber,
             session.WorkflowRunId,
@@ -306,10 +308,10 @@ public class AgentSessionSpecs
 
         Assert.Equal(session.Id, reopened.Id);
         Assert.Equal("failed", reopened.Status);
-        Assert.Equal(retryRunnerId, reopened.RunnerId);
+        Assert.Equal(_runnerId, reopened.RunnerId);
 
         var nextRunnerId = $"{_runnerId}-next";
-        var repeated = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+        var repeated = await grain.EnsureAsync(new EnsureAgentSessionCommand(
             project.Id,
             session.IssueNumber,
             session.WorkflowRunId,
@@ -322,7 +324,7 @@ public class AgentSessionSpecs
 
         Assert.Equal(session.Id, repeated.Id);
         Assert.Equal("failed", repeated.Status);
-        Assert.Equal(nextRunnerId, repeated.RunnerId);
+        Assert.Equal(_runnerId, repeated.RunnerId);
     }
 
     [Fact]
@@ -330,23 +332,23 @@ public class AgentSessionSpecs
     {
         var (_, _, _, session) = await CreateStartedAgentSessionAsync("runner-unregister");
 
-        await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).FailIfRunningAsync("Runner unregistered");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).FailIfRunningAsync("Runner unregistered");
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
         Assert.Contains("unregistered", grainSession.FailureReason);
     }
 
     [Fact]
-    public async Task EnsureWorkflowAgentSession_TerminalSessionExists_KeepsTerminalSessionClosed()
+    public async Task EnsureAgentSession_TerminalSessionExists_KeepsTerminalSessionClosed()
     {
         var (project, _, work, session) = await CreateStartedAgentSessionAsync("retry-terminal");
 
-        await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).FailIfRunningAsync("Session liveness probe timed out");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).FailIfRunningAsync("Session liveness probe timed out");
 
-        var ensured = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id)
-            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+        var ensured = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
+            .EnsureAsync(new EnsureAgentSessionCommand(
                 project.Id,
                 work.Issue!.IssueNumber,
                 work.WorkflowRunId,
@@ -363,7 +365,7 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task EnsureWorkflowAgentSession_NamedTerminalSessionStartsNewWork()
+    public async Task EnsureAgentSession_NamedTerminalSessionStartsNewWork()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check");
 
@@ -378,8 +380,8 @@ public class AgentSessionSpecs
             }
         });
 
-        var ensured = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id)
-            .EnsureAsync(new EnsureWorkflowAgentSessionCommand(
+        var ensured = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id)
+            .EnsureAsync(new EnsureAgentSessionCommand(
                 project.Id,
                 issue.Number,
                 work.WorkflowRunId,
@@ -441,7 +443,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal(30, grainSession.InputTokens);
         Assert.Equal(15, grainSession.OutputTokens);
@@ -483,7 +485,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal(30, grainSession.InputTokens);
         Assert.Equal(5, grainSession.OutputTokens);
@@ -523,14 +525,14 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("completed", grainSession.Status);
         Assert.Null(grainSession.InputTokens);
         Assert.Null(grainSession.CostAmount);
 
         await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var events = await db.WorkflowAgentSessionEvents
+        var events = await db.AgentSessionEvents
             .Where(e => e.SessionId == session.Id)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
@@ -556,7 +558,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("anthropic/claude-sonnet-4-20250514", grainSession.ResolvedModel);
     }
@@ -578,7 +580,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
         Assert.Equal("probe timed out", grainSession.FailureReason);
@@ -617,7 +619,7 @@ public class AgentSessionSpecs
             }
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(session.Id).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal(2, grainSession.ToolCallCount);
         Assert.Equal(1, grainSession.ToolErrorCount);
@@ -631,7 +633,7 @@ public class AgentSessionSpecs
 
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
-            var row = await db.WorkflowAgentSessions.SingleAsync(s => s.Id == session.Id);
+            var row = await db.AgentSessions.SingleAsync(s => s.Id == session.Id);
             row.RunnerId = staleRunnerId;
             await db.SaveChangesAsync();
         }
@@ -774,7 +776,7 @@ public class AgentSessionSpecs
 
         await using (var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync())
         {
-            var row = await db.WorkflowAgentSessions.FirstAsync(s => s.Id == session.Id);
+            var row = await db.AgentSessions.FirstAsync(s => s.Id == session.Id);
             row.Stage = "Plan";
             await db.SaveChangesAsync();
         }
@@ -854,7 +856,7 @@ public class AgentSessionSpecs
         var work = await PollUntilAgentWorkAsync(issue.Number);
 
         var sessionName = work.WorkId;
-        var sessionId = GrainKey.WorkflowAgentSession(project.Id, work.WorkflowRunId, sessionName);
+        var sessionId = GrainKey.AgentSession(project.Id, work.WorkflowRunId, sessionName);
         await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{work.WorkflowRunId}/{sessionName}/ensure", new
         {
             workId = work.WorkId,
@@ -874,7 +876,7 @@ public class AgentSessionSpecs
             exitCode = 1
         });
 
-        var grainSession = await _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(sessionId).GetAsync();
+        var grainSession = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).GetAsync();
         Assert.NotNull(grainSession);
         Assert.Equal("failed", grainSession.Status);
         Assert.Equal("ACP agent requires 'prompt'", grainSession.FailureReason);
@@ -931,7 +933,7 @@ public class AgentSessionSpecs
         return default!;
     }
 
-    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, WorkflowAgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
+    private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, AgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
         var projectName = $"session-grain-{name}-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
@@ -947,8 +949,8 @@ public class AgentSessionSpecs
             Title: issueTitle,
             Issue: new WorkIssueRef(project.Id, issue.Number.ToString(), issue.Number));
         sessionName ??= work.WorkId;
-        var grain = _fixture.Grains.GetGrain<IWorkflowAgentSessionGrain>(GrainKey.WorkflowAgentSession(project.Id, work.WorkflowRunId, sessionName));
-        var session = await grain.EnsureAsync(new EnsureWorkflowAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(GrainKey.AgentSession(project.Id, work.WorkflowRunId, sessionName));
+        var session = await grain.EnsureAsync(new EnsureAgentSessionCommand(project.Id, issue.Number, work.WorkflowRunId, sessionName, _runnerId, work.WorkId, work.WorkType, work.Stage, work.Title));
         if (start)
             await _client.PostOkAsync($"/api/runner/{_runnerId}/sessions/{project.Id}/{session.WorkflowRunId}/{session.SessionName}/attach", new { agentSessionId = session.Id, workDir = project.Path, processPid = 1234 });
         return (project, issue, work, session);
@@ -985,7 +987,7 @@ public class AgentSessionSpecs
     private sealed record ProjectDto(string Id, string Name, string Path, string BaseBranch);
     private sealed record IssueDto(string Id, int Number, string Title);
     private sealed record WorkDispatchDto(string WorkflowRunId, string WorkId, string? Uses, string? With, string WorkType, string? Stage, string? Title, string? ProjectId, string? IssueId, int? IssueNumber);
-    private sealed record WorkflowAgentSessionSummaryDto(string Id, string SessionName, string Status);
+    private sealed record AgentSessionSummaryDto(string Id, string SessionName, string Status);
     private sealed record ActivityDto(ActivitySummaryDto Summary, ActivityCardDto[] Sessions, ActivityWaitingDto[] Waiting);
     private sealed record ActivitySummaryDto(int Active, int Waiting, int Completed, int Failed, ActivitySlotUsageDto Slots);
     private sealed record ActivitySlotUsageDto(int Active, int Max);

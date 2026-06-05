@@ -9,15 +9,15 @@ using Mohist.Server.Infrastructure.Data.Db;
 
 namespace Mohist.Server.Sessions.Grains;
 
-public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrain
+public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 {
-    private readonly IStateStore<WorkflowAgentSession> _stateStore;
+    private readonly IStateStore<AgentSession> _stateStore;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventBus _eventBus;
-    private readonly ILogger<WorkflowAgentSessionGrain> _log;
-    private WorkflowAgentSession? _session;
+    private readonly ILogger<AgentSessionGrain> _log;
+    private AgentSession? _session;
 
-    public WorkflowAgentSessionGrain(IStateStore<WorkflowAgentSession> stateStore, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<WorkflowAgentSessionGrain> log)
+    public AgentSessionGrain(IStateStore<AgentSession> stateStore, IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus, ILogger<AgentSessionGrain> log)
     {
         _stateStore = stateStore;
         _dbFactory = dbFactory;
@@ -32,7 +32,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         _session = await _stateStore.LoadAsync(SessionId);
     }
 
-    public async Task<WorkflowAgentSessionInfo> EnsureAsync(EnsureWorkflowAgentSessionCommand command)
+    public async Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command)
     {
         if (_session is null)
         {
@@ -57,36 +57,43 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
-        return ToInfo(_session);
+        return await ToInfoAsync(_session);
     }
 
-    private WorkflowAgentSession CreateSession(EnsureWorkflowAgentSessionCommand command) =>
-        WorkflowAgentSession.Create(
+    private AgentSession CreateSession(EnsureAgentSessionCommand command) =>
+        AgentSession.Create(
             SessionId,
-            command.ProjectId,
-            command.IssueNumber ?? 0,
-            command.WorkflowRunId,
-            command.SessionName,
-            command.RunnerId,
-            command.WorkId,
-            command.WorkType,
-            command.Stage,
-            command.Title);
+            command.RunnerId ?? string.Empty,
+            "opencode",
+            null,
+            metadata: BuildMetadata(command));
 
-    public async Task<WorkflowAgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
+    private static AgentSessionMetadata BuildMetadata(EnsureAgentSessionCommand command) =>
+        new AgentSessionMetadata()
+            .WithLabel(AgentSessionMetadataKeys.ProjectId, command.ProjectId)
+            .WithLabel(AgentSessionMetadataKeys.IssueNumber, command.IssueNumber is > 0 ? command.IssueNumber.Value.ToString() : null)
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceId, command.WorkflowRunId)
+            .WithLabel(AgentSessionMetadataKeys.SessionName, command.SessionName)
+            .WithAnnotation(AgentSessionMetadataKeys.TaskId, command.WorkId)
+            .WithAnnotation(AgentSessionMetadataKeys.TaskKind, command.WorkType)
+            .WithAnnotation(AgentSessionMetadataKeys.Phase, command.Stage)
+            .WithAnnotation(AgentSessionMetadataKeys.Title, command.Title);
+
+    public async Task<AgentSessionInfo> AttachAgentAsync(AttachAgentCommand command)
     {
         var session = await GetOrCreateAsync();
 
         var now = DateTime.UtcNow;
         if (!session.AttachAgent(command.AgentSessionId, command.Model, command.WorkDir, command.ChangeDir, command.ProcessPid, now))
-            return ToInfo(session);
+            return await ToInfoAsync(session);
 
         await _stateStore.SaveAsync(SessionId, session);
         EmitStarted(session);
-        return ToInfo(session);
+        return await ToInfoAsync(session);
     }
 
-    public async Task<IReadOnlyList<WorkflowAgentSessionEventInfo>> AppendEventsAsync(AppendWorkflowAgentSessionEventsCommand command)
+    public async Task<IReadOnlyList<AgentSessionEventInfo>> AppendEventsAsync(AppendAgentSessionEventsCommand command)
     {
         if (command.Events.Count == 0) return [];
 
@@ -98,12 +105,12 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             session.RecordActivity(now);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var nextSequence = await db.WorkflowAgentSessionEvents
+        var nextSequence = await db.AgentSessionEvents
             .Where(e => e.SessionId == session.Id)
             .Select(e => (long?)e.Sequence)
             .MaxAsync() ?? 0;
 
-        var entries = new List<WorkflowAgentSessionEventRow>();
+        var entries = new List<AgentSessionEventRow>();
 
         foreach (var e in command.Events)
         {
@@ -123,9 +130,9 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
                     var failureCategory = GetStringProp(payload, "failureCategory");
                     var exitCode = GetIntProp(payload, "exitCode");
                     if (status == "failed")
-                        session.Fail(now, failureReason, exitCode, failureCategory);
+                        session.Fail(now, failureReason, exitCode);
                     else if (status == "cancelled")
-                        session.Cancel(now, failureReason, exitCode, failureCategory);
+                        session.Cancel(now, failureReason, exitCode);
                     else
                         session.Complete(now, exitCode);
                 }
@@ -158,35 +165,29 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
                 }
                 else if (e.Type == "agent_session_model_resolved")
                 {
-                    var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
-                    var resolvedModel = GetStringProp(payload, "resolvedModel");
-                    session.UpdateResolvedModel(resolvedModel);
+                    // Resolved model is an event-level observation; consumers project it from AgentSessionEvents.
                 }
                 else if (e.Type == "tool_call")
                 {
-                    var tool = ParseToolCall(e.PayloadJson, e.Type);
-                    if (tool is not null)
-                        session.RecordToolCall(false);
+                    // Tool calls are transcript events, not AgentSession domain state.
                 }
                 else if (e.Type == "tool_call_update")
                 {
-                    var tool = ParseToolCall(e.PayloadJson, e.Type);
-                    if (tool is not null && tool.State == "failed")
-                        session.RecordToolError();
+                    // Tool call state is projected from AgentSessionEvents.
                 }
             }
 
-            entries.Add(new WorkflowAgentSessionEventRow
+            entries.Add(new AgentSessionEventRow
             {
                 SessionId = session.Id,
                 ProjectId = session.ProjectId,
                 IssueNumber = session.IssueNumber,
-                WorkflowRunId = session.WorkflowRunId,
+                WorkflowRunId = session.RunId,
                 SessionName = session.SessionName,
-                AgentSessionId = session.AgentSessionId,
-                WorkId = command.WorkId ?? session.WorkId,
-                WorkType = command.WorkType ?? session.WorkType,
-                Stage = command.Stage ?? session.Stage,
+                AgentSessionId = session.Status.AgentRuntimeSessionId,
+                WorkId = command.WorkId ?? session.TaskId,
+                WorkType = command.WorkType ?? session.TaskKind,
+                Stage = command.Stage ?? session.Phase,
                 Sequence = ++nextSequence,
                 Type = e.Type,
                 PayloadJson = string.IsNullOrWhiteSpace(e.PayloadJson) ? "{}" : e.PayloadJson,
@@ -200,7 +201,7 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         var isTerminal = session.IsTerminal;
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
 
-        db.WorkflowAgentSessionEvents.AddRange(entries);
+        db.AgentSessionEvents.AddRange(entries);
         await db.SaveChangesAsync();
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
@@ -211,74 +212,36 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         if (statusChanged)
             EmitStatusChanged(session);
         if (isTerminal)
-            EmitTerminal(session, AgentSessionStatusNames.ToName(session.Status));
+            EmitTerminal(session, AgentSessionStatusNames.ToName(session.Status.Phase));
 
         return entries.Select(e => ToEventInfo(e)).ToList();
     }
 
-    public async Task<WorkflowAgentSessionInfo?> FailIfRunningAsync(string reason)
+    public async Task<AgentSessionInfo?> FailIfRunningAsync(string reason)
     {
         var session = await GetOrCreateAsync();
-        if (session.IsTerminal) return ToInfo(session);
+        if (session.IsTerminal) return await ToInfoAsync(session);
 
         session.Fail(DateTime.UtcNow, reason);
         await _stateStore.SaveAsync(SessionId, session);
         EmitTerminal(session, "failed");
-        return ToInfo(session);
+        return await ToInfoAsync(session);
     }
 
-    public async Task<WorkflowAgentSessionInfo?> GetAsync()
+    public async Task<AgentSessionInfo?> GetAsync()
     {
-        return _session is null ? null : ToInfo(_session);
+        return _session is null ? null : await ToInfoAsync(_session);
     }
 
-    private async Task<WorkflowAgentSession?> LoadByWorkflowAndSessionAsync(string workflowRunId, string sessionName)
+    private async Task<AgentSession?> LoadByWorkflowAndSessionAsync(string workflowRunId, string sessionName)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var row = await db.WorkflowAgentSessions.AsNoTracking()
+        var row = await db.AgentSessions.AsNoTracking()
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.SessionName == sessionName);
-        return row is null ? null : new WorkflowAgentSession
-        {
-            Id = row.Id,
-            ProjectId = row.ProjectId,
-            IssueNumber = row.IssueNumber,
-            WorkflowRunId = row.WorkflowRunId,
-            SessionName = row.SessionName,
-            WorkId = row.WorkId,
-            WorkType = row.WorkType,
-            Stage = row.Stage,
-            Title = row.Title,
-            RunnerId = row.RunnerId,
-            AgentSessionId = row.AgentSessionId,
-            Status = AgentSessionStatusNames.Parse(row.Status),
-            Model = row.Model,
-            WorkDir = row.WorkDir,
-            ChangeDir = row.ChangeDir,
-            ProcessPid = row.ProcessPid,
-            CreatedAt = row.CreatedAt,
-            StartedAt = row.StartedAt,
-            LastDataAt = row.LastDataAt,
-            LastHeartbeatAt = row.LastHeartbeatAt,
-            CompletedAt = row.CompletedAt,
-            FailureReason = row.FailureReason,
-            ExitCode = row.ExitCode,
-            ResolvedModel = row.ResolvedModel,
-            InputTokens = row.InputTokens,
-            OutputTokens = row.OutputTokens,
-            TotalTokens = row.TotalTokens,
-            CachedReadTokens = row.CachedReadTokens,
-            ThoughtTokens = row.ThoughtTokens,
-            CostAmount = row.CostAmount,
-            CostCurrency = row.CostCurrency,
-            ContextWindowUsed = row.ContextWindowUsed,
-            ContextWindowSize = row.ContextWindowSize,
-            FailureCategory = row.FailureCategory,
-            ToolCallCount = row.ToolCallCount,
-            ToolErrorCount = row.ToolErrorCount,
-        };
+        return row is null ? null : AgentSessionJson.Deserialize(row);
     }
 
-    private async Task<WorkflowAgentSession> GetOrCreateAsync()
+    private async Task<AgentSession> GetOrCreateAsync()
     {
         if (_session is not null) return _session;
 
@@ -287,23 +250,28 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         var workflowRunId = parts.Length > 1 ? parts[1] : string.Empty;
         var sessionName = parts.Length > 2 ? parts[2] : string.Empty;
 
-        _session = WorkflowAgentSession.Create(SessionId, projectId, 0, workflowRunId, sessionName, null);
+        var metadata = new AgentSessionMetadata()
+            .WithLabel(AgentSessionMetadataKeys.ProjectId, projectId)
+            .WithLabel(AgentSessionMetadataKeys.SourceKind, "workflow")
+            .WithLabel(AgentSessionMetadataKeys.SourceId, workflowRunId)
+            .WithLabel(AgentSessionMetadataKeys.SessionName, sessionName);
+        _session = AgentSession.Create(SessionId, string.Empty, "opencode", null, metadata: metadata);
         await _stateStore.SaveAsync(SessionId, _session);
         return _session;
     }
 
-    private void EmitStarted(WorkflowAgentSession session) => _eventBus.Emit("coder_session_started", new CoderSessionStartedEvent(
+    private void EmitStarted(AgentSession session) => _eventBus.Emit("coder_session_started", new CoderSessionStartedEvent(
         session.IssueNumber.ToString(),
         session.ProjectId,
         session.Id,
-        session.AgentSessionId ?? session.Id,
-        session.WorkId,
-        session.Model,
-        session.Stage,
+        session.Status.AgentRuntimeSessionId ?? session.Id,
+        session.TaskId,
+        session.Settings.Model,
+        session.Phase,
         session.Title,
         session.Title));
 
-    private void EmitTranscriptEntry(WorkflowAgentSession session, WorkflowAgentSessionEventRow entry)
+    private void EmitTranscriptEntry(AgentSession session, AgentSessionEventRow entry)
     {
         var text = ExtractText(entry.PayloadJson);
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
@@ -311,8 +279,8 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             _eventBus.Emit("coder_text_chunk", new CoderTranscriptEntryEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
-                session.WorkId,
-                session.AgentSessionId ?? session.Id,
+                session.TaskId,
+                session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
                 text));
         }
@@ -321,8 +289,8 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             _eventBus.Emit("coder_thought_chunk", new CoderTranscriptEntryEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
-                session.WorkId,
-                session.AgentSessionId ?? session.Id,
+                session.TaskId,
+                session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
                 text));
         }
@@ -334,8 +302,8 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
             _eventBus.Emit("coder_tool_call", new CoderToolCallEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
-                session.WorkId,
-                session.AgentSessionId ?? session.Id,
+                session.TaskId,
+                session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
                 tool.ToolName,
                 tool.State,
@@ -352,16 +320,16 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         }
     }
 
-    private void EmitStatusChanged(WorkflowAgentSession session) => _eventBus.Emit("coder_session_status_changed", new CoderSessionStatusChangedEvent(
+    private void EmitStatusChanged(AgentSession session) => _eventBus.Emit("coder_session_status_changed", new CoderSessionStatusChangedEvent(
         session.IssueNumber.ToString(),
         session.ProjectId,
         session.Id,
-        session.AgentSessionId ?? session.Id,
-        AgentSessionStatusNames.ToName(session.Status),
-        session.LastDataAt?.ToString("o"),
-        session.FailureReason));
+        session.Status.AgentRuntimeSessionId ?? session.Id,
+        AgentSessionStatusNames.ToName(session.Status.Phase),
+        session.Status.LastDataAt?.ToString("o"),
+        session.Status.FailureReason));
 
-    private void EmitTerminal(WorkflowAgentSession session, string terminal) => _eventBus.Emit(terminal switch
+    private void EmitTerminal(AgentSession session, string terminal) => _eventBus.Emit(terminal switch
     {
         "failed" => "coder_session_failed",
         "cancelled" => "coder_session_cancelled",
@@ -371,54 +339,104 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         session.ProjectId,
         session.Id,
         terminal,
-        session.FailureReason,
+        session.Status.FailureReason,
         DurationMs(session)));
 
-    private static long DurationMs(WorkflowAgentSession session)
+    private static long DurationMs(AgentSession session)
     {
-        var start = session.StartedAt ?? session.CreatedAt;
-        var end = session.CompletedAt ?? DateTime.UtcNow;
+        var start = session.Status.StartedAt ?? session.Status.CreatedAt;
+        var end = session.Status.CompletedAt ?? DateTime.UtcNow;
         return Math.Max(0, (long)(end - start).TotalMilliseconds);
     }
 
-    private static WorkflowAgentSessionInfo ToInfo(WorkflowAgentSession s) => new(
+    private async Task<AgentSessionInfo> ToInfoAsync(AgentSession s)
+    {
+        var eventSummary = await LoadEventSummaryAsync(s.Id);
+        var usage = s.Status.UsageSummary ?? new AgentUsageSummary();
+        return new AgentSessionInfo(
         s.Id,
         s.ProjectId,
         s.IssueNumber == 0 ? null : s.IssueNumber,
-        s.WorkflowRunId,
+        s.RunId,
         s.SessionName,
-        s.WorkId,
-        s.WorkType,
-        s.Stage,
+        s.TaskId,
+        s.TaskKind,
+        s.Phase,
         s.Title,
-        s.RunnerId,
-        s.AgentSessionId,
-        AgentSessionStatusNames.ToName(s.Status),
-        s.Model,
-        s.WorkDir,
+        s.Runtime.RunnerId,
+        s.Status.AgentRuntimeSessionId,
+        AgentSessionStatusNames.ToName(s.Status.Phase),
+        s.Settings.Model,
+        s.Runtime.WorkDir,
         s.ChangeDir,
-        s.ProcessPid,
-        s.CreatedAt.ToString("o"),
-        s.StartedAt?.ToString("o"),
-        s.LastDataAt?.ToString("o"),
-        s.CompletedAt?.ToString("o"),
-        s.FailureReason,
-        s.ExitCode,
-        s.ResolvedModel,
-        s.InputTokens,
-        s.OutputTokens,
-        s.TotalTokens,
-        s.CachedReadTokens,
-        s.ThoughtTokens,
-        s.CostAmount,
-        s.CostCurrency,
-        s.ContextWindowUsed,
-        s.ContextWindowSize,
-        s.FailureCategory,
-        s.ToolCallCount,
-        s.ToolErrorCount);
+        null,
+        s.Status.CreatedAt.ToString("o"),
+        s.Status.StartedAt?.ToString("o"),
+        s.Status.LastDataAt?.ToString("o"),
+        s.Status.CompletedAt?.ToString("o"),
+        s.Status.FailureReason,
+        s.Status.ExitCode,
+        eventSummary.ResolvedModel,
+        usage.InputTokens,
+        usage.OutputTokens,
+        usage.TotalTokens,
+        usage.CachedReadTokens,
+        usage.ThoughtTokens,
+        usage.CostAmount,
+        usage.CostCurrency,
+        usage.ContextWindowUsed,
+        usage.ContextWindowSize,
+        eventSummary.FailureCategory,
+        eventSummary.ToolCallCount,
+        eventSummary.ToolErrorCount);
+    }
 
-    private static WorkflowAgentSessionEventInfo ToEventInfo(WorkflowAgentSessionEventRow e) => new(
+    private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var events = await db.AgentSessionEvents.AsNoTracking()
+            .Where(e => e.SessionId == sessionId)
+            .OrderBy(e => e.Sequence)
+            .ToListAsync();
+
+        string? resolvedModel = null;
+        string? failureCategory = null;
+        var toolCalls = 0;
+        var toolErrors = 0;
+
+        foreach (var e in events)
+        {
+            if (e.Type == "agent_session_model_resolved")
+            {
+                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                resolvedModel = GetStringProp(payload, "resolvedModel") ?? resolvedModel;
+            }
+            else if (e.Type == "agent_session_terminal")
+            {
+                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                failureCategory = GetStringProp(payload, "failureCategory") ?? failureCategory;
+            }
+            else if (e.Type == "tool_call")
+            {
+                toolCalls++;
+            }
+            else if (e.Type == "tool_call_update")
+            {
+                var payload = JsonSerializer.Deserialize<JsonElement>(e.PayloadJson);
+                var status = GetStringProp(payload, "status") ?? GetStringProp(payload, "state");
+                if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+                    toolErrors++;
+            }
+        }
+
+        return new AgentSessionEventSummary(
+            resolvedModel,
+            failureCategory,
+            toolCalls == 0 ? null : toolCalls,
+            toolErrors == 0 ? null : Math.Min(toolErrors, Math.Max(toolCalls, toolErrors)));
+    }
+
+    private static AgentSessionEventInfo ToEventInfo(AgentSessionEventRow e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.ProjectId,
@@ -557,4 +575,10 @@ public sealed class WorkflowAgentSessionGrain : Grain, IWorkflowAgentSessionGrai
         string? DisplayTitle,
         string? DisplaySubtitle,
         string? Category);
+
+    private sealed record AgentSessionEventSummary(
+        string? ResolvedModel,
+        string? FailureCategory,
+        int? ToolCallCount,
+        int? ToolErrorCount);
 }
