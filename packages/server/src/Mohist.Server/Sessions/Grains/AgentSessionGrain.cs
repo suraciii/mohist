@@ -101,7 +101,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await ToInfoAsync(session);
     }
 
-    public async Task<IReadOnlyList<AgentSessionEventInfo>> AppendEventsAsync(AppendAgentSessionEventsCommand command)
+    public async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command)
     {
         if (command.Events.Count == 0) return [];
 
@@ -114,12 +114,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var projection = await LoadProjectionAsync(session.Id);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var nextSequence = await db.AgentSessionEvents
+        var nextSequence = await db.AgentSessionRuntimeEvents
             .Where(e => e.SessionId == session.Id)
             .Select(e => (long?)e.Sequence)
             .MaxAsync() ?? 0;
 
-        var entries = new List<AgentSessionEventRow>();
+        var entries = new List<AgentSessionRuntimeEventRow>();
 
         foreach (var e in command.Events)
         {
@@ -174,7 +174,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 }
                 else if (e.Type == "agent_session_model_resolved")
                 {
-                    // Resolved model is an event-level observation; consumers project it from AgentSessionEvents.
+                    // Resolved model is an event-level observation; consumers project it from AgentSessionRuntimeEvents.
                 }
                 else if (e.Type == "tool_call")
                 {
@@ -182,11 +182,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 }
                 else if (e.Type == "tool_call_update")
                 {
-                    // Tool call state is projected from AgentSessionEvents.
+                    // Tool call state is projected from AgentSessionRuntimeEvents.
                 }
             }
 
-            entries.Add(new AgentSessionEventRow
+            entries.Add(new AgentSessionRuntimeEventRow
             {
                 SessionId = session.Id,
                 ProjectId = session.ProjectId,
@@ -210,7 +210,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var isTerminal = session.IsTerminal;
         var statusChanged = entries.Any(r => r.Type == "agent_liveness_status");
 
-        db.AgentSessionEvents.AddRange(entries);
+        db.AgentSessionRuntimeEvents.AddRange(entries);
         await db.SaveChangesAsync();
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
@@ -284,7 +284,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             null));
     }
 
-    private void EmitTranscriptEntry(AgentSession session, AgentSessionEventRow entry)
+    private void EmitTranscriptEntry(AgentSession session, AgentSessionRuntimeEventRow entry)
     {
         var text = ExtractText(entry.PayloadJson);
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
@@ -405,10 +405,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         eventSummary.ToolErrorCount);
     }
 
-    private async Task<AgentSessionEventSummary> LoadEventSummaryAsync(string sessionId)
+    private async Task<AgentSessionRuntimeEventSummary> LoadEventSummaryAsync(string sessionId)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var events = await db.AgentSessionEvents.AsNoTracking()
+        var events = await db.AgentSessionRuntimeEvents.AsNoTracking()
             .Where(e => e.SessionId == sessionId)
             .OrderBy(e => e.Sequence)
             .ToListAsync();
@@ -443,7 +443,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             }
         }
 
-        return new AgentSessionEventSummary(
+        return new AgentSessionRuntimeEventSummary(
             resolvedModel,
             failureCategory,
             toolCalls == 0 ? null : toolCalls,
@@ -456,7 +456,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return await db.AgentSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId);
     }
 
-    private static AgentSessionEventInfo ToEventInfo(AgentSessionEventRow e) => new(
+    private static AgentSessionRuntimeEventInfo ToEventInfo(AgentSessionRuntimeEventRow e) => new(
         e.Id.ToString(),
         e.SessionId,
         e.ProjectId,
@@ -596,7 +596,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         string? DisplaySubtitle,
         string? Category);
 
-    private sealed record AgentSessionEventSummary(
+    private sealed record AgentSessionRuntimeEventSummary(
         string? ResolvedModel,
         string? FailureCategory,
         int? ToolCallCount,

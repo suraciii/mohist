@@ -285,7 +285,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Projects");
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionEventRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRuntimeEventRow", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -354,7 +354,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("WorkflowRunId", "SessionName", "Sequence");
 
-                    b.ToTable("AgentSessionEvents", (string)null);
+                    b.ToTable("AgentSessionRuntimeEvents", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>

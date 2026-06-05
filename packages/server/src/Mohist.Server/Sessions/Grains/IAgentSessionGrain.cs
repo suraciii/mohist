@@ -4,7 +4,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 {
     Task<AgentSessionInfo> EnsureAsync(EnsureAgentSessionCommand command);
     Task<AgentSessionInfo> AttachAgentAsync(AttachAgentCommand command);
-    Task<IReadOnlyList<AgentSessionEventInfo>> AppendEventsAsync(AppendAgentSessionEventsCommand command);
+    Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendRuntimeEventsAsync(AppendAgentSessionRuntimeEventsCommand command);
     Task<AgentSessionInfo?> FailIfRunningAsync(string reason);
     Task<AgentSessionInfo?> GetAsync();
 }
@@ -30,14 +30,14 @@ public sealed record AttachAgentCommand(
     [property: Id(4)] int? ProcessPid = null);
 
 [GenerateSerializer]
-public sealed record AppendAgentSessionEventsCommand(
+public sealed record AppendAgentSessionRuntimeEventsCommand(
     [property: Id(0)] string? WorkId = null,
     [property: Id(1)] string? WorkType = null,
     [property: Id(2)] string? Stage = null,
-    [property: Id(3)] IReadOnlyList<AgentSessionEventInput> Events = null!);
+    [property: Id(3)] IReadOnlyList<AgentSessionRuntimeEventInput> Events = null!);
 
 [GenerateSerializer]
-public sealed record AgentSessionEventInput(
+public sealed record AgentSessionRuntimeEventInput(
     [property: Id(0)] string Type,
     [property: Id(1)] string PayloadJson);
 
@@ -80,7 +80,7 @@ public sealed record AgentSessionInfo(
     [property: Id(34)] int? ToolErrorCount);
 
 [GenerateSerializer]
-public sealed record AgentSessionEventInfo(
+public sealed record AgentSessionRuntimeEventInfo(
     [property: Id(0)] string Id,
     [property: Id(1)] string SessionId,
     [property: Id(2)] string ProjectId,

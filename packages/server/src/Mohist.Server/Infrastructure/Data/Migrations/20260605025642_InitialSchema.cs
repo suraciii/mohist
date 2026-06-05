@@ -253,7 +253,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "AgentSessionEvents",
+                name: "AgentSessionRuntimeEvents",
                 columns: table => new
                 {
                     Id = table.Column<long>(type: "INTEGER", nullable: false)
@@ -274,7 +274,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_AgentSessionEvents", x => x.Id);
+                    table.PrimaryKey("PK_AgentSessionRuntimeEvents", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -412,19 +412,19 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 column: "ProjectId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_AgentSessionEvents_ProjectId_IssueNumber_Id",
-                table: "AgentSessionEvents",
+                name: "IX_AgentSessionRuntimeEvents_ProjectId_IssueNumber_Id",
+                table: "AgentSessionRuntimeEvents",
                 columns: new[] { "ProjectId", "IssueNumber", "Id" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_AgentSessionEvents_SessionId_Sequence",
-                table: "AgentSessionEvents",
+                name: "IX_AgentSessionRuntimeEvents_SessionId_Sequence",
+                table: "AgentSessionRuntimeEvents",
                 columns: new[] { "SessionId", "Sequence" },
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_AgentSessionEvents_WorkflowRunId_SessionName_Sequence",
-                table: "AgentSessionEvents",
+                name: "IX_AgentSessionRuntimeEvents_WorkflowRunId_SessionName_Sequence",
+                table: "AgentSessionRuntimeEvents",
                 columns: new[] { "WorkflowRunId", "SessionName", "Sequence" });
 
             migrationBuilder.CreateIndex(
@@ -595,7 +595,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 name: "ProjectWorkflowTemplates");
 
             migrationBuilder.DropTable(
-                name: "AgentSessionEvents");
+                name: "AgentSessionRuntimeEvents");
 
             migrationBuilder.DropTable(
                 name: "AgentSessions");
