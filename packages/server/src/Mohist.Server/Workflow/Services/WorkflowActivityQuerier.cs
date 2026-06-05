@@ -28,16 +28,17 @@ public class WorkflowActivityQuerier
 
         var sessions = await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
         var leases = await LoadLeasesAsync(db, sessions.Select(s => s.WorkflowRunId).Distinct(StringComparer.Ordinal).ToArray(), ct);
-        var domainSessions = sessions.Select(AgentSessionJson.Deserialize).OfType<AgentSession>().ToList();
         var result = new List<ActiveAgentDto>();
 
-        foreach (var session in domainSessions)
+        foreach (var row in sessions)
         {
-            if (!IsLeaseOwnedActiveSession(session, leases)) continue;
+            var session = AgentSessionJson.Deserialize(row);
+            if (session is null) continue;
+            if (!IsLeaseOwnedActiveSession(session, row, leases)) continue;
 
             var status = await _workflowQuerier.GetStatusAsync(session.RunId);
             var pending = status?.PendingWork;
-            if (status is null || pending is null || pending.WorkId != session.TaskId) continue;
+            if (status is null || pending is null || pending.WorkId != row.WorkId) continue;
 
             var currentStage = status.Stages.FirstOrDefault(s => s.Stage == pending.Stage);
             var completed = currentStage?.Tasks.Count(t => string.Equals(t.Status, TaskRunStatus.Completed.ToString(), StringComparison.Ordinal)) ?? 0;
@@ -50,16 +51,16 @@ public class WorkflowActivityQuerier
                 session.IssueNumber,
                 session.ProjectId,
                 session.RunId,
-                session.TaskId ?? string.Empty,
-                session.TaskKind ?? string.Empty,
-                session.Phase,
-                session.Title,
+                row.WorkId ?? string.Empty,
+                row.WorkType ?? string.Empty,
+                row.Stage,
+                null,
                 session.Id,
                 (session.Status.StartedAt ?? session.Status.CreatedAt).ToString("o"),
                 lastActivity,
                 new ActiveAgentProgressDto(
-                    session.Phase,
-                    new ActiveWorkItemDto(session.TaskKind ?? "task", session.TaskId ?? session.RunId, session.Title ?? session.TaskId ?? session.RunId),
+                    row.Stage,
+                    new ActiveWorkItemDto(row.WorkType ?? "task", row.WorkId ?? session.RunId, row.WorkId ?? session.RunId),
                     new TaskProgressDto(completed, total),
                     lastActivity)));
         }
@@ -77,7 +78,7 @@ public class WorkflowActivityQuerier
         return rows.ToDictionary(row => row.WorkflowRunId, row => WorkflowLeaseJson.Deserialize(row.State), StringComparer.Ordinal);
     }
 
-    private static bool IsLeaseOwnedActiveSession(AgentSession session, IReadOnlyDictionary<string, WorkLease?> leases)
+    private static bool IsLeaseOwnedActiveSession(AgentSession session, AgentSessionRow row, IReadOnlyDictionary<string, WorkLease?> leases)
     {
         if (session.Status.CompletedAt is not null || session.Status.Phase is not (AgentSessionStatus.Created or AgentSessionStatus.Running or AgentSessionStatus.Probing))
             return false;
@@ -86,7 +87,7 @@ public class WorkflowActivityQuerier
             return true;
 
         return string.Equals(session.Runtime.RunnerId, lease.RunnerId, StringComparison.Ordinal)
-            && string.Equals(session.TaskId, lease.WorkId, StringComparison.Ordinal);
+            && string.Equals(row.WorkId, lease.WorkId, StringComparison.Ordinal);
     }
 
     private static DateTime LastActivityAt(AgentSession session) =>

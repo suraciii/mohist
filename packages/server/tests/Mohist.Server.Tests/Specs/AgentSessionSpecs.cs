@@ -131,7 +131,7 @@ public class AgentSessionSpecs
         Assert.Equal(currentSession.Id, root.GetProperty("acpSessionId").GetString());
         Assert.False(string.IsNullOrEmpty(root.GetProperty("status").GetString()));
         Assert.Equal(work.Stage, root.GetProperty("stage").GetString());
-        Assert.Equal("Plan session", root.GetProperty("title").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("title").ValueKind);
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
 
         var metadata = root.GetProperty("metadata");
@@ -365,7 +365,7 @@ public class AgentSessionSpecs
     }
 
     [Fact]
-    public async Task EnsureAgentSession_NamedTerminalSessionStartsNewWork()
+    public async Task EnsureAgentSession_TerminalSessionKeyStaysClosedForDifferentWork()
     {
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("named-reuse", sessionName: "check");
 
@@ -393,9 +393,9 @@ public class AgentSessionSpecs
                 "Fix review findings"));
 
         Assert.Equal(session.Id, ensured.Id);
-        Assert.Equal("created", ensured.Status);
-        Assert.Equal("fix-review-findings:1.1", ensured.WorkId);
-        Assert.Null(ensured.CompletedAt);
+        Assert.Equal("completed", ensured.Status);
+        Assert.Equal(work.WorkId, ensured.WorkId);
+        Assert.NotNull(ensured.CompletedAt);
         Assert.Null(ensured.FailureReason);
     }
 

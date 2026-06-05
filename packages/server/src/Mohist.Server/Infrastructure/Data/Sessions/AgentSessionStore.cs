@@ -42,6 +42,9 @@ public class AgentSessionStore : IStateStore<AgentSession>
         }
         else
         {
+            row.WorkId ??= existing.WorkId;
+            row.WorkType ??= existing.WorkType;
+            row.Stage ??= existing.Stage;
             db.Entry(existing).CurrentValues.SetValues(row);
         }
         await db.SaveChangesAsync();
@@ -108,10 +111,7 @@ public static class AgentSessionJson
             .WithLabel(AgentSessionMetadataKeys.IssueNumber, session.IssueNumber == 0 && row.IssueNumber > 0 ? row.IssueNumber.ToString() : null)
             .WithLabel(AgentSessionMetadataKeys.SourceKind, string.IsNullOrWhiteSpace(session.SourceKind) ? "workflow" : null)
             .WithLabel(AgentSessionMetadataKeys.SourceId, string.IsNullOrWhiteSpace(session.RunId) ? row.WorkflowRunId : null)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, string.IsNullOrWhiteSpace(session.SessionName) ? row.SessionName : null)
-            .WithAnnotation(AgentSessionMetadataKeys.TaskId, session.TaskId is null ? row.WorkId : null)
-            .WithAnnotation(AgentSessionMetadataKeys.TaskKind, session.TaskKind is null ? row.WorkType : null)
-            .WithAnnotation(AgentSessionMetadataKeys.Phase, session.Phase is null ? row.Stage : null);
+            .WithLabel(AgentSessionMetadataKeys.SessionName, string.IsNullOrWhiteSpace(session.SessionName) ? row.SessionName : null);
 
         if (string.IsNullOrWhiteSpace(session.Id)
             || string.IsNullOrWhiteSpace(session.ProjectId)

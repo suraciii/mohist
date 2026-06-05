@@ -21,15 +21,15 @@ public sealed class AgentSession
     [JsonIgnore]
     public string? SourceKind => Metadata.Label(AgentSessionMetadataKeys.SourceKind);
     [JsonIgnore]
-    public string? TaskId => Metadata.Annotation(AgentSessionMetadataKeys.TaskId);
+    public string? TaskId => null;
     [JsonIgnore]
-    public string? TaskKind => Metadata.Annotation(AgentSessionMetadataKeys.TaskKind);
+    public string? TaskKind => null;
     [JsonIgnore]
-    public string? Phase => Metadata.Annotation(AgentSessionMetadataKeys.Phase);
+    public string? Phase => null;
     [JsonIgnore]
-    public string? Title => Metadata.Annotation(AgentSessionMetadataKeys.Title);
+    public string? Title => null;
     [JsonIgnore]
-    public string? ChangeDir => Metadata.Annotation(AgentSessionMetadataKeys.ChangeDir);
+    public string? ChangeDir => null;
 
     public static AgentSession Create(
         string id,
@@ -59,11 +59,13 @@ public static class AgentSessionMetadataKeys
     public const string SourceKind = "mohist.io/source-kind";
     public const string SourceId = "mohist.io/source-id";
     public const string SessionName = "mohist.io/session-name";
-    public const string TaskId = "mohist.io/task-id";
-    public const string TaskKind = "mohist.io/task-kind";
-    public const string Phase = "mohist.io/phase";
-    public const string Title = "mohist.io/title";
-    public const string ChangeDir = "mohist.io/change-dir";
+}
+
+public static class AgentSessionKey
+{
+    public const string Workflow = "workflow";
+
+    public static string WorkflowSession(string workflowRunId, string sessionName) => $"workflows/{workflowRunId}/{sessionName}";
 }
 
 public sealed record AgentSessionMetadata(
