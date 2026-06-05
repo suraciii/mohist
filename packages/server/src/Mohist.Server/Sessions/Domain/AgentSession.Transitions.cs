@@ -17,12 +17,13 @@ public static partial class AgentSessionExtensions
             int? issueNumber)
         {
             _ = runnerId;
-            _ = workType;
-            _ = stage;
-            _ = title;
-            _ = workId;
             if (session.IssueNumber == 0 && issueNumber is > 0)
                 session.Metadata = session.Metadata.WithLabel(AgentSessionMetadataKeys.IssueNumber, issueNumber.Value.ToString());
+            session.Metadata = session.Metadata
+                .WithLabel(AgentSessionMetadataKeys.WorkId, workId)
+                .WithLabel(AgentSessionMetadataKeys.WorkType, workType)
+                .WithLabel(AgentSessionMetadataKeys.Stage, stage)
+                .WithAnnotation(AgentSessionMetadataKeys.Title, title);
             return [];
         }
 

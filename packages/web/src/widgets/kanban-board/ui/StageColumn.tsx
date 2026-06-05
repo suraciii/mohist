@@ -7,7 +7,7 @@ import { IssueStatus, type Issue } from '../../../entities/issue'
 import type { SortMode } from '../model/board-query'
 import { archiveAllCompleted } from '../../../entities/issue'
 import { IssueCard } from './IssueCard'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { getStageColors } from '../model/stage-colors'
 
 const DONE_COLLAPSE_LIMIT = 5
@@ -34,6 +34,7 @@ export function StageColumn({
 }: Props & { status: IssueStatus }) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
+  const toProjectPath = useProjectPath()
   const [expanded, setExpanded] = useState(false)
   const colors = getStageColors(status)
 
@@ -147,7 +148,7 @@ export function StageColumn({
             📦 {archivedCount} archived
             {archivedCount > 0 && (
               <a
-                href="/archived"
+                href={toProjectPath('/archived')}
                 className="text-muted-foreground hover:text-foreground/80 underline ml-1"
               >
                 view

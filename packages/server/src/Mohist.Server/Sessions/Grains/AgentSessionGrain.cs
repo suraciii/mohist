@@ -73,7 +73,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             .WithLabel(AgentSessionMetadataKeys.IssueNumber, command.IssueNumber is > 0 ? command.IssueNumber.Value.ToString() : null)
             .WithLabel(AgentSessionMetadataKeys.SourceKind, AgentSessionKey.Workflow)
             .WithLabel(AgentSessionMetadataKeys.SourceId, command.WorkflowRunId)
-            .WithLabel(AgentSessionMetadataKeys.SessionName, command.SessionName);
+            .WithLabel(AgentSessionMetadataKeys.SessionName, command.SessionName)
+            .WithLabel(AgentSessionMetadataKeys.WorkId, command.WorkId)
+            .WithLabel(AgentSessionMetadataKeys.WorkType, command.WorkType)
+            .WithLabel(AgentSessionMetadataKeys.Stage, command.Stage)
+            .WithAnnotation(AgentSessionMetadataKeys.Title, command.Title);
 
     private async Task UpdateProjectionAsync(EnsureAgentSessionCommand command)
     {

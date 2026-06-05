@@ -210,7 +210,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 columns: table => new
                 {
                     Id = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 256, nullable: false),
+                    Name = table.Column<string>(type: "TEXT", maxLength: 63, nullable: false),
                     Path = table.Column<string>(type: "TEXT", nullable: false),
                     BaseBranch = table.Column<string>(type: "TEXT", nullable: false),
                     RepositoriesJson = table.Column<string>(type: "TEXT", nullable: false),

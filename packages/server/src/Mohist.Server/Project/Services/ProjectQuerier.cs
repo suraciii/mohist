@@ -35,8 +35,11 @@ public class ProjectQuerier
 
     public async Task<ProjectInfo?> GetByNameAsync(string name)
     {
+        if (!ProjectName.TryNormalize(name, out var normalized, out _))
+            return null;
+
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var entry = await db.Projects.FirstOrDefaultAsync(p => p.Name == name);
+        var entry = await db.Projects.FirstOrDefaultAsync(p => p.Name == normalized);
         if (entry is null) return null;
         var variables = await LoadProjectVariablesAsync(db, entry.Id);
         return ToInfo(entry, variables);
@@ -44,8 +47,12 @@ public class ProjectQuerier
 
     public async Task<ProjectInfo?> ResolveByIdOrNameAsync(string identifier)
     {
+        var normalizedName = ProjectName.TryNormalize(identifier, out var parsedName, out _)
+            ? parsedName
+            : null;
+
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var entry = await db.Projects.FirstOrDefaultAsync(p => p.Id == identifier || p.Name == identifier);
+        var entry = await db.Projects.FirstOrDefaultAsync(p => p.Id == identifier || (normalizedName != null && p.Name == normalizedName));
         if (entry is null) return null;
         var variables = await LoadProjectVariablesAsync(db, entry.Id);
         return ToInfo(entry, variables);
@@ -53,8 +60,11 @@ public class ProjectQuerier
 
     public async Task<bool> ExistsAsync(string name)
     {
+        if (!ProjectName.TryNormalize(name, out var normalized, out _))
+            return false;
+
         await using var db = await _dbFactory.CreateDbContextAsync();
-        return await db.Projects.AnyAsync(p => p.Name == name);
+        return await db.Projects.AnyAsync(p => p.Name == normalized);
     }
 
     public async Task<ProjectInfo?> ResolveSingleAsync()

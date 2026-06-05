@@ -12,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Project.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.Db;
 
@@ -53,7 +54,7 @@ public class MohistDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256);
-            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(ProjectName.MaxLength).IsRequired();
             entity.Property(e => e.RepositoriesJson).IsRequired();
             entity.HasIndex(e => e.Name).IsUnique();
         });

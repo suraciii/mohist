@@ -13,7 +13,7 @@ import {
   PowerIcon,
   PowerOffIcon,
 } from 'lucide-react'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { useAgentStatus } from '../../../entities/agent'
 import { useDeleteProject } from '../../../entities/project'
 import {
@@ -57,6 +57,7 @@ function isNavActive(pathname: string, to: string): boolean {
 
 function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   const { projectId, setProjectId, projects, currentProject } = useProject()
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -78,6 +79,7 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   function handleSelect(project: Project) {
     setProjectId(project.id)
     setOpen(false)
+    navigate(`/${encodeURIComponent(project.name)}`)
     onNavigate?.()
   }
 
@@ -88,7 +90,9 @@ function ProjectSwitcher({ onNavigate }: { onNavigate?: () => void }) {
         setDeleteConfirmOpen(false)
         setOpen(false)
         const remaining = projects.filter((p) => p.id !== currentProject.id)
-        setProjectId(remaining[0]?.id ?? null)
+        const nextProject = remaining[0] ?? null
+        setProjectId(nextProject?.id ?? null)
+        navigate(nextProject ? `/${encodeURIComponent(nextProject.name)}` : '/')
         onNavigate?.()
       },
     })
@@ -255,6 +259,7 @@ function AgentStatusFooter() {
 export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
   const location = useLocation()
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
@@ -304,12 +309,13 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {primaryNav.map((item) => {
-                const active = isNavActive(location.pathname, item.to)
+                const to = toProjectPath(item.to)
+                const active = isNavActive(location.pathname, to)
                 return (
                   <SidebarMenuItem key={item.key}>
                     <SidebarMenuButton
                       isActive={active}
-                      onClick={() => navigate(item.to)}
+                      onClick={() => navigate(to)}
                       data-testid={`nav-${item.key}`}
                     >
                       <item.icon />
@@ -327,12 +333,13 @@ export function AppSidebar({ onCreateIssue }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu>
               {configureNav.map((item) => {
-                const active = isNavActive(location.pathname, item.to)
+                const to = toProjectPath(item.to)
+                const active = isNavActive(location.pathname, to)
                 return (
                   <SidebarMenuItem key={item.key}>
                     <SidebarMenuButton
                       isActive={active}
-                      onClick={() => navigate(item.to)}
+                      onClick={() => navigate(to)}
                       data-testid={`nav-${item.key}`}
                     >
                       <item.icon />

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate, useParams, Outlet } from 'react-router-dom'
 import { useProjects } from '../entities/project'
 import { LiveTaskProvider } from './providers/LiveTaskProvider'
-import { ProjectProvider, useProject } from '../entities/project'
+import { ProjectProvider, useProject, projectPath } from '../entities/project'
 import { Header } from '../widgets/app-shell'
 import { AppSidebar } from '../widgets/app-shell/ui/AppSidebar'
 import { SidebarProvider, SidebarInset } from '@/shared/ui/components/sidebar'
@@ -47,25 +47,43 @@ function AppContent() {
         <div className="flex-1 min-h-0 flex flex-col pb-14 md:pb-0">
           <Routes>
             <Route element={<ProjectGuard />}>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/issue/:number" element={<NavigateToIssues />} />
-              <Route path="/issue/:number/files" element={<NavigateToIssues />} />
-              <Route path="/issue/:number/session/:sessionId" element={<NavigateToIssues />} />
-              <Route path="/issue/:number/workflow/sessions/:sessionName" element={<NavigateToIssues />} />
-              <Route path="/issues/:number" element={<IssueDetailPage />} />
-              <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-              <Route path="/issues/:number/session/:sessionId" element={<SessionPage />} />
-              <Route path="/issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
-              <Route path="/activity" element={<ActivityPage />} />
-              <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
-              <Route path="/settings/:section" element={<SettingsPage />} />
-              <Route path="/logs" element={<LogsPage />} />
-              <Route path="/archived" element={<ArchivedPage />} />
-              <Route path="/epics" element={<EpicListPage />} />
-              <Route path="/epic/:id" element={<EpicDetailPage />} />
+              <Route path="/" element={<NavigateToCurrentProject />} />
+              <Route path="/issue/:number" element={<NavigateLegacyIssue />} />
+              <Route path="/issue/:number/files" element={<NavigateLegacyIssue />} />
+              <Route path="/issue/:number/session/:sessionId" element={<NavigateLegacyIssue />} />
+              <Route path="/issue/:number/workflow/sessions/:sessionName" element={<NavigateLegacyIssue />} />
+              <Route path="/issues/:number" element={<NavigateLegacyPath />} />
+              <Route path="/issues/:number/files" element={<NavigateLegacyPath />} />
+              <Route path="/issues/:number/session/:sessionId" element={<NavigateLegacyPath />} />
+              <Route path="/issues/:number/workflow/sessions/:sessionName" element={<NavigateLegacyPath />} />
+              <Route path="/activity" element={<NavigateLegacyPath />} />
+              <Route path="/settings" element={<NavigateLegacyPath path="/settings/ai" />} />
+              <Route path="/settings/:section" element={<NavigateLegacyPath />} />
+              <Route path="/logs" element={<NavigateLegacyPath />} />
+              <Route path="/archived" element={<NavigateLegacyPath />} />
+              <Route path="/epics" element={<NavigateLegacyPath />} />
+              <Route path="/epic/:id" element={<NavigateLegacyEpic />} />
+              <Route path="/:projectName" element={<ProjectRouteScope />}>
+                <Route index element={<HomePage />} />
+                <Route path="issue/:number" element={<NavigateToIssues />} />
+                <Route path="issue/:number/files" element={<NavigateToIssues />} />
+                <Route path="issue/:number/session/:sessionId" element={<NavigateToIssues />} />
+                <Route path="issue/:number/workflow/sessions/:sessionName" element={<NavigateToIssues />} />
+                <Route path="issues/:number" element={<IssueDetailPage />} />
+                <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
+                <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
+                <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
+                <Route path="activity" element={<ActivityPage />} />
+                <Route path="settings" element={<Navigate to="settings/ai" replace />} />
+                <Route path="settings/:section" element={<SettingsPage />} />
+                <Route path="logs" element={<LogsPage />} />
+                <Route path="archived" element={<ArchivedPage />} />
+                <Route path="epics" element={<EpicListPage />} />
+                <Route path="epics/:id" element={<EpicDetailPage />} />
+              </Route>
             </Route>
           </Routes>
-          {location.pathname === '/' && <FAB onClick={() => setCreateIssueOpen(true)} />}
+          {isProjectRoot(location.pathname) && <FAB onClick={() => setCreateIssueOpen(true)} />}
         </div>
         <MobileBottomNav />
       </SidebarInset>
@@ -77,7 +95,62 @@ function AppContent() {
 
 function NavigateToIssues() {
   const location = useLocation()
-  return <Navigate to={location.pathname.replace(/^\/issue\//, '/issues/')} replace />
+  return <Navigate to={location.pathname.replace(/\/issue\//, '/issues/')} replace />
+}
+
+function NavigateToCurrentProject() {
+  const { currentProject } = useProject()
+  return <Navigate to={projectPath(currentProject?.name)} replace />
+}
+
+function NavigateLegacyPath({ path }: { path?: string } = {}) {
+  const location = useLocation()
+  const { currentProject } = useProject()
+  return <Navigate to={projectPath(currentProject?.name, path ?? location.pathname)} replace />
+}
+
+function NavigateLegacyIssue() {
+  const location = useLocation()
+  const { currentProject } = useProject()
+  return <Navigate to={projectPath(currentProject?.name, location.pathname.replace(/^\/issue\//, '/issues/'))} replace />
+}
+
+function NavigateLegacyEpic() {
+  const params = useParams<{ id?: string }>()
+  const { currentProject } = useProject()
+  return <Navigate to={projectPath(currentProject?.name, `/epics/${params.id ?? ''}`)} replace />
+}
+
+function ProjectRouteScope() {
+  const { projectName } = useParams<{ projectName?: string }>()
+  const { projects, setProjectId, currentProject } = useProject()
+
+  useEffect(() => {
+    if (!projectName || projects.length === 0) return
+    const project = projects.find((candidate) => candidate.name === projectName)
+    if (project && project.id !== currentProject?.id) {
+      setProjectId(project.id)
+    }
+  }, [currentProject?.id, projectName, projects, setProjectId])
+
+  return <ProjectNameGuard projectName={projectName} />
+}
+
+function ProjectNameGuard({ projectName }: { projectName?: string }) {
+  const { projects, currentProject } = useProject()
+
+  if (!projectName || projects.length === 0) return <HomePage />
+  const project = projects.find((candidate) => candidate.name === projectName)
+  if (!project) {
+    return <Navigate to="/" replace />
+  }
+  if (currentProject?.id !== project.id) return null
+
+  return <Outlet />
+}
+
+function isProjectRoot(pathname: string) {
+  return pathname.split('/').filter(Boolean).length === 1
 }
 
 export default function App() {

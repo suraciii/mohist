@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ActivityIcon, ListTodoIcon, MenuIcon } from 'lucide-react'
 import { useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
+import { useProjectPath } from '../../../entities/project'
 
 interface Tab {
   label: string
@@ -15,6 +16,7 @@ export function MobileBottomNav() {
   const location = useLocation()
   const navigate = useNavigate()
   const { setOpenMobile } = useSidebar()
+  const toProjectPath = useProjectPath()
 
   const tabs: Tab[] = [
     {
@@ -40,15 +42,16 @@ export function MobileBottomNav() {
 
   function isActive(tab: Tab) {
     if (tab.action) return false
-    if (tab.path === '/') return location.pathname === '/'
-    return location.pathname === tab.path || location.pathname.startsWith(`${tab.path}/`)
+    const path = toProjectPath(tab.path)
+    if (path === '/') return location.pathname === '/'
+    return location.pathname === path || location.pathname.startsWith(`${path}/`)
   }
 
   function handleClick(tab: Tab) {
     if (tab.action) {
       tab.action()
     } else {
-      navigate(tab.path)
+      navigate(toProjectPath(tab.path))
     }
   }
 

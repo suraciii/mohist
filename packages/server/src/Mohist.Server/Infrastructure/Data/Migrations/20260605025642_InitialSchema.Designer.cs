@@ -266,7 +266,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(256)
+                        .HasMaxLength(63)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Path")

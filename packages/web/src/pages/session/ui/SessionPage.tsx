@@ -6,7 +6,7 @@ import { useCoderSessions } from '../../../entities/coder-session'
 import { getAgentSessionMetadata, getAgentSessionEvents } from '../../../entities/coder-session'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { useSessionTranscript, projectTurn } from '../../../widgets/session-transcript'
 import type { AgentSessionMetadata, AgentSessionEvent, SessionMetadata, SessionStatusKind, CoderSessionDetail } from '../../../entities/coder-session'
 import { SessionTranscriptLayout } from '../../../widgets/session-transcript'
@@ -153,12 +153,13 @@ function StatusBadge({ kind, failureReason }: { kind: StatusKind; failureReason?
 }
 
 function SessionNotFound({ issueNumber }: { issueNumber: number }) {
+  const toProjectPath = useProjectPath()
   return (
     <div className="flex items-center justify-center flex-1">
       <div className="text-center space-y-3">
         <div className="text-gray-400 text-lg">Session not found</div>
         <Link
-          to={`/issues/${issueNumber}`}
+          to={toProjectPath(`/issues/${issueNumber}`)}
           className="text-sm text-blue-600 hover:text-blue-800 underline"
         >
           Back to issue #{issueNumber}
@@ -177,13 +178,14 @@ function SessionLoadingState() {
 }
 
 function SessionApiErrorState({ issueNumber }: { issueNumber: number }) {
+  const toProjectPath = useProjectPath()
   return (
     <div className="flex items-center justify-center flex-1">
       <div className="text-center space-y-3">
         <div className="text-red-400 text-lg">Failed to load session</div>
         <p className="text-gray-500 text-sm">An error occurred while fetching session data.</p>
         <Link
-          to={`/issues/${issueNumber}`}
+          to={toProjectPath(`/issues/${issueNumber}`)}
           className="text-sm text-blue-600 hover:text-blue-800 underline"
         >
           Back to issue #{issueNumber}
@@ -205,13 +207,14 @@ function SessionWaitingState() {
 }
 
 function SessionEmptyState({ issueNumber }: { issueNumber: number }) {
+  const toProjectPath = useProjectPath()
   return (
     <div className="flex items-center justify-center flex-1">
       <div className="text-center space-y-3">
         <div className="text-gray-400 text-lg">No activity recorded for this session</div>
         <p className="text-gray-500 text-sm">This session has no recorded transcript data.</p>
         <Link
-          to={`/issues/${issueNumber}`}
+          to={toProjectPath(`/issues/${issueNumber}`)}
           className="text-sm text-blue-600 hover:text-blue-800 underline"
         >
           Back to issue #{issueNumber}

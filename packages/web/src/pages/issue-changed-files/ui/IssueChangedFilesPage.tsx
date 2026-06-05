@@ -8,6 +8,7 @@ import type { FileBlock } from '../../../widgets/issue-changed-files'
 import type { IssueCommitsResponse, CommitEntry } from '../../../entities/issue'
 import { Button } from '@/shared/ui/components/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/components/select'
+import { useProjectPath } from '../../../entities/project'
 
 type ExpandState = 'all' | 'none' | 'mixed'
 type DiffMode = 'unified' | 'split'
@@ -58,10 +59,11 @@ function formatRelativeTime(iso: string): string {
 
 function BackToIssueButton({ issueNumber }: { issueNumber: number }) {
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   return (
     <Button
       variant="link"
-      onClick={() => navigate(`/issues/${issueNumber}`)}
+      onClick={() => navigate(toProjectPath(`/issues/${issueNumber}`))}
       className="mb-4 h-auto p-0 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 transition-colors"
     >
       <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -162,6 +164,7 @@ function DiffSummaryCard({
 
 function ErrorState({ issueNumber, issueError, diffError }: { issueNumber: number; issueError: boolean; diffError: boolean }) {
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 w-full">
@@ -170,7 +173,7 @@ function ErrorState({ issueNumber, issueError, diffError }: { issueNumber: numbe
           <p className="text-sm text-red-700 mb-4">
             {issueError ? 'Failed to load issue details.' : diffError ? 'Failed to load issue diff.' : 'Failed to load issue commits.'}
           </p>
-          <Button variant="link" onClick={() => navigate(`/issues/${issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
+          <Button variant="link" onClick={() => navigate(toProjectPath(`/issues/${issueNumber}`))} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
             View issue detail
           </Button>
         </div>
@@ -181,12 +184,13 @@ function ErrorState({ issueNumber, issueError, diffError }: { issueNumber: numbe
 
 function InvalidIssueState() {
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 w-full">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6">
           <p className="text-sm text-red-700 mb-4">Invalid issue number</p>
-          <Button variant="link" onClick={() => navigate('/')} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
+          <Button variant="link" onClick={() => navigate(toProjectPath())} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">
             Back to board
           </Button>
         </div>

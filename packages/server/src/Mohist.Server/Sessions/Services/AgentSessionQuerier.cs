@@ -132,7 +132,7 @@ public class AgentSessionQuerier
             StatusName(domainSession),
             domainSession.Settings.Model,
             session.Stage,
-            null,
+            domainSession.Title,
             domainSession.Status.CreatedAt.ToString("o"),
             domainSession.Status.CompletedAt?.ToString("o"),
             eventSummary.ResolvedModel,
@@ -454,7 +454,7 @@ public class AgentSessionQuerier
         var usage = Usage(s);
         return new AgentSessionDto(
             s.Id, s.ProjectId, IssueNumber(s), s.RunId, s.SessionName,
-            row.WorkId, row.WorkType, row.Stage, null, s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
+            row.WorkId, row.WorkType, row.Stage, s.Title, s.Runtime.RunnerId, s.Status.AgentRuntimeSessionId,
             StatusName(s), s.Settings.Model, s.Runtime.WorkDir, s.ChangeDir, null,
             s.Status.CreatedAt.ToString("o"), s.Status.StartedAt?.ToString("o"), s.Status.CompletedAt?.ToString("o"),
             s.Status.LastDataAt?.ToString("o"), s.Status.FailureReason, s.Status.ExitCode,
@@ -476,9 +476,9 @@ public class AgentSessionQuerier
     {
         var usage = Usage(s);
         return new AgentSessionSummaryDto(
-            s.Id, s.SessionName, s.Status.AgentRuntimeSessionId ?? s.Id, row.WorkId, null,
+            s.Id, s.SessionName, s.Status.AgentRuntimeSessionId ?? s.Id, row.WorkId, s.Title,
             StatusName(s), s.Status.CreatedAt.ToString("o"), s.Status.CompletedAt?.ToString("o"),
-            s.Settings.Model, null, row.Stage, null,
+            s.Settings.Model, null, row.Stage, s.Title,
             s.Status.LastDataAt?.ToString("o"), null, null, s.Status.FailureReason,
             null, usage.InputTokens, usage.OutputTokens,
             usage.TotalTokens, usage.CachedReadTokens, usage.ThoughtTokens,

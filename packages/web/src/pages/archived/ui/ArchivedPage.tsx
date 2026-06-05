@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useArchivedIssues } from '../../../entities/issue'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { getLabelStyle, sortLabels } from '../../../shared/lib/label-colors'
 import { formatRelativeTime } from '../../../shared/lib/relative-time'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
@@ -11,6 +11,7 @@ import { Input } from '@/shared/ui/components/input'
 export function ArchivedPage() {
   const { projectId } = useProject()
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const { data: archivedIssues, isLoading } = useArchivedIssues(
     projectId ? { projectId } : undefined,
   )
@@ -38,7 +39,7 @@ export function ArchivedPage() {
       <div className="max-w-3xl mx-auto px-6 py-6">
         <Button
           variant="link"
-          onClick={() => navigate('/')}
+          onClick={() => navigate(toProjectPath())}
           className="mb-4 inline-flex h-auto gap-1 px-0 text-muted-foreground"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -92,7 +93,7 @@ export function ArchivedPage() {
               return (
                 <a
                   key={issue.id}
-                  href={`/issues/${issue.number}`}
+                  href={toProjectPath(`/issues/${issue.number}`)}
                   className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors p-4"
                 >
                   <div className="flex items-start justify-between gap-3">

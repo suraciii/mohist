@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { IssueStatus, type Issue } from '../../../entities/issue'
 import { useIssues } from '../../../entities/issue'
 import {
@@ -74,11 +74,13 @@ function issueStatusTone(health: string) {
 }
 
 function LinkedIssueRow({ issue, onRemove, disabled }: { issue: LinkedIssue; onRemove: (issueId: string) => void; disabled: boolean }) {
+  const toProjectPath = useProjectPath()
+
   return (
     <Card className="flex items-center justify-between gap-4 p-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <Link to={`/issues/${issue.number}`} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
+          <Link to={toProjectPath(`/issues/${issue.number}`)} className="font-medium text-blue-600 hover:text-blue-700 hover:underline">
             #{issue.number}
           </Link>
           <span className={`rounded px-2 py-0.5 text-xs font-medium ${issueStatusTone(issue.health)}`}>{issue.health}</span>
@@ -282,6 +284,7 @@ function EpicIssueSelector({ candidates, value, onChange, hasSelectableCandidate
 export function EpicDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const { projectId } = useProject()
   const { data: epic, isLoading } = useEpic(id)
   const { data: issues } = useIssues(projectId ? { projectId } : undefined)
@@ -316,7 +319,7 @@ export function EpicDetailPage() {
           <Button
             type="button"
             variant="link"
-            onClick={() => navigate('/epics')}
+            onClick={() => navigate(toProjectPath('/epics'))}
             className="mt-4"
           >
             Back to Epics
@@ -363,7 +366,7 @@ export function EpicDetailPage() {
         <Button
           type="button"
           variant="link"
-          onClick={() => navigate('/epics')}
+          onClick={() => navigate(toProjectPath('/epics'))}
           className="px-0"
         >
           Back to Epics
@@ -430,7 +433,7 @@ export function EpicDetailPage() {
           <div className="rounded-lg bg-muted p-4">
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next Issue</div>
             {epic.progress.nextIssue ? (
-              <Link to={`/issues/${epic.progress.nextIssue.number}`} className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
+              <Link to={toProjectPath(`/issues/${epic.progress.nextIssue.number}`)} className="mt-2 block text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline">
                 #{epic.progress.nextIssue.number} {epic.progress.nextIssue.title}
               </Link>
             ) : epic.progress.readyToMarkDone ? (
