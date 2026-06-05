@@ -51,7 +51,6 @@ const WORKFLOW_STAGE_LABELS: Record<WorkflowStage, string> = {
 
 function stageToIssueStatus(stage: WorkflowStage | undefined): IssueStatus {
   if (!stage) return IssueStatus.Backlog
-  if (stage === WorkflowStage.Plan) return IssueStatus.Todo
   if (stage === WorkflowStage.Done) return IssueStatus.Done
   return IssueStatus.InProgress
 }

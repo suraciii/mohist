@@ -19,7 +19,7 @@ function makeIssue(overrides: Partial<Issue> & { id: string }): Issue {
 describe('groupIssuesByStage', () => {
   it('returns empty columns when no issues', () => {
     const cols = groupIssuesByStage([])
-    expect(cols).toHaveLength(5)
+    expect(cols).toHaveLength(4)
     for (const col of cols) {
       expect(col.issues).toEqual([])
     }
@@ -28,12 +28,11 @@ describe('groupIssuesByStage', () => {
   it('groups active issues by their stage', () => {
     const issues = [
       makeIssue({ id: '1', status: IssueStatus.Backlog }),
-      makeIssue({ id: '2', status: IssueStatus.Todo }),
+      makeIssue({ id: '2', status: IssueStatus.Backlog }),
       makeIssue({ id: '3', status: IssueStatus.InProgress, workflowStage: WorkflowStage.Build }),
     ]
     const cols = groupIssuesByStage(issues)
-    expect(cols.find((c) => c.key === IssueStatus.Backlog)!.issues).toHaveLength(1)
-    expect(cols.find((c) => c.key === IssueStatus.Todo)!.issues).toHaveLength(1)
+    expect(cols.find((c) => c.key === IssueStatus.Backlog)!.issues).toHaveLength(2)
     expect(cols.find((c) => c.key === IssueStatus.InProgress)!.issues).toHaveLength(1)
   })
 

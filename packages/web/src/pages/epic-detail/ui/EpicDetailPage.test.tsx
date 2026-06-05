@@ -506,7 +506,7 @@ const searchIssues = [
     id: 'issue-archived',
     number: 4,
     title: 'Archived candidate',
-    status: 'todo' as const,
+    status: 'backlog' as const,
     archivedAt: '2026-01-15T00:00:00Z',
   },
   {
@@ -524,7 +524,7 @@ const searchIssues = [
       startable: false,
       reason: 'waiting-for-completion',
       message: 'Waiting for #1',
-      waitingForCompletion: [{ issueId: 'issue-1', number: 1, title: 'Done issue', completed: false, status: 'todo', health: 'active' }],
+      waitingForCompletion: [{ issueId: 'issue-1', number: 1, title: 'Done issue', completed: false, status: 'backlog', health: 'active' }],
     },
   },
   { id: 'issue-2', number: 2, title: 'Blocked issue', status: 'in_progress' as const },
@@ -624,7 +624,7 @@ describe('EpicDetailPage searchable Add Issue', () => {
     mocks.useEpic.mockReturnValue({ data: blockedEpic, isLoading: false })
     mocks.useIssues.mockReturnValue({
       data: [
-        { id: 'issue-archived', number: 4, title: 'Archived candidate', status: 'todo' as const, archivedAt: '2026-01-15T00:00:00Z' },
+        { id: 'issue-archived', number: 4, title: 'Archived candidate', status: 'backlog' as const, archivedAt: '2026-01-15T00:00:00Z' },
         { id: 'issue-closed', number: 5, title: 'Closed candidate', status: 'done' as const },
       ],
     })

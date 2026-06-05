@@ -160,7 +160,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task CancelAsync()
     {
         EnsureIssue();
-        if (_issue!.WorkflowRunId is { } wrId)
+        if (_issue!.ActiveWorkflowRunId is { } wrId)
         {
             var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
             await wfGrain.StopAsync("issue-closed");
@@ -215,7 +215,7 @@ public class IssueGrain : Grain, IIssueGrain
     {
         EnsureIssue();
 
-        var wrId = _issue!.WorkflowRunId;
+        var wrId = _issue!.ActiveWorkflowRunId;
         if (wrId is null) return null;
 
         var wfStatus = await _workflowQuerier.GetStatusAsync(wrId);

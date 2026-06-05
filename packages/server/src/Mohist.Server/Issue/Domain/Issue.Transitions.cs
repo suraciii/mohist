@@ -34,7 +34,7 @@ public sealed partial class Issue
         if (title != null) _title = RequireTitle(title);
         if (body != null) _body = body;
         if (labels != null) _labels = labels;
-        if (priority != null) _priority = NormalizePriority(priority);
+        if (priority != null) _priority = IssuePriority.From(priority);
         Touch(now);
     }
 
@@ -42,16 +42,16 @@ public sealed partial class Issue
     {
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
             throw new InvalidOperationException($"Issue #{Number} is {_status}");
-        if (_workflowRunId is not null)
-            throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
-        _workflowRunId = wrId;
+        if (_activeWorkflowRunId is not null)
+            throw new InvalidOperationException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
+        _activeWorkflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         Touch(now);
     }
 
     public bool Complete(string workflowRunId, DateTime? now = null)
     {
-        if (_workflowRunId != workflowRunId) return false;
+        if (_activeWorkflowRunId != workflowRunId) return false;
         if (_status == IssueStatus.Done) return false;
         if (_status != IssueStatus.InProgress)
             throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
@@ -80,7 +80,6 @@ public sealed partial class Issue
         if (_status == IssueStatus.Done || _archivedAt != null)
             throw new InvalidOperationException($"Issue #{Number} cannot close");
         _status = IssueStatus.Cancelled;
-        _workflowRunId = null;
         Touch(now);
     }
 

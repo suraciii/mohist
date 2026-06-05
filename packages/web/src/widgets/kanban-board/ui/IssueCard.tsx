@@ -123,15 +123,7 @@ function WorkflowStagePill({ issue }: { issue: Issue }) {
   const colors = getStageColors(
     issue.status === IssueStatus.Done
       ? IssueStatus.Done
-      : stage === WorkflowStage.Plan
-        ? IssueStatus.Todo
-        : stage === WorkflowStage.Build
-          ? IssueStatus.InProgress
-          : stage === WorkflowStage.Check
-            ? IssueStatus.InProgress
-            : stage === WorkflowStage.Integrate
-              ? IssueStatus.InProgress
-              : IssueStatus.Backlog,
+      : IssueStatus.InProgress,
   )
 
   return (

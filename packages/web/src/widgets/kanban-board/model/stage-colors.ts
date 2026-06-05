@@ -20,12 +20,6 @@ export const STAGE_COLORS: Record<IssueStatus, StageColorScheme> = {
     activeBg: 'bg-gray-50',
     activeBorder: 'border-gray-200',
   },
-  [IssueStatus.Todo]: {
-    accent: '#3b82f6',
-    labelClass: 'text-blue-700',
-    activeBg: 'bg-blue-50/60',
-    activeBorder: 'border-blue-200',
-  },
   [IssueStatus.InProgress]: {
     accent: '#f59e0b',
     labelClass: 'text-amber-700',

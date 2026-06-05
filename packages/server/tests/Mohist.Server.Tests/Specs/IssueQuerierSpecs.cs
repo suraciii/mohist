@@ -36,7 +36,7 @@ public class IssueQuerierSpecs
             Title = "Query me",
             Labels = ["bug"],
             Priority = "p1",
-            Status = Issue.Domain.IssueStatus.Todo,
+            Status = Issue.Domain.IssueStatus.Backlog,
         };
 
         db.Issues.Add(new IssueRow
@@ -48,11 +48,11 @@ public class IssueQuerierSpecs
 
         var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
 
-        var list = await service.ListAsync(project.Id, project, stage: "todo", label: "bug");
+        var list = await service.ListAsync(project.Id, project, stage: "backlog", label: "bug");
 
         var item = Assert.Single(list);
         Assert.Equal("Query me", item.Title);
-        Assert.Equal("todo", item.Status);
+        Assert.Equal("backlog", item.Status);
         Assert.Equal("Project One", item.ProjectName);
     }
 
@@ -70,7 +70,7 @@ public class IssueQuerierSpecs
             Title = "Id keyed issue",
             Labels = ["feature"],
             Priority = "p2",
-            Status = Issue.Domain.IssueStatus.Todo,
+            Status = Issue.Domain.IssueStatus.Backlog,
         };
 
         db.Issues.Add(new IssueRow
@@ -111,7 +111,7 @@ public class IssueQuerierSpecs
             Title = "Canonical title",
             Labels = [],
             Priority = "p2",
-            Status = Issue.Domain.IssueStatus.Todo,
+            Status = Issue.Domain.IssueStatus.Backlog,
         };
 
         db.Issues.Add(new IssueRow

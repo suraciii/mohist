@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Mohist.Server.Issue.Domain;
 
 public sealed partial class Issue
@@ -5,13 +7,13 @@ public sealed partial class Issue
     private string _title = null!;
     private string? _body;
     private string[] _labels = [];
-    private string _priority = "p2";
+    private IssuePriority _priority = IssuePriority.Default;
     private DateTime _updatedAt;
     private DateTime? _archivedAt;
-    private string? _workflowRunId;
+    private string? _activeWorkflowRunId;
     private IssueStatus _status = IssueStatus.Backlog;
     private int[] _prerequisiteNumbers = [];
-    private string? _repositoryRef;
+    private IssueRepositoryRef? _repositoryRef;
 
     public required string Id { get; init; }
     public required string ProjectId { get; init; }
@@ -37,8 +39,8 @@ public sealed partial class Issue
 
     public string Priority
     {
-        get => _priority;
-        init => _priority = NormalizePriority(value);
+        get => _priority.Value;
+        init => _priority = IssuePriority.From(value);
     }
 
     public DateTime CreatedAt { get; init; }
@@ -55,10 +57,17 @@ public sealed partial class Issue
         init => _archivedAt = value;
     }
 
+    [JsonIgnore]
+    public string? ActiveWorkflowRunId
+    {
+        get => _activeWorkflowRunId;
+        init => _activeWorkflowRunId = NormalizeOptional(value);
+    }
+
     public string? WorkflowRunId
     {
-        get => _workflowRunId;
-        init => _workflowRunId = value;
+        get => ActiveWorkflowRunId;
+        init => _activeWorkflowRunId = NormalizeOptional(value);
     }
 
     public IssueStatus Status
@@ -75,8 +84,8 @@ public sealed partial class Issue
 
     public string? RepositoryRef
     {
-        get => _repositoryRef;
-        init => _repositoryRef = NormalizeOptional(value);
+        get => _repositoryRef?.Value;
+        init => _repositoryRef = IssueRepositoryRef.From(value);
     }
 
     private static string RequireTitle(string title)
@@ -85,9 +94,6 @@ public sealed partial class Issue
             throw new ArgumentException("Issue title is required", nameof(title));
         return title;
     }
-
-    private static string NormalizePriority(string? priority) =>
-        string.IsNullOrWhiteSpace(priority) ? "p2" : priority;
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;

@@ -178,7 +178,6 @@ public class IssueApiSpecs
 
             Assert.Equal(1, status.Issues);
             Assert.Equal(1, status.IssuesByStatus["in_progress"]);
-            Assert.Contains("ready", status.IssuesByStatus.Keys);
             Assert.Contains("cancelled", status.IssuesByStatus.Keys);
             Assert.DoesNotContain("plan", status.IssuesByStatus.Keys);
             Assert.DoesNotContain("build", status.IssuesByStatus.Keys);

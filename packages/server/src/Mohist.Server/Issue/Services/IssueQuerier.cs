@@ -136,7 +136,7 @@ public class IssueQuerier
             CreatedAt = issue.CreatedAt.ToString("o"),
             UpdatedAt = issue.UpdatedAt.ToString("o"),
             ArchivedAt = issue.ArchivedAt?.ToString("o"),
-            WorkflowRunId = issue.WorkflowRunId,
+            WorkflowRunId = issue.ActiveWorkflowRunId,
             WorkflowProfileId = IssueWorkflowProfiles.DefaultId,
             PrerequisiteNumbers = issue.PrerequisiteNumbers,
             Repository = resolution.Repository,
