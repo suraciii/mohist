@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useProjectPath } from '../../../entities/project'
 import type { CoderSessionSummary } from '../../../entities/coder-session'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
 
@@ -83,9 +84,10 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 export function SessionHeader({ session, issueNumber, showTranscriptLink }: SessionHeaderProps) {
+  const toProjectPath = useProjectPath()
   const label = getSessionLabel(session)
   const sessionName = session.sessionName ?? session.executionId ?? session.id
-  const transcriptPath = `/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`
+  const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`)
   const startTime = formatTime(session.createdAt)
 
   const isActive = session.status === 'running' || session.status === 'probing'

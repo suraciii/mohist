@@ -51,7 +51,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         await projectGrain.AddRepositoryAsync("secondary", "/proj/secondary-new", "git@secondary.example:repo-new.git", "release");
 
         // When the user opens the workspace diff.
-        using var diffResponse = await _client.GetAsync($"/api/issues/{issue.Number}/diff?projectId={projectId}");
+        using var diffResponse = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/diff");
         Assert.Equal(HttpStatusCode.OK, diffResponse.StatusCode);
         var diff = JsonDocument.Parse(await diffResponse.Content.ReadAsStringAsync()).RootElement;
         var data = diff.GetProperty("data");
@@ -79,10 +79,10 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         await projectGrain.RemoveRepositoryAsync("secondary");
 
         // When the user requests workspace diff/file-content/worktree-status/cleanup endpoints.
-        using var diff = await _client.GetAsync($"/api/issues/{issue.Number}/diff?projectId={projectId}");
-        using var fileContent = await _client.GetAsync($"/api/issues/{issue.Number}/file-content?projectId={projectId}&path=a.txt");
-        using var worktreeStatus = await _client.GetAsync($"/api/issues/{issue.Number}/worktree-status?projectId={projectId}");
-        using var cleanup = await _client.PostAsync($"/api/issues/{issue.Number}/cleanup?projectId={projectId}", null);
+        using var diff = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/diff");
+        using var fileContent = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/file-content?path=a.txt");
+        using var worktreeStatus = await _client.GetAsync($"/api/projects/{projectId}/issues/{issue.Number}/worktree-status");
+        using var cleanup = await _client.PostAsync($"/api/projects/{projectId}/issues/{issue.Number}/cleanup", null);
 
         // Then each endpoint returns a clear repository configuration problem instead of
         // silently using stale issue repository data or falling back to "main".
@@ -118,7 +118,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
         // When the user queues a rebase without specifying a base branch.
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues/{issue.Number}/rebase?projectId={projectId}",
+            $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
 
         // Then the queued rebase task uses the current project repository base branch
@@ -141,7 +141,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
         // When the user queues a rebase.
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues/{issue.Number}/rebase?projectId={projectId}",
+            $"/api/projects/{projectId}/issues/{issue.Number}/rebase",
             new { });
 
         // Then the endpoint returns a clear repository configuration problem instead of
@@ -164,7 +164,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
         // When the user archives the issue.
         using var response = await _client.PostAsync(
-            $"/api/issues/{issue.Number}/archive?projectId={projectId}",
+            $"/api/projects/{projectId}/issues/{issue.Number}/archive",
             null);
 
         // Then the endpoint returns a clear repository configuration problem instead of
@@ -193,7 +193,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     private async Task<IssueDto> CreateIssueAsync(string projectId, string title, string? repositoryName = null)
     {
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues?projectId={projectId}",
+            $"/api/projects/{projectId}/issues",
             new { title, repositoryName });
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -204,7 +204,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
 
     private async Task StartIssueAndClaimRunnerAsync(string projectId, int number)
     {
-        await _client.PostOkAsync($"/api/issues/{number}/start?projectId={projectId}");
+        await _client.PostOkAsync($"/api/projects/{projectId}/issues/{number}/start");
 
         var runnerId = $"repo-resolution-runner-{Guid.NewGuid():N}";
         await _client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -214,7 +214,7 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
             projectId,
         });
 
-        var issue = await _client.GetDataAsync<IssueDto>($"/api/issues/{number}?projectId={projectId}");
+        var issue = await _client.GetDataAsync<IssueDto>($"/api/projects/{projectId}/issues/{number}");
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
         var issueStatus = await issueGrain.GetWorkflowStatusAsync();
         var wrId = issueStatus!.WorkflowRunId!;

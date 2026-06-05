@@ -315,6 +315,7 @@ interface ReaderPaneProps {
 
 function ReaderPane(props: ReaderPaneProps) {
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   if (props.isCommitDiffLoading) return <CenteredReaderMessage>Loading commit diff...</CenteredReaderMessage>
   if (props.isCommitDiffError) {
     return (
@@ -322,7 +323,7 @@ function ReaderPane(props: ReaderPaneProps) {
         <div>Failed to load commit diff.</div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={props.onExitCommitMode}>Exit commit mode</Button>
-          <Button variant="link" onClick={() => navigate(`/issues/${props.issueNumber}`)} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">Back to issue</Button>
+          <Button variant="link" onClick={() => navigate(toProjectPath(`/issues/${props.issueNumber}`))} className="h-auto p-0 text-sm text-blue-600 hover:text-blue-700">Back to issue</Button>
         </div>
       </div>
     )

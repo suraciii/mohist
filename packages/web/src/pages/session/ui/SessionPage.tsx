@@ -259,6 +259,7 @@ interface SessionHeaderProps {
 }
 
 function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }: SessionHeaderProps) {
+  const toProjectPath = useProjectPath()
   const isTerminal = statusKind === 'completed' || statusKind === 'failed'
   const createdAt = meta?.createdAt ?? new Date().toISOString()
   const completedAt = meta?.completedAt ?? null
@@ -291,7 +292,7 @@ function SessionHeader({ issueNumber, issueTitle, meta, statusKind, turnCount }:
     <div className="border-b border-gray-200 bg-white px-4 py-3 shrink-0">
       <div className="flex items-center gap-2 text-sm mb-2">
         <Link
-          to={`/issues/${issueNumber}`}
+          to={toProjectPath(`/issues/${issueNumber}`)}
           className="flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors"
         >
           <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">

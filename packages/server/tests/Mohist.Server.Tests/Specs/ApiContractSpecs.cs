@@ -69,7 +69,7 @@ public class ApiContractSpecs
         });
         try
         {
-            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/opencode/models?projectId={projectId}");
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{projectId}/opencode/models");
 
             Assert.Contains("zai/glm-5", response.Models);
             Assert.Contains("openai/gpt-5.5", response.Models);
@@ -98,7 +98,7 @@ public class ApiContractSpecs
                 maxWorkflowSlots = 4,
             });
 
-            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/agent/status?projectId={projectId}");
+            var status = await _fixture.Client.GetDataAsync<AgentStatusDto>($"/api/projects/{projectId}/agent/status");
 
             Assert.Equal(0, status.Capacity.Active);
             Assert.Equal(4, status.Capacity.Max);
@@ -155,15 +155,15 @@ public class ApiContractSpecs
         var repos = await _fixture.Client.GetDataAsync<RepositoryDto[]>($"/api/projects/{project.Name}/repositories");
         Assert.Single(repos);
 
-        var issue = await _fixture.Client.PostDataAsync<IssueDto>("/api/issues", new { title = "Project name scoped issue", projectId = project.Name });
-        var issueByName = await _fixture.Client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Name}");
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>($"/api/projects/{project.Name }/issues", new { title = "Project name scoped issue", projectId = project.Name });
+        var issueByName = await _fixture.Client.GetDataAsync<IssueDto>($"/api/projects/{project.Name}/issues/{issue.Number}");
 
         Assert.Equal(issue.Number, issueByName.Number);
         Assert.Equal(project.Id, issueByName.ProjectId);
     }
 
     [Fact]
-    public async Task OpencodeModels_WhenProjectIdMissing_ReturnsGlobalRunnerModels()
+    public async Task OpencodeModels_OnProjectRoute_ReturnsGlobalRunnerModels()
     {
         var runnerId = $"global-model-runner-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -175,7 +175,8 @@ public class ApiContractSpecs
 
         try
         {
-            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>("/api/opencode/models");
+            var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = UniqueProjectName("global-models"), path = "/tmp/project", baseBranch = "main" });
+            var response = await _fixture.Client.GetDataAsync<OpencodeModelsDto>($"/api/projects/{project.Id}/opencode/models");
 
             Assert.Contains("openai/gpt-5.5", response.Models);
         }
@@ -192,12 +193,12 @@ public class ApiContractSpecs
         var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName, path = "/tmp/project", baseBranch = "trunk" });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString();
-        var issueResponse = await _fixture.Client.PostAsJsonAsync("/api/issues", new { title = "Needs rebase", projectId });
+        var issueResponse = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues", new { title = "Needs rebase" });
         var issueJson = await issueResponse.Content.ReadFromJsonAsync<JsonElement>();
         var number = issueJson.GetProperty("data").GetProperty("number").GetInt32();
         var issueId = issueJson.GetProperty("data").GetProperty("id").GetString()!;
 
-        await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/start?projectId={projectId}", new { });
+        await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{number}/start", new { });
 
         var runnerId = $"rebase-test-{Guid.NewGuid():N}";
         await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
@@ -218,7 +219,7 @@ public class ApiContractSpecs
             var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.PollAsync();
 
-            using var response = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
+            using var response = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{number}/rebase", new { });
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -227,7 +228,7 @@ public class ApiContractSpecs
             Assert.Equal("trunk", data.GetProperty("baseBranch").GetString());
             Assert.StartsWith("rebase-", data.GetProperty("taskId").GetString());
 
-            using var duplicate = await _fixture.Client.PostAsJsonAsync($"/api/issues/{number}/rebase?projectId={projectId}", new { });
+            using var duplicate = await _fixture.Client.PostAsJsonAsync($"/api/projects/{projectId}/issues/{number}/rebase", new { });
             Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
             var duplicatePayload = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("rebase_already_pending", duplicatePayload.GetProperty("code").GetString());
@@ -235,7 +236,7 @@ public class ApiContractSpecs
         finally
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-            await _fixture.Client.PostAsync($"/api/issues/{number}/stop?projectId={projectId}", null);
+            await _fixture.Client.PostAsync($"/api/projects/{projectId}/issues/{number}/stop", null);
         }
     }
 

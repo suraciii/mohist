@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useProjectPath } from '../../../entities/project'
 import type { SessionCard as SessionCardType, WaitingCard as WaitingCardType } from '../model/activity-cards'
 import { ActiveSessionAnomalies, WaitingSessionAnomalies } from '../model/anomaly'
 import { formatCompact, formatCost } from '../../../shared/lib/format-compact'
@@ -82,12 +83,13 @@ interface ActiveSessionCardProps {
 }
 
 export function ActiveSessionCard({ card, now }: ActiveSessionCardProps) {
+  const toProjectPath = useProjectPath()
   const elapsed = now - new Date(card.createdAt).getTime()
   const stageColor = STAGE_COLORS[card.issueStage.toLowerCase()] ?? 'bg-gray-100 text-gray-700'
 
   return (
     <Link
-      to={`/issues/${card.issueNumber}`}
+      to={toProjectPath(`/issues/${card.issueNumber}`)}
       className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
     >
       <div className="p-3">
@@ -187,11 +189,12 @@ interface WaitingCardProps {
 }
 
 export function WaitingCard({ card }: WaitingCardProps) {
+  const toProjectPath = useProjectPath()
   const isApproval = card.label === 'Needs Approval'
 
   return (
     <Link
-      to={`/issues/${card.issueNumber}`}
+      to={toProjectPath(`/issues/${card.issueNumber}`)}
       className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
     >
       <div className="p-3">
@@ -251,13 +254,14 @@ interface RecentCardProps {
 }
 
 export function RecentCard({ card }: RecentCardProps) {
+  const toProjectPath = useProjectPath()
   const isFailed = card.status === 'failed'
   const stageColor = STAGE_COLORS[card.issueStage.toLowerCase()] ?? 'bg-gray-100 text-gray-700'
   const workTitle = card.title ?? card.taskDescription ?? card.currentWorkTitle
 
   return (
     <Link
-      to={`/issues/${card.issueNumber}`}
+      to={toProjectPath(`/issues/${card.issueNumber}`)}
       className="block rounded-lg border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-colors"
     >
       <div className="p-3">

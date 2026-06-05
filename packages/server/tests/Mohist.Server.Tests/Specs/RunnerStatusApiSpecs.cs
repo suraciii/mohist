@@ -95,7 +95,7 @@ public class RunnerStatusApiSpecs
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
 
-        var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+        var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -122,7 +122,7 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -159,7 +159,7 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -193,7 +193,7 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -207,11 +207,11 @@ public class RunnerStatusApiSpecs
     }
 
     [Fact]
-    public async Task GetRunners_MissingProjectId_ReturnsBadRequest()
+    public async Task GetRunners_OnLegacyRoute_ReturnsNotFound()
     {
         var response = await _fixture.Client.GetAsync("/api/runners");
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -275,7 +275,7 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -312,7 +312,7 @@ public class RunnerStatusApiSpecs
 
         try
         {
-            var response = await _fixture.Client.GetAsync($"/api/runners?projectId={projectId}");
+            var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/runners");
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();

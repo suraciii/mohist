@@ -89,7 +89,7 @@ public class IssueSessionApiSpecs
             }
         });
 
-        var raw = await _client.GetRawAsync($"/api/issues/{issue.Number}/sessions/plan?projectId={project.Id}");
+        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
 
@@ -193,7 +193,7 @@ public class IssueSessionApiSpecs
             }
         });
 
-        var response = await _client.GetDataAsync<IssueSessionEventsResponseDto>($"/api/issues/{issue.Number}/sessions/build/events?projectId={project.Id}");
+        var response = await _client.GetDataAsync<IssueSessionEventsResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/events");
 
         var types = response.Events.Select(e => e.Type).ToArray();
         Assert.Equal(
@@ -257,8 +257,8 @@ public class IssueSessionApiSpecs
             }
         });
 
-        var metadataRaw = await _client.GetRawAsync($"/api/issues/{issue.Number}/sessions/plan?projectId={project.Id}");
-        var eventsRaw = await _client.GetRawAsync($"/api/issues/{issue.Number}/sessions/plan/events?projectId={project.Id}");
+        var metadataRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
+        var eventsRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/events");
 
         using (var metadataDoc = JsonDocument.Parse(metadataRaw))
         using (var eventsDoc = JsonDocument.Parse(eventsRaw))
@@ -295,7 +295,7 @@ public class IssueSessionApiSpecs
         var projectName = $"isa-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issueTitle = title ?? $"Session api {name}";
-        var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = issueTitle, body = "track session", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
+        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = issueTitle, body = "track session", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });
 
         var work = new WorkDispatch(
             WorkflowRunId: $"wf-{Guid.NewGuid():N}",

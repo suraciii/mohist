@@ -34,7 +34,7 @@ public class EpicLifecycleSpecs
         await LinkIssueAsync(project.Id, epic.Id, delivered.Number);
         await LinkIssueAsync(project.Id, epic.Id, pending.Number);
 
-        using var response = await _client.PostAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
@@ -45,7 +45,7 @@ public class EpicLifecycleSpecs
         Assert.NotNull(envelope.Details);
         Assert.Equal(1, envelope.Details!.UndeliveredCount);
 
-        var after = await _client.GetDataAsync<EpicDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("active", after.Status);
     }
 
@@ -61,11 +61,11 @@ public class EpicLifecycleSpecs
         await LinkIssueAsync(project.Id, epic.Id, first.Number);
         await LinkIssueAsync(project.Id, epic.Id, second.Number);
 
-        var marked = await _client.PostDataAsync<EpicDto>($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
+        var marked = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
         Assert.Equal("done", marked.Status);
 
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("done", detail.Status);
         Assert.Equal(2, detail.Progress.DeliveredCount);
         Assert.Equal(2, detail.Progress.TotalIssueCount);
@@ -85,9 +85,9 @@ public class EpicLifecycleSpecs
         await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Repeated done");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
-        await _client.PostOkAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
-        using var response = await _client.PostAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
@@ -99,7 +99,7 @@ public class EpicLifecycleSpecs
         Assert.Equal("done", envelope.Details!.CurrentStatus);
         Assert.Equal("done", envelope.Details.RequestedStatus);
 
-        var after = await _client.GetDataAsync<EpicDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var after = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("done", after.Status);
     }
 
@@ -110,9 +110,9 @@ public class EpicLifecycleSpecs
         var issue = await CreateIssueAsync(project.Id, "Linked");
         var epic = await CreateEpicAsync(project.Id, "Closed epic");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
-        await _client.PostOkAsync($"/api/epics/{epic.Id}/close?projectId={project.Id}", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
-        using var response = await _client.PostAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
@@ -131,9 +131,9 @@ public class EpicLifecycleSpecs
         var project = await CreateProjectAsync();
         var epic = await CreateEpicAsync(project.Id, "Close twice");
 
-        await _client.PostOkAsync($"/api/epics/{epic.Id}/close?projectId={project.Id}", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
-        using var response = await _client.PostAsync($"/api/epics/{epic.Id}/close?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
@@ -154,9 +154,9 @@ public class EpicLifecycleSpecs
         await CompleteIssueAsync(project.Id, issue);
         var epic = await CreateEpicAsync(project.Id, "Done then close");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
-        await _client.PostOkAsync($"/api/epics/{epic.Id}/done?projectId={project.Id}", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/done", null);
 
-        using var response = await _client.PostAsync($"/api/epics/{epic.Id}/close?projectId={project.Id}", null);
+        using var response = await _client.PostAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
@@ -179,11 +179,11 @@ public class EpicLifecycleSpecs
         await LinkIssueAsync(project.Id, epic.Id, first.Number);
         await LinkIssueAsync(project.Id, epic.Id, second.Number);
 
-        var closed = await _client.PostDataAsync<EpicDto>($"/api/epics/{epic.Id}/close?projectId={project.Id}", null);
+        var closed = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
         Assert.Equal("closed", closed.Status);
 
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("closed", detail.Status);
         Assert.Empty(detail.LinkedIssues);
         Assert.Equal(0, detail.Progress.TotalIssueCount);
@@ -205,7 +205,7 @@ public class EpicLifecycleSpecs
         await LinkIssueAsync(project.Id, epic.Id, dependent.Number);
         var issueDetailBefore = await GetIssueInfoAsync(project.Id, dependent.Number);
 
-        await _client.PostOkAsync($"/api/epics/{epic.Id}/close?projectId={project.Id}", null);
+        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Id}/close", null);
 
         var issueDetailAfter = await GetIssueInfoAsync(project.Id, dependent.Number);
         Assert.Equal(issueDetailBefore!.Status, issueDetailAfter!.Status);
@@ -213,7 +213,7 @@ public class EpicLifecycleSpecs
         Assert.Equal(issueDetailBefore.Health, issueDetailAfter.Health);
         Assert.Equal(issueDetailBefore.WorkflowRunId, issueDetailAfter.WorkflowRunId);
 
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("closed", detail.Status);
         Assert.Empty(detail.LinkedIssues);
     }
@@ -227,10 +227,10 @@ public class EpicLifecycleSpecs
         var epic = await CreateEpicAsync(project.Id, "No auto complete");
         await LinkIssueAsync(project.Id, epic.Id, issue.Number);
 
-        var beforeMark = await _client.GetDataAsync<EpicDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var beforeMark = await _client.GetDataAsync<EpicDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.Equal("active", beforeMark.Status);
 
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/epics/{epic.Id}?projectId={project.Id}");
+        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Id}");
         Assert.True(detail.Progress.ReadyToMarkDone);
         Assert.Equal(1, detail.Progress.DeliveredCount);
         Assert.Equal(1, detail.Progress.TotalIssueCount);
@@ -248,7 +248,7 @@ public class EpicLifecycleSpecs
 
     private async Task<IssueDto> CreateIssueAsync(string projectId, string title)
     {
-        return await _client.PostDataAsync<IssueDto>("/api/issues", new { title, projectId });
+        return await _client.PostDataAsync<IssueDto>($"/api/projects/{projectId}/issues", new { title });
     }
 
     private async Task CompleteIssueAsync(string projectId, IssueDto issueInfo)
@@ -260,12 +260,12 @@ public class EpicLifecycleSpecs
 
     private async Task<EpicDto> CreateEpicAsync(string projectId, string title)
     {
-        return await _client.PostDataAsync<EpicDto>("/api/epics", new { title, description = "lifecycle test", priority = "p2", projectId });
+        return await _client.PostDataAsync<EpicDto>($"/api/projects/{projectId}/epics", new { title, description = "lifecycle test", priority = "p2" });
     }
 
     private async Task LinkIssueAsync(string projectId, string epicId, int issueNumber)
     {
-        await _client.PostOkAsync($"/api/epics/{epicId}/issues?projectId={projectId}", new { issueId = issueNumber.ToString() });
+        await _client.PostOkAsync($"/api/projects/{projectId}/epics/{epicId}/issues", new { issueId = issueNumber.ToString() });
     }
 
     private async Task<IssueInfo?> GetIssueInfoAsync(string projectId, int number)

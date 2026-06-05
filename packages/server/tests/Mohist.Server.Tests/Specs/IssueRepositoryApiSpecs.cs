@@ -67,7 +67,7 @@ public class IssueRepositoryApiSpecs
         var (projectId, _) = await SetupProjectWithRepositoriesAsync();
 
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues?projectId={projectId}",
+            $"/api/projects/{projectId}/issues",
             new { title = "Ghost repo", repositoryName = "ghost" },
             JsonOptions);
 
@@ -154,7 +154,7 @@ public class IssueRepositoryApiSpecs
     private async Task<RepositoryApiEnvelope<IssueRepositoryDto>> CreateIssueAsync(string projectId, object body)
     {
         using var response = await _client.PostAsJsonAsync(
-            $"/api/issues?projectId={projectId}",
+            $"/api/projects/{projectId}/issues",
             body,
             JsonOptions);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -167,7 +167,7 @@ public class IssueRepositoryApiSpecs
 
     private async Task<IssueRepositoryDto?> GetIssueAsync(string projectId, int number)
     {
-        using var response = await _client.GetAsync($"/api/issues/{number}?projectId={projectId}");
+        using var response = await _client.GetAsync($"/api/projects/{projectId}/issues/{number}");
         response.EnsureSuccessStatusCode();
         var envelope = await response.Content.ReadFromJsonAsync<RepositoryApiEnvelope<IssueRepositoryDto>>(JsonOptions);
         Assert.NotNull(envelope);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, request, withProject } from '../src/shared/api/client'
+import { ApiError, projectApiPath, request } from '../src/shared/api/client'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -44,17 +44,9 @@ describe('api client', () => {
     })
   })
 
-  it('passes project context through a header without dropping existing headers', async () => {
-    const init = withProject({
-      method: 'POST',
-      headers: { 'X-Existing': 'keep' },
-      body: JSON.stringify({ title: 'Header scoped issue' }),
-    }, 'project-1')
-
-    const headers = new Headers(init?.headers)
-
-    expect(headers.get('X-Mohist-Project-Id')).toBe('project-1')
-    expect(headers.get('X-Existing')).toBe('keep')
-    expect(init?.body).toBe(JSON.stringify({ title: 'Header scoped issue' }))
+  it('builds project-scoped API paths', () => {
+    expect(projectApiPath('project-1', '/issues')).toBe('/projects/project-1/issues')
+    expect(projectApiPath('project-1', 'issues/12')).toBe('/projects/project-1/issues/12')
+    expect(projectApiPath('my project', '/issues')).toBe('/projects/my%20project/issues')
   })
 })

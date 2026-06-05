@@ -156,7 +156,7 @@ function makeSessionsForLookup() {
 
 describe('T-009: SessionPage split endpoints', () => {
   describe('metadata endpoint usage', () => {
-    it('initial request uses GET /api/issues/:number/sessions/:name for header metadata', async () => {
+    it('initial request uses project-scoped session metadata endpoint', async () => {
       const api = await import('../src/entities/coder-session/api/client')
       const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
       const eventsMock = api.getAgentSessionEvents as unknown as ReturnType<typeof vi.fn>
@@ -208,7 +208,7 @@ describe('T-009: SessionPage split endpoints', () => {
   })
 
   describe('events endpoint usage', () => {
-    it('transcript loading uses GET /api/issues/:number/sessions/:name/events', async () => {
+    it('transcript loading uses project-scoped session events endpoint', async () => {
       const api = await import('../src/entities/coder-session/api/client')
       const metadataMock = api.getAgentSessionMetadata as unknown as ReturnType<typeof vi.fn>
       const eventsMock = api.getAgentSessionEvents as unknown as ReturnType<typeof vi.fn>

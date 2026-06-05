@@ -8,33 +8,36 @@ public static class StatusRoutes
 {
     public static WebApplication MapStatusRoutes(this WebApplication app)
     {
-        app.MapGet("/api/status", async (bool? all, string? projectId, IGrainFactory grains, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
+        app.MapGet("/api/status", async (bool? all, IssueQuerier issuesQuery, ProjectQuerier projectsQuery) =>
         {
-            if (all == true)
+            if (all != true)
+                return ApiResults.BadRequest("Use /api/projects/{projectRef}/status for project status.");
+
+            var projects = await projectsQuery.ListAllAsync();
+            var status = new List<object>();
+
+            foreach (var project in projects)
             {
-                var projects = await projectsQuery.ListAllAsync();
-                var status = new List<object>();
+                var issues = await issuesQuery.ListAsync(project.Id, project, all: true);
+                var activeIssues = issues.Count(i => i.Health == "active");
 
-                foreach (var project in projects)
+                status.Add(new
                 {
-                    var issues = await issuesQuery.ListAsync(project.Id, project, all: true);
-                    var activeIssues = issues.Count(i => i.Health == "active");
-
-                    status.Add(new
-                    {
-                        name = project.Name,
-                        path = project.Path,
-                        issues = issues.Count,
-                        activeIssues
-                    });
-                }
-
-                return ApiResults.Ok(status);
+                    name = project.Name,
+                    path = project.Path,
+                    issues = issues.Count,
+                    activeIssues
+                });
             }
 
-            var current = await ResolveProjectAsync(projectId, projectsQuery);
+            return ApiResults.Ok(status);
+        });
+
+        app.MapGet("/api/projects/{projectRef}/status", async (string projectRef, IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+        {
+            var current = await projects.ResolveAsync(projectRef);
             if (current is null)
-                return ApiResults.BadRequest("No active project. Pass projectId or create/select a project in the web UI.");
+                return ApiResults.NotFound("Project not found");
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Health == "active").ToList();
@@ -64,14 +67,6 @@ public static class StatusRoutes
         });
 
         return app;
-    }
-
-    private static async Task<ProjectInfo?> ResolveProjectAsync(string? projectId, ProjectQuerier projectsQuery)
-    {
-        if (!string.IsNullOrWhiteSpace(projectId))
-            return await projectsQuery.GetByIdAsync(projectId);
-
-        return await projectsQuery.ResolveSingleAsync();
     }
 
     private static (string? Version, string? GitHash, string? SourceHead, bool UpToDate) GetVersionInfo()
