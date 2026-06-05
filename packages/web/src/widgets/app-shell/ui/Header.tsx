@@ -7,17 +7,19 @@ import { useAgentStatus } from '../../../entities/agent'
 function usePageTitle(): string {
   const location = useLocation()
   const params = useParams<{ number?: string; id?: string; section?: string }>()
+  const segments = location.pathname.split('/').filter(Boolean)
+  const section = segments.length > 1 ? `/${segments.slice(1).join('/')}` : '/'
 
-  if (location.pathname === '/') return 'Board'
-  if (location.pathname.startsWith('/activity')) return 'Activity'
-  if (location.pathname === '/epics') return 'Epics'
-  if (location.pathname.startsWith('/epic/')) return `Epic #${params.id?.slice(0, 8) ?? ''}`
-  if (location.pathname.startsWith('/issues/')) {
+  if (section === '/') return 'Board'
+  if (section.startsWith('/activity')) return 'Activity'
+  if (section === '/epics') return 'Epics'
+  if (section.startsWith('/epics/')) return `Epic #${params.id?.slice(0, 8) ?? ''}`
+  if (section.startsWith('/issues/')) {
     return params.number ? `Issue #${params.number}` : 'Issue'
   }
-  if (location.pathname === '/archived') return 'Archived'
-  if (location.pathname.startsWith('/logs')) return 'Logs'
-  if (location.pathname.startsWith('/settings')) {
+  if (section === '/archived') return 'Archived'
+  if (section.startsWith('/logs')) return 'Logs'
+  if (section.startsWith('/settings')) {
     const section = params.section
     if (!section || section === 'ai') return 'Settings'
     return `Settings · ${section.charAt(0).toUpperCase()}${section.slice(1)}`

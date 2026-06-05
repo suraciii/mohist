@@ -49,6 +49,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());
         services.AddSingleton<ProjectQuerier>();
+        services.AddSingleton<ProjectRefResolver>();
         services.AddSingleton<IssueRepositoryResolver>();
         services.AddScoped<IssueIdentityResolver>();
         services.AddScoped<IssueQuerier>();

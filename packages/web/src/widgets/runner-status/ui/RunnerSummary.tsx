@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import type { RunnerStatusSummary } from '../../../entities/runner'
 import { useRunnerSummary } from '../../../entities/runner'
+import { useProjectPath } from '../../../entities/project'
 
 const RUNNER_START_HINT = 'Start a runner with: npx mohist runner'
 
@@ -10,6 +11,7 @@ interface RunnerSummaryProps {
 
 export function RunnerSummary({ summary }: RunnerSummaryProps) {
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const { rows } = summary
 
   if (rows.length === 0) {
@@ -32,7 +34,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   if (!hasConnectedCapacity) {
     return (
       <button
-        onClick={() => navigate('/activity')}
+        onClick={() => navigate(toProjectPath('/activity'))}
         className="flex items-center gap-2 text-xs hover:underline text-left"
       >
         <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
@@ -50,7 +52,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
   if (connectedBusyCount > 0) {
     return (
       <button
-        onClick={() => navigate('/activity')}
+        onClick={() => navigate(toProjectPath('/activity'))}
         className="flex items-center gap-2 text-xs hover:underline text-left"
       >
         <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-blue-100 text-blue-700">
@@ -68,7 +70,7 @@ export function RunnerSummary({ summary }: RunnerSummaryProps) {
 
   return (
     <button
-      onClick={() => navigate('/activity')}
+      onClick={() => navigate(toProjectPath('/activity'))}
       className="flex items-center gap-2 text-xs hover:underline text-left"
     >
       <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-green-100 text-green-700">

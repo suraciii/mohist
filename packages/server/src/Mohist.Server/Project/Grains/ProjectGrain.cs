@@ -15,17 +15,14 @@ namespace Mohist.Server.Project.Grains;
 public class ProjectGrain : Grain, IProjectGrain
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly ProjectWorkflowProfileManager _workflowProfiles;
     private readonly ILogger<ProjectGrain> _log;
     private ProjectInfo? _project;
 
     public ProjectGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
-        ProjectWorkflowProfileManager workflowProfiles,
         ILogger<ProjectGrain> log)
     {
         _dbFactory = dbFactory;
-        _workflowProfiles = workflowProfiles;
         _log = log;
     }
 
@@ -43,6 +40,8 @@ public class ProjectGrain : Grain, IProjectGrain
 
     public async Task<ProjectInfo> CreateAsync(string name, string path, string? baseBranch)
     {
+        name = ProjectName.NormalizeOrThrow(name);
+
         if (_project is not null)
             throw new InvalidOperationException($"Project '{GrainKey}' already exists");
 

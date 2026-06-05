@@ -6,6 +6,7 @@ import { EpicCreateDialog } from '../../../features/create-epic'
 import { Button } from '@/shared/ui/components/button'
 import { Badge } from '@/shared/ui/components/badge'
 import { Card } from '@/shared/ui/components/card'
+import { useProjectPath } from '../../../entities/project'
 
 function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = {
@@ -42,12 +43,13 @@ function StatusBadge({ status }: { status: EpicStatus }) {
 
 function EpicCard({ epic }: { epic: EpicWithProgress }) {
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const { progress } = epic
 
   return (
     <Card
       className="p-4 hover:border-muted-foreground/30 transition-colors cursor-pointer"
-      onClick={() => navigate(`/epic/${epic.id}`)}
+      onClick={() => navigate(toProjectPath(`/epics/${epic.id}`))}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">

@@ -15,7 +15,7 @@ import { WorkflowProfilesSection } from './WorkflowProfilesSection'
 import { RepositoriesSection } from './RepositoriesSection'
 import { TemplatesSection } from './TemplatesSection'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import {
   Tabs,
   TabsContent,
@@ -65,11 +65,12 @@ function SectionContent({ section }: { section: Section }) {
 export function SettingsPage() {
   const { section } = useParams<{ section: string }>()
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
 
   useDocumentTitle('Settings — Mohist')
 
   if (!section || !isValidSection(section)) {
-    return <Navigate to="/settings/ai" replace />
+    return <Navigate to={toProjectPath('/settings/ai')} replace />
   }
 
   return (
@@ -77,7 +78,7 @@ export function SettingsPage() {
       <div className="max-w-5xl mx-auto px-4 md:px-6 py-6">
         <Tabs
           value={section}
-          onValueChange={(value) => navigate(`/settings/${value}`)}
+          onValueChange={(value) => navigate(toProjectPath(`/settings/${value}`))}
           orientation="horizontal"
           className="gap-4"
         >

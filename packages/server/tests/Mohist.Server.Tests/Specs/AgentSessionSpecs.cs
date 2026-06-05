@@ -131,7 +131,7 @@ public class AgentSessionSpecs
         Assert.Equal(currentSession.Id, root.GetProperty("acpSessionId").GetString());
         Assert.False(string.IsNullOrEmpty(root.GetProperty("status").GetString()));
         Assert.Equal(work.Stage, root.GetProperty("stage").GetString());
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("title").ValueKind);
+        Assert.Equal("Plan session", root.GetProperty("title").GetString());
         Assert.False(string.IsNullOrEmpty(root.GetProperty("createdAt").GetString()));
 
         var metadata = root.GetProperty("metadata");
@@ -983,7 +983,7 @@ public class AgentSessionSpecs
 
     private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, AgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
-        var projectName = $"session-grain-{name}-{Guid.NewGuid():N}";
+        var projectName = $"asg-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issueTitle = title ?? $"Session grain {name}";
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = issueTitle, body = "track sessions", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });

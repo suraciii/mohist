@@ -16,7 +16,7 @@ import { BranchBar, WorkflowView, TaskProgressPanel, IssueWorkflowProfileEditor 
 import { SessionList } from '../../../widgets/coder-session'
 import { formatTime } from '../../../shared/lib/format-time'
 import { statusLabel } from '../../../entities/issue/lib/status-badge'
-import { useProject } from '../../../entities/project'
+import { useProject, useProjectPath } from '../../../entities/project'
 import { Button } from '@/shared/ui/components/button'
 import { Input } from '@/shared/ui/components/input'
 import { Textarea } from '@/shared/ui/components/textarea'
@@ -196,6 +196,7 @@ function WorkflowYamlDialog({ workflowRunId }: { workflowRunId: string }) {
 export function IssueDetailPage() {
   const { number } = useParams<{ number: string }>()
   const navigate = useNavigate()
+  const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
   const { projectId } = useProject()
   const issueNumber = parseInt(number ?? '0', 10)
@@ -416,7 +417,7 @@ export function IssueDetailPage() {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
           <button
             type="button"
-            onClick={() => navigate('/')}
+            onClick={() => navigate(toProjectPath())}
             data-testid="back-to-board"
             className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
@@ -483,7 +484,7 @@ export function IssueDetailPage() {
             {issue.primaryEpic && (
               <button
                 type="button"
-                onClick={() => navigate(`/epic/${issue.primaryEpic!.id}`)}
+                onClick={() => navigate(toProjectPath(`/epics/${issue.primaryEpic!.id}`))}
                 className="mt-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="primary-epic-label"
               >
@@ -593,7 +594,7 @@ export function IssueDetailPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/issues/${issueNumber}/files`)}
+                      onClick={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
                       className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
                     >
                       View files
@@ -611,7 +612,7 @@ export function IssueDetailPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/issues/${issueNumber}/files`)}
+                      onClick={() => navigate(toProjectPath(`/issues/${issueNumber}/files`))}
                       className="border-blue-200 text-blue-600 hover:border-blue-300 hover:text-blue-700"
                     >
                       View all commits

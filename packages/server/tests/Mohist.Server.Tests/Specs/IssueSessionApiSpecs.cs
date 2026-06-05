@@ -292,7 +292,7 @@ public class IssueSessionApiSpecs
 
     private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, AgentSessionInfo Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
     {
-        var projectName = $"issue-session-api-{name}-{Guid.NewGuid():N}";
+        var projectName = $"isa-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = Directory.GetCurrentDirectory(), baseBranch = "main" });
         var issueTitle = title ?? $"Session api {name}";
         var issue = await _client.PostDataAsync<IssueDto>("/api/issues", new { title = issueTitle, body = "track session", labels = Array.Empty<string>(), priority = "p1", projectId = project.Id });

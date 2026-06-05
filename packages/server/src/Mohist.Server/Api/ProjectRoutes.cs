@@ -1,6 +1,7 @@
 using Mohist.Server.Project.Grains;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Project.Domain;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using System.Text.Json;
@@ -19,9 +20,9 @@ public static class ProjectRoutes
             return ApiResults.Ok(projects);
         });
 
-        group.MapGet("/{identifier}", async (string identifier, ProjectQuerier projectsQuery) =>
+        group.MapGet("/{projectRef}", async (string projectRef, ProjectRefResolver projects) =>
         {
-            var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
+            var project = await projects.ResolveAsync(projectRef);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
@@ -30,14 +31,17 @@ public static class ProjectRoutes
             if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Path))
                 return ApiResults.BadRequest("name and path are required");
 
-            if (await projectsQuery.ExistsAsync(req.Name))
-                return ApiResults.Conflict($"Project '{req.Name}' already exists");
+            if (!ProjectName.TryNormalize(req.Name, out var projectName, out var nameError))
+                return ApiResults.BadRequest(nameError!, "invalid_project_name");
+
+            if (await projectsQuery.ExistsAsync(projectName))
+                return ApiResults.Conflict($"Project '{projectName}' already exists");
 
             var id = $"proj_{Guid.NewGuid():N}";
             var projectGrain = grains.GetGrain<IProjectGrain>(id);
             try
             {
-                var project = await projectGrain.CreateAsync(req.Name, req.Path, req.BaseBranch);
+                var project = await projectGrain.CreateAsync(projectName, req.Path, req.BaseBranch);
                 return Results.Json(new { success = true, data = project }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
@@ -46,22 +50,25 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapPost("/{identifier}/use", async (string identifier, ProjectQuerier projectsQuery) =>
+        group.MapPost("/{projectRef}/use", async (string projectRef, ProjectRefResolver projects) =>
         {
-            var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
+            var project = await projects.ResolveAsync(projectRef);
             return project is not null ? ApiResults.Ok(project) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapPatch("/{id}", async (string id, UpdateProjectRequest req, IGrainFactory grains) =>
+        group.MapPatch("/{projectRef}", async (string projectRef, UpdateProjectRequest req, IGrainFactory grains, ProjectRefResolver projects) =>
         {
-            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             var updated = await projectGrain.UpdateAsync(req.BaseBranch);
             return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapDelete("/{identifier}", async (string identifier, IGrainFactory grains, ProjectQuerier projectsQuery) =>
+        group.MapDelete("/{projectRef}", async (string projectRef, IGrainFactory grains, ProjectRefResolver projects) =>
         {
-            var project = await projectsQuery.ResolveByIdOrNameAsync(identifier);
+            var project = await projects.ResolveAsync(projectRef);
             if (project is null)
                 return ApiResults.NotFound("Project not found");
 
@@ -70,20 +77,23 @@ public static class ProjectRoutes
             return ApiResults.Ok();
         });
 
-        group.MapGet("/{id}/repositories", async (string id, ProjectQuerier projectsQuery) =>
+        group.MapGet("/{projectRef}/repositories", async (string projectRef, ProjectRefResolver projects) =>
         {
-            var project = await projectsQuery.GetByIdAsync(id);
+            var project = await projects.ResolveAsync(projectRef);
             return project is not null ? ApiResults.Ok(project.Repositories) : ApiResults.NotFound("Project not found");
         });
 
-        group.MapPost("/{id}/repositories", async (string id, AddRepositoryRequest req, IGrainFactory grains) =>
+        group.MapPost("/{projectRef}/repositories", async (string projectRef, AddRepositoryRequest req, IGrainFactory grains, ProjectRefResolver projects) =>
         {
             if (string.IsNullOrWhiteSpace(req.Name))
                 return ApiResults.BadRequest("name is required");
             if (string.IsNullOrWhiteSpace(req.Path) && string.IsNullOrWhiteSpace(req.Remote))
                 return ApiResults.BadRequest("path or remote is required");
 
-            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             try
             {
                 var updated = await projectGrain.AddRepositoryAsync(req.Name, req.Path, req.Remote, req.BaseBranch);
@@ -97,9 +107,12 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapPatch("/{id}/repositories/{repoName}", async (string id, string repoName, UpdateRepositoryRequest req, IGrainFactory grains) =>
+        group.MapPatch("/{projectRef}/repositories/{repoName}", async (string projectRef, string repoName, UpdateRepositoryRequest req, IGrainFactory grains, ProjectRefResolver projects) =>
         {
-            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             if (req.SetDefault == true)
             {
                 var updated = await projectGrain.SetDefaultRepositoryAsync(repoName);
@@ -108,9 +121,12 @@ public static class ProjectRoutes
             return ApiResults.BadRequest("No action specified");
         });
 
-        group.MapDelete("/{id}/repositories/{repoName}", async (string id, string repoName, IGrainFactory grains) =>
+        group.MapDelete("/{projectRef}/repositories/{repoName}", async (string projectRef, string repoName, IGrainFactory grains, ProjectRefResolver projects) =>
         {
-            var projectGrain = grains.GetGrain<IProjectGrain>(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var projectGrain = grains.GetGrain<IProjectGrain>(project.Id);
             var updated = await projectGrain.RemoveRepositoryAsync(repoName);
             return updated is not null ? ApiResults.Ok(updated) : ApiResults.NotFound("Project or repository not found");
         });
@@ -119,20 +135,26 @@ public static class ProjectRoutes
         // Project workflow templates CRUD
         // =======================================================================
 
-        group.MapGet("/{id}/workflow-templates", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/workflow-templates", async (string projectRef, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var templates = await manager.ListTemplatesAsync(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var templates = await manager.ListTemplatesAsync(project.Id);
             return ApiResults.Ok(templates);
         });
 
-        group.MapPost("/{id}/workflow-templates", async (string id, CreateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        group.MapPost("/{projectRef}/workflow-templates", async (string projectRef, CreateProjectTemplateRequest req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             if (string.IsNullOrWhiteSpace(req.Yaml))
                 return ApiResults.BadRequest("yaml is required");
 
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
             try
             {
-                var template = await manager.CreateTemplateAsync(id, req.Yaml);
+                var template = await manager.CreateTemplateAsync(project.Id, req.Yaml);
                 return Results.Json(new { success = true, data = template }, statusCode: 201);
             }
             catch (InvalidOperationException ex)
@@ -141,22 +163,28 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapGet("/{id}/workflow-templates/{tid}", async (string id, string tid, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/workflow-templates/{tid}", async (string projectRef, string tid, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var def = await manager.GetTemplateAsync(id, tid);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var def = await manager.GetTemplateAsync(project.Id, tid);
             return def is not null
-                ? ApiResults.Ok(new { projectId = id, templateId = tid, definition = def })
+                ? ApiResults.Ok(new { projectId = project.Id, templateId = tid, definition = def })
                 : ApiResults.NotFound("Project template not found");
         });
 
-        group.MapPut("/{id}/workflow-templates/{tid}", async (string id, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{projectRef}/workflow-templates/{tid}", async (string projectRef, string tid, UpdateProjectTemplateRequest req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             if (string.IsNullOrWhiteSpace(req.Yaml))
                 return ApiResults.BadRequest("yaml is required");
 
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
             try
             {
-                var template = await manager.UpdateTemplateAsync(id, tid, req.Yaml);
+                var template = await manager.UpdateTemplateAsync(project.Id, tid, req.Yaml);
                 return template is not null
                     ? ApiResults.Ok(template)
                     : ApiResults.NotFound("Project template not found");
@@ -167,9 +195,12 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapDelete("/{id}/workflow-templates/{tid}", async (string id, string tid, ProjectWorkflowProfileManager manager) =>
+        group.MapDelete("/{projectRef}/workflow-templates/{tid}", async (string projectRef, string tid, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var deleted = await manager.DeleteTemplateAsync(id, tid);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var deleted = await manager.DeleteTemplateAsync(project.Id, tid);
             return deleted ? ApiResults.Ok(new { deleted = true }) : ApiResults.NotFound("Project template not found");
         });
 
@@ -177,88 +208,121 @@ public static class ProjectRoutes
         // Project workflow profile
         // =======================================================================
 
-        group.MapGet("/{id}/workflow-profile", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/workflow-profile", async (string projectRef, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var templateId = await manager.GetDefaultTemplateAsync(id);
-            var variables = await manager.GetVariablesAsync(id);
-            return ApiResults.Ok(new { projectId = id, defaultTemplateId = templateId, variables });
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var templateId = await manager.GetDefaultTemplateAsync(project.Id);
+            var variables = await manager.GetVariablesAsync(project.Id);
+            return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = templateId, variables });
         });
 
-        group.MapPut("/{id}/workflow-profile/default-template", async (string id, SetDefaultTemplateRequest req, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{projectRef}/workflow-profile/default-template", async (string projectRef, SetDefaultTemplateRequest req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             if (string.IsNullOrWhiteSpace(req.TemplateId))
                 return ApiResults.BadRequest("templateId is required");
 
-            var updated = await manager.SetDefaultTemplateAsync(id, req.TemplateId);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var updated = await manager.SetDefaultTemplateAsync(project.Id, req.TemplateId);
             return updated is not null
-                ? ApiResults.Ok(new { projectId = id, defaultTemplateId = updated })
+                ? ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = updated })
                 : ApiResults.NotFound("Project workflow profile not found");
         });
 
-        group.MapDelete("/{id}/workflow-profile/default-template", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapDelete("/{projectRef}/workflow-profile/default-template", async (string projectRef, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            await manager.SetDefaultTemplateAsync(id, null);
-            return ApiResults.Ok(new { projectId = id, defaultTemplateId = (string?)null });
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            await manager.SetDefaultTemplateAsync(project.Id, null);
+            return ApiResults.Ok(new { projectId = project.Id, defaultTemplateId = (string?)null });
         });
 
-        group.MapGet("/{id}/workflow-profile/variables", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/workflow-profile/variables", async (string projectRef, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var variables = await manager.GetVariablesAsync(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var variables = await manager.GetVariablesAsync(project.Id);
             return ApiResults.Ok(variables);
         });
 
-        group.MapPut("/{id}/workflow-profile/variables", async (string id, VariableBundle bundle, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{projectRef}/workflow-profile/variables", async (string projectRef, VariableBundle bundle, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var result = await manager.SetVariablesAsync(id, bundle);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var result = await manager.SetVariablesAsync(project.Id, bundle);
             return ApiResults.Ok(result);
         });
 
-        group.MapPatch("/{id}/workflow-profile/variables", async (string id, VariableBundle patch, ProjectWorkflowProfileManager manager) =>
+        group.MapPatch("/{projectRef}/workflow-profile/variables", async (string projectRef, VariableBundle patch, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var result = await manager.PatchVariablesAsync(id, patch);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var result = await manager.PatchVariablesAsync(project.Id, patch);
             return ApiResults.Ok(result);
         });
 
-        group.MapGet("/{id}/templates", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/templates", async (string projectRef, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var prompts = await manager.ListPromptsAsync(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var prompts = await manager.ListPromptsAsync(project.Id);
             return ApiResults.Ok(prompts.Select(ToTemplateRoutePrompt));
         });
 
-        group.MapGet("/{id}/templates/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/templates/{key}", async (string projectRef, string key, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var prompt = await manager.GetPromptAsync(id, key);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var prompt = await manager.GetPromptAsync(project.Id, key);
             return prompt is null
                 ? ApiResults.NotFound($"Prompt '{key}' not found")
                 : ApiResults.Ok(ToTemplateRoutePrompt(prompt));
         });
 
-        group.MapGet("/{id}/templates/{key}/override", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/templates/{key}/override", async (string projectRef, string key, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var prompt = await manager.GetProjectPromptOverrideAsync(id, key);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var prompt = await manager.GetProjectPromptOverrideAsync(project.Id, key);
             return prompt is null
                 ? ApiResults.NotFound($"Prompt override '{key}' not found")
                 : ApiResults.Ok(prompt);
         });
 
-        group.MapPut("/{id}/templates/{key}/override", async (string id, string key, ProjectPromptOverrideRequest? req, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{projectRef}/templates/{key}/override", async (string projectRef, string key, ProjectPromptOverrideRequest? req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
 
-            var prompt = await manager.SetProjectPromptOverrideAsync(id, key, req.DisplayName, req.Description, req.Tags, req.Stage, req.Body);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var prompt = await manager.SetProjectPromptOverrideAsync(project.Id, key, req.DisplayName, req.Description, req.Tags, req.Stage, req.Body);
 
             return ApiResults.Ok(prompt);
         });
 
-        group.MapDelete("/{id}/templates/{key}/override", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        group.MapDelete("/{projectRef}/templates/{key}/override", async (string projectRef, string key, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            await manager.DeleteProjectPromptOverrideAsync(id, key);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            await manager.DeleteProjectPromptOverrideAsync(project.Id, key);
 
             return ApiResults.Ok();
         });
 
-        group.MapPost("/{id}/templates/{key}/preview", async (string id, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager) =>
+        group.MapPost("/{projectRef}/templates/{key}/preview", async (string projectRef, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             JsonElement variables;
             if (req?.Variables is { } raw)
@@ -271,7 +335,10 @@ public static class ProjectRoutes
 
             try
             {
-                var result = await manager.PreviewPromptAsync(id, key, variables);
+                var project = await projects.ResolveAsync(projectRef);
+                if (project is null) return ApiResults.NotFound("Project not found");
+
+                var result = await manager.PreviewPromptAsync(project.Id, key, variables);
                 return ApiResults.Ok(result);
             }
             catch (ArgumentException ex)
@@ -280,36 +347,48 @@ public static class ProjectRoutes
             }
         });
 
-        group.MapGet("/{id}/workflow-profile/prompts", async (string id, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/workflow-profile/prompts", async (string projectRef, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var prompts = await manager.ListPromptsAsync(id);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var prompts = await manager.ListPromptsAsync(project.Id);
             return ApiResults.Ok(prompts);
         });
 
-        group.MapGet("/{id}/workflow-profile/prompts/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        group.MapGet("/{projectRef}/workflow-profile/prompts/{key}", async (string projectRef, string key, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            var prompt = await manager.GetPromptAsync(id, key);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            var prompt = await manager.GetPromptAsync(project.Id, key);
             return prompt is null
                 ? ApiResults.NotFound($"Prompt '{key}' not found")
                 : ApiResults.Ok(prompt);
         });
 
-        group.MapPut("/{id}/workflow-profile/prompts/{key}", async (string id, string key, PromptUpsertRequest? req, ProjectWorkflowProfileManager manager) =>
+        group.MapPut("/{projectRef}/workflow-profile/prompts/{key}", async (string projectRef, string key, PromptUpsertRequest? req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
 
-            await manager.SetPromptAsync(id, key, req.Body);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            await manager.SetPromptAsync(project.Id, key, req.Body);
             return ApiResults.Ok(new { key, body = req.Body });
         });
 
-        group.MapDelete("/{id}/workflow-profile/prompts/{key}", async (string id, string key, ProjectWorkflowProfileManager manager) =>
+        group.MapDelete("/{projectRef}/workflow-profile/prompts/{key}", async (string projectRef, string key, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
-            await manager.DeletePromptAsync(id, key);
+            var project = await projects.ResolveAsync(projectRef);
+            if (project is null) return ApiResults.NotFound("Project not found");
+
+            await manager.DeletePromptAsync(project.Id, key);
             return ApiResults.Ok();
         });
 
-        group.MapPost("/{id}/workflow-profile/prompts/{key}/preview", async (string id, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager) =>
+        group.MapPost("/{projectRef}/workflow-profile/prompts/{key}/preview", async (string projectRef, string key, PromptPreviewRequest? req, ProjectWorkflowProfileManager manager, ProjectRefResolver projects) =>
         {
             JsonElement variables;
             if (req?.Variables is { } raw)
@@ -322,7 +401,10 @@ public static class ProjectRoutes
 
             try
             {
-                var result = await manager.PreviewPromptAsync(id, key, variables);
+                var project = await projects.ResolveAsync(projectRef);
+                if (project is null) return ApiResults.NotFound("Project not found");
+
+                var result = await manager.PreviewPromptAsync(project.Id, key, variables);
                 return ApiResults.Ok(result);
             }
             catch (ArgumentException ex)

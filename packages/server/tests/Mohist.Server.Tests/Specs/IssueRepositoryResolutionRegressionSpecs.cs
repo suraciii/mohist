@@ -463,7 +463,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_ProjectHasNoRepositories_AfterRepositoryRemoval_SurfacesProjectHasNoRepositoriesProblem()
     {
         // Given a project with a single default repository and an issue bound to it.
-        var projectId = await CreateProjectAsync("Single Repo", "/proj/main", "main");
+        var projectId = await CreateProjectAsync("single-repo", "/proj/main", "main");
         var issue = await CreateIssueAsync(projectId, "Last repo removed", "main");
 
         // When the only repository is removed.
@@ -483,7 +483,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     public async Task GetIssue_ProjectDeleted_AfterIssueCreation_SurfacesProjectMissingRepositoryProblem()
     {
         // Given an issue created against a project.
-        var projectId = await CreateProjectAsync("Transient", "/proj/main", "main");
+        var projectId = await CreateProjectAsync("transient", "/proj/main", "main");
         var issue = await CreateIssueAsync(projectId, "Vanishing project", "main");
 
         // When the project is deleted.
@@ -534,7 +534,7 @@ public class IssueRepositoryResolutionRegressionSpecs
     [Fact]
     public async Task GetIssue_WithoutRepositoryRef_FallsBackToProjectDefault()
     {
-        var projectId = await CreateProjectAsync("Legacy No Ref", "/proj/main", "main");
+        var projectId = await CreateProjectAsync("legacy-no-ref", "/proj/main", "main");
         var issue = Mohist.Server.Issue.Domain.Issue.Create(
             "issue_no_ref",
             projectId,

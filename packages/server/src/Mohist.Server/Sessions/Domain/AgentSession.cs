@@ -21,13 +21,13 @@ public sealed class AgentSession
     [JsonIgnore]
     public string? SourceKind => Metadata.Label(AgentSessionMetadataKeys.SourceKind);
     [JsonIgnore]
-    public string? TaskId => null;
+    public string? TaskId => Metadata.Label(AgentSessionMetadataKeys.WorkId);
     [JsonIgnore]
-    public string? TaskKind => null;
+    public string? TaskKind => Metadata.Label(AgentSessionMetadataKeys.WorkType);
     [JsonIgnore]
-    public string? Phase => null;
+    public string? Phase => Metadata.Label(AgentSessionMetadataKeys.Stage);
     [JsonIgnore]
-    public string? Title => null;
+    public string? Title => Metadata.Annotation(AgentSessionMetadataKeys.Title);
     [JsonIgnore]
     public string? ChangeDir => null;
 
@@ -59,6 +59,10 @@ public static class AgentSessionMetadataKeys
     public const string SourceKind = "mohist.io/source-kind";
     public const string SourceId = "mohist.io/source-id";
     public const string SessionName = "mohist.io/session-name";
+    public const string WorkId = "mohist.io/work-id";
+    public const string WorkType = "mohist.io/work-type";
+    public const string Stage = "mohist.io/stage";
+    public const string Title = "mohist.io/title";
 }
 
 public static class AgentSessionKey

@@ -115,7 +115,7 @@ public class ApiContractSpecs
     [Fact]
     public async Task ProjectApi_ResolvesProjectByNameOrId_AndUseReturnsProject()
     {
-        var projectName = $"project-resolve-{Guid.NewGuid():N}";
+        var projectName = UniqueProjectName("resolve");
         var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName, path = "/tmp/project", baseBranch = "main" });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString()!;
@@ -129,6 +129,37 @@ public class ApiContractSpecs
         Assert.Equal(projectName, byId.Name);
         Assert.Equal(projectId, useByName.Id);
         Assert.Equal(projectName, useById.Name);
+    }
+
+    [Fact]
+    public async Task ProjectApi_CreatesDnsProjectName_AndRejectsInvalidName()
+    {
+        var response = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Dns-Project", path = "/tmp/project", baseBranch = "main" });
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("dns-project", payload.GetProperty("data").GetProperty("name").GetString());
+
+        using var invalid = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = "Bad Project", path = "/tmp/project", baseBranch = "main" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var invalidPayload = await invalid.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("invalid_project_name", invalidPayload.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ProjectScopedApis_AcceptProjectNameAsProjectRef()
+    {
+        var projectName = UniqueProjectName("scope");
+        var project = await _fixture.Client.PostDataAsync<ProjectDto>("/api/projects", new { name = projectName, path = "/tmp/project", baseBranch = "main" });
+
+        var repos = await _fixture.Client.GetDataAsync<RepositoryDto[]>($"/api/projects/{project.Name}/repositories");
+        Assert.Single(repos);
+
+        var issue = await _fixture.Client.PostDataAsync<IssueDto>("/api/issues", new { title = "Project name scoped issue", projectId = project.Name });
+        var issueByName = await _fixture.Client.GetDataAsync<IssueDto>($"/api/issues/{issue.Number}?projectId={project.Name}");
+
+        Assert.Equal(issue.Number, issueByName.Number);
+        Assert.Equal(project.Id, issueByName.ProjectId);
     }
 
     [Fact]
@@ -157,7 +188,7 @@ public class ApiContractSpecs
     [Fact]
     public async Task IssueRebaseApi_QueuesWorkflowTask()
     {
-        var projectName = $"proj-{Guid.NewGuid():N}";
+        var projectName = UniqueProjectName("rebase");
         var projectResponse = await _fixture.Client.PostAsJsonAsync("/api/projects", new { name = projectName, path = "/tmp/project", baseBranch = "trunk" });
         var projectJson = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
         var projectId = projectJson.GetProperty("data").GetProperty("id").GetString();
@@ -210,7 +241,11 @@ public class ApiContractSpecs
 
     private sealed record OpencodeModelsDto(string[] Models);
     private sealed record ProjectDto(string Id, string Name);
+    private sealed record RepositoryDto(string Name);
+    private sealed record IssueDto(string Id, string ProjectId, int Number);
     private sealed record AgentStatusDto(AgentCapacityDto Capacity, RunnerDto[] Runners);
     private sealed record AgentCapacityDto(int Active, int Max);
     private sealed record RunnerDto(string Id, string? Kind = null, int Active = 0, int Max = 0);
+
+    private static string UniqueProjectName(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..Math.Min(prefix.Length + 1 + 32, 63)];
 }

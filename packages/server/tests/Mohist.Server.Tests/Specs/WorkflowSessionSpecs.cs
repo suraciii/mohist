@@ -138,7 +138,7 @@ public class WorkflowSessionSpecs
 
     private async Task<(ProjectDto Project, IssueDto Issue, string SessionName, string WorkflowRunId)> CreateIssueWorkflowSessionAsync(string name, string? title = null)
     {
-        var projectName = $"workflow-session-{name}-{Guid.NewGuid():N}";
+        var projectName = $"wfs-{Guid.NewGuid():N}";
         var project = await _client.PostDataAsync<ProjectDto>("/api/projects", new
         {
             name = projectName,

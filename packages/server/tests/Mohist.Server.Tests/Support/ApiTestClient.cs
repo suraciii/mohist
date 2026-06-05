@@ -26,7 +26,7 @@ public static class ApiTestClient
         using var response = body is null
             ? await client.PostAsync(path, null)
             : await client.PostAsJsonAsync(path, body, JsonOptions);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithBodyAsync(response);
         return await ReadDataAsync<T>(response);
     }
 
@@ -35,19 +35,19 @@ public static class ApiTestClient
         using var response = body is null
             ? await client.PostAsync(path, null)
             : await client.PostAsJsonAsync(path, body, JsonOptions);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithBodyAsync(response);
     }
 
     public static async Task PutAsJsonOkAsync(this HttpClient client, string path, object body)
     {
         using var response = await client.PutAsJsonAsync(path, body, JsonOptions);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithBodyAsync(response);
     }
 
     public static async Task<T> PatchDataAsync<T>(this HttpClient client, string path, object body)
     {
         using var response = await client.PatchAsJsonAsync(path, body, JsonOptions);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessWithBodyAsync(response);
         return await ReadDataAsync<T>(response);
     }
 
@@ -59,6 +59,17 @@ public static class ApiTestClient
         if (!envelope.Success)
             throw new InvalidOperationException(envelope.Error ?? "API request failed");
         return envelope.Data!;
+    }
+
+    private static async Task EnsureSuccessWithBodyAsync(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        var body = await response.Content.ReadAsStringAsync();
+        throw new HttpRequestException(
+            $"Response status code does not indicate success: {(int)response.StatusCode} ({response.ReasonPhrase}). Body: {body}",
+            inner: null,
+            response.StatusCode);
     }
 
     private sealed record ApiEnvelope<T>(bool Success, T? Data, string? Error = null, string? Code = null, object? Details = null);
