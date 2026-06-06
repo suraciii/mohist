@@ -1,0 +1,37 @@
+using System.Text.Json;
+using Mohist.Server.Workflow.Domain.Run;
+using Xunit;
+using Mohist.Server.Tests.Support;
+
+namespace Mohist.Server.Tests.Specs.Workflow.Api;
+
+public class WorkflowEventSerializationSpecs
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void SystemTextJson_ShowsDefaultWorkflowEventUnionShape()
+    {
+        WorkflowEvent e = new TaskCompleted("build", "task-1");
+
+        var json = JsonSerializer.Serialize(e, JsonOptions);
+
+        Assert.Equal("""{"stage":"build","taskId":"task-1"}""", json);
+        Assert.Contains("build", json);
+        Assert.Contains("task-1", json);
+    }
+
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
+    [Fact]
+    public void SystemTextJson_CannotRoundTripWorkflowEventUnionWithoutType()
+    {
+        WorkflowEvent e = new TaskCompleted("build", "task-1");
+
+        var json = JsonSerializer.Serialize(e, JsonOptions);
+
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<WorkflowEvent>(json));
+    }
+}
