@@ -7,6 +7,7 @@ using System.Text.Json;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using System.Linq;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -14,6 +15,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 {
     public WorkflowStateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedWorkflow_NoMoreWork()
     {
@@ -26,6 +29,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedWorkflow_NoMoreWork()
     {
@@ -41,6 +46,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RejectedWorkflow_NoMoreWork()
     {
@@ -58,6 +65,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskRunning_SecondPollWaitsForCompletion()
     {
@@ -75,6 +84,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r2, check, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StaleReport_IgnoredWorkflowContinues()
     {
@@ -95,6 +106,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartedWorkflow_RunnerClaimsFromBacklog()
     {
@@ -114,6 +127,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.NotNull(work);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWithoutRunner_RunnerClaimsFromBacklogLater()
     {
@@ -130,6 +145,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-1.", work.WorkId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ActiveLease_PreservesOwnership_BlocksDuplicateDispatch()
     {
@@ -146,6 +163,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
         Assert.Equal(r1, assignedRunner);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ActiveLease_DifferentRunnerPoll_DoesNotOverwriteExistingLease()
     {
@@ -165,6 +184,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ActiveLease_SameOwnerPoll_DoesNotCreateDuplicateAssignment()
     {
@@ -184,6 +205,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowTaskStarted_IsRecordedAfterMatchingLeaseIsPersisted()
     {
@@ -201,6 +224,8 @@ public class WorkflowStateSpecs : WorkflowGrainSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedClaimedWorkflow_RequestWorkRejectsAsNotRunnable()
     {

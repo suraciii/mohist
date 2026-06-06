@@ -20,6 +20,8 @@ public class ApiContractSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("/api/projects/current")]
     [InlineData("/api/questions")]
@@ -38,6 +40,8 @@ public class ApiContractSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Theory]
     [InlineData("/api/questions/question-1/reply")]
     [InlineData("/api/questions/question-1/expire")]
@@ -52,6 +56,8 @@ public class ApiContractSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task OpencodeModels_ReturnsRunnerReportedModels()
     {
@@ -80,6 +86,8 @@ public class ApiContractSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task AgentStatus_ReportsRegisteredRunnerWorkflowSlots()
     {
@@ -112,6 +120,8 @@ public class ApiContractSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectApi_ResolvesProjectByNameOrId_AndUseReturnsProject()
     {
@@ -131,6 +141,8 @@ public class ApiContractSpecs
         Assert.Equal(projectName, useById.Name);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectApi_CreatesDnsProjectName_AndRejectsInvalidName()
     {
@@ -146,6 +158,8 @@ public class ApiContractSpecs
         Assert.Equal("invalid_project_name", invalidPayload.GetProperty("code").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task ProjectScopedApis_AcceptProjectNameAsProjectRef()
     {
@@ -162,6 +176,8 @@ public class ApiContractSpecs
         Assert.Equal(project.Id, issueByName.ProjectId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task OpencodeModels_OnProjectRoute_ReturnsGlobalRunnerModels()
     {
@@ -186,6 +202,8 @@ public class ApiContractSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task IssueRebaseApi_QueuesWorkflowTask()
     {

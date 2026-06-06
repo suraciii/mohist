@@ -24,6 +24,8 @@ public class IssueRepositoryReferenceSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task NewIssue_WithExplicitRepository_PersistsOnlyTheReference()
     {
@@ -42,6 +44,8 @@ public class IssueRepositoryReferenceSpecs
             "New issues must not persist a mutable repository configuration snapshot as authority.");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task NewIssue_WithoutRepository_PersistsDefaultProjectRepositoryReference()
     {
@@ -65,6 +69,8 @@ public class IssueRepositoryReferenceSpecs
             "Default-bound issues must not persist a repository configuration snapshot as authority.");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void State_RoundTrip_PersistsOnlyRepositoryReference()
     {
@@ -93,6 +99,8 @@ public class IssueRepositoryReferenceSpecs
         Assert.Equal("secondary", reloaded!.RepositoryRef);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_ReferencesUnknownRepository_SurfacesRepositoryNotFoundProblem()
     {
@@ -131,6 +139,8 @@ public class IssueRepositoryReferenceSpecs
         Assert.Contains("secondary", info.RepositoryProblem.CandidateNames!);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_ProjectWithNoRepositories_SurfacesProjectHasNoRepositoriesProblem()
     {
@@ -169,6 +179,8 @@ public class IssueRepositoryReferenceSpecs
         Assert.Equal(IssueRepositoryProblemCode.ProjectHasNoRepositories, info.RepositoryProblem!.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ReadModel_ProjectMissing_SurfacesProjectMissingProblem()
     {

@@ -1,5 +1,6 @@
 using Mohist.Cli;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -7,6 +8,8 @@ public sealed class SkillAssetServiceSpecs : IDisposable
 {
     private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-skill-assets-{Guid.NewGuid():N}");
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void ListVisibleSkills_ReturnsExplicitBuiltInsSortedByName()
     {
@@ -21,6 +24,8 @@ public sealed class SkillAssetServiceSpecs : IDisposable
         Assert.All(skills, skill => Assert.False(string.IsNullOrWhiteSpace(skill.Description)));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void GetSkill_UsesOverrideAssetRoot_WhenProvided()
     {
@@ -43,6 +48,8 @@ public sealed class SkillAssetServiceSpecs : IDisposable
         Assert.Contains("# override", result.Skill.SkillMarkdown);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void GetSkill_ReturnsClearFailure_ForUnknownSkill()
     {
@@ -54,6 +61,8 @@ public sealed class SkillAssetServiceSpecs : IDisposable
         Assert.Equal("Unknown Mohist built-in skill 'unknown-skill'.", result.Error);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void GetSkill_FullContent_AppendsSupplementaryFilesInDeterministicOrder()
     {
@@ -76,6 +85,8 @@ public sealed class SkillAssetServiceSpecs : IDisposable
             result.Skill!.SupplementaryFiles.Select(file => file.RelativePath).ToArray());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Service_DoesNotTouchDotMohistSkills()
     {

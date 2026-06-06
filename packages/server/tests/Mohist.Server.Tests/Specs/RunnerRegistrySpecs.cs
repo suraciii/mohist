@@ -1,6 +1,7 @@
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Runner.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -8,6 +9,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
 {
     public RunnerRegistrySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_GlobalRunner_ReturnsForSelectedProject()
     {
@@ -21,6 +24,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.Contains(eligible, r => r.RunnerId == globalRunnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_ProjectRunner_ReturnsForSameProject()
     {
@@ -34,6 +39,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.Contains(eligible, r => r.RunnerId == projectRunnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_OtherProjectRunner_IsExcluded()
     {
@@ -47,6 +54,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(eligible, r => r.RunnerId == otherProjectRunnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_CombinesGlobalAndProjectRunners()
     {
@@ -71,6 +80,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(eligible, r => r.RunnerId == otherProjectRunnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_ReturnsRunnerInfoFields()
     {
@@ -92,6 +103,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.NotNull(info.RegisteredAt);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_CalledFromGlobalRegistry_ReturnsGlobalAndProjectRunners()
     {
@@ -111,6 +124,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.Contains(eligible, r => r.RunnerId == projectRunnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListRunnerIdsAsync_RemainsCompatible()
     {
@@ -124,6 +139,8 @@ public class RunnerRegistrySpecs : WorkflowGrainSpecs
         Assert.Contains(runnerId, ids);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task ListEligibleRunnersAsync_DeduplicatesByRunnerId()
     {

@@ -8,6 +8,8 @@ namespace Mohist.Server.Tests.Specs;
 
 public class ProjectCliSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ProjectUse_ByName_PersistsActiveProjectInCliState()
     {
@@ -38,6 +40,8 @@ public class ProjectCliSpecs
         Assert.Equal("", error.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Use_ByName_PersistsActiveProjectInCliState()
     {
@@ -68,6 +72,8 @@ public class ProjectCliSpecs
         Assert.Equal("", error.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task IssueList_UsesPersistedActiveProjectWhenProjectIdIsOmitted()
     {

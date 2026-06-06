@@ -1,10 +1,13 @@
 using Mohist.Server.SystemInfo;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class GitSourceInspectorSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Inspect_CleanRepo_ReturnsPathBranchHeadAndNotDirty()
     {
@@ -26,6 +29,8 @@ public class GitSourceInspectorSpecs
         Assert.False(state.Dirty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Inspect_DirtyRepo_ReturnsDirtyTrue()
     {
@@ -45,6 +50,8 @@ public class GitSourceInspectorSpecs
         Assert.Equal("abc123def456", state.Head);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Inspect_AfterNewCommit_SourceHeadDiffersFromCapturedHash()
     {
@@ -68,6 +75,8 @@ public class GitSourceInspectorSpecs
         Assert.NotEqual(capturedRunningHash, secondState.Head);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Inspect_NonGitDirectory_ReturnsNullBranchAndHead()
     {
@@ -87,6 +96,8 @@ public class GitSourceInspectorSpecs
         Assert.False(state.Dirty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Inspect_MissingDirectory_ReturnsNullBranchAndHead()
     {

@@ -38,6 +38,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         using var _ = await _client.PostAsync($"/api/projects/{_projectId}/issues/{_issueNumber}/stop", null);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueStart_RunnerCompletesWorkflow_IssueBecomesDone()
     {
@@ -94,6 +96,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Contains(events, e => e.Type == "WorkflowRunCompleted");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowVariablesPatch_AppliesToFutureDispatches()
     {
@@ -122,6 +126,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal(1200, agent.GetProperty("timeout").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectVariablesPatch_AppliesToNextTaskDispatch()
     {
@@ -167,6 +173,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectStageVariablesPatch_OverridesPersistedWorkflowStageAgent()
     {
@@ -211,6 +219,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Equal(1500, agent.GetProperty("timeout").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueStart_GlobalRunnerClaimsProjectBacklogWork()
     {
@@ -253,6 +263,8 @@ public class IssueWorkflowProductLoopSpecs : IAsyncLifetime
         Assert.Fail("Global runner did not claim project backlog work");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowYaml_ReturnsActiveWorkflowDefinition()
     {

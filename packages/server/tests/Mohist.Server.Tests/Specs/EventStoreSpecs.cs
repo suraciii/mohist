@@ -21,6 +21,8 @@ public class EventStoreSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AppendWorkflowEventAsync_StoresMinimalDomainEventRow()
     {
@@ -68,6 +70,8 @@ public class EventStoreSpecs
             });
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ListWorkflowEventsAsync_ProjectsDomainEventsFromPayload()
     {
@@ -88,6 +92,8 @@ public class EventStoreSpecs
         Assert.Equal("task.1", payload.TaskId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentSessionStore_StoresSessionStateAndDomainEventsInOneCommit()
     {

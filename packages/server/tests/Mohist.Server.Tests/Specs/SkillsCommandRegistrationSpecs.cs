@@ -1,12 +1,15 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("SkillsCli")]
 public sealed class SkillsCommandRegistrationSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void SkillsHelp_DescribesCoderAgentSkillManagement_AndListsExpectedSubcommands()
     {
@@ -21,6 +24,8 @@ public sealed class SkillsCommandRegistrationSpecs
         Assert.DoesNotContain("update", help);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void SkillsUpdate_IsNotRegistered()
     {

@@ -185,6 +185,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
     }
 
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowInBacklog_RunnerClaimsOnFirstPoll()
     {
@@ -210,6 +212,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PausedWorkflowInBacklog_RunnerClaimsButNoWork()
     {
@@ -224,6 +228,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedWorkflow_ReleasedFromBacklog()
     {
@@ -246,6 +252,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.Null(await anotherRunner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RetryAfterFailure_ReRegisteredToBacklog()
     {
@@ -273,6 +281,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         await workflow.ReportResultAsync(runnerId, check.WorkId, new WorkResult("pass", Output: """[{"name":"check-1","status":"pass"}]"""));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NoRunner_WorkflowWaitsInBacklog()
     {
@@ -291,6 +301,8 @@ public class BacklogSpecs : IClassFixture<BacklogFixture>
         Assert.Equal(_workflowId, work.WorkflowRunId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedWorkflow_ReleasedFromBacklog()
     {

@@ -1,10 +1,13 @@
 using Mohist.Server.SystemInfo;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class SystemdUnitParserSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Parse_ExtractsWorkingDirectoryExecStartAndDescription()
     {
@@ -29,6 +32,8 @@ WantedBy=default.target
         Assert.Equal("Mohist Server", result.Description);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Parse_WhenKeysMissing_ReturnsNulls()
     {
@@ -43,6 +48,8 @@ Description=Minimal
         Assert.Equal("Minimal", result.Description);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Parse_IgnoresCommentsAndEmptyLines()
     {
@@ -61,6 +68,8 @@ ExecStart=dotnet run --project Mohist.Server.csproj
         Assert.Equal("dotnet run --project Mohist.Server.csproj", result.ExecStart);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Parse_HandlesTrailingWhitespace()
     {
@@ -75,6 +84,8 @@ ExecStart=dotnet run --project Mohist.Server.csproj
 
 public class SystemdInstallDetectorSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_LocalSourceUnitWithSolutionAndSourceRun_ReturnsLocalSource()
     {
@@ -97,6 +108,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Equal("Detected local-source systemd user install from mohist.service", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_LocalSourceWithRunnerUnit_ReturnsLocalSourceAndRunnerUnit()
     {
@@ -117,6 +130,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Equal("mohist-runner.service", result.RunnerUnit);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_MissingUnit_ReturnsUnknown()
     {
@@ -128,6 +143,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Contains("mohist.service unit not found", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_MissingWorkingDirectory_ReturnsUnknown()
     {
@@ -145,6 +162,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Contains("no WorkingDirectory", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_MissingSolutionFile_ReturnsUnknown()
     {
@@ -163,6 +182,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Contains("does not contain Mohist.sln", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_BinaryExecStart_ReturnsBinary()
     {
@@ -183,6 +204,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Contains("not a local-source run shape", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_DotnetRunWithoutProjectFlag_ReturnsUnknown()
     {
@@ -202,6 +225,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Contains("not a local-source run shape", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_DotnetRunWithWrongProject_ReturnsUnknown()
     {
@@ -221,6 +246,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Contains("not a local-source run shape", result.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_MalformedUnitFile_ReturnsUnknown()
     {
@@ -237,6 +264,8 @@ public class SystemdInstallDetectorSpecs
         Assert.Equal("unknown", result.Mode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Detect_EmptyExecStart_ReturnsUnknown()
     {

@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
 {
     public StageLockSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SameProjectIntegrateStages_RunSequentiallyAcrossWorkflows()
     {
@@ -99,6 +102,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await ReportAsync(secondRunnerId, secondMerge.WorkflowRunId, secondMerge.WorkId, new WorkResult("completed"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedIntegrateStage_ReleasesSequentialLock()
     {
@@ -146,6 +151,8 @@ public class StageLockSpecs : WorkflowGrainSpecs
         await ReportAsync(runner2Id, workflow2Id, wf2Merge.WorkId, new WorkResult("completed"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedIntegrateWorkflow_ReleasesSequentialLock()
     {

@@ -1,5 +1,6 @@
 using Mohist.Server.Project.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -15,6 +16,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
     private IProjectGrain NewProjectGrain(string? id = null) =>
         _grains.GetGrain<IProjectGrain>(id ?? Guid.NewGuid().ToString());
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateProject_ReturnsProjectWithId()
     {
@@ -27,6 +30,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("main", project.BaseBranch);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateProject_Duplicate_Throws()
     {
@@ -38,6 +43,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
             grain.CreateAsync("dup", "/b", null));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetAsync_Existing_ReturnsProject()
     {
@@ -50,6 +57,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("develop", project.BaseBranch);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetAsync_NotExisting_ReturnsNull()
     {
@@ -58,6 +67,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(project);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Update_ChangesBaseBranch()
     {
@@ -69,6 +80,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Equal("develop", updated!.BaseBranch);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Update_NotExisting_ReturnsNull()
     {
@@ -77,6 +90,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Delete_Existing_RemovesProject()
     {
@@ -87,6 +102,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Null(await grain.GetAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task AddRepository_AddsToProject()
     {
@@ -99,6 +116,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Contains(updated.Repositories, r => r.Name == "frontend");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultRepository_SwitchesDefault()
     {
@@ -115,6 +134,8 @@ public class ProjectGrainSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.False(main.IsDefault);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task RemoveRepository_RemovesFromProject()
     {

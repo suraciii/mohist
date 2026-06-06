@@ -1,5 +1,6 @@
 using Mohist.Server.Infrastructure.Events;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -13,6 +14,8 @@ public class EventBusSpecs
             Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryEventBus>.Instance);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Emit_WithSubscriber_ReceivesEvent()
     {
@@ -25,12 +28,16 @@ public class EventBusSpecs
         Assert.Equal("{\"msg\":\"hello\"}", System.Text.Json.JsonSerializer.Serialize(received));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Emit_NoSubscriber_DoesNotThrow()
     {
         _bus.Emit("orphan", new { x = 1 });
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Off_RemovesSubscriber()
     {
@@ -44,6 +51,8 @@ public class EventBusSpecs
         Assert.Equal(1, count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Emit_MultipleSubscribers_AllReceive()
     {
@@ -58,6 +67,8 @@ public class EventBusSpecs
         Assert.Equal(1, b);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void Emit_DifferentEventTypes_Isolated()
     {
@@ -72,6 +83,8 @@ public class EventBusSpecs
         Assert.False(receivedB);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Emit_SlowSubscriber_DoesBlockCaller()
     {

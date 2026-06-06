@@ -21,6 +21,8 @@ public class WorkflowSessionSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GivenRunnerReportsAcpSessionEvents_WhenSessionIsQueried_ThenEventsAreSavedInSessionOrder()
     {
@@ -76,6 +78,8 @@ public class WorkflowSessionSpecs
         Assert.Equal("proposal", detail.Events[1].WorkId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GivenMohistPromptAndTerminalFailure_WhenIssueWorkflowSessionEventsAreQueried_ThenRawEventsReturnInSequence()
     {

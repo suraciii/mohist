@@ -2,11 +2,14 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class DatabaseInitializationSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenEmptyDatabase_CreatesAllTables()
     {
@@ -32,6 +35,8 @@ public class DatabaseInitializationSpecs
         Assert.True(await TableExistsAsync(connection, "__EFMigrationsHistory"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenEmptyDatabase_CreatesProjectPromptTemplatesTableAndIndex()
     {
@@ -50,6 +55,8 @@ public class DatabaseInitializationSpecs
         Assert.Single(await RecordedMigrationsAsync(connection));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenCalledTwiceOnProjectPromptTemplates_IsIdempotent()
     {
@@ -74,6 +81,8 @@ public class DatabaseInitializationSpecs
         Assert.True(await IndexExistsAsync(connection, "IX_ProjectPromptTemplates_ProjectId_UpdatedAt"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Migrate_WhenCalledTwice_IsIdempotent()
     {

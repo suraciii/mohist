@@ -3,11 +3,14 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class TaskRequiredFilesSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithExpectFiles_ReturnsRequiredFileEntries()
     {
@@ -27,6 +30,8 @@ public class TaskRequiredFilesSpecs
         Assert.Contains("<promise>PASS</promise>", result[0].Markers!);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithMultipleFiles_ReturnsAllEntries()
     {
@@ -49,6 +54,8 @@ public class TaskRequiredFilesSpecs
         Assert.Equal("tasks.json", result[2].Path);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithNoExpect_ReturnsEmpty()
     {
@@ -62,6 +69,8 @@ public class TaskRequiredFilesSpecs
         Assert.Empty(result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithNullInput_ReturnsEmpty()
     {
@@ -69,6 +78,8 @@ public class TaskRequiredFilesSpecs
         Assert.Empty(result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExtractRequiredFiles_WithEmptyPath_SkipsEntry()
     {
@@ -85,6 +96,8 @@ public class TaskRequiredFilesSpecs
         Assert.Equal("valid.md", result[0].Path);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DeriveClassification_ForCoreAndMohistInternal_UsesOrchestration()
     {
@@ -95,6 +108,8 @@ public class TaskRequiredFilesSpecs
         Assert.Equal(TaskClassification.Orchestration, classification);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DeriveClassification_ForAgentTask_UsesUserFacing()
     {
@@ -105,6 +120,8 @@ public class TaskRequiredFilesSpecs
         Assert.Equal(TaskClassification.UserFacing, classification);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void TaskRun_WithRequiredFiles_ContainsMetadata()
     {
@@ -132,6 +149,8 @@ public class TaskRequiredFilesSpecs
         Assert.Equal("task-expect", taskRun.RequiredFiles[0].Source);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void TaskRun_StatusCanBeUpdated_WithoutRemovingRequiredFiles()
     {
@@ -160,6 +179,8 @@ public class TaskRequiredFilesSpecs
         Assert.Equal("design.md", taskRun.RequiredFiles[0].Path);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void TaskRun_NoFileContentStored()
     {

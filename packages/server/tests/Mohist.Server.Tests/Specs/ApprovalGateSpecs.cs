@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -7,6 +8,8 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
 {
     public ApprovalGateSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ApprovalStage_TasksAndChecksPass_WorkflowAwaitsApproval()
     {
@@ -25,6 +28,8 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.Null(poll);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_UserApproves_WorkflowContinuesToNextStage()
     {
@@ -50,6 +55,8 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_UserApproves_AssignedRunnerContinuesWorkflow()
     {
@@ -73,6 +80,8 @@ public class ApprovalGateSpecs : WorkflowGrainSpecs
         Assert.StartsWith("compile.", buildWork.WorkId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task AwaitingApproval_UserRejects_WorkflowFails()
     {

@@ -2,6 +2,7 @@ using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class IssueRepositoryResolverSpecs
 {
     private readonly IssueRepositoryResolver _resolver = new();
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_EmptyReference_OnProjectWithDefault_ReturnsDefaultRepository()
     {
@@ -35,6 +38,8 @@ public class IssueRepositoryResolverSpecs
         Assert.True(result.Repository.IsDefault);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_ExplicitReference_ReturnsMatchingProjectRepository()
     {
@@ -62,6 +67,8 @@ public class IssueRepositoryResolverSpecs
         Assert.False(result.Repository.IsDefault);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_ExplicitReference_StaleStoredFieldsDoNotOverrideProjectRepository()
     {
@@ -87,6 +94,8 @@ public class IssueRepositoryResolverSpecs
         Assert.True(result.Repository.IsDefault);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_ProjectMissing_ReturnsProjectMissingProblem()
     {
@@ -98,6 +107,8 @@ public class IssueRepositoryResolverSpecs
         Assert.Null(result.Problem.RepositoryRef);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_ProjectWithNoRepositories_ReturnsProjectHasNoRepositoriesProblem()
     {
@@ -118,6 +129,8 @@ public class IssueRepositoryResolverSpecs
         Assert.Contains("proj-empty", result.Problem.Message);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_EmptyReferenceAndNoDefault_ReturnsDefaultRepositoryMissingProblem()
     {
@@ -140,6 +153,8 @@ public class IssueRepositoryResolverSpecs
         Assert.Equal(IssueRepositoryProblemCode.DefaultRepositoryMissing, result.Problem!.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_UnknownExplicitReference_ReturnsRepositoryNotFoundProblem()
     {
@@ -167,6 +182,8 @@ public class IssueRepositoryResolverSpecs
         Assert.Contains("secondary", result.Problem.CandidateNames!);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_UnknownReference_NeverFallsBackToDefaultOrImplicitMainBranch()
     {
@@ -188,6 +205,8 @@ public class IssueRepositoryResolverSpecs
         Assert.NotNull(result.Problem);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_AmbiguousExplicitReference_ReturnsAmbiguousReferenceProblem()
     {
@@ -215,6 +234,8 @@ public class IssueRepositoryResolverSpecs
         Assert.Contains("MAIN", result.Problem.CandidateNames!);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_ReferenceLookupIsCaseInsensitive()
     {
@@ -237,6 +258,8 @@ public class IssueRepositoryResolverSpecs
         Assert.Equal("Main", result.Repository!.Name);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Resolve_WhitespaceOnlyReference_BehavesLikeEmpty()
     {

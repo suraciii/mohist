@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -25,6 +26,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
     private static WorkflowStartInput TestInput() =>
         new(Variables: """{"project":{"id":"test-project"}}""");
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void EventBus_DirectEmit_Works()
     {
@@ -34,6 +37,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         Assert.Single(received);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowStart_EmitsStageChanged()
     {
@@ -59,6 +64,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowPause_EmitsStageChanged()
     {
@@ -87,6 +94,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowResume_EmitsStageChanged()
     {

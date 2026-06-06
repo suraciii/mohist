@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Cli;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -19,6 +20,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
             Directory.Delete(_tempRoot, recursive: true);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Write_ThenTryRead_RoundTripsVersionGitHashAndSkills()
     {
@@ -39,6 +42,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Equal(new[] { "mohist", "mohist-explore" }, read.Data.Skills);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Write_OrdersAndDeduplicatesSkillNames()
     {
@@ -58,6 +63,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
                 .ToArray());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Write_NormalizesSkillNamesAndPreservesBuildIdentity()
     {
@@ -76,6 +83,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Equal(new[] { "mohist", "mohist-explore" }, read.Data.Skills);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_AcceptsMatchingManifestWithDeclaredSkillsAndFiles()
     {
@@ -96,6 +105,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Empty(result.Errors);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_ReportsMissingManifest()
     {
@@ -113,6 +124,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Contains(result.Errors, error => error.Contains("mo update", StringComparison.Ordinal));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_ReportsVersionMismatchWithRepairGuidance()
     {
@@ -135,6 +148,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Contains(result.Errors, error => error.Contains("mo update", StringComparison.Ordinal));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_ReportsGitHashMismatchWithRepairGuidance()
     {
@@ -158,6 +173,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Contains(result.Errors, error => error.Contains("mo update", StringComparison.Ordinal));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_ReportsOmittedBuiltInSkillNames()
     {
@@ -179,6 +196,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Contains(result.Errors, error => error.Contains("mo update", StringComparison.Ordinal));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_ReportsMissingSkillMarkdown()
     {
@@ -201,6 +220,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Contains(result.Errors, error => error.Contains("mo update", StringComparison.Ordinal));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_ReportsMalformedManifest()
     {
@@ -218,6 +239,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Contains(result.Errors, error => error.Contains("mo update", StringComparison.Ordinal));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Validate_DoesNotReadDotMohistSkills()
     {
@@ -244,6 +267,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Equal("keep", File.ReadAllText(sentinelPath));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void ResolveBuildIdentity_PrefersInformationalVersionSplit()
     {
@@ -257,6 +282,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Equal("abcdef0123", identity.GitHash);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void ResolveBuildIdentity_FallsBackToEnvThenGitHead()
     {
@@ -275,6 +302,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Equal("headhash", fromHead.GitHash);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void ResolveCurrentBuildIdentity_ReturnsNonEmptyVersionForMohistCli()
     {
@@ -284,6 +313,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.NotEmpty(identity.Version);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void ResolveBuildIdentity_ToleratesNullInputs()
     {
@@ -297,6 +328,8 @@ public sealed class SkillAssetManifestSpecs : IDisposable
         Assert.Null(identity.GitHash);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void ResolveBuildIdentity_FallsBackToAssemblyVersionWhenInformationalMissing()
     {

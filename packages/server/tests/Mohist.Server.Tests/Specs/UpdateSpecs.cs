@@ -8,6 +8,8 @@ namespace Mohist.Server.Tests.Specs;
 
 public class UpdateSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateAll_UpdatesCliServerAndRunnerWithoutPulling()
     {
@@ -64,6 +66,8 @@ public class UpdateSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCli_PublishesAndReplacesResolvedMoBinary()
     {
@@ -114,6 +118,8 @@ public class UpdateSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_BuildsCurrentSourceAndRestarts()
     {
@@ -147,6 +153,8 @@ public class UpdateSpecs
         Assert.Equal(new[] { "--user", "restart", "mohist.service" }, commands.ExecutedCommands[1].Args);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_WaitsForReadinessAfterRestart()
     {
@@ -184,6 +192,8 @@ public class UpdateSpecs
         Assert.Contains("Server is ready.", stdout.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_WhenReadinessDoesNotBecomeReady_ReturnsFailure()
     {
@@ -217,6 +227,8 @@ public class UpdateSpecs
         Assert.Contains("Last readiness error: GET / returned 500 InternalServerError", stderr.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_ReadinessChecksAssetHeadersWithoutReadingBundleBody()
     {
@@ -250,6 +262,8 @@ public class UpdateSpecs
         Assert.Equal(["/api/health", "/", "/assets/app.js"], readiness.Paths);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void SourceCodeUpdater_DefaultsServerReadinessToIpv4Loopback()
     {
@@ -272,6 +286,8 @@ public class UpdateSpecs
         Assert.Equal(new Uri("http://127.0.0.1:3456"), updater.ServerBaseAddress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateRunner_BuildsCurrentSourceAndRestarts()
     {
@@ -298,6 +314,8 @@ public class UpdateSpecs
         Assert.Equal(new[] { "--user", "restart", "mohist-runner.service" }, commands.ExecutedCommands[1].Args);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunner_RestoresRunner()
     {
@@ -346,6 +364,8 @@ public class UpdateSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateAll_WhenRunnerBuildFailsAfterServerReady_RestoresRunner()
     {
@@ -394,6 +414,8 @@ public class UpdateSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_WhenBuildFails_AbortsWithError()
     {
@@ -419,6 +441,8 @@ public class UpdateSpecs
         Assert.Contains("Build failed", stderr.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_WhenBuildFails_PrintsCommandOutput()
     {
@@ -446,6 +470,8 @@ public class UpdateSpecs
         Assert.Contains("Build failed", output);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCli_WhenPublishFails_PrintsCommandOutput()
     {
@@ -473,6 +499,8 @@ public class UpdateSpecs
         Assert.Contains("CLI publish failed", output);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateServer_InDryRunMode_PreviewsCommands()
     {

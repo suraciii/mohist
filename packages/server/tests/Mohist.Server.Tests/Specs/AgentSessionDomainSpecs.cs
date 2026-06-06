@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Sessions.Domain;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -26,6 +27,8 @@ public class AgentSessionDomainSpecs
 
     private static AgentUsageSummary Usage(AgentSession session) => session.Status.UsageSummary ?? new AgentUsageSummary();
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void Create_OrganizesSessionIntoResourceSections()
     {
@@ -48,6 +51,8 @@ public class AgentSessionDomainSpecs
         Assert.NotNull(session.Status.UsageSummary);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void StateJson_UsesMetadataRuntimeSettingsAndStatusSections()
     {
@@ -76,6 +81,8 @@ public class AgentSessionDomainSpecs
         Assert.True(root.GetProperty("Settings").TryGetProperty("Model", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void ApplyUsage_AccumulatesTokenCounters()
     {
@@ -93,6 +100,8 @@ public class AgentSessionDomainSpecs
         Assert.IsType<AgentSessionUsageRecorded>(Assert.Single(secondEvents).Value);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void AttachAgent_ReturnsStartedAndModelChangedEvents()
     {
@@ -105,6 +114,8 @@ public class AgentSessionDomainSpecs
             e => Assert.Equal("model-a", Assert.IsType<AgentSessionModelChanged>(e.Value).Model));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void TerminalTransitions_ReturnSessionEvents()
     {
@@ -125,6 +136,8 @@ public class AgentSessionDomainSpecs
         Assert.Equal(2, cancelledEvent.ExitCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void ApplyUsage_AccumulatesCostAndUpdatesCurrency()
     {
@@ -137,6 +150,8 @@ public class AgentSessionDomainSpecs
         Assert.Equal("EUR", Usage(session).CostCurrency);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void ApplyUsage_UpdatesContextWindowSnapshot()
     {
@@ -149,6 +164,8 @@ public class AgentSessionDomainSpecs
         Assert.Equal(250, Usage(session).ContextWindowSize);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void ApplyUsage_NullDelta_DoesNotChangeExistingValues()
     {
@@ -170,6 +187,8 @@ public class AgentSessionDomainSpecs
         Assert.Equal(100, Usage(session).ContextWindowUsed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void ApplyUsage_NegativeDelta_IgnoresDelta()
     {
@@ -187,6 +206,8 @@ public class AgentSessionDomainSpecs
         Assert.Null(Usage(session).CostAmount);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.AgentSession)]
     [Fact]
     public void ApplyUsage_TerminalSession_DoesNotMutate()
     {

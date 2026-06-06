@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Domain;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
 {
     public PausingWorkSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningWorkflow_Pause_StopsAfterCurrentTask()
     {
@@ -33,6 +36,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PausedWorkflow_Resume_ContinuesWithNextTask()
     {
@@ -64,6 +69,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.True(await runner2.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_Resume_ThrowsDomainException()
     {
@@ -74,6 +81,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.ResumeAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_HasTerminalStatus()
     {
@@ -88,6 +97,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Equal("Stopped", statusAfter);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_Resumes_DoesNotReturnNewWork()
     {
@@ -101,6 +112,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_ReleasesLease()
     {
@@ -112,6 +125,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         Assert.Null(await workflow.GetCurrentWorkIdAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_CannotBeStoppedAgain()
     {
@@ -122,6 +137,8 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         await Assert.ThrowsAsync<WorkflowDomainException>(() => workflow.StopAsync("second"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CompletedWorkflow_CannotBeStopped()
     {

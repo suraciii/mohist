@@ -6,6 +6,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -23,6 +24,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         return new FixedTimeProvider(now);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_GlobalRunner_IsIncluded()
     {
@@ -36,6 +39,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Contains(result, r => r.Id == runnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_ProjectRunner_IsIncluded()
     {
@@ -49,6 +54,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Contains(result, r => r.Id == runnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_OtherProjectRunner_IsExcluded()
     {
@@ -62,6 +69,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(result, r => r.Id == runnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_NoProjectScopedRunners_ReturnsOnlyGlobalRunners()
     {
@@ -71,6 +80,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.All(result, r => Assert.Equal("global", r.Scope.Type));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_IdleRunner_HasIdleStatus()
     {
@@ -86,6 +97,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("idle", view.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_BusyRunner_HasBusyStatusAndActiveWork()
     {
@@ -105,6 +118,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal(workflowId, view.ActiveWork.WorkflowRunId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_StaleRunner_HasStaleStatus()
     {
@@ -121,6 +136,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("stale", view.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_OfflineRunner_HasOfflineStatus()
     {
@@ -139,6 +156,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.True(view == null || view.Status == "offline");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_ConnectedRunner_HasConnectionState()
     {
@@ -156,6 +175,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("connected", view.ConnectionState);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_DisconnectedRunner_HasDisconnectedConnectionState()
     {
@@ -170,6 +191,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("disconnected", view.ConnectionState);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_DisconnectedIdleWorkspaceRunner_IsProjectedAsOffline()
     {
@@ -186,6 +209,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal("offline", view.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_DisconnectedBusyWorkspaceRunner_IsProjectedAsBusyWithActiveWorkDiagnostic()
     {
@@ -207,6 +232,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Equal(workflowId, view.ActiveWork.WorkflowRunId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_ReturnsAllFields()
     {
@@ -237,6 +264,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Null(view.ActiveWork);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_GlobalRunnerScope_IsGlobal()
     {
@@ -252,6 +281,8 @@ public class RunnerStatusProjectionSpecs : WorkflowGrainSpecs
         Assert.Null(view.Scope.ProjectId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetRunnersAsync_DoesNotExposeSecrets()
     {

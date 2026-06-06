@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -8,6 +9,8 @@ public class WorkflowEventSerializationSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void SystemTextJson_ShowsDefaultWorkflowEventUnionShape()
     {
@@ -20,6 +23,8 @@ public class WorkflowEventSerializationSpecs
         Assert.Contains("task-1", json);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void SystemTextJson_CannotRoundTripWorkflowEventUnionWithoutType()
     {

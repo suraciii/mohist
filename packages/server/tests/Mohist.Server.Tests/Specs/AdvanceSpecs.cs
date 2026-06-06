@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class AdvanceSpecs : WorkflowGrainSpecs
 {
     public AdvanceSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ApprovalStage_CompletesWork_WaitsForApproval()
     {
@@ -35,6 +38,8 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NonApprovalStage_CompletesWork_AutoAdvancesToNextStage()
     {
@@ -63,6 +68,8 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         Assert.True(await Grains.GetGrain<IRunnerGrain>(r3).IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EmptyStage_SkipsToNextStage()
     {
@@ -81,6 +88,8 @@ public class AdvanceSpecs : WorkflowGrainSpecs
         Assert.True(await Grains.GetGrain<IRunnerGrain>(runnerId).IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EmptyApprovalStage_UserApproves_AdvancesToNextStage()
     {

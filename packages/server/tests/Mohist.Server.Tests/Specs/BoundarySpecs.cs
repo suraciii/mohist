@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class BoundarySpecs : WorkflowGrainSpecs
 {
     public BoundarySpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task EmptyStage_NoTasksOrChecks_WorkflowCompletes()
     {
@@ -22,6 +25,8 @@ public class BoundarySpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckReportsPending_CheckRunsAgain()
     {
@@ -42,6 +47,8 @@ public class BoundarySpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task UnknownWorkReport_Ignored_CurrentWorkContinues()
     {

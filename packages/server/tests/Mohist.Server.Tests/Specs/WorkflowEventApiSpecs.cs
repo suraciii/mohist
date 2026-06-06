@@ -23,6 +23,8 @@ public class WorkflowEventApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task IssueEvents_ReturnsDomainEventsForCurrentWorkflowRunOnly()
     {
@@ -58,6 +60,8 @@ public class WorkflowEventApiSpecs
         Assert.Equal("1.0", taskCompleted.SpecVersion);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task WorkflowRunEvents_DoesNotIncludeAgentSessionStreamEvents()
     {
@@ -87,6 +91,8 @@ public class WorkflowEventApiSpecs
         Assert.DoesNotContain(events, e => e.Type == "tool_call_update");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task IssueEvents_OnLegacyRoute_ReturnsNotFound()
     {

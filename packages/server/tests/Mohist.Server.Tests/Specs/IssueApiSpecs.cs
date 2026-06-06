@@ -15,6 +15,8 @@ public class IssueApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Comments_RoundTripThroughIssueDetailShape()
     {
@@ -28,6 +30,8 @@ public class IssueApiSpecs
         Assert.Contains(detail.Comments, c => c.Id == comment.Id && c.Body == "Looks good");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_OnLegacyCollectionRoute_ReturnsNotFound()
     {
@@ -39,6 +43,8 @@ public class IssueApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_OnProjectRoute_UsesRouteProjectContext()
     {
@@ -51,6 +57,8 @@ public class IssueApiSpecs
         Assert.Equal(issue.Id, detail.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
     {
@@ -62,6 +70,8 @@ public class IssueApiSpecs
         Assert.NotNull(detail);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_ReturnsOnlyIssuesInRouteProject()
     {
@@ -76,6 +86,8 @@ public class IssueApiSpecs
         Assert.DoesNotContain(issues, issue => issue.Id == secondIssue.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithWorkflowProfileId_RoundTripsProfileId()
     {
@@ -87,6 +99,8 @@ public class IssueApiSpecs
         Assert.Equal("mohist/default", detail.WorkflowProfileId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SystemWorkflowTemplates_ReturnDefaultTemplateMetadata()
     {
@@ -98,6 +112,8 @@ public class IssueApiSpecs
         Assert.Contains("OpenSpec", profile.Description);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Prerequisites_ProjectIntoStartEligibility()
     {
@@ -112,6 +128,8 @@ public class IssueApiSpecs
         Assert.Contains(detail.Prerequisites, p => p.Number == prereq.Number && !p.Completed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
@@ -125,6 +143,8 @@ public class IssueApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SystemInfo_ReturnsTypedRuntimePayload()
     {
@@ -140,6 +160,8 @@ public class IssueApiSpecs
         Assert.False(string.IsNullOrWhiteSpace(system.Install.Mode));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task SystemUpdateStatus_WhenNoJobExists_ReturnsIdleEnvelope()
     {
@@ -149,6 +171,8 @@ public class IssueApiSpecs
         Assert.Null(status.Job);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ProjectStatus_UsesIssueLifecycleStages()
     {
@@ -173,6 +197,8 @@ public class IssueApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Epics_LinkIssueAndExposePrimaryEpic()
     {

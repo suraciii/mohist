@@ -27,6 +27,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         _services = fixture.Services;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_ResolvesRepositoryFromCurrentProjectConfig_AndDispatchesRepositoryVariables()
     {
@@ -54,6 +56,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Equal("develop", repository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_AfterProjectRepositoryConfigChange_UsesLatestRepositoryMetadata()
     {
@@ -88,6 +92,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Equal("release", repository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_ReferencedRepositoryRemovedAfterIssueCreation_ThrowsRepositoryConfigurationProblem()
     {
@@ -122,6 +128,8 @@ public class IssueWorkflowRepositoryResolutionSpecs
         Assert.Equal("secondary", info.RepositoryProblem.RepositoryRef);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_ResolutionFailure_DoesNotCreateWorkflowOrDispatchWork()
     {

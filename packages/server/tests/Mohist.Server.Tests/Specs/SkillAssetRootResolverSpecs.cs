@@ -20,6 +20,8 @@ public sealed class SkillAssetRootResolverSpecs
         _environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = null;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_PrefersManagedCacheUnderUserHome_AsDefaultInstalledRoot()
     {
@@ -37,6 +39,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Null(resolution.DiagnosticSummary);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_PrefersOverrideDirectory_OverManagedCacheAndSiblingFallback()
     {
@@ -57,6 +61,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Equal(Path.GetFullPath(overrideRoot), Path.GetFullPath(resolution.AssetRoot!));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_PrefersOverrideDirectory_OverSiblingFallback_WhenManagedCacheIsAbsent()
     {
@@ -75,6 +81,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Equal(Path.GetFullPath(overrideRoot), Path.GetFullPath(resolution.AssetRoot!));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_TreatsOverrideThatPointsToMissingDirectory_AsUnrecoverable()
     {
@@ -95,6 +103,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Contains("does not exist", resolution.DiagnosticSummary!, StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_FallsBackToSiblingRoot_WhenManagedCacheIsAbsent()
     {
@@ -130,6 +140,8 @@ public sealed class SkillAssetRootResolverSpecs
             Path.GetFullPath(resolution.AssetRoot!));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_TreatsIncompatibleManagedCache_AsFailed_AndReportsRepairGuidance()
     {
@@ -157,6 +169,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Contains("mo update", service.ResolverDiagnostic!, StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_DoesNotReadWriteOrMutateRuntimeDotMohistSkills()
     {
@@ -190,6 +204,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Equal("keep-nested", _files.ReadAllText(nestedSentinel));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_DoesNotReadWriteOrMutateRuntimeDotMohistSkills_WhenResolutionFails()
     {
@@ -220,6 +236,8 @@ public sealed class SkillAssetRootResolverSpecs
         Assert.Equal("keep-runtime", _files.ReadAllText(sentinelPath));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_DefaultManagedCacheLocation_IsUserHomeDotMohistCliSkillData()
     {
@@ -236,6 +254,8 @@ public sealed class SkillAssetRootResolverSpecs
             Path.GetFullPath(resolution.AssetRoot!));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public void Resolve_ReportsSiblingPath_InDiagnostic_WhenNoAssetRootFound()
     {

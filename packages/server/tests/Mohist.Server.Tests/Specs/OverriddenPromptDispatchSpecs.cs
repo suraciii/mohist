@@ -31,6 +31,8 @@ public class OverriddenPromptDispatchSpecs : IAsyncLifetime
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ProposalDispatch_DeliversOverriddenBodyForOneProject_AndSystemBodyForAnother()
     {

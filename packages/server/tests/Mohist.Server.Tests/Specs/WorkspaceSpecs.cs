@@ -16,6 +16,8 @@ public class WorkspaceSpecs
         _fixture.Git.Reset();
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueHasNoWorkspaceBranch_WhenUserOpensReviewViews_ThenMohistExplainsThatNoChangesAreAvailable()
     {
@@ -42,6 +44,8 @@ public class WorkspaceSpecs
         Assert.Equal("deadbeef", commitDiff.Hash);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorktreeExists_WhenUserCleansUpWorkspace_ThenLocalWorktreeIsRemoved()
     {
@@ -61,6 +65,8 @@ public class WorkspaceSpecs
         Assert.Contains(_fixture.Git.RemoveWorktreeCalls, c => c.ProjectPath == "/fake/project" && c.ProjectName == projectName && c.IssueNumber == issue.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Api)]
     [Fact]
     public async Task GivenIssueWorkspaceIsAlreadyClean_WhenUserRunsCleanupAgain_ThenCleanupSucceedsAsNoOp()
     {

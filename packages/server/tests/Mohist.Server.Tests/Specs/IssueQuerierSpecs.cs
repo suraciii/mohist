@@ -22,6 +22,8 @@ public class IssueQuerierSpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_ReadsIssueStateWithoutCallingIssueGrain()
     {
@@ -56,6 +58,8 @@ public class IssueQuerierSpecs
         Assert.Equal("Project One", item.ProjectName);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetAndListAsync_ReadIssueIdKeyedRows()
     {
@@ -97,6 +101,8 @@ public class IssueQuerierSpecs
         Assert.Equal(IssueWorkflowProfiles.DefaultId, item.WorkflowProfileId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_WithCanonicalRows_ReturnsIssueOnce()
     {
@@ -130,6 +136,8 @@ public class IssueQuerierSpecs
         Assert.Equal("Canonical title", item.Title);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_WithActiveWorkflowStageAndUserTasks_IncludesWorkflowStageProgress()
     {
@@ -226,6 +234,8 @@ public class IssueQuerierSpecs
         Assert.Equal("Test the thing", item.WorkflowStageProgress.CurrentTaskTitle);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_WithOrchestrationTasks_ExcludesThemFromProgressCount()
     {
@@ -311,6 +321,8 @@ public class IssueQuerierSpecs
         Assert.Equal(0, item.WorkflowStageProgress.Running);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_WithFailedUserTask_NotCountedAsCompleted()
     {
@@ -396,6 +408,8 @@ public class IssueQuerierSpecs
         Assert.Equal(1, item.WorkflowStageProgress.Failed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_ForBacklogIssue_ReturnsNullWorkflowStageProgress()
     {
@@ -426,6 +440,8 @@ public class IssueQuerierSpecs
         Assert.Null(item.WorkflowStageProgress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_ForCompletedWorkflow_ReturnsNullWorkflowStageProgress()
     {
@@ -477,6 +493,8 @@ public class IssueQuerierSpecs
         Assert.Null(item.WorkflowStageProgress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_WithNoUserFacingTasks_ReturnsNullWorkflowStageProgress()
     {
@@ -551,6 +569,8 @@ public class IssueQuerierSpecs
         Assert.Null(item.WorkflowStageProgress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_WithApprovalOnlyWaitingStage_OmitsWorkflowStageProgress()
     {

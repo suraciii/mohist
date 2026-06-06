@@ -8,6 +8,7 @@ using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -40,6 +41,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         if (File.Exists(_dbPath)) File.Delete(_dbPath);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_FallsBackToSystemDefault_WhenRunContextMissing()
     {
@@ -49,6 +52,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains("system-template:mohist/default", result.Id ?? "");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_UsesIssueCustomWithoutRunProfileBinding()
     {
@@ -64,6 +69,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(2, result.Structure.Stages.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_Priority2_ReturnsIssueCustomTemplate()
     {
@@ -79,6 +86,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(2, result.Structure.Stages.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_Priority3_ReturnsIssueReferencedTemplate()
     {
@@ -95,6 +104,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(4, result.Structure.Stages.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_Priority4_FallsBackToProjectDefault()
     {
@@ -111,6 +122,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(5, result.Structure.Stages.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTemplate_ProjectDefaultSystemTemplate_FallsBackToSystemTemplate()
     {
@@ -127,6 +140,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(result.Structure.Stages, s => s.Stage == "plan");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadVariables_ReturnsEmpty_WhenOnlyRunExists()
     {
@@ -139,6 +154,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(result.Stages);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadVariables_MergesProjectAndIssueByPriority()
     {
@@ -161,6 +178,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("issue-c", doc.RootElement.GetProperty("c").GetString());  // issue overrides project
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_NullTaskWith_ReturnsNull()
     {
@@ -169,6 +188,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_PreservesTemplateStrings()
     {
@@ -191,6 +212,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("${{ agent }}", result["agent"]!.Value.GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_DeepMergesObjectKey()
     {
@@ -216,6 +239,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(300000, doc.RootElement.GetProperty("timeoutMs").GetInt32());       // vars overrides task
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_PreservesPlainValues()
     {
@@ -234,6 +259,8 @@ public class WorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal(42, result!["count"]!.Value.GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ExpandTaskWith_PreservesNestedTemplatePath()
     {

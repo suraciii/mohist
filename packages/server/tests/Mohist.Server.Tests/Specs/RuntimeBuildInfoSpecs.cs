@@ -1,11 +1,14 @@
 using System.Reflection;
 using Mohist.Server.SystemInfo;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class RuntimeBuildInfoSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void MetadataIdentity_WhenAssemblyHasInformationalVersion_ReturnsVersionAndGitHash()
     {
@@ -18,6 +21,8 @@ public class RuntimeBuildInfoSpecs
         Assert.True(info.StartedAt <= DateTimeOffset.UtcNow);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void GitHash_WhenInitialized_RemainsStableForProcessLifetime()
     {
@@ -28,6 +33,8 @@ public class RuntimeBuildInfoSpecs
         Assert.Equal(info1.Version, info2.Version);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ResolveIdentity_WhenInformationalVersionHasNoHash_FallsBackToEnvironmentHash()
     {
@@ -41,6 +48,8 @@ public class RuntimeBuildInfoSpecs
         Assert.Equal("envhash123", identity.GitHash);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void ResolveIdentity_WhenInformationalVersionHasNoHashAndEnvironmentIsEmpty_FallsBackToGitHead()
     {
@@ -54,6 +63,8 @@ public class RuntimeBuildInfoSpecs
         Assert.Equal("headhash456", identity.GitHash);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void StartedAt_IsCapturedAtInitialization()
     {
@@ -65,6 +76,8 @@ public class RuntimeBuildInfoSpecs
         Assert.True(info.StartedAt <= after, "StartedAt should be before initialization completed");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void TryReadGitHeadFile_WhenRepoHasDetachedHead_ReturnsHash()
     {
@@ -85,6 +98,8 @@ public class RuntimeBuildInfoSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void TryReadGitHeadFile_WhenRepoHasSymbolicRef_ReturnsRefHash()
     {
@@ -106,6 +121,8 @@ public class RuntimeBuildInfoSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void TryReadGitHeadFile_WhenRepoHasMissingRef_ReturnsNull()
     {

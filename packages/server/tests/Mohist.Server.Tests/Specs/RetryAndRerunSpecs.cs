@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
 {
     public RetryAndRerunSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TaskFails_Retry_TaskRunsAgain()
     {
@@ -28,6 +31,8 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, check, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_Retry_CheckRunsAgain()
     {
@@ -47,6 +52,8 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, retriedCheck, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageFails_Rerun_StageStartsFromScratch()
     {
@@ -65,6 +72,8 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r3, check2, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StagePasses_Rerun_StageStartsOver()
     {
@@ -82,6 +91,8 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
         Assert.StartsWith("task-1.", task2.WorkId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningWorkflow_Retry_Error()
     {

@@ -1,11 +1,14 @@
 using Mohist.Server.Workflow.Domain.Prompts;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class PromptFrontmatterParserSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Parse_WellFormedFrontmatter_ExposesAllFourFieldsAndStripsBlock()
     {
@@ -28,6 +31,8 @@ public class PromptFrontmatterParserSpecs
         Assert.DoesNotContain("---", body);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Parse_MissingFrontmatter_ReturnsDefaultsAndFullTextAsBody()
     {
@@ -42,6 +47,8 @@ public class PromptFrontmatterParserSpecs
         Assert.Equal(fileText, body);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Parse_PartialFrontmatterWithOnlyName_DefaultsOtherFieldsAndKeepsBodyValid()
     {
@@ -59,6 +66,8 @@ public class PromptFrontmatterParserSpecs
         Assert.Equal("remaining body content\n", body);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Parse_MalformedYaml_ThrowsPromptFrontmatterParseExceptionWithKeyInMessage()
     {

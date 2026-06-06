@@ -5,6 +5,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -37,6 +38,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== System templates =====================
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ListSystemTemplates_ReturnsAtLeastMohistDefault()
     {
@@ -46,6 +49,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(list, t => t.Id == "mohist/default");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public void GetSystemTemplateDefinition_MohistDefault_HasStages()
     {
@@ -56,6 +61,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(def.Stages, s => s.Stage == "plan");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public void GetSystemTemplateDefinition_Unknown_ReturnsNull()
     {
@@ -64,6 +71,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== Project templates CRUD =====================
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ListTemplates_EmptyProject()
     {
@@ -72,6 +81,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Empty(list);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateTemplate_ParsesYamlAndStores()
     {
@@ -85,6 +96,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("my-template", def.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task CreateTemplate_DuplicateId_Throws()
     {
@@ -94,6 +107,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
             _manager.CreateTemplateAsync("proj-dup", MinimalYaml("t1")));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateTemplate_ReplacesDefinition()
     {
@@ -107,6 +122,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Contains(def!.Stages, s => s.Stage == "stage-2");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateTemplate_IdMismatch_Throws()
     {
@@ -116,6 +133,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
             _manager.UpdateTemplateAsync("proj-mismatch", "t1", MinimalYaml("t2")));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task UpdateTemplate_NonExistent_ReturnsNull()
     {
@@ -123,6 +142,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Null(info);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeleteTemplate_RemovesRow()
     {
@@ -134,6 +155,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== Default template =====================
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultTemplate_RequiresTemplateToExist()
     {
@@ -141,6 +164,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
             _manager.SetDefaultTemplateAsync("proj-nowhere", "ghost"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultTemplate_AcceptsProjectTemplate()
     {
@@ -150,6 +175,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("t1", await _manager.GetDefaultTemplateAsync("proj-set"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultTemplate_AcceptsSystemTemplate()
     {
@@ -157,6 +184,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Equal("mohist/default", result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetDefaultTemplate_NullClears()
     {
@@ -168,6 +197,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
 
     // ===================== Variables Set/Patch =====================
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetVariables_ReturnsEmpty_WhenNotSet()
     {
@@ -175,6 +206,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.Same(VariableBundle.Empty, bundle);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task SetVariables_StoresBundle()
     {
@@ -187,6 +220,8 @@ public class ProjectWorkflowProfileManagerSpecs : IAsyncLifetime
         Assert.NotNull(result.Vars);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PatchVariables_DeepMerges_WithExisting()
     {
