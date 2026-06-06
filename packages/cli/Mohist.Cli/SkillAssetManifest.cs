@@ -21,8 +21,10 @@ internal static class SkillAssetManifest
             informationalVersion: typeof(SkillAssetManifest).Assembly
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             versionFromAssembly: typeof(SkillAssetManifest).Assembly.GetName().Version?.ToString(),
-            getEnvHash: () => Environment.GetEnvironmentVariable("MOHIST_GIT_HASH"),
+            getEnvHash: () => SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(GitHashEnvironmentVariable),
             getGitHeadFromRepo: () => TryReadGitHeadFromAssembly(typeof(SkillAssetManifest).Assembly));
+
+    public const string GitHashEnvironmentVariable = "MOHIST_GIT_HASH";
 
     public static SkillAssetBuildIdentity ResolveBuildIdentity(
         string? informationalVersion,
@@ -67,7 +69,17 @@ internal static class SkillAssetManifest
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(skillNames);
 
-        Directory.CreateDirectory(assetRoot);
+        Write(assetRoot, identity, skillNames, RealFileSystem.Instance);
+    }
+
+    public static void Write(string assetRoot, SkillAssetBuildIdentity identity, IReadOnlyList<string> skillNames, IFileSystem fileSystem)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(assetRoot);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(skillNames);
+        ArgumentNullException.ThrowIfNull(fileSystem);
+
+        fileSystem.CreateDirectory(assetRoot);
         var normalized = skillNames
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(name => name.Trim())
@@ -82,23 +94,26 @@ internal static class SkillAssetManifest
             normalized);
 
         var manifestPath = Path.Combine(assetRoot, FileName);
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(document, JsonOptions));
+        fileSystem.WriteAllText(manifestPath, JsonSerializer.Serialize(document, JsonOptions));
     }
 
-    public static SkillAssetManifestReadResult TryRead(string assetRoot)
+    public static SkillAssetManifestReadResult TryRead(string assetRoot) =>
+        TryRead(assetRoot, RealFileSystem.Instance);
+
+    public static SkillAssetManifestReadResult TryRead(string assetRoot, IFileSystem fileSystem)
     {
         if (string.IsNullOrWhiteSpace(assetRoot))
             return SkillAssetManifestReadResult.Missing("Asset root was not provided.");
 
         var manifestPath = Path.Combine(assetRoot, FileName);
-        if (!File.Exists(manifestPath))
+        if (!fileSystem.Exists(manifestPath))
             return SkillAssetManifestReadResult.Missing(
                 $"Manifest file '{manifestPath}' is missing. Repair by running 'mo update' or 'scripts/install-mo.sh'.");
 
         string raw;
         try
         {
-            raw = File.ReadAllText(manifestPath);
+            raw = fileSystem.ReadAllText(manifestPath);
         }
         catch (Exception ex)
         {
@@ -131,13 +146,21 @@ internal static class SkillAssetManifest
     public static SkillAssetManifestValidation Validate(
         string assetRoot,
         SkillAssetBuildIdentity expectedIdentity,
-        IReadOnlyList<string> expectedSkillNames)
+        IReadOnlyList<string> expectedSkillNames) =>
+        Validate(assetRoot, expectedIdentity, expectedSkillNames, RealFileSystem.Instance);
+
+    public static SkillAssetManifestValidation Validate(
+        string assetRoot,
+        SkillAssetBuildIdentity expectedIdentity,
+        IReadOnlyList<string> expectedSkillNames,
+        IFileSystem fileSystem)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetRoot);
         ArgumentNullException.ThrowIfNull(expectedIdentity);
         ArgumentNullException.ThrowIfNull(expectedSkillNames);
+        ArgumentNullException.ThrowIfNull(fileSystem);
 
-        var readResult = TryRead(assetRoot);
+        var readResult = TryRead(assetRoot, fileSystem);
         if (!readResult.IsFound)
             return SkillAssetManifestValidation.Invalid(readResult.Error ?? $"Manifest is missing at '{assetRoot}'.");
 
@@ -193,7 +216,7 @@ internal static class SkillAssetManifest
         foreach (var skillName in manifestSkills)
         {
             var skillFile = Path.Combine(assetRoot, skillName, "SKILL.md");
-            if (!File.Exists(skillFile))
+            if (!fileSystem.Exists(skillFile))
             {
                 errors.Add(
                     $"Manifest lists built-in skill '{skillName}' but '{skillFile}' is missing. " +

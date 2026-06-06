@@ -1,6 +1,8 @@
 using Xunit;
 using Mohist.Cli;
+using Mohist.Server.Tests.Support;
 using System.Net;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -10,12 +12,12 @@ public class UpdateSpecs
     public async Task UpdateAll_UpdatesCliServerAndRunnerWithoutPulling()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempRoot);
-        WritePackagedSkillAssets(Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        var files = new FakeFileSystem();
+        WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
         try
         {
-            var files = new FakeFileSystem();
+
             var commands = new FakeCommandExecutor();
             var installer = new SystemdServiceInstaller(
                 new StringWriter(),
@@ -27,6 +29,8 @@ public class UpdateSpecs
                 new StringWriter(),
                 installer,
                 commands,
+                files,
+                new MockEnvironmentVariableProvider(),
                 new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
@@ -51,7 +55,7 @@ public class UpdateSpecs
             Assert.Equal("systemctl", commands.ExecutedCommands[8].FileName);
             Assert.Equal(new[] { "--user", "restart", "mohist-runner.service" }, commands.ExecutedCommands[8].Args);
             Assert.DoesNotContain(commands.ExecutedCommands, c => c.FileName == "git");
-            AssertManagedSkillAssetsSynced(tempRoot);
+            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -64,12 +68,12 @@ public class UpdateSpecs
     public async Task UpdateCli_PublishesAndReplacesResolvedMoBinary()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-cli-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempRoot);
-        WritePackagedSkillAssets(Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        var files = new FakeFileSystem();
+        WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
         try
         {
-            var files = new FakeFileSystem();
+
             var commands = new FakeCommandExecutor();
             commands.SetNextStdout("/home/user/.local/bin/mo\n");
             var installer = new SystemdServiceInstaller(
@@ -82,6 +86,8 @@ public class UpdateSpecs
                 new StringWriter(),
                 installer,
                 commands,
+                files,
+                new MockEnvironmentVariableProvider(),
                 new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
@@ -99,7 +105,7 @@ public class UpdateSpecs
             Assert.Equal("chmod", commands.ExecutedCommands[3].FileName);
             Assert.Equal("mv", commands.ExecutedCommands[4].FileName);
             Assert.Equal("/home/user/.local/bin/mo", commands.ExecutedCommands[4].Args[1]);
-            AssertManagedSkillAssetsSynced(tempRoot);
+            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -123,6 +129,8 @@ public class UpdateSpecs
             new StringWriter(),
             installer,
             commands,
+            files,
+            new MockEnvironmentVariableProvider(),
             new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
             {
                 BaseAddress = new Uri("http://localhost:3456"),
@@ -160,6 +168,8 @@ public class UpdateSpecs
             new StringWriter(),
             installer,
             commands,
+            files,
+            new MockEnvironmentVariableProvider(),
             new HttpClient(readiness)
             {
                 BaseAddress = new Uri("http://localhost:3456"),
@@ -190,6 +200,8 @@ public class UpdateSpecs
             stderr,
             installer,
             commands,
+            files,
+            new MockEnvironmentVariableProvider(),
             new HttpClient(new SequenceHttpHandler(
                 new ResponseSpec(HttpStatusCode.OK),
                 new ResponseSpec(HttpStatusCode.InternalServerError)))
@@ -224,6 +236,8 @@ public class UpdateSpecs
             new StringWriter(),
             installer,
             commands,
+            files,
+            new MockEnvironmentVariableProvider(),
             new HttpClient(readiness)
             {
                 BaseAddress = new Uri("http://localhost:3456"),
@@ -239,29 +253,23 @@ public class UpdateSpecs
     [Fact]
     public void SourceCodeUpdater_DefaultsServerReadinessToIpv4Loopback()
     {
-        var previous = Environment.GetEnvironmentVariable("MOHIST_SERVER_URL");
-        try
-        {
-            Environment.SetEnvironmentVariable("MOHIST_SERVER_URL", null);
-            var files = new FakeFileSystem();
-            var commands = new FakeCommandExecutor();
-            var installer = new SystemdServiceInstaller(
-                new StringWriter(),
-                new StringWriter(),
-                files,
-                commands);
-            var updater = new SourceCodeUpdater(
-                new StringWriter(),
-                new StringWriter(),
-                installer,
-                commands);
+        var environment = new MockEnvironmentVariableProvider();
+        var files = new FakeFileSystem();
+        var commands = new FakeCommandExecutor();
+        var installer = new SystemdServiceInstaller(
+            new StringWriter(),
+            new StringWriter(),
+            files,
+            commands);
+        var updater = new SourceCodeUpdater(
+            new StringWriter(),
+            new StringWriter(),
+            installer,
+            commands,
+            files,
+            environment);
 
-            Assert.Equal(new Uri("http://127.0.0.1:3456"), updater.ServerBaseAddress);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("MOHIST_SERVER_URL", previous);
-        }
+        Assert.Equal(new Uri("http://127.0.0.1:3456"), updater.ServerBaseAddress);
     }
 
     [Fact]
@@ -294,12 +302,12 @@ public class UpdateSpecs
     public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunner_RestoresRunner()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-fail1-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempRoot);
-        WritePackagedSkillAssets(Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        var files = new FakeFileSystem();
+        WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
         try
         {
-            var files = new FakeFileSystem();
+
             var commands = new FakeCommandExecutor();
             commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
             var stderr = new StringWriter();
@@ -313,6 +321,8 @@ public class UpdateSpecs
                 stderr,
                 installer,
                 commands,
+                files,
+                new MockEnvironmentVariableProvider(),
                 new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
@@ -327,7 +337,7 @@ public class UpdateSpecs
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
             Assert.Contains("Restoring runner service", stderr.ToString());
-            AssertManagedSkillAssetsSynced(tempRoot);
+            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -340,12 +350,12 @@ public class UpdateSpecs
     public async Task UpdateAll_WhenRunnerBuildFailsAfterServerReady_RestoresRunner()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-update-all-fail2-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempRoot);
-        WritePackagedSkillAssets(Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
+        var files = new FakeFileSystem();
+        WritePackagedSkillAssets(files, Path.Combine(tempRoot, ".publish", "cli", "skill-data"));
 
         try
         {
-            var files = new FakeFileSystem();
+
             var commands = new FakeCommandExecutor();
             commands.SetExitCodeFor("npm", args => args.SequenceEqual(["run", "build", "-w", "packages/runner"]), 1);
             var stderr = new StringWriter();
@@ -359,6 +369,8 @@ public class UpdateSpecs
                 stderr,
                 installer,
                 commands,
+                files,
+                new MockEnvironmentVariableProvider(),
                 new HttpClient(new SequenceHttpHandler(HttpStatusCode.OK))
                 {
                     BaseAddress = new Uri("http://localhost:3456"),
@@ -373,7 +385,7 @@ public class UpdateSpecs
             Assert.Contains(commands.ExecutedCommands, c =>
                 c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
             Assert.Contains("Restoring runner service", stderr.ToString());
-            AssertManagedSkillAssetsSynced(tempRoot);
+            AssertManagedSkillAssetsSynced(files, tempRoot);
         }
         finally
         {
@@ -489,31 +501,8 @@ public class UpdateSpecs
         Assert.Contains("wait for /api/health, /, and referenced /assets/* response headers readiness checks", output);
     }
 
-    private sealed class FakeFileSystem : IFileSystem
+    private sealed class FakeFileSystem : Mohist.Server.Tests.Support.FakeFileSystem
     {
-        private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
-
-        public Task WriteAllTextAsync(string path, string contents)
-        {
-            _files[Path.GetFullPath(path)] = contents;
-            return Task.CompletedTask;
-        }
-
-        public Task<string> ReadAllTextAsync(string path) => Task.FromResult(Read(path));
-
-        public bool Exists(string path) => _files.ContainsKey(Path.GetFullPath(path));
-
-        public bool DirectoryExists(string path) => false;
-
-        public void CreateDirectory(string path)
-        {
-        }
-
-        public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) => [];
-
-        public void Delete(string path) => _files.Remove(Path.GetFullPath(path));
-
-        public string Read(string path) => _files[Path.GetFullPath(path)];
     }
 
     private sealed class FakeCommandExecutor : ICommandExecutor
@@ -638,28 +627,28 @@ public class UpdateSpecs
         return expanded.ToArray();
     }
 
-    private static void WritePackagedSkillAssets(string sourceRoot)
+    private static void WritePackagedSkillAssets(FakeFileSystem files, string sourceRoot)
     {
-        Directory.CreateDirectory(Path.Combine(sourceRoot, "mohist"));
-        Directory.CreateDirectory(Path.Combine(sourceRoot, "mohist-explore"));
-        File.WriteAllText(
+        files.AddDirectory(Path.Combine(sourceRoot, "mohist"));
+        files.AddDirectory(Path.Combine(sourceRoot, "mohist-explore"));
+        files.AddFile(
             Path.Combine(sourceRoot, "manifest.json"),
             "{\"schemaVersion\":1,\"cliVersion\":\"1.0.0\",\"gitHash\":\"test\",\"skills\":[\"mohist\",\"mohist-explore\"]}");
-        File.WriteAllText(
+        files.AddFile(
             Path.Combine(sourceRoot, "mohist", "SKILL.md"),
             "---\nname: mohist\ndescription: test\n---\n\n# mohist\n");
-        File.WriteAllText(
+        files.AddFile(
             Path.Combine(sourceRoot, "mohist-explore", "SKILL.md"),
             "---\nname: mohist-explore\ndescription: test\n---\n\n# mohist-explore\n");
     }
 
-    private static void AssertManagedSkillAssetsSynced(string tempRoot)
+    private static void AssertManagedSkillAssetsSynced(FakeFileSystem files, string tempRoot)
     {
         var managedRoot = Path.Combine(tempRoot, ".mohist", "cli", "skill-data");
-        Assert.True(File.Exists(Path.Combine(managedRoot, "manifest.json")), $"Expected manifest at {managedRoot}");
-        Assert.True(File.Exists(Path.Combine(managedRoot, "mohist", "SKILL.md")), "Expected mohist SKILL.md");
-        Assert.True(File.Exists(Path.Combine(managedRoot, "mohist-explore", "SKILL.md")), "Expected mohist-explore SKILL.md");
+        Assert.True(files.HasFile(Path.Combine(managedRoot, "manifest.json")), $"Expected manifest at {managedRoot}");
+        Assert.True(files.HasFile(Path.Combine(managedRoot, "mohist", "SKILL.md")), "Expected mohist SKILL.md");
+        Assert.True(files.HasFile(Path.Combine(managedRoot, "mohist-explore", "SKILL.md")), "Expected mohist-explore SKILL.md");
         var mohistSkillsDir = Path.Combine(tempRoot, ".mohist", "skills");
-        Assert.False(Directory.Exists(mohistSkillsDir), "Internal .mohist/skills should remain untouched by sync");
+        Assert.False(files.DirectoryExists(mohistSkillsDir), "Internal .mohist/skills should remain untouched by sync");
     }
 }

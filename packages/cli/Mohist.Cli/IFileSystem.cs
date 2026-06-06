@@ -1,0 +1,65 @@
+using System.Text;
+
+namespace Mohist.Cli;
+
+internal interface IFileSystem
+{
+    string CurrentDirectory { get; }
+    bool Exists(string path);
+    bool DirectoryExists(string path);
+    void CreateDirectory(string path);
+    void Delete(string path);
+    void DeleteDirectory(string path);
+    void Move(string source, string destination);
+    string ReadAllText(string path);
+    Task<string> ReadAllTextAsync(string path);
+    void WriteAllText(string path, string contents);
+    Task WriteAllTextAsync(string path, string contents);
+    IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption);
+    Stream OpenRead(string path);
+    Stream OpenWrite(string path);
+}
+
+internal sealed class RealFileSystem : IFileSystem
+{
+    public static readonly RealFileSystem Instance = new();
+
+    private RealFileSystem()
+    {
+    }
+
+    public string CurrentDirectory => Directory.GetCurrentDirectory();
+
+    public bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
+
+    public bool DirectoryExists(string path) => Directory.Exists(path);
+
+    public void CreateDirectory(string path) => Directory.CreateDirectory(path);
+
+    public void Delete(string path) => File.Delete(path);
+
+    public void DeleteDirectory(string path) => Directory.Delete(path, recursive: true);
+
+    public void Move(string source, string destination) => Directory.Move(source, destination);
+
+    public string ReadAllText(string path) => File.ReadAllText(path);
+
+    public Task<string> ReadAllTextAsync(string path) => File.ReadAllTextAsync(path, Encoding.UTF8);
+
+    public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents);
+
+    public async Task WriteAllTextAsync(string path, string contents)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(path, contents, Encoding.UTF8);
+    }
+
+    public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) =>
+        Directory.EnumerateFiles(path, searchPattern, searchOption);
+
+    public Stream OpenRead(string path) => File.OpenRead(path);
+
+    public Stream OpenWrite(string path) => File.Create(path);
+}

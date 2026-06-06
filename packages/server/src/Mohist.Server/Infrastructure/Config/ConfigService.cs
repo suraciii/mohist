@@ -1,11 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.Infrastructure.Config;
 
 public class ConfigService
 {
     private readonly IConfiguration _configuration;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<ConfigService> _log;
     private readonly string _configPath;
 
@@ -25,9 +27,10 @@ public class ConfigService
         ["logLevel"] = ("string", "INFO"),
     };
 
-    public ConfigService(IConfiguration configuration, ILogger<ConfigService> log, string? configPath = null)
+    public ConfigService(IConfiguration configuration, IEnvironmentVariableProvider environment, ILogger<ConfigService> log, string? configPath = null)
     {
         _configuration = configuration;
+        _environment = environment;
         _log = log;
         _configPath = configPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -322,7 +325,7 @@ public class ConfigService
     {
         // 优先级 1: 环境变量
         var envKey = $"MOHIST__CONFIG__{key.ToUpperInvariant()}";
-        var envValue = Environment.GetEnvironmentVariable(envKey);
+        var envValue = _environment.GetEnvironmentVariable(envKey);
         if (!string.IsNullOrWhiteSpace(envValue))
             return envValue;
 

@@ -72,6 +72,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
         services.AddSingleton<IFileSystem, PhysicalFileSystem>();
+        services.AddSingleton<IEnvironmentVariableProvider>(SystemEnvironmentVariableProvider.Instance);
         services.AddSingleton<SystemdInstallDetector>();
         services.AddSingleton<IGitSourceInspector, GitSourceInspector>();
         services.AddSingleton<IServiceStatusChecker, SystemdServiceStatusChecker>();
@@ -81,7 +82,7 @@ public static class MohistServiceRegistration
         services.AddHttpClient<ISystemReadinessProbe, HttpSystemReadinessProbe>(client =>
         {
             var serverUrl = configuration["Mohist:ServerUrl"]
-                ?? Environment.GetEnvironmentVariable("MOHIST_SERVER_URL")
+                ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(ServerUrlEnvironmentVariable)
                 ?? "http://127.0.0.1:3456";
             client.BaseAddress = new Uri(serverUrl);
             client.Timeout = TimeSpan.FromSeconds(5);
@@ -96,6 +97,12 @@ public static class MohistServiceRegistration
         return services;
     }
 
+    public const string ServerUrlEnvironmentVariable = "MOHIST_SERVER_URL";
+    public const string DbPathEnvironmentVariable = "MOHIST_DB_PATH";
+    public const string HomeEnvironmentVariable = "HOME";
+    public const string RunnerRootEnvironmentVariable = "MOHIST_RUNNER_ROOT";
+    public const string WorkspaceRootEnvironmentVariable = "MOHIST_WORKSPACE_ROOT";
+
     public static string ResolveSqliteConnectionString(IConfiguration configuration)
     {
         var configured = configuration["Mohist:SqliteConnectionString"];
@@ -103,11 +110,11 @@ public static class MohistServiceRegistration
             return configured;
 
         var dbPath = configuration["Mohist:DbPath"]
-            ?? Environment.GetEnvironmentVariable("MOHIST_DB_PATH");
+            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(DbPathEnvironmentVariable);
 
         if (string.IsNullOrWhiteSpace(dbPath))
         {
-            var home = Environment.GetEnvironmentVariable("HOME")
+            var home = SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(HomeEnvironmentVariable)
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var dataDir = Path.Combine(home, ".mohist");
             Directory.CreateDirectory(dataDir);
@@ -126,8 +133,8 @@ public static class MohistServiceRegistration
     private static string? ResolveRunnerRoot(IConfiguration configuration)
     {
         var configured = configuration["Mohist:RunnerRoot"]
-            ?? Environment.GetEnvironmentVariable("MOHIST_RUNNER_ROOT")
-            ?? Environment.GetEnvironmentVariable("MOHIST_WORKSPACE_ROOT");
+            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(RunnerRootEnvironmentVariable)
+            ?? SystemEnvironmentVariableProvider.Instance.GetEnvironmentVariable(WorkspaceRootEnvironmentVariable);
         return string.IsNullOrWhiteSpace(configured) ? null : configured;
     }
 }

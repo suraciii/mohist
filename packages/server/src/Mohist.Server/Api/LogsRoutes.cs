@@ -1,14 +1,17 @@
 using System.Text.Json;
+using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.Api;
 
 public static class LogsRoutes
 {
+    public const string HomeEnvironmentVariable = "HOME";
+
     public static WebApplication MapLogsRoutes(this WebApplication app)
     {
-        app.MapGet("/api/logs/tail", async (long? cursor, int? limit, int? maxBytes) =>
+        app.MapGet("/api/logs/tail", async (long? cursor, int? limit, int? maxBytes, IEnvironmentVariableProvider environment) =>
         {
-            var home = Environment.GetEnvironmentVariable("HOME")
+            var home = environment.GetEnvironmentVariable(HomeEnvironmentVariable)
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var logDir = Path.Combine(home, ".mohist", "logs");
 

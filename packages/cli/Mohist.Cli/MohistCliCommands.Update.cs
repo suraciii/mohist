@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -95,6 +96,8 @@ internal sealed class SourceCodeUpdater
     private readonly TextWriter _err;
     private readonly SystemdServiceInstaller _systemd;
     private readonly ICommandExecutor _commandExecutor;
+    private readonly IFileSystem _fileSystem;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly HttpClient _http;
     private readonly TimeSpan _serverReadyTimeout;
     private readonly Func<string?> _getUserHome;
@@ -104,6 +107,8 @@ internal sealed class SourceCodeUpdater
         TextWriter error,
         SystemdServiceInstaller systemd,
         ICommandExecutor commandExecutor,
+        IFileSystem? fileSystem = null,
+        IEnvironmentVariableProvider? environment = null,
         HttpClient? http = null,
         TimeSpan? serverReadyTimeout = null,
         Func<string?>? getUserHome = null)
@@ -112,18 +117,22 @@ internal sealed class SourceCodeUpdater
         _err = error;
         _systemd = systemd;
         _commandExecutor = commandExecutor;
+        _fileSystem = fileSystem ?? RealFileSystem.Instance;
+        _environment = environment ?? SystemEnvironmentVariableProvider.Instance;
         _http = http ?? new HttpClient
         {
-            BaseAddress = new Uri(Environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://127.0.0.1:3456"),
+            BaseAddress = new Uri(_environment.GetEnvironmentVariable(ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
             Timeout = TimeSpan.FromSeconds(5),
         };
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
         _getUserHome = getUserHome ?? DefaultUserHome;
     }
 
-    private static string? DefaultUserHome()
+    public const string ServerUrlEnvironmentVariable = "MOHIST_SERVER_URL";
+
+    private string? DefaultUserHome()
     {
-        var home = Environment.GetEnvironmentVariable("HOME");
+        var home = _environment.GetEnvironmentVariable(SkillAssetRootResolver.HomeEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(home))
             return home;
         return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -259,7 +268,7 @@ internal sealed class SourceCodeUpdater
             return move;
         }
 
-        var synchronizer = new SkillAssetSynchronizer(_out, _err);
+        var synchronizer = new SkillAssetSynchronizer(_out, _err, _fileSystem);
         var syncExitCode = await synchronizer.SyncAsync(sourceSkillData, managedSkillData);
         if (syncExitCode != 0)
         {
@@ -373,13 +382,15 @@ internal sealed class SourceCodeUpdater
         if (!string.IsNullOrWhiteSpace(explicitPath))
             return Path.GetFullPath(explicitPath);
 
-        var envPath = Environment.GetEnvironmentVariable("MOHIST_CLI_PATH");
+        var envPath = _environment.GetEnvironmentVariable(CliPathEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(envPath))
             return Path.GetFullPath(envPath);
 
         var (exitCode, stdout, _) = await _commandExecutor.ExecuteAsync("sh", ["-lc", "command -v mo"], null);
         return exitCode == 0 ? stdout.Trim() : null;
     }
+
+    public const string CliPathEnvironmentVariable = "MOHIST_CLI_PATH";
 
     private static string RuntimeIdentifier()
     {

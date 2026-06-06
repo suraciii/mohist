@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Tests.Support;
 using Xunit;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -26,7 +28,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -59,7 +61,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -93,7 +95,7 @@ public class SystemInfoServiceSpecs
             .Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -121,7 +123,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -150,7 +152,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -170,7 +172,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -200,7 +202,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -228,7 +230,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -259,7 +261,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -278,7 +280,7 @@ public class SystemInfoServiceSpecs
         var config = new ConfigurationBuilder().Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 
@@ -312,7 +314,7 @@ public class SystemInfoServiceSpecs
             .Build();
 
         var svc = new SystemInfoService(
-            runtime, detector, git, services, config, NullLogger<SystemInfoService>.Instance);
+            runtime, detector, git, services, config, new MockEnvironmentVariableProvider(), NullLogger<SystemInfoService>.Instance);
 
         var info = await svc.GetSystemInfoAsync();
 

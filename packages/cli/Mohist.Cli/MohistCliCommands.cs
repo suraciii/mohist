@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -53,22 +54,25 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor)
+    internal static Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null)
     {
+        environment ??= SystemEnvironmentVariableProvider.Instance;
         var api = new MohistCliApi(http, output, error, fileSystem, commandExecutor);
         var services = new ServiceCollection();
         services.AddSingleton(api);
         services.AddSingleton(output);
         services.AddSingleton(error);
-        services.AddSingleton(fileSystem);
-        services.AddSingleton(commandExecutor);
+        services.AddSingleton<IFileSystem>(fileSystem);
+        services.AddSingleton<ICommandExecutor>(commandExecutor);
+        services.AddSingleton<IEnvironmentVariableProvider>(environment);
         services.AddSingleton<SystemdServiceInstaller>();
         services.AddSingleton<SourceCodeUpdater>();
         services.AddSingleton<SkillAssetService>();
         services.AddSingleton<SkillInstallService>();
         var provider = services.BuildServiceProvider();
         var root = Build(api, provider);
-        return root.Parse(args).InvokeAsync();
+        var config = new InvocationConfiguration { Output = output, Error = error };
+        return root.Parse(args).InvokeAsync(config);
     }
 
     internal static string Query(

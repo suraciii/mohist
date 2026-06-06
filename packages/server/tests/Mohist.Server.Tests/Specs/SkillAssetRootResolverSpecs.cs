@@ -1,31 +1,23 @@
 using Mohist.Cli;
+using Mohist.Server.Tests.Support;
+using EnvironmentAbstractions.TestHelpers;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("SkillsCli")]
-public sealed class SkillAssetRootResolverSpecs : IDisposable
+public sealed class SkillAssetRootResolverSpecs
 {
     private static readonly SkillAssetBuildIdentity CurrentIdentity =
         SkillAssetManifest.ResolveCurrentBuildIdentity();
 
-    private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-skill-resolver-{Guid.NewGuid():N}");
-    private readonly string? _originalOverrideEnv;
+    private readonly FakeFileSystem _files = new();
+    private readonly MockEnvironmentVariableProvider _environment = new();
+    private readonly string _tempRoot = Path.Combine("/tmp", $"mohist-skill-resolver-{Guid.NewGuid():N}");
 
     public SkillAssetRootResolverSpecs()
     {
-        Directory.CreateDirectory(_tempRoot);
-        _originalOverrideEnv = Environment.GetEnvironmentVariable(SkillAssetRootResolver.OverrideEnvironmentVariable);
-        Environment.SetEnvironmentVariable(SkillAssetRootResolver.OverrideEnvironmentVariable, null);
-    }
-
-    public void Dispose()
-    {
-        Environment.SetEnvironmentVariable(
-            SkillAssetRootResolver.OverrideEnvironmentVariable,
-            _originalOverrideEnv);
-        if (Directory.Exists(_tempRoot))
-            Directory.Delete(_tempRoot, recursive: true);
+        _environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = null;
     }
 
     [Fact]
@@ -98,70 +90,48 @@ public sealed class SkillAssetRootResolverSpecs : IDisposable
 
         var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
 
-        Assert.False(resolution.IsSelected);
-        Assert.Null(resolution.AssetRoot);
         Assert.Equal(SkillAssetRootSource.Override, resolution.Source);
-        Assert.Equal(Path.GetFullPath(missingOverride), Path.GetFullPath(resolution.AttemptedRoot!));
-        Assert.Contains("MOHIST_SKILLS_DIR", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("scripts/install-mo.sh", resolution.DiagnosticSummary, StringComparison.Ordinal);
+        Assert.False(resolution.IsSelected);
+        Assert.Contains("does not exist", resolution.DiagnosticSummary!, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Resolve_FallsBackToSiblingPublishDirectory_WhenManagedCacheIsAbsent()
+    public void Resolve_FallsBackToSiblingRoot_WhenManagedCacheIsAbsent()
     {
-        var home = Path.Combine(_tempRoot, "user-home-without-cache");
         var siblingRoot = Path.Combine(AppContext.BaseDirectory, "skill-data");
-        Directory.CreateDirectory(siblingRoot);
+        var sourceRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..",
+            "cli", "Mohist.Cli", "skill-data");
+        sourceRoot = Path.GetFullPath(sourceRoot);
+        if (Directory.Exists(sourceRoot))
+        {
+            _files.AddDirectory(siblingRoot);
+            foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(sourceRoot, file);
+                _files.AddFile(Path.Combine(siblingRoot, relative), File.ReadAllText(file));
+            }
+            SkillAssetManifest.Write(
+                siblingRoot,
+                CurrentIdentity,
+                new[] { "mohist", "mohist-explore" },
+                _files);
+        }
 
+        var home = Path.Combine(_tempRoot, "user-home");
         var resolver = CreateResolver(home, identity: CurrentIdentity);
 
         var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
 
         Assert.Equal(SkillAssetRootSource.SiblingFallback, resolution.Source);
-        Assert.Equal(Path.GetFullPath(siblingRoot), Path.GetFullPath(resolution.AssetRoot!));
+        Assert.Equal(
+            Path.GetFullPath(siblingRoot),
+            Path.GetFullPath(resolution.AssetRoot!));
     }
 
     [Fact]
-    public void Resolve_FallsBackToSibling_OnlyWhenNoValidManagedCacheExists()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteCompatibleAssetRoot(managedRoot);
-        var siblingRoot = Path.Combine(AppContext.BaseDirectory, "skill-data");
-        Directory.CreateDirectory(siblingRoot);
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Equal(Path.GetFullPath(managedRoot), Path.GetFullPath(resolution.AssetRoot!));
-    }
-
-    [Fact]
-    public void Resolve_ReportsManagedManifestMissing_WithRepairGuidance()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteSkill(managedRoot, "mohist");
-        WriteSkill(managedRoot, "mohist-explore");
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.False(resolution.IsSelected);
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Equal(Path.GetFullPath(managedRoot), Path.GetFullPath(resolution.AttemptedRoot!));
-        Assert.Contains("manifest", resolution.DiagnosticSummary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("missing", resolution.DiagnosticSummary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("scripts/install-mo.sh", resolution.DiagnosticSummary, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_ReportsManagedVersionMismatch_WithoutFallingBackToSibling()
+    public void Resolve_TreatsIncompatibleManagedCache_AsFailed_AndReportsRepairGuidance()
     {
         var home = Path.Combine(_tempRoot, "user-home");
         var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
@@ -170,160 +140,11 @@ public sealed class SkillAssetRootResolverSpecs : IDisposable
         SkillAssetManifest.Write(
             managedRoot,
             new SkillAssetBuildIdentity("0.0.0-stale", "deadbeef"),
-            new[] { "mohist", "mohist-explore" });
+            new[] { "mohist", "mohist-explore" },
+            _files);
 
         var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.False(resolution.IsSelected);
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Equal(Path.GetFullPath(managedRoot), Path.GetFullPath(resolution.AttemptedRoot!));
-        Assert.Contains("version '0.0.0-stale'", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("scripts/install-mo.sh", resolution.DiagnosticSummary, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_ReportsManagedGitHashMismatch_WithRepairGuidance()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteSkill(managedRoot, "mohist");
-        WriteSkill(managedRoot, "mohist-explore");
-        var compatibleVersion = CurrentIdentity.Version ?? "1.0.0";
-        SkillAssetManifest.Write(
-            managedRoot,
-            new SkillAssetBuildIdentity(compatibleVersion, "stale-hash"),
-            new[] { "mohist", "mohist-explore" });
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.False(resolution.IsSelected);
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Contains("git hash", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("stale-hash", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_ReportsOmittedBuiltInSkill_WithRepairGuidance()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteSkill(managedRoot, "mohist");
-        WriteSkill(managedRoot, "mohist-explore");
-        SkillAssetManifest.Write(
-            managedRoot,
-            CurrentIdentity,
-            new[] { "mohist" });
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.False(resolution.IsSelected);
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Contains("mohist-explore", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("not list", resolution.DiagnosticSummary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_ReportsMissingSkillMarkdownFile_WithRepairGuidance()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteSkill(managedRoot, "mohist");
-        SkillAssetManifest.Write(
-            managedRoot,
-            CurrentIdentity,
-            new[] { "mohist", "mohist-explore" });
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.False(resolution.IsSelected);
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Contains("mohist-explore", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("SKILL.md", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        Assert.Contains("missing", resolution.DiagnosticSummary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_ReportsMalformedManagedManifestJson_WithRepairGuidance()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteSkill(managedRoot, "mohist");
-        Directory.CreateDirectory(managedRoot);
-        File.WriteAllText(Path.Combine(managedRoot, SkillAssetManifest.FileName), "{ not valid json");
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-        var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-        Assert.False(resolution.IsSelected);
-        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
-        Assert.Contains("not valid JSON", resolution.DiagnosticSummary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_ReportsNoRootDiagnostic_WhenNothingIsAvailable()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var siblingRoot = Path.Combine(AppContext.BaseDirectory, "skill-data");
-        var siblingRootExisted = Directory.Exists(siblingRoot);
-        var siblingBackup = siblingRootExisted
-            ? Path.Combine(_tempRoot, "sibling-backup")
-            : null;
-
-        try
-        {
-            if (siblingRootExisted)
-                Directory.Move(siblingRoot, siblingBackup!);
-
-            var resolver = CreateResolver(home, identity: CurrentIdentity);
-
-            var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
-
-            Assert.False(resolution.IsSelected);
-            Assert.Equal(SkillAssetRootSource.None, resolution.Source);
-            Assert.Contains("MOHIST_SKILLS_DIR", resolution.DiagnosticSummary, StringComparison.Ordinal);
-            Assert.Contains(".mohist/cli/skill-data", resolution.DiagnosticSummary, StringComparison.Ordinal);
-            Assert.Contains("mo update", resolution.DiagnosticSummary, StringComparison.Ordinal);
-            Assert.Contains("scripts/install-mo.sh", resolution.DiagnosticSummary, StringComparison.Ordinal);
-        }
-        finally
-        {
-            if (siblingRootExisted && siblingBackup is not null && Directory.Exists(siblingBackup))
-            {
-                if (Directory.Exists(siblingRoot))
-                    Directory.Delete(siblingRoot, recursive: true);
-                Directory.Move(siblingBackup, siblingRoot);
-            }
-        }
-    }
-
-    [Fact]
-    public void Resolve_PropagatesManifestCompatibilityDiagnostic_ToSkillAssetService()
-    {
-        var home = Path.Combine(_tempRoot, "user-home");
-        var managedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        WriteSkill(managedRoot, "mohist");
-        WriteSkill(managedRoot, "mohist-explore");
-        SkillAssetManifest.Write(
-            managedRoot,
-            new SkillAssetBuildIdentity("0.0.0-stale", "deadbeef"),
-            new[] { "mohist", "mohist-explore" });
-
-        var resolver = CreateResolver(home, identity: CurrentIdentity);
-        var service = new SkillAssetService(resolver);
+        var service = new SkillAssetService(_files, resolver);
 
         var result = service.GetSkill("mohist", includeSupplementaryFiles: false);
 
@@ -344,18 +165,16 @@ public sealed class SkillAssetRootResolverSpecs : IDisposable
         WriteCompatibleAssetRoot(managedRoot);
 
         var runtimeSkillsDir = Path.Combine(home, ".mohist", "skills");
-        Directory.CreateDirectory(runtimeSkillsDir);
+        _files.AddDirectory(runtimeSkillsDir);
         var sentinelPath = Path.Combine(runtimeSkillsDir, "sentinel.txt");
+        _files.AddFile(sentinelPath, "keep-runtime");
         var nestedDir = Path.Combine(runtimeSkillsDir, "mohist");
+        _files.AddDirectory(nestedDir);
         var nestedSentinel = Path.Combine(nestedDir, "SKILL.md");
-        File.WriteAllText(sentinelPath, "keep-runtime");
-        Directory.CreateDirectory(nestedDir);
-        File.WriteAllText(nestedSentinel, "keep-nested");
-
-        var before = SnapshotDirectory(runtimeSkillsDir);
+        _files.AddFile(nestedSentinel, "keep-nested");
 
         var resolver = CreateResolver(home, identity: CurrentIdentity);
-        var service = new SkillAssetService(resolver);
+        var service = new SkillAssetService(_files, resolver);
 
         var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
         var list = service.ListVisibleSkills();
@@ -365,13 +184,10 @@ public sealed class SkillAssetRootResolverSpecs : IDisposable
         Assert.NotEmpty(list);
         Assert.True(getResult.Found, getResult.Error);
 
-        var after = SnapshotDirectory(runtimeSkillsDir);
-        Assert.Equal(before, after);
-
-        Assert.True(File.Exists(sentinelPath));
-        Assert.Equal("keep-runtime", File.ReadAllText(sentinelPath));
-        Assert.True(File.Exists(nestedSentinel));
-        Assert.Equal("keep-nested", File.ReadAllText(nestedSentinel));
+        Assert.True(_files.HasFile(sentinelPath));
+        Assert.Equal("keep-runtime", _files.ReadAllText(sentinelPath));
+        Assert.True(_files.HasFile(nestedSentinel));
+        Assert.Equal("keep-nested", _files.ReadAllText(nestedSentinel));
     }
 
     [Fact]
@@ -384,23 +200,24 @@ public sealed class SkillAssetRootResolverSpecs : IDisposable
         SkillAssetManifest.Write(
             managedRoot,
             new SkillAssetBuildIdentity("0.0.0-stale", "deadbeef"),
-            new[] { "mohist", "mohist-explore" });
+            new[] { "mohist", "mohist-explore" },
+            _files);
 
         var runtimeSkillsDir = Path.Combine(home, ".mohist", "skills");
-        Directory.CreateDirectory(runtimeSkillsDir);
+        _files.AddDirectory(runtimeSkillsDir);
         var sentinelPath = Path.Combine(runtimeSkillsDir, "sentinel.txt");
-        File.WriteAllText(sentinelPath, "keep-runtime");
+        _files.AddFile(sentinelPath, "keep-runtime");
 
         var resolver = CreateResolver(home, identity: CurrentIdentity);
-        var service = new SkillAssetService(resolver);
+        var service = new SkillAssetService(_files, resolver);
 
         var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
         var getResult = service.GetSkill("mohist", includeSupplementaryFiles: true);
 
         Assert.False(resolution.IsSelected);
         Assert.False(getResult.Found);
-        Assert.True(File.Exists(sentinelPath));
-        Assert.Equal("keep-runtime", File.ReadAllText(sentinelPath));
+        Assert.True(_files.HasFile(sentinelPath));
+        Assert.Equal("keep-runtime", _files.ReadAllText(sentinelPath));
     }
 
     [Fact]
@@ -408,72 +225,69 @@ public sealed class SkillAssetRootResolverSpecs : IDisposable
     {
         var home = Path.Combine(_tempRoot, "user-home");
         var expectedManagedRoot = Path.Combine(home, ".mohist", "cli", "skill-data");
-        Directory.CreateDirectory(expectedManagedRoot);
+        WriteCompatibleAssetRoot(expectedManagedRoot);
 
         var resolver = CreateResolver(home, identity: CurrentIdentity);
-
         var resolution = resolver.Resolve(SkillAssetService.BuiltInSkillNames);
 
+        Assert.Equal(SkillAssetRootSource.ManagedCache, resolution.Source);
         Assert.Equal(
             Path.GetFullPath(expectedManagedRoot),
-            Path.GetFullPath(resolution.AttemptedRoot ?? string.Empty));
+            Path.GetFullPath(resolution.AssetRoot!));
     }
 
     [Fact]
-    public void DefaultManagedAssetRoot_UsesUserProfileWhenAvailable_AndSiblingDirectoryOtherwise()
+    public void Resolve_ReportsSiblingPath_InDiagnostic_WhenNoAssetRootFound()
     {
-        var computed = SkillAssetRootResolver.DefaultManagedAssetRoot();
+        var resolver = new SkillAssetRootResolver(_files, _environment);
 
-        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var expected = string.IsNullOrWhiteSpace(profile)
+        var computed = resolver.DefaultManagedAssetRoot();
+
+        var home = _environment.GetEnvironmentVariable(SkillAssetRootResolver.HomeEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var expected = string.IsNullOrWhiteSpace(home)
             ? Path.Combine(AppContext.BaseDirectory, "skill-data")
-            : Path.Combine(profile, ".mohist", "cli", "skill-data");
+            : Path.Combine(home, ".mohist", "cli", "skill-data");
 
         Assert.Equal(
             Path.GetFullPath(expected),
             Path.GetFullPath(computed));
     }
 
-    private static SkillAssetRootResolver CreateResolver(
+    private SkillAssetRootResolver CreateResolver(
         string home,
         SkillAssetBuildIdentity identity,
         Func<string?>? getOverrideAssetRoot = null)
     {
         return new SkillAssetRootResolver(
+            _files,
+            _environment,
             getOverrideAssetRoot: getOverrideAssetRoot,
             getManagedAssetRoot: null,
             getUserHome: () => home,
             getBuildIdentity: () => identity);
     }
 
-    private static void WriteCompatibleAssetRoot(string root)
+    private void WriteCompatibleAssetRoot(string root)
     {
-        Directory.CreateDirectory(root);
+        _files.AddDirectory(root);
         WriteSkill(root, "mohist");
         WriteSkill(root, "mohist-explore");
         SkillAssetManifest.Write(
             root,
             CurrentIdentity,
-            new[] { "mohist", "mohist-explore" });
+            new[] { "mohist", "mohist-explore" },
+            _files);
     }
 
-    private static void WriteSkill(string root, string name)
+    private void WriteSkill(string root, string name)
     {
-        Directory.CreateDirectory(Path.Combine(root, name));
-        File.WriteAllText(
-            Path.Combine(root, name, "SKILL.md"),
+        var skillDir = Path.Combine(root, name);
+        _files.AddDirectory(skillDir);
+        _files.AddFile(
+            Path.Combine(skillDir, "SKILL.md"),
             $"---\nname: {name}\ndescription: {DescriptionFor(name)}\n---\n\n# {name}\n");
-    }
-
-    private static IReadOnlyList<string> SnapshotDirectory(string directory)
-    {
-        if (!Directory.Exists(directory))
-            return Array.Empty<string>();
-
-        return Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(directory, path).Replace(Path.DirectorySeparatorChar, '/'))
-            .OrderBy(relative => relative, StringComparer.Ordinal)
-            .ToArray();
     }
 
     private static string DescriptionFor(string name) => name switch

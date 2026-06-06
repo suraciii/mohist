@@ -2,11 +2,14 @@ namespace Mohist.Server.SystemInfo;
 
 public sealed class SystemInfoService
 {
+    public const string HomeEnvironmentVariable = "HOME";
+
     private readonly IRuntimeBuildInfo _runtimeBuildInfo;
     private readonly SystemdInstallDetector _installDetector;
     private readonly IGitSourceInspector _gitInspector;
     private readonly IServiceStatusChecker _serviceStatusChecker;
     private readonly IConfiguration _configuration;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<SystemInfoService> _logger;
 
     public SystemInfoService(
@@ -15,6 +18,7 @@ public sealed class SystemInfoService
         IGitSourceInspector gitInspector,
         IServiceStatusChecker serviceStatusChecker,
         IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
         ILogger<SystemInfoService> logger)
     {
         _runtimeBuildInfo = runtimeBuildInfo;
@@ -22,6 +26,7 @@ public sealed class SystemInfoService
         _gitInspector = gitInspector;
         _serviceStatusChecker = serviceStatusChecker;
         _configuration = configuration;
+        _environment = environment;
         _logger = logger;
     }
 
@@ -147,7 +152,7 @@ public sealed class SystemInfoService
 
     private SystemPaths ResolvePaths()
     {
-        var home = Environment.GetEnvironmentVariable("HOME")
+        var home = _environment.GetEnvironmentVariable(HomeEnvironmentVariable)
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         var dataDir = Path.Combine(home, ".mohist");

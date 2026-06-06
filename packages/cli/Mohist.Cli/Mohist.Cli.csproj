@@ -17,8 +17,13 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="EnvironmentAbstractions" />
     <None Include="..\..\..\docs\README.md" Pack="true" PackagePath="\" />
     <Content Include="skill-data\**\*" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="skill-data/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EnvironmentAbstractions.BannedApiAnalyzer" PrivateAssets="all" />
   </ItemGroup>
 
   <UsingTask TaskName="GenerateSkillManifest"

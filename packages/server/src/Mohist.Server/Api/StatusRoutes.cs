@@ -1,6 +1,7 @@
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
+using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.Api;
 
@@ -33,16 +34,15 @@ public static class StatusRoutes
             return ApiResults.Ok(status);
         });
 
-        app.MapGet("/api/projects/{projectRef}/status", async (string projectRef, IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+        app.MapGet("/api/projects/{projectRef}/status", async (string projectRef, IssueQuerier issuesQuery, ProjectRefResolver projects, IEnvironmentVariableProvider environment) =>
         {
             var current = await projects.ResolveAsync(projectRef);
-            if (current is null)
-                return ApiResults.NotFound("Project not found");
+            if (current is null) return ApiResults.NotFound("Project not found");
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Health == "active").ToList();
 
-            var versionInfo = GetVersionInfo();
+            var versionInfo = GetVersionInfo(environment);
 
             var result = new
             {
@@ -69,10 +69,10 @@ public static class StatusRoutes
         return app;
     }
 
-    private static (string? Version, string? GitHash, string? SourceHead, bool UpToDate) GetVersionInfo()
+    private static (string? Version, string? GitHash, string? SourceHead, bool UpToDate) GetVersionInfo(IEnvironmentVariableProvider environment)
     {
         var version = typeof(StatusRoutes).Assembly.GetName().Version?.ToString();
-        var gitHash = Environment.GetEnvironmentVariable("MOHIST_GIT_HASH");
+        var gitHash = environment.GetEnvironmentVariable(RuntimeBuildInfo.GitHashEnvironmentVariable);
         var sourceHead = GetGitHead();
         var upToDate = gitHash != null && sourceHead != null && gitHash == sourceHead;
         return (version, gitHash, sourceHead, upToDate);

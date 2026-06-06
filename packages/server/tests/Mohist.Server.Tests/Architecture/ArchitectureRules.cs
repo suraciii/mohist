@@ -12,7 +12,9 @@ namespace Mohist.Server.Tests.Architecture;
 public class ArchitectureRules
 {
     private static readonly ArchUnitNET.Domain.Architecture _architecture = new ArchLoader()
-        .LoadAssemblies(System.Reflection.Assembly.Load("Mohist.Server"))
+        .LoadAssemblies(
+            System.Reflection.Assembly.Load("Mohist.Server"),
+            System.Reflection.Assembly.Load("Mohist.Cli"))
         .Build();
 
     private static readonly IObjectProvider<IType> OrleansGeneratedTypes = Types()
@@ -331,5 +333,48 @@ public class ArchitectureRules
         Slices().Matching("Mohist.Server.Workflow.(*)")
             .Should().BeFreeOfCycles()
             .Check(_architecture);
+    }
+
+    /// <summary>
+    /// Enforces the convention that all environment variable access goes through
+    /// <c>System.IEnvironmentVariableProvider</c> (from the <c>EnvironmentAbstractions</c> NuGet package).
+    /// </summary>
+    /// <remarks>
+    /// ArchUnitNET's call graph only tracks instance method dispatches and does not
+    /// detect static method invocations on <c>System.Environment</c>. The primary
+    /// enforcement is at compile time via the <c>EnvironmentAbstractions.BannedApiAnalyzer</c>
+    /// Roslyn analyzer, which blocks any direct call to
+    /// <c>System.Environment.GetEnvironmentVariable</c> /
+    /// <c>System.Environment.SetEnvironmentVariable</c>. This archtest is a backstop:
+    /// it verifies every production csproj references the analyzer so the compile-time
+    /// enforcement actually runs.
+    /// </remarks>
+    [Fact]
+    public void ProductionCode_ShouldNotCallSystemEnvironmentDirectly()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src"));
+
+        var productionProjects = new[]
+        {
+            ("Mohist.Server", Path.Combine(repoRoot, "Mohist.Server", "Mohist.Server.csproj")),
+            ("Mohist.Cli",    Path.Combine(repoRoot, "..", "..", "cli", "Mohist.Cli", "Mohist.Cli.csproj")),
+        };
+
+        var missing = new List<string>();
+        foreach (var (name, csprojPath) in productionProjects)
+        {
+            var csproj = File.ReadAllText(csprojPath);
+            if (!csproj.Contains("EnvironmentAbstractions.BannedApiAnalyzer", StringComparison.Ordinal))
+            {
+                missing.Add(name);
+            }
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            "These production csprojs must reference EnvironmentAbstractions.BannedApiAnalyzer to " +
+            "enforce IEnvironmentVariableProvider usage at compile time: " + string.Join(", ", missing));
     }
 }
