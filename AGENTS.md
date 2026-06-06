@@ -13,22 +13,32 @@ mohist 是一个 AI 驱动的开发工作流自动化工具，使用本地 SQLit
 | `packages/web/` | Web UI | React + Vite + Tailwind + TanStack Query |
 | `design/` | 技术设计 | 架构设计、技术规格、流程设计 |
 | `docs/` | 项目文档 | CONTRIBUTING、使用指南等补充文档 |
-| `opensrc/openclaw/` | 参考源码 | openclaw 项目源代码，供架构参考 |
-| `opensrc/nanoclaw/` | 参考源码 | nanoclaw 项目源代码，极简 AI agent 框架（~8K 行），供架构参考 |
 
 ## 核心实现结构
 
 ```
 packages/server/
 ├── src/Mohist.Server/
-│   ├── Api/                    # REST API 路由
-│   ├── Issue/                  # Issue domain/grains/queries/workflow profiles
+│   ├── Api/                    # REST API 路由 + Endpoint Filter
+│   ├── Issue/                  # Issue 域 / Grain / Querier / 工作流 profile
 │   ├── Workflow/               # WorkflowGrain + workflow domain
-│   ├── Runner/                 # Runner grains + embedded runner bridge
+│   ├── Runner/                 # Runner Grain + embedded runner bridge
 │   ├── Sessions/               # Agent session telemetry
-│   ├── Storage/                # EF Core state store
-│   └── Hosting/                # Server/service/web registration
+│   ├── Project/, Epic/         # Project / Epic 域 (Bounded Contexts)
+│   ├── Events/                 # SignalR Hub + 事件桥接
+│   ├── SystemInfo/             # runtime build/update/service info
+│   ├── Infrastructure/
+│   │   ├── Data/               # EF Core DbContext + Store 实现
+│   │   ├── Hosting/            # DI / API / Silo 注册
+│   │   ├── Events/             # IEventBus + InMemoryEventBus
+│   │   ├── Config/             # ConfigService + 文件系统抽象
+│   │   ├── Workspace/, Orleans/, Serialization/, Files/
+│   │   └── ...
+│   └── Program.cs
 └── tests/Mohist.Server.Tests/  # 后端 spec/集成测试
+    ├── Specs/{Workflow,Issue,Project,Epic,Runner,Sessions,Skills,SystemSpecs,Api,Foundation}/
+    ├── Architecture/           # ArchUnitNET 规则
+    └── Support/                # 共享 Fixture / TestData / Traits
 
 packages/runner/
 ├── src/                        # TypeScript runner runtime
@@ -41,23 +51,39 @@ packages/web/
 
 ## 工作流阶段
 
+实际由 `mohist-default.workflow.yaml` 定义 (8 个 stage)：
+
 ```
-Draft → Plan → Build → Check → Integrate → Done
-  ↑       ↑                    ↑          ↑
-Backlog  (用户审批)          (用户审批)  (自动合并)
+proposal → specs → design → tasks → self-review → load-tasks → ai-review → integrate
+                            ↑                       ↑              ↑           ↑
+                          (用户审批)             (auto)         (用户审批)   (auto)
 ```
+
+Issue 状态机 (`IssueStatus` 枚举) 与上述 stage 不同，定义在 `Issue/Domain/IssueStatus.cs`：
+
+| Issue 状态 | 含义 |
+|------|------|
+| `Backlog` | 已创建但未启动 workflow |
+| `InProgress` | workflow 运行中 |
+| `Done` | workflow 成功完成 |
+| `Cancelled` | 显式关闭或归档 |
+
+> **重要**：AGENTS.md 早期版本描述的 `Draft → Plan → Build → Check → Integrate → Done` 是设计意图，**当前实现的 yaml 用 `proposal/specs/design/tasks/.../integrate`** 命名，请以 yaml 为准。
 
 Explore 不再是 Mohist runtime 内置功能。探索/需求澄清通过 `mo skills install` 安装的外部 agent skill（如 `mohist-explore`）完成；Mohist runtime 只管理 issue、workflow、审批、产物和执行调度。
 
 ### 各阶段职责
 
-| 阶段 | 职责 | Gate |
+| Stage | 职责 | Gate |
 |------|------|------|
-| Plan | 技术设计，拆解任务 | 用户审批 + 健康门控 (typecheck) |
-| Build | 逐个执行任务 (AFK/HITL) | 健康门控 (build) + 全任务完成 |
-| Check | AI 代码审查 | 用户审批 + merge-ready 检查 |
-| Integrate | spec sync + 归档 + 合并 + 集成后健康检查 | 集成后门控 (build+test) |
-| Done | 完成 | — |
+| `proposal` | 产生技术 proposal | — |
+| `specs` | 拆解为 capability specs | — |
+| `design` | 任务设计 / 变量构建 | — |
+| `tasks` | 逐个执行任务 (AFK/HITL) | 健康门控 (build) + 全任务完成 |
+| `self-review` | 自我审查 | — |
+| `load-tasks` | 加载下一批任务 | — |
+| `ai-review` | AI 代码审查 | 用户审批 + merge-ready 检查 |
+| `integrate` | spec sync + 归档 + 合并 + 集成后健康检查 | 集成后门控 (build+test) |
 
 ## 常用命令
 
@@ -85,35 +111,33 @@ npm run dev:web
 
 ## Web UI
 
-服务启动后访问 `http://localhost:3456`。实时更新通过 SSE（Server-Sent Events）推送，共 49 种事件类型。
+服务启动后访问 `http://localhost:3456`。实时更新通过 **SignalR hub**（`/hubs/events`）推送，共 **45 种事件类型**（`EventBusEventTypes.All`）。SSE 路由已删除（旧 commit `6fb8b239a5`）。
 
 ## 非显而易见的发现
 
 ### Agent Runner
-- 使用 `opencode agent --local --message "..."` spawn 子进程
+- Runner 是独立 TypeScript 进程（`packages/runner/`），通过 `opencode acp --pure` spawn + `@agentclientprotocol/sdk` 与外部 `opencode` runtime 通信
 - 超时分三级：session (30min) / stage (60min) / task (10min)
-- Prompt 在 `src/agents/prompts/` 中定义（YAML + Markdown 格式）
-- 支持 ACP (Agent Client Protocol) 通信
+- Prompt 在 `packages/server/src/Mohist.Server/Workflow/Services/Prompts/builtins/` 中定义（`.prompt` 文件，YAML frontmatter + XML/正文 格式）
 
 ### 工作流状态机
 - 只能顺序推进，不能跳过阶段
-- `WorkflowEngine` 控制状态流转
-- 每个阶段有独立的 `StageRunner`（Plan/Build/Check/Integrate）
-- 每个 StageRunner 包含 tasks → checks → auto-fix 流程
-- `CheckpointManager` 支持断点续传
+- 状态机由 `WorkflowGrain`（Orleans Grain）驱动
+- Stage 状态在 `StageRun` / `TaskRun` / `StageCheck` 领域模型中表达
+- 状态持久化通过 EF Core `WorkflowRunRow.State` JSON 列 + ETag 乐观锁（不依赖 Orleans `IPersistentState`）
+- Grain 单线程激活模型替代旧 `WorkflowEngine` + `Mutex` + `CheckpointManager`
 
 ### 审批流
-- Plan 和 Check 阶段有 `UserApprovalCheck`
-- 审批暂停时触发 `approval_requested` SSE 事件
+- Plan（`design`） 和 Check（`ai-review`）阶段需要用户审批
+- 审批暂停时 UI 通过 `stage_changed` 事件 + `availableActions` 字段推断待办（**`approval_requested` SSE 事件当前未 emit**，见 `EventBusEventTypes.cs:13` 是死注册）
 - 通过/驳回后自动入队 `resume-pipeline`
-- Check 驳回回到 Build 阶段（非 Plan）
-- Integrate 失败也回到 Build 阶段
+- 失败回退：当前实现用 `rerun` action 目标 `run.CurrentStageId`，**不跨阶段回退**（Check 驳回/Integrate 失败都重跑当前 stage，与文档早期描述不一致；待修）
 
 ### Provider 接口
-- 内置 anthropic/openai/glm/kimi/deepseek/minimax/qwen
-- 支持自定义 OpenAI 兼容 provider
-- Provider 配置存储在 `~/.mohist/config.jsonc`
-- 支持分阶段模型覆盖（Plan/Build/Check/Integrate 各用不同模型）
+- 当前实现统一通过 **opencode** runtime 委托 agent 工作
+- `OpencodeRoutes.cs:/api/opencode/runtime` 返回 `{ mode: "local-opencode", command, model }`
+- 模型在 `~/.mohist/config.jsonc` 中以字符串形式配置
+- 多 provider 架构（anthropic/openai/glm/kimi/deepseek/minimax/qwen）是历史设计意图，**当前未实现**
 
 ### OpenSpec 集成
 - 基于 proposal → specs + design → tasks 模型
@@ -158,28 +182,24 @@ npm run dev:web
 #### Decision 1: Issue Workflow → Orleans Grain
 
 **日期**: 2026-05-22
-**决策**: 将每个 Issue 建模为一个 `IssueWorkflowGrain`（StatelessWorker 或 Reentrant），管理其完整的生命周期状态机。
+**决策**: 将每个 Issue 的 workflow 建模为 Orleans Grain，但 issue 自身状态与 workflow 状态分离在两个不同 Grain 中。
 
 **核心 Grain 设计思路**:
-- `IIssueWorkflowGrain` — 一个 issue 一个 Grain，持有 issue 的 workflow state
-  - 状态: Draft → Plan → Build → Check → Integrate → Done
-  - 内嵌 C# `WorkflowRun` 领域模型
-  - 通过 Orleans Reminder / Timer 实现 timeout、retry、auto-fix
-  - Approval gate 通过 Grain Method 调用（`SubmitApprovalAsync`）
-  - 事件通过 Orleans Stream 推送到 SSE endpoint
+- `IIssueGrain` — 持 issue 自身状态（标题、描述、状态机 Backlog/InProgress/Done/Cancelled、关联 workflow run id）
+- `IWorkflowGrain` — 持 workflow 运行状态（`WorkflowRun` 领域模型），由 issue start 时通过 `GrainFactory.GetGrain<IWorkflowGrain>(wrId)` 调起
+- 状态通过自定义 `IStateStore<T>` + EF Core DbContext 持久化到 `WorkflowRunRow.State` JSON 列 + ETag 乐观锁
+- 通过 Orleans Reminder / Timer 实现 timeout、retry、auto-fix
+- Approval gate 通过 Grain Method 调用（`ApproveAsync` / `RejectAsync`）
+- 事件通过自建进程内 `IEventBus` 推送到 SignalR Hub（**不用 Orleans Streams**）
 
 **映射关系**:
-| 现有 TypeScript 组件 | Orleans 对应 |
+| 旧 TypeScript 设计 | 实际 .NET 实现 |
 |---------------------|-------------|
-| `AgentRunnerService` (1118行) | 多个 Grain: `IIssueWorkflowGrain` + `IAgentSchedulerGrain` |
-| 内存 `runningSlots` / `pendingQueues` Map | Grain 内部状态 + Orleans 并发保证 |
-| `WorkflowRun` / `StageRun` / `TaskRun` 领域模型 | Grain State (可序列化) |
-| `EventBus` (内存事件) | Orleans Stream (`IAsyncObservable`) |
-| `WorkflowRuntime` / `WorkflowRunner` | Grain 方法编排 |
-| `CheckpointManager` 断点续传 | Grain 天然持久化，Silo 重启自动恢复 |
-| `UserApprovalCheck` 暂停等待 | Grain Method + `await` 或 Reminder 轮询 |
-| Agent 子进程 spawn | `IAgentProcessGrain` 管理进程生命周期 |
-| Orphan scan 定时器 | Orleans Reminder / Silo 周期扫描 |
+| `IIssueWorkflowGrain`（issue + workflow 合并） | `IIssueGrain` + `IWorkflowGrain`（分离） |
+| Grain State 持久化 | EF Core JSON 列 + ETag 乐观锁 |
+| Orleans Stream (`IAsyncObservable`) 推 SSE | `IEventBus` + SignalR `/hubs/events` |
+| `CheckpointManager` 断点续传 | EF Core 持久化，Silo 重启自动恢复 |
+| Orphan scan 定时器 | **未实现**（`WorkflowGrain` 仅 1 个 heartbeat reminder） |
 
 **不做的**:
 - 不改变前端 API 契约
@@ -189,21 +209,28 @@ npm run dev:web
 #### Decision 2: 单项目结构 + Central Package Management
 
 **日期**: 2026-05-22
-**决策**: .NET 后端使用单项目 `Mohist.Server`（非多项目拆分），Workflow 作为命名空间目录而非独立项目。
+**决策**: .NET 后端使用单项目 `Mohist.Server`（非多项目拆分），各 Bounded Context 作为命名空间目录而非独立项目。
 
 **项目结构**:
 ```
 packages/server/
 ├── Mohist.sln
-├── Directory.Build.props          # 统一 net10.0
+├── Directory.Build.props          # 统一 net11.0
 ├── Directory.Packages.props       # CPM 统一版本管理
 ├── src/Mohist.Server/
 │   ├── Workflow/
 │   │   ├── Domain/                # 领域模型 (WorkflowRun, StageRun, ...)
 │   │   ├── Grains/                # Orleans Grain (IWorkflowGrain, WorkflowGrain)
-│   │   └── Handlers/              # Handler 接口 + Registry
+│   │   ├── Services/              # Querier / ProfileManager / ActivityQuerier
+│   │   └── Surrogates/            # Orleans 序列化代理
+│   ├── Issue/                     # 同 Workflow/ 布局
+│   ├── Project/, Epic/, Runner/, Sessions/, Events/, ...
+│   ├── Infrastructure/            # Data/Hosting/Events/Config/Orleans/...
 │   └── Mohist.Server.csproj
 └── tests/Mohist.Server.Tests/
+    ├── Specs/<BoundedContext>/
+    ├── Architecture/
+    └── Support/
 ```
 
 **理由**: 当前阶段以迁移为主，无需过早拆分项目。领域模型和 Grain 在同一项目中减少序列化/反序列化开销，后续按需拆分。
@@ -211,19 +238,13 @@ packages/server/
 #### Decision 3: WorkflowRunner → WorkflowGrain 迁移
 
 **日期**: 2026-05-22
-**决策**: 将 TypeScript `WorkflowRunner`（run loop + Mutex + LoopController）迁移为 Orleans `WorkflowGrain`，利用 Grain 单线程保证替代 Mutex，利用 Grain 持久化替代 WorkflowStore。
-
-**映射关系**:
-| TypeScript WorkflowRunner | C# WorkflowGrain |
-|---------------------------|------------------|
-| `Mutex` (内存锁) | Orleans Grain 天然单线程访问（Reentrant） |
-| `LoopController` (wake/wait) | Grain Method 调用直接驱动（无需事件循环） |
-| `WorkflowStore.save()` | Grain State 持久化（后续接入） |
-| `HandlerRegistry` | `IHandlerRegistry`（DI 注入） |
-| `TaskHandler.run()` | `ITaskHandler.RunAsync()` |
-| `CheckHandler.run()` | `ICheckHandler.RunAsync()` |
-| `TaskLoader.load()` | `ITaskLoader.LoadAsync()` |
-| `AbortSignal` 中断 | `PauseAsync()` / Orleans Cancellation |
-| `tryInjectRetryTask` | 内置 `TryInjectRetryTask` |
+**决策**: 将 TypeScript `WorkflowRunner`（run loop + Mutex + LoopController）迁移为 Orleans `WorkflowGrain`，利用 Grain 单线程保证替代 Mutex，利用 EF Core 持久化替代 WorkflowStore。
 
 **关键差异**: WorkflowGrain 不使用 while 循环 + wake/wait 模式。外部（API 调用、Reminder）通过调用 Grain Method（`StartAsync`、`ApproveAsync`、`ResumeAsync`）驱动状态推进，Grain 内部 `RunLoop` 处理到下一个挂起点（await-approval / failed / complete / paused）即返回。
+
+**已实现 vs 文档设计**:
+- ✅ Grain 单线程激活模型替代 Mutex
+- ✅ Grain Method 调用直接驱动（无事件循环）
+- ✅ EF Core 持久化
+- ❌ 旧文档提到的 `IHandlerRegistry` / `ITaskHandler` / `ICheckHandler` / `ITaskLoader` 抽象未单独抽出；任务执行逻辑内联在 `WorkflowGrain.PrepareWorkAsync` / `WorkLease` 中
+- ❌ 旧文档提到的 `tryInjectRetryTask` → `TryInjectRetryTask` 内置 helper 未命名/未抽

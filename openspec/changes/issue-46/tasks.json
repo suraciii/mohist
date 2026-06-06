@@ -17,8 +17,8 @@
       "type": "MIGRATE",
       "output": "Issue storage/domain compatibility layer that reads legacy snapshots and writes repository references for new issues.",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Use the repository name as the stable reference for now, matching current project configuration and API inputs."
+      "passes": true,
+      "notes": "Implementation done in commit 1d122e1022. Domain layer + IssueStore updated to store only repository reference; legacy snapshots are still readable. Marked passes=true on retrospective review; Integrate step (spec sync + archive) still pending — see openspec/specs/ for sync status."
     },
     {
       "id": "T-002",
@@ -37,8 +37,8 @@
       "dependsOn": [
         "T-001"
       ],
-      "passes": false,
-      "notes": "Keep the abstraction narrow so a future repository id can replace repository name without rewriting every consumer."
+      "passes": true,
+      "notes": "Implementation done in commit 9039ec5e9c. Shared IssueRepositoryResolver + structured problem model live in Issue/Repository/. Marked passes=true on retrospective review; Integrate step (spec sync + archive) still pending — see openspec/specs/ for sync status."
     },
     {
       "id": "T-003",
@@ -58,8 +58,8 @@
         "T-001",
         "T-002"
       ],
-      "passes": false,
-      "notes": "Preserve API compatibility where practical by continuing to return repository details, but make them resolved runtime/read-time data."
+      "passes": true,
+      "notes": "Implementation done in commit 5a7370584d. Issue create/read API now resolves repository context from current project configuration. Marked passes=true on retrospective review; Integrate step (spec sync + archive) still pending — see openspec/specs/ for sync status."
     },
     {
       "id": "T-004",
@@ -79,8 +79,8 @@
         "T-002",
         "T-003"
       ],
-      "passes": false,
-      "notes": "This is the main trust boundary for downstream agent tasks and worktree creation."
+      "passes": true,
+      "notes": "Implementation done in commit 41f02fb66b. Workflow start and variable build now consume the shared resolver. Marked passes=true on retrospective review; Integrate step (spec sync + archive) still pending — see openspec/specs/ for sync status."
     },
     {
       "id": "T-005",
@@ -100,8 +100,8 @@
         "T-002",
         "T-004"
       ],
-      "passes": false,
-      "notes": "Covers the behavior described across worktree-manager, http-api review/rebase, and base-drift-awareness specs. Verification should include the drift scenarios in specs/base-drift-awareness/spec.md in addition to the worktree and API paths."
+      "passes": true,
+      "notes": "Implementation done in commit c8884d731a. Workspace / review / rebase / drift / integrate all route through the shared resolver. Marked passes=true on retrospective review; Integrate step (spec sync + archive) still pending — see openspec/specs/ for sync status."
     },
     {
       "id": "T-006",
@@ -122,8 +122,8 @@
         "T-004",
         "T-005"
       ],
-      "passes": false,
-      "notes": "Include scenarios spanning local issue store, API reads, workflow start variables, worktree/review paths, drift/rebase decisions, and issue read-model repository-problem reporting so every modified spec has direct regression coverage."
+      "passes": true,
+      "notes": "Implementation done in commit 8278464571. Regression coverage in Specs/Issue/Api/IssueRepositoryResolutionRegressionSpecs.cs and IssueWorkflowRepositoryResolutionSpecs.cs. Marked passes=true on retrospective review; Integrate step (spec sync + archive) still pending — see openspec/specs/ for sync status."
     }
   ]
 }

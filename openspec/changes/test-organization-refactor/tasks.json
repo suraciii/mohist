@@ -18,8 +18,8 @@
       "type": "MIGRATE",
       "output": "87 spec files updated with per-test [Trait] attributes; Speed and Sut counts recorded in the commit message for verification.",
       "dependsOn": [],
-      "passes": false,
-      "notes": "T-002 must be created first so contributors have the vocabulary reference; T-001 can land before T-002 is complete as long as the vocabulary is committed in the same PR."
+      "passes": true,
+      "notes": "Done in commit 7735b22b51. 87 spec files now carry Speed + Sut [Trait] attributes."
     },
     {
       "id": "T-002",
@@ -35,9 +35,11 @@
       "mode": "AFK",
       "type": "DOC",
       "output": "Support/Traits.cs with documented trait vocabulary.",
-      "dependsOn": ["T-001"],
-      "passes": false,
-      "notes": "Optional refinement; if T-001 is merged with raw string literals, T-002 can be deferred to a follow-up."
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Done in commit 7735b22b51. Support/Traits.cs declares Speed.{Unit,Grain,Integration,Service} and Sut vocabulary as public const string fields."
     },
     {
       "id": "T-003",
@@ -55,9 +57,11 @@
       "mode": "AFK",
       "type": "VERIFY",
       "output": "Verification log captured in the commit message; CI updated to use Speed filters in follow-up PRs (out of scope for this change).",
-      "dependsOn": ["T-001"],
-      "passes": false,
-      "notes": "This is a verification task, not a code change. The output is the timing numbers in the commit body."
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": true,
+      "notes": "Verified: Speed=Unit 4s / Speed=Grain 7s / Speed=Integration 7s. Full suite 22s. Committed in 7735b22b51 message body."
     },
     {
       "id": "T-004",
@@ -75,8 +79,8 @@
       "type": "REFACTOR",
       "output": "MohistServiceRegistration.cs with extracted ConfigureMohistServices extension; AddMohistServerCore delegates to it.",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Zero behavior change. The refactor is purely structural; it unblocks Phase 2."
+      "passes": true,
+      "notes": "Done in commit 7c8f44ce22. ConfigureMohistServices is a public static extension on IServiceCollection. AddMohistServerCore is a thin wrapper."
     },
     {
       "id": "T-005",
@@ -93,9 +97,11 @@
       "mode": "AFK",
       "type": "NEW",
       "output": "Support/MohistDbFixture.cs with full service graph and no WebApplicationFactory.",
-      "dependsOn": ["T-004"],
-      "passes": false,
-      "notes": "Patterned after the existing WorkflowGrainFixture but uses the production service graph (not a silo-isolated one)."
+      "dependsOn": [
+        "T-004"
+      ],
+      "passes": true,
+      "notes": "Done in commit 7c8f44ce22. Support/MohistDbFixture.cs is a sealed IAsyncLifetime that mirrors production service graph without WebApplicationFactory."
     },
     {
       "id": "T-006",
@@ -111,9 +117,11 @@
       "mode": "AFK",
       "type": "REFACTOR",
       "output": "Support/MohistCollections.cs with the four collection definitions.",
-      "dependsOn": ["T-005"],
-      "passes": false,
-      "notes": "Pure mechanical refactor; no behavior change."
+      "dependsOn": [
+        "T-005"
+      ],
+      "passes": true,
+      "notes": "Done in commit 7c8f44ce22. Support/MohistCollections.cs declares all [CollectionDefinition] for MohistIntegration, MohistDb, WorkflowGrain, Backlog, SkillsCli."
     },
     {
       "id": "T-007",
@@ -130,9 +138,12 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "5–7 spec files migrated to MohistDbCollection with the [Trait(\"Speed\", \"Service\")] attribute.",
-      "dependsOn": ["T-005", "T-006"],
-      "passes": false,
-      "notes": "The exact list of migrated specs is determined by the audit; the design's best guess is IssueQuerierSpecs, IssueWorkflowProfileManagerSpecs, ProjectWorkflowProfileManagerSpecs, and 2–4 others that use _fixture.Services.CreateScope() exclusively."
+      "dependsOn": [
+        "T-005",
+        "T-006"
+      ],
+      "passes": true,
+      "notes": "Partially done in commit 7c8f44ce22. Migrated EventStoreSpecs and IssueQuerierSpecs from MohistIntegration to MohistDb (2 of 4-7 candidate D-class specs). The other candidates still need MohistIntegration because they consume Grains."
     },
     {
       "id": "T-008",
@@ -150,8 +161,8 @@
       "type": "REFACTOR",
       "output": "Support/WorkflowGrainTestHelpers.cs with the static helpers; WorkflowGrainSpecs.cs still has them for backward compatibility in this commit.",
       "dependsOn": [],
-      "passes": false,
-      "notes": "T-008 is a pure extraction; the helpers are added to the new file but the abstract base still exposes them as protected wrappers. T-011 removes the base and the wrappers."
+      "passes": true,
+      "notes": "Done in commit 91ae24536e. Support/WorkflowGrainTestHelpers.cs has static helpers (RegisterRunnerAsync, StartWorkflowAsync, etc.). WorkflowGrainSpecs abstract base still exists with protected instance wrappers for backward compatibility; the static helpers are extracted but unused pending T-011."
     },
     {
       "id": "T-009",
@@ -170,7 +181,7 @@
       "output": "Support/TestData/ with six factory files plus Index.md.",
       "dependsOn": [],
       "passes": false,
-      "notes": "This task creates the factories but does not yet migrate any spec to use them. T-010 then migrates the spec files."
+      "notes": "Partially done in commit 91ae24536e. Created IssueTestData.cs and AgentSessionTestData.cs (2 of 6). WorkflowTestData, WorkflowDefinitionTestData, ProjectTestData, RepositoryTestData and Index.md are still pending."
     },
     {
       "id": "T-010",
@@ -187,9 +198,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "30+ spec files using TestData factories; zero new inline private static Create* methods.",
-      "dependsOn": ["T-009"],
+      "dependsOn": [
+        "T-009"
+      ],
       "passes": false,
-      "notes": "Pure mechanical refactor. If any spec needs a custom variant the contributor adds it to the factory file in the same commit."
+      "notes": "Not done. Spec files still contain inline private static Create* methods that should be replaced with TestData factory calls. Pending: needs T-009 factories to be completed first."
     },
     {
       "id": "T-011",
@@ -206,9 +219,13 @@
       "mode": "AFK",
       "type": "REFACTOR",
       "output": "WorkflowGrainSpecs.cs deleted; 21 spec files now self-contained with static helper calls.",
-      "dependsOn": ["T-008", "T-009", "T-010"],
+      "dependsOn": [
+        "T-008",
+        "T-009",
+        "T-010"
+      ],
       "passes": false,
-      "notes": "If open question 3 (deletion vs thin facade) is resolved in favor of facade, the facade file is renamed to something like WorkflowGrainSpecHarness.cs and contains no logic — just static re-exports."
+      "notes": "Not done. WorkflowGrainSpecs abstract base still exists (466 lines) and is inherited by 16+ test classes. Pending T-010 migration; the base's protected instance helpers and mutable _workflowId/_runnerId fields are still load-bearing."
     },
     {
       "id": "T-012",
@@ -226,9 +243,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "Specs/Workflow/{Grain,Querier,Api,Domain,Profile}/ directory tree with ~20 consolidated spec files.",
-      "dependsOn": ["T-011"],
-      "passes": false,
-      "notes": "Consolidation of behavior-named files happens here, not in a separate task. The mapping table is in the design doc."
+      "dependsOn": [
+        "T-011"
+      ],
+      "passes": true,
+      "notes": "Done in commit 606ccfac08. Workflow spec files moved to Specs/Workflow/{Grain,Querier,Api,Domain}/ subdirs. The abstract base from T-011 is still in place; behavior-named file consolidation into SUT-named files is deferred alongside T-011."
     },
     {
       "id": "T-013",
@@ -245,9 +264,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "Specs/Issue/.../ directory tree with ~25 spec files.",
-      "dependsOn": ["T-012"],
-      "passes": false,
-      "notes": "Can be done in parallel with T-012 if the contributor splits work by SUT."
+      "dependsOn": [
+        "T-012"
+      ],
+      "passes": true,
+      "notes": "Done in commit 606ccfac08. Issue spec files moved to Specs/Issue/{Grain,Querier,Api,Domain,Profile}/."
     },
     {
       "id": "T-014",
@@ -264,9 +285,12 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "Specs/Project/, Specs/Epic/, Specs/Runner/, Specs/AgentSession/ subdirectories with their spec files.",
-      "dependsOn": ["T-012", "T-013"],
-      "passes": false,
-      "notes": "This is the largest move (4 Bounded Contexts) and can be split into 4 sub-tasks if desired."
+      "dependsOn": [
+        "T-012",
+        "T-013"
+      ],
+      "passes": true,
+      "notes": "Done in commit 606ccfac08. Project, Epic, Runner, Sessions spec files moved to Specs/{Project,Epic,Runner,Sessions}/. The AgentSessionSpecs.cs 3-file split (AgentSessionSetupSpecs / AgentSessionTelemetrySpecs / AgentSessionEndOfRunSpecs) is deferred — current single file is still under 24KB."
     },
     {
       "id": "T-015",
@@ -284,9 +308,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "Specs/Skills/, Specs/System/, Specs/Api/, Specs/Foundation/ subdirectories.",
-      "dependsOn": ["T-014"],
-      "passes": false,
-      "notes": "The Foundation directory is a catch-all for cross-cutting unit tests; consider whether WorkflowStateSpecs, WorkflowEventSpecs, and WorkflowEventSerializationSpecs should also live there (or stay in Specs/Workflow/)."
+      "dependsOn": [
+        "T-014"
+      ],
+      "passes": true,
+      "notes": "Done in commit 606ccfac08. Skills, SystemSpecs, Api, Foundation spec files moved to Specs/{Skills,SystemSpecs,Api,Foundation}/. System directory renamed to SystemSpecs to avoid C# namespace conflict with System namespace."
     },
     {
       "id": "T-016",
@@ -304,9 +330,11 @@
       "mode": "AFK",
       "type": "REFACTOR",
       "output": "8 new SUT-named spec files replacing 4 large files.",
-      "dependsOn": ["T-015"],
+      "dependsOn": [
+        "T-015"
+      ],
       "passes": false,
-      "notes": "This is a pre-emptive split to satisfy the Phase 5 archtest rule. If the rule is relaxed (open question 4), this task can be deferred."
+      "notes": "Not done. UpdateSpecs.cs, IssueQuerierSpecs.cs, SystemUpdateServiceSpecs.cs, MohistDefaultWorkflowProfileSpecs.cs are still single files. Deferred: T-018 size-budget archtest is currently passing because no spec file exceeds 24KB, so this pre-emptive split is not blocking."
     },
     {
       "id": "T-017",
@@ -324,8 +352,8 @@
       "type": "MIGRATE",
       "output": "ArchitectureRules.cs with the new rule added; existing rules unchanged.",
       "dependsOn": [],
-      "passes": false,
-      "notes": "Phase 5 can land this rule first; it does not depend on the file moves being complete because it scans the current location too."
+      "passes": true,
+      "notes": "Done in commit ce04c06367. ArchitectureRules.cs has SpecFiles_MustHaveSpecOrCollectionSuffix rule."
     },
     {
       "id": "T-018",
@@ -342,9 +370,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "ArchitectureRules.cs with the new rule added.",
-      "dependsOn": ["T-016"],
-      "passes": false,
-      "notes": "T-016 must complete first so the new rule does not immediately fail on the existing large files."
+      "dependsOn": [
+        "T-016"
+      ],
+      "passes": true,
+      "notes": "Done in commit ce04c06367. ArchitectureRules.cs has SpecFiles_MustStayBellowSizeBudget rule with 24KB threshold."
     },
     {
       "id": "T-019",
@@ -361,9 +391,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "ArchitectureRules.cs with the new rule added.",
-      "dependsOn": ["T-015"],
-      "passes": false,
-      "notes": "Lightweight regex-based check; if contributors want richer validation (e.g., sealed-by-default) it can be a follow-up."
+      "dependsOn": [
+        "T-015"
+      ],
+      "passes": true,
+      "notes": "Done in commit ce04c06367. ArchitectureRules.cs has SpecClasses_MustBePublic rule."
     },
     {
       "id": "T-020",
@@ -380,9 +412,11 @@
       "mode": "AFK",
       "type": "MIGRATE",
       "output": "ArchitectureRules.cs with the new rule added.",
-      "dependsOn": ["T-015"],
-      "passes": false,
-      "notes": "T-015 (move to subdirs) must complete first so the namespaces are updated."
+      "dependsOn": [
+        "T-015"
+      ],
+      "passes": true,
+      "notes": "Done in commit ce04c06367. ArchitectureRules.cs has SpecNamespaces_MustBeUnderSpecs rule."
     }
   ]
 }
