@@ -10,9 +10,6 @@ using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
-[CollectionDefinition("WorkflowEvents", DisableParallelization = true)]
-public class WorkflowEventsCollection;
-
 [Collection("WorkflowEvents")]
 public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
 {
