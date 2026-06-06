@@ -1,6 +1,6 @@
+using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SystemInfo;
 
@@ -12,10 +12,12 @@ public static class OpencodeRoutes
 
     public static WebApplication MapOpencodeRoutes(this WebApplication app)
     {
-        app.MapGet("/api/projects/{projectRef}/opencode/models", async (string projectRef, IGrainFactory grains, ProjectRefResolver projects) =>
+        var group = app.MapGroup("/api/projects/{projectRef}/opencode")
+            .AddEndpointFilter<ProjectResolutionEndpointFilter>();
+
+        group.MapGet("/models", async (HttpContext context, IGrainFactory grains) =>
         {
-            var project = await projects.ResolveAsync(projectRef);
-            if (project is null) return ApiResults.NotFound("Project not found");
+            var project = context.GetResolvedProject();
 
             var globalRegistry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
             var models = await globalRegistry.ListCoderModelsAsync();

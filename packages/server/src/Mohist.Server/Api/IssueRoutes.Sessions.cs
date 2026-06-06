@@ -12,10 +12,9 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             int number,
-            AgentSessionQuerier sessions,
-            ProjectRefResolver projects) =>
+            AgentSessionQuerier sessions) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             return ApiResults.Ok(await sessions.ListSummariesByIssueAsync(project.Id, number));
         });
 
@@ -24,10 +23,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             string name,
-            AgentSessionQuerier sessions,
-            ProjectRefResolver projects) =>
+            AgentSessionQuerier sessions) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var metadata = await sessions.GetSessionMetadataAsync(project.Id, number, name);
             return metadata is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(metadata);
         });
@@ -37,10 +35,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             string name,
-            AgentSessionQuerier sessions,
-            ProjectRefResolver projects) =>
+            AgentSessionQuerier sessions) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var events = await sessions.GetSessionEventsAsync(project.Id, number, name);
             return events is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(events);
         });

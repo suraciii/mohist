@@ -1,7 +1,7 @@
+using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.Project.Services;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 
@@ -13,15 +13,16 @@ public static class WorkspaceRoutes
 
     public static WebApplication MapWorkspaceRoutes(this WebApplication app)
     {
-        var issues = app.MapGroup("/api/projects/{projectRef}/issues/{number:int}");
+        var issues = app.MapGroup("/api/projects/{projectRef}/issues/{number:int}")
+            .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
         issues.MapGet("/diff", async (
-            string projectRef, int number,
+            HttpContext context, int number,
             IGitService git,
-            IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var (pid, issue) = await ResolveIssueAsync(projectRef, number, projects, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var pid = context.GetResolvedProject().Id;
+            var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
@@ -62,12 +63,12 @@ public static class WorkspaceRoutes
         });
 
         issues.MapGet("/commits", async (
-            string projectRef, int number,
+            HttpContext context, int number,
             IGitService git,
-            IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var (pid, issue) = await ResolveIssueAsync(projectRef, number, projects, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var pid = context.GetResolvedProject().Id;
+            var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
@@ -110,12 +111,12 @@ public static class WorkspaceRoutes
         });
 
         issues.MapGet("/commits/{hash}/diff", async (
-            string projectRef, int number, string hash,
+            HttpContext context, int number, string hash,
             IGitService git,
-            IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var (pid, issue) = await ResolveIssueAsync(projectRef, number, projects, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var pid = context.GetResolvedProject().Id;
+            var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
@@ -143,12 +144,12 @@ public static class WorkspaceRoutes
         });
 
         issues.MapGet("/worktree-status", async (
-            string projectRef, int number,
+            HttpContext context, int number,
             IGitService git,
-            IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var (pid, issue) = await ResolveIssueAsync(projectRef, number, projects, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var pid = context.GetResolvedProject().Id;
+            var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
@@ -170,12 +171,12 @@ public static class WorkspaceRoutes
         });
 
         issues.MapGet("/file-content", async (
-            string projectRef, int number, string path,
+            HttpContext context, int number, string path,
             IGitService git,
-            IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var (pid, issue) = await ResolveIssueAsync(projectRef, number, projects, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var pid = context.GetResolvedProject().Id;
+            var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
@@ -196,10 +197,10 @@ public static class WorkspaceRoutes
             }
         });
 
-        issues.MapPost("/cleanup", async (string projectRef, int number, IGrainFactory grains, IGitService git, WorkflowActivityQuerier projection, IssueQuerier issuesQuery, ProjectRefResolver projects) =>
+        issues.MapPost("/cleanup", async (HttpContext context, int number, IGrainFactory grains, IGitService git, WorkflowActivityQuerier projection, IssueQuerier issuesQuery) =>
         {
-            var (pid, issue) = await ResolveIssueAsync(projectRef, number, projects, issuesQuery);
-            if (pid is null) return ApiResults.BadRequest("No active project");
+            var pid = context.GetResolvedProject().Id;
+            var issue = await issuesQuery.GetAsync(pid, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
@@ -252,17 +253,6 @@ public static class WorkspaceRoutes
 
     private static Task<bool> BranchExistsAsync(IGitService git, IssueReadModel issue, string repoPath)
         => git.BranchExistsAsync(repoPath, $"mo/issue-{issue.Number}");
-
-    private static async Task<(string? ProjectId, IssueReadModel? Issue)> ResolveIssueAsync(
-        string projectRef, int number, ProjectRefResolver projects, IssueQuerier issuesQuery)
-    {
-        var project = await projects.ResolveAsync(projectRef);
-        if (project is null) return (null, null);
-        var pid = project.Id;
-
-        var issue = await issuesQuery.GetAsync(pid, number);
-        return (pid, issue);
-    }
 
     private static bool IsWorkflowActive(IssueWorkflowStatus? workflow)
     {

@@ -80,7 +80,7 @@ public static class RunnerRoutes
         group.MapPost("/report", async (string runnerId, RunnerReportRequest req, IGrainFactory grains) =>
         {
             if (string.IsNullOrWhiteSpace(req.WorkflowRunId))
-                return Results.BadRequest(new { error = "workflowRunId is required" });
+                return ApiResults.BadRequest("workflowRunId is required");
 
             var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode);
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);

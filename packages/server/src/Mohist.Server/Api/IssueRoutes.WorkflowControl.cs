@@ -15,10 +15,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ResumeAsync();
@@ -30,10 +29,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync();
@@ -46,10 +44,9 @@ public static partial class IssueRoutes
             int number,
             RejectRequest? req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RejectAsync(req?.Reason);
@@ -61,10 +58,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RetryAsync();
@@ -76,10 +72,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).RerunAsync();
@@ -93,10 +88,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             await grains.GetGrain<IWorkflowGrain>(wrId).PauseAsync("user-force-stop");
@@ -110,10 +104,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IGrainFactory grains,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var wrId = (await issuesQuery.GetInfoAsync(project.Id, number))?.WorkflowRunId;
             if (wrId is null) return ApiResults.NotFound("No workflow run");
             try

@@ -18,10 +18,9 @@ public static partial class IssueRoutes
             string? priority,
             bool? archived,
             bool? all,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var list = await issuesQuery.ListAsync(project.Id, project, stage, label, priority, archived, all);
             return ApiResults.Ok(list);
         });
@@ -32,13 +31,12 @@ public static partial class IssueRoutes
             CreateIssueRequest req,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
-            ProjectRefResolver projects,
             IssueRepositoryResolver repositoryResolver) =>
         {
             if (string.IsNullOrWhiteSpace(req.Title))
                 return ApiResults.BadRequest("title is required");
 
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var resolution = repositoryResolver.Resolve(project, req.RepositoryName);
             if (resolution.HasProblem)
@@ -57,10 +55,9 @@ public static partial class IssueRoutes
             HttpContext ctx,
             string projectRef,
             int number,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var info = await issuesQuery.GetAsync(project.Id, number, project);
             return info is not null ? ApiResults.Ok(info) : ApiResults.NotFound($"Issue #{number} not found");
         });
@@ -72,10 +69,9 @@ public static partial class IssueRoutes
             UpdateIssueRequest req,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
