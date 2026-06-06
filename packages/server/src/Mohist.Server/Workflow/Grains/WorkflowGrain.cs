@@ -24,6 +24,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private WorkLease? _lease;
     private WorkflowExecutionContext? _variables;
     private string? _lastRunnerId;
+    private bool _runDirty;
     private IGrainReminder? _workHeartbeatReminder;
     private readonly HashSet<string> _announcedWaitingLocks = [];
     private readonly HashSet<string> _announcedAcquiredLocks = [];
@@ -68,9 +69,21 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         await EnsureWorkHeartbeatAsync();
     }
 
-    public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
+    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        return Task.CompletedTask;
+        if (!_runDirty || _run is null) return;
+
+        try
+        {
+            await _runStore.SaveAsync(_run, ct);
+            _runDirty = false;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex,
+                "Workflow {Id} flush on deactivation failed; in-memory mutations will be lost until next activation reloads state",
+                GrainKey);
+        }
     }
 
     public async Task ReceiveReminder(string reminderName, TickStatus status)
@@ -889,7 +902,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, bool saveVariables = false)
     {
         if (_run is not null)
+        {
+            _runDirty = true;
             await SaveRunAsync(events);
+        }
 
         if (saveVariables)
         {
@@ -1040,6 +1056,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         try
         {
             await _runStore.SaveAsync(_run);
+            _runDirty = false;
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -1058,6 +1075,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         try
         {
             await _runStore.SaveAsync(_run, events);
+            _runDirty = false;
         }
         catch (DbUpdateConcurrencyException ex)
         {

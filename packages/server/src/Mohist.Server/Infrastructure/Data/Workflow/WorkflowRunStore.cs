@@ -10,14 +10,14 @@ namespace Mohist.Server.Infrastructure.Data.Workflow;
 
 public interface IWorkflowRunStore
 {
-    Task SaveAsync(WorkflowRun run);
+    Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
-    Task<WorkflowRun?> LoadAsync(string workflowRunId);
+    Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
 }
 
 public class WorkflowRunStore : IWorkflowRunStore
 {
-    private readonly MohistDbContext _db;
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IEventBus _eventBus;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -27,26 +27,28 @@ public class WorkflowRunStore : IWorkflowRunStore
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public WorkflowRunStore(MohistDbContext db, IEventBus eventBus)
+    public WorkflowRunStore(IDbContextFactory<MohistDbContext> dbFactory, IEventBus eventBus)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _eventBus = eventBus;
     }
 
-    public async Task SaveAsync(WorkflowRun run)
+    public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
     {
-        await StageRunAsync(run);
-        await _db.SaveChangesAsync();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await StageRunAsync(db, run, ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)
     {
-        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await StageRunAsync(run, ct);
-            var stagedEvents = await WorkflowEventPersistence.StageAsync(_db, run.Id, events, ct);
-            await _db.SaveChangesAsync(ct);
+            await StageRunAsync(db, run, ct);
+            var stagedEvents = await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
+            await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             Publish(stagedEvents);
         }
@@ -57,27 +59,28 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
     }
 
-    private async Task StageRunAsync(WorkflowRun run, CancellationToken ct = default)
+    private static async Task StageRunAsync(MohistDbContext db, WorkflowRun run, CancellationToken ct)
     {
         var json = JsonSerializer.Serialize(run, JsonOptions);
-        var entity = await _db.WorkflowRuns.FindAsync([run.Id], ct);
+        var entity = await db.WorkflowRuns.FindAsync([run.Id], ct);
 
         if (entity is null)
         {
             var newEntity = new WorkflowRunRow { WorkflowRunId = run.Id, State = json };
-            _db.WorkflowRuns.Add(newEntity);
-            _db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
+            db.WorkflowRuns.Add(newEntity);
+            db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
             return;
         }
 
         entity.State = json;
-        var entry = _db.Entry(entity);
+        var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
     }
 
-    public async Task<WorkflowRun?> LoadAsync(string workflowRunId)
+    public async Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default)
     {
-        var entity = await _db.WorkflowRuns.FindAsync(workflowRunId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var entity = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
         if (entity is null) return null;
         return Deserialize(entity.State);
     }
@@ -88,9 +91,11 @@ public class WorkflowRunStore : IWorkflowRunStore
         {
             return JsonSerializer.Deserialize<WorkflowRun>(json, JsonOptions);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            // JSON corruption is unrecoverable; surface to caller rather than silently returning null.
+            throw new InvalidOperationException(
+                $"Failed to deserialize workflow run state. The persisted JSON is corrupt.", ex);
         }
     }
 
@@ -102,5 +107,4 @@ public class WorkflowRunStore : IWorkflowRunStore
             _eventBus.Emit(dto.Type, dto);
         }
     }
-
 }

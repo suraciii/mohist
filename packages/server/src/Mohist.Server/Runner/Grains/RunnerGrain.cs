@@ -18,7 +18,7 @@ public class RunnerGrain : Grain, IRunnerGrain
     private int _nextProjectIndex;
     private IDisposable? _heartbeatTimer;
     private readonly IWorkflowBacklogDirectory _backlogs;
-    private readonly IDbContextFactory<MohistDbContext>? _dbFactory;
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ILogger<RunnerGrain> _log;
 
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
@@ -26,11 +26,11 @@ public class RunnerGrain : Grain, IRunnerGrain
 
     public RunnerGrain(
         IWorkflowBacklogDirectory backlogs,
-        IServiceProvider services,
+        IDbContextFactory<MohistDbContext> dbFactory,
         ILogger<RunnerGrain> log)
     {
         _backlogs = backlogs;
-        _dbFactory = services.GetService<IDbContextFactory<MohistDbContext>>();
+        _dbFactory = dbFactory;
         _log = log;
     }
 
@@ -236,18 +236,15 @@ public class RunnerGrain : Grain, IRunnerGrain
             return [_projectId];
 
         var projectIds = new HashSet<string>(_backlogs.ListProjects(), StringComparer.Ordinal);
-        if (_dbFactory is not null)
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var persistedProjectIds = await db.Projects
+            .AsNoTracking()
+            .Select(project => project.Id)
+            .ToListAsync();
+        foreach (var projectId in persistedProjectIds)
         {
-            await using var db = await _dbFactory.CreateDbContextAsync();
-            var persistedProjectIds = await db.Projects
-                .AsNoTracking()
-                .Select(project => project.Id)
-                .ToListAsync();
-            foreach (var projectId in persistedProjectIds)
-            {
-                if (!string.IsNullOrWhiteSpace(projectId))
-                    projectIds.Add(projectId);
-            }
+            if (!string.IsNullOrWhiteSpace(projectId))
+                projectIds.Add(projectId);
         }
 
         return projectIds.Order(StringComparer.Ordinal).ToArray();
