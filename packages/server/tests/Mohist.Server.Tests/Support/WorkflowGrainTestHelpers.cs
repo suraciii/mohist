@@ -1,0 +1,364 @@
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Serialization;
+using Mohist.Server.Runner.Grains;
+using Mohist.Server.Workflow.Domain;
+using Mohist.Server.Workflow.Domain.Definition;
+using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workflow.Services.Prompts;
+using Orleans;
+using Xunit;
+
+namespace Mohist.Server.Tests.Support;
+
+/// <summary>
+/// Static helpers for spec files that exercise the <see cref="WorkflowGrain"/>
+/// via <see cref="WorkflowGrainFixture"/>. Extracted from the former
+/// <c>WorkflowGrainSpecs</c> abstract base class so helpers can be called
+/// from non-derived specs and tests do not share mutable instance state
+/// (<c>_workflowId</c>, <c>_runnerId</c>) across cases.
+/// </summary>
+public static class WorkflowGrainTestHelpers
+{
+    public static string TestProjectId(string workflowId) => $"test-project-{workflowId}";
+
+    public static WorkflowStartInput TestInput(IGrainFactory grains, string workflowId, string? projectId = null)
+    {
+        projectId ??= TestProjectId(workflowId);
+        var json = JsonSerializer.Serialize(new { project = new { id = projectId } }, WorkflowVariableJson.Options);
+        return new WorkflowStartInput(json, ProjectId: projectId);
+    }
+
+    public static async Task<string> RegisterRunnerAsync(
+        IGrainFactory grains,
+        string workflowId,
+        string? runnerId = null,
+        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
+    {
+        var projectId = TestProjectId(workflowId);
+        return await RegisterRunnerForProjectAsync(grains, projectId, runnerId, maxWorkflowSlots);
+    }
+
+    public static async Task<string> RegisterRunnerForProjectAsync(
+        IGrainFactory grains,
+        string projectId,
+        string? runnerId = null,
+        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
+    {
+        runnerId ??= $"runner-{Guid.NewGuid():N}";
+        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(runnerId, ["spec/*"], "test-host", projectId, MaxWorkflowSlots: maxWorkflowSlots));
+        return runnerId;
+    }
+
+    public static IWorkflowGrain CreateWorkflow(IGrainFactory grains, string workflowId) =>
+        grains.GetGrain<IWorkflowGrain>(workflowId);
+
+    public static async Task<IWorkflowGrain> StartWorkflowAsync(
+        IGrainFactory grains,
+        string connectionString,
+        WorkflowDefinition definition,
+        string workflowId,
+        string? runnerId = null,
+        int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)
+    {
+        await ClearBacklogAsync(grains, connectionString);
+        var projectId = TestProjectId(workflowId);
+        runnerId ??= await RegisterRunnerAsync(grains, workflowId, runnerId, maxWorkflowSlots);
+
+        var workflow = CreateWorkflow(grains, workflowId);
+        await SeedWorkflowTemplateAsync(connectionString, workflowId, definition, projectId);
+        await workflow.StartAsync(TestInput(grains, workflowId, projectId));
+        return workflow;
+    }
+
+    public static async Task<IWorkflowGrain> StartWorkflowWithoutRunnerAsync(
+        IGrainFactory grains,
+        string connectionString,
+        WorkflowDefinition definition,
+        string workflowId)
+    {
+        await ClearBacklogAsync(grains, connectionString);
+        var projectId = TestProjectId(workflowId);
+        var workflow = CreateWorkflow(grains, workflowId);
+        await SeedWorkflowTemplateAsync(connectionString, workflowId, definition, projectId);
+        await workflow.StartAsync(TestInput(grains, workflowId, projectId));
+        return workflow;
+    }
+
+    public static WorkflowQuerier GetQuerier(string connectionString)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        return new WorkflowQuerier(factory, new WorkflowProfileManager(factory, null!, new PromptTemplateEngine()));
+    }
+
+    public static async Task SeedLeaseAsync(string connectionString, string workflowId, WorkLease lease)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var row = await db.WorkflowLeases.FindAsync(workflowId);
+        var json = JsonSerializer.Serialize(lease, WorkflowStorageJson.Options);
+
+        if (row is null)
+        {
+            db.WorkflowLeases.Add(new WorkflowLeaseRow
+            {
+                WorkflowRunId = workflowId,
+                State = json
+            });
+        }
+        else
+        {
+            row.State = json;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task DeactivateWorkflowAsync(IGrainFactory grains, string workflowId)
+    {
+        var workflow = grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.DeactivateForTestAsync();
+
+        var management = grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var activations = await management.GetDetailedGrainStatistics();
+            if (!activations.Any(stat => stat.GrainType.Contains(nameof(WorkflowGrain), StringComparison.Ordinal)
+                && stat.GrainId.ToString()!.Contains(workflowId, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+
+        Assert.Fail($"Workflow grain '{workflowId}' did not deactivate in time.");
+    }
+
+    public static async Task ClearBacklogAsync(IGrainFactory grains, string connectionString)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using var db = new MohistDbContext(options);
+        db.WorkflowLeases.RemoveRange(db.WorkflowLeases);
+        db.BacklogStates.RemoveRange(db.BacklogStates);
+        await db.SaveChangesAsync();
+
+        var management = grains.GetGrain<IManagementGrain>(0);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+    }
+
+    public static async Task EnqueueWorkflowForTestAsync(IGrainFactory grains, string workflowId, string? projectId = null)
+    {
+        projectId ??= TestProjectId(workflowId);
+        var backlog = grains.GetGrain<IWorkflowBacklogGrain>(WorkflowBacklogKeys.ForProject(projectId));
+        await backlog.EnqueueAsync(workflowId);
+    }
+
+    public static async Task AssignWorkflowToRunnerAsync(IGrainFactory grains, string workflowId, string runnerId)
+    {
+        var workflow = grains.GetGrain<IWorkflowGrain>(workflowId);
+        await workflow.AssignRunnerAsync(runnerId);
+    }
+
+    public static async Task AssignActiveWorkForTestAsync(
+        IGrainFactory grains,
+        string connectionString,
+        string runnerId,
+        string workflowId,
+        string workId = "task-1.1",
+        string workType = "task",
+        string stage = "build",
+        string? title = "Task 1")
+    {
+        var workflow = grains.GetGrain<IWorkflowGrain>(workflowId);
+        var projectId = TestProjectId(workflowId);
+        await SeedWorkflowTemplateAsync(connectionString, workflowId, SingleStage(
+            tasks: [new("task-1", title ?? "Task 1", "spec/task")],
+            checks: []), projectId);
+        await workflow.StartAsync(TestInput(grains, workflowId, projectId));
+        await workflow.AssignRunnerAsync(runnerId);
+
+        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+        Assert.NotNull(await runner.PollAsync());
+    }
+
+    public static async Task<(WorkDispatch Work, string RunnerId)> PollWorkAsync(IGrainFactory grains, string connectionString, string runnerId, string workflowId)
+    {
+        if (string.IsNullOrWhiteSpace(workflowId))
+            Assert.Fail("workflowId is required for PollWorkAsync");
+
+        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "test-host",
+            TestProjectId(workflowId),
+            MaxWorkflowSlots: RunnerCapacity.DefaultMaxWorkflowSlots));
+
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            var work = await runner.PollAsync();
+            if (work is not null)
+                return (work, runnerId);
+
+            await Task.Delay(20);
+        }
+
+        Assert.Fail($"Runner '{runnerId}' has no work for workflow '{workflowId}'");
+        return default;
+    }
+
+    public static async Task ReportAsync(IGrainFactory grains, string runnerId, string workflowRunId, string workId, WorkResult result)
+    {
+        var runner = grains.GetGrain<IRunnerGrain>(runnerId);
+        await runner.ReportResultAsync(workflowRunId, workId, result);
+    }
+
+    public static async Task ReportAsync(IGrainFactory grains, string runnerId, WorkDispatch work, WorkResult result)
+    {
+        await ReportAsync(grains, runnerId, work.WorkflowRunId, work.WorkId, result);
+    }
+
+    public static async Task ReportChecksAsync(IGrainFactory grains, string runnerId, WorkDispatch checksWork, params (string Name, string Status, string? Message)[] checkResults)
+    {
+        var output = JsonSerializer.Serialize(checkResults.Select(cr => new Dictionary<string, string?>
+        {
+            ["name"] = cr.Name,
+            ["status"] = cr.Status,
+            ["message"] = cr.Message,
+        }));
+        await ReportAsync(grains, runnerId, checksWork.WorkflowRunId, checksWork.WorkId, new WorkResult(
+            checkResults.All(cr => cr.Status == "pass") ? "pass" : "fail",
+            Output: output));
+    }
+
+    public static async Task ReportChecksPassAsync(IGrainFactory grains, string runnerId, WorkDispatch checksWork, params string[] checkNames)
+    {
+        await ReportChecksAsync(grains, runnerId, checksWork, checkNames.Select(n => (n, "pass", (string?)null)).ToArray());
+    }
+
+    public static async Task ReportChecksFailAsync(IGrainFactory grains, string runnerId, WorkDispatch checksWork, string failedCheckName, string message, params string[] passingCheckNames)
+    {
+        var results = passingCheckNames.Select(n => (n, "pass", (string?)null)).ToList();
+        results.Add((failedCheckName, "fail", message));
+        await ReportChecksAsync(grains, runnerId, checksWork, results.ToArray());
+    }
+
+    public static WorkflowDefinition SingleStage(
+        List<TaskDefinition>? tasks = null,
+        List<CheckDefinition>? checks = null,
+        bool requiresApproval = false,
+        string stage = "build")
+    {
+        return new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition(stage,
+                tasks ?? [new("task-1", "Task 1", "spec/task")],
+                checks ?? [new("check-1", "Check 1", "spec/check")],
+                RequiresApproval: requiresApproval)
+        ]);
+    }
+
+    public static Dictionary<string, JsonElement?> With(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement?>>(json)!;
+
+    public static async Task SeedWorkflowTemplateAsync(string connectionString, string workflowId, WorkflowDefinition definition, string? projectId = null)
+    {
+        projectId ??= TestProjectId(workflowId);
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        await using var db = new MohistDbContext(options);
+        var templateId = definition.Id;
+        var templateJson = JsonSerializer.Serialize(definition, WorkflowYamlSerializer.JsonOptions);
+
+        var existingTemplate = await db.ProjectWorkflowTemplates.FindAsync(projectId, templateId);
+        if (existingTemplate is null)
+        {
+            db.ProjectWorkflowTemplates.Add(new ProjectWorkflowTemplateRow
+            {
+                ProjectId = projectId,
+                TemplateId = templateId,
+                Template = templateJson,
+            });
+        }
+        else
+        {
+            existingTemplate.Template = templateJson;
+            existingTemplate.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        var projectProfile = await db.ProjectWorkflowProfiles.FindAsync(projectId);
+        if (projectProfile is null)
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = projectId,
+                DefaultTemplateId = templateId,
+            });
+        }
+        else
+        {
+            projectProfile.DefaultTemplateId = templateId;
+            projectProfile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task PatchProjectVariablesAsync(string connectionString, string projectId, VariableBundle patch)
+    {
+        var options = new DbContextOptionsBuilder<MohistDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var factory = new PooledDbContextFactory<MohistDbContext>(options);
+        var manager = new ProjectWorkflowProfileManager(factory, null!, new PromptTemplateEngine());
+        await manager.PatchVariablesAsync(projectId, patch);
+    }
+
+    public static WorkflowDefinition TwoStages()
+    {
+        return new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("plan",
+                [new("draft", "Draft", "spec/task")],
+                [new("plan-ok", "Plan OK", "spec/check")]),
+            new StageDefinition("build",
+                [new("compile", "Compile", "spec/task")],
+                [new("build-ok", "Build OK", "spec/check")])
+        ]);
+    }
+
+    public static WorkflowDefinition ApprovalStage()
+    {
+        return new WorkflowDefinition("spec/workflow",
+        [
+            new StageDefinition("plan",
+                [new("draft", "Draft", "spec/task")],
+                [new("plan-ok", "Plan OK", "spec/check")],
+                RequiresApproval: true),
+            new StageDefinition("build",
+                [new("compile", "Compile", "spec/task")],
+                [new("build-ok", "Build OK", "spec/check")])
+        ]);
+    }
+}
