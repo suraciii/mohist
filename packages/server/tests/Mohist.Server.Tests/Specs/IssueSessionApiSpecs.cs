@@ -24,6 +24,8 @@ public class IssueSessionApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionMetadataEndpoint_ExposesRequiredMetadataAndOmitsProjectedFields()
     {
@@ -127,6 +129,8 @@ public class IssueSessionApiSpecs
         Assert.False(root.TryGetProperty("transcript", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionEventsEndpoint_ReturnsRawEventsInAscendingSequenceAcrossBatches()
     {
@@ -223,6 +227,8 @@ public class IssueSessionApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueSessionApis_DoNotReturnServerProjectedTurns()
     {

@@ -43,6 +43,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         _services = fixture.Services;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListAsync_AfterProjectRepositoryConfigChange_ResolvesLatestMetadataForEachIssue()
     {
@@ -88,6 +90,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Null(defaultInfo.RepositoryProblem);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssuesApi_AfterProjectRepositoryConfigChange_ResolvesLatestMetadata()
     {
@@ -118,6 +122,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("develop-new", repository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithAmbiguousRepositoryName_ReturnsBadRequestWithRepositoryAmbiguousCode()
     {
@@ -141,6 +147,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Contains("main", envelope.Error ?? string.Empty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_WithAmbiguousRepositoryReference_SurfacesAmbiguousRepositoryProblem()
     {
@@ -173,6 +181,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Contains("MAIN", candidates);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkAsync_WithAmbiguousRepositoryReference_ThrowsConfigurationProblem()
     {
@@ -200,6 +210,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Null(status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RebaseEndpoint_AfterRepositoryPathAndBaseBranchChange_EmbedsNewRepositoryContextInTask()
     {
@@ -250,6 +262,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RebaseEndpoint_AfterRepositoryPathAndBaseBranchChange_UsesCurrentRepositoryConfiguration()
     {
@@ -292,6 +306,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.DoesNotContain("\"baseBranch\":\"main\"", withJson);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkspaceCommitsEndpoint_AfterRepositoryBaseBranchChange_UsesCurrentBaseBranch()
     {
@@ -331,6 +347,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", data.GetProperty("base").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkspaceFileContentEndpoint_AfterReferencedRepositoryRemoved_ReturnsRepositoryConfigurationProblem()
     {
@@ -359,6 +377,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Contains("secondary", payload.GetProperty("error").GetString() ?? string.Empty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkspaceWorktreeStatusEndpoint_AfterRepositoryPathAndBaseBranchChange_ReturnsResolvedWorktreeStatus()
     {
@@ -406,6 +426,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", data.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ProjectRepositoryDefaultChanged_PreservesExplicitReferenceInsteadOfAdoptingNewDefault()
     {
@@ -431,6 +453,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.True(fetched.Repository.IsDefault, "Default flag must follow project config, not the original issue repository details");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ReferencedRepositoryRemoved_ButProjectHasOtherRepositories_RepositoryProblemReportsCandidates()
     {
@@ -459,6 +483,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.DoesNotContain("secondary", candidates);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ProjectHasNoRepositories_AfterRepositoryRemoval_SurfacesProjectHasNoRepositoriesProblem()
     {
@@ -479,6 +505,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(IssueRepositoryProblemCode.ProjectHasNoRepositories, fetched.RepositoryProblem!.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_ProjectDeleted_AfterIssueCreation_SurfacesProjectMissingRepositoryProblem()
     {
@@ -499,6 +527,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(IssueRepositoryProblemCode.ProjectMissing, fetched.RepositoryProblem!.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkflowStart_AfterProjectRepositoryRemoteChange_PicksUpLatestRemoteInVariables()
     {
@@ -531,6 +561,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("git@secondary.example:repo-remote-new.git", repository.GetProperty("remote").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_WithoutRepositoryRef_FallsBackToProjectDefault()
     {
@@ -553,6 +585,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.True(info.Repository.IsDefault);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AfterRepositoryPathAndBaseBranchChange_ReturnsLatestPathAndBaseBranch()
     {
@@ -589,6 +623,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.False(repository.GetProperty("isDefault").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AndListIssues_ReturnConsistentRepositoryMetadata_AfterConfigChange()
     {
@@ -637,6 +673,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", singleRepository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueListApi_AfterReferencedRepositoryRemoved_ReportsRepositoryProblemForOrphanedIssue()
     {
@@ -669,6 +707,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.DoesNotContain("secondary", candidates);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task WorkflowStart_AfterMultipleSequentialProjectConfigChanges_UsesLatestConfig()
     {
@@ -717,6 +757,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-final", readRepository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AfterIssueGrainReactivation_StillResolvesFromCurrentProjectConfig()
     {
@@ -757,6 +799,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("release-new", repository.GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task RebaseEndpoint_AfterProjectConfigChange_ResponseCarriesLatestBaseBranchAndRepositoryContext()
     {
@@ -796,6 +840,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal("queued", data.GetProperty("status").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task ListIssues_AfterReferencedRepositoryRemoved_PreservesIssueOrderingAndIncludesProblemField()
     {
@@ -838,6 +884,8 @@ public class IssueRepositoryResolutionRegressionSpecs
         Assert.Equal(JsonValueKind.Null, surviving.GetProperty("repositoryProblem").ValueKind);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_RepositoryNameUnchanged_ButOtherFieldsChange_ResolvesUpdatedFields()
     {

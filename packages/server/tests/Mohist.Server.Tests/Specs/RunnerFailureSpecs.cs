@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
 {
     public RunnerFailureSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerUnregistersWithInFlightWork_AssignmentIsPreserved()
     {
@@ -32,6 +35,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Null(await otherRunner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunnerUnregistersWithAssignment_AssignmentIsPreserved()
     {
@@ -46,6 +51,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Equal(runnerId, await workflow.GetClaimedRunnerIdAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StoppedWorkflow_KeepsAssignment_AndRunnerDropsPendingWork()
     {
@@ -62,6 +69,8 @@ public class RunnerFailureSpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RegisteredButUnavailableLeaseOwner_RemainsRecoveryBlocked()
     {

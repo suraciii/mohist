@@ -20,6 +20,8 @@ public sealed class SkillsContentSpecs
         _defaultAssetRoot = PopulateDefaultAssets();
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task List_PrintsVisibleBuiltInSkillsSortedByName()
     {
@@ -34,6 +36,8 @@ public sealed class SkillsContentSpecs
         Assert.StartsWith("mohist-explore\t", lines[1], StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task List_Json_ReturnsStructuredSortedEntries()
     {
@@ -58,6 +62,8 @@ public sealed class SkillsContentSpecs
             });
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Get_PrintsPackagedFullGuidance_NotInstalledStub()
     {
@@ -77,6 +83,8 @@ public sealed class SkillsContentSpecs
         Assert.DoesNotContain("mo skills get mohist --full", content, StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Get_Json_ReturnsNameDescriptionAndContent()
     {
@@ -91,6 +99,8 @@ public sealed class SkillsContentSpecs
         Assert.Contains("name: mohist", item["content"]!.GetValue<string>());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Get_Full_AppendsSupplementaryFilesInDeterministicOrder()
     {
@@ -106,6 +116,8 @@ public sealed class SkillsContentSpecs
         Assert.DoesNotContain("mo skills get mohist --full", content, StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Get_All_EmitsAllVisibleBuiltInSkillsInNameOrder()
     {
@@ -121,6 +133,8 @@ public sealed class SkillsContentSpecs
         Assert.True(exploreIndex > mohistIndex);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Path_PrintsPackagedDirectoryPath_AndJsonIncludesNameAndPath()
     {
@@ -139,6 +153,8 @@ public sealed class SkillsContentSpecs
         Assert.Equal(textPath, item["path"]!.GetValue<string>());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Path_PrintsManagedCachePath_WhenManagedCacheIsSelected()
     {
@@ -174,6 +190,8 @@ public sealed class SkillsContentSpecs
         Assert.Equal(Path.Combine(managedRoot, "mohist"), item["path"]!.GetValue<string>());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Get_ReturnsFullPackagedGuidance_FromManagedCache_WhenSelected()
     {
@@ -206,6 +224,8 @@ public sealed class SkillsContentSpecs
         Assert.Contains("name: mohist-explore", exploreStdout.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Path_FallsBackToSiblingRoot_WhenManagedCacheIsAbsent()
     {
@@ -245,6 +265,8 @@ public sealed class SkillsContentSpecs
         Assert.Equal(Path.Combine(siblingRoot, "mohist"), textPath);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Get_FailsWithRepairGuidance_WhenManagedCacheIsIncompatible()
     {
@@ -279,6 +301,8 @@ public sealed class SkillsContentSpecs
         Assert.Contains("scripts/install-mo.sh", diagnostic, StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task Commands_UseMohistSkillsDirOverride_ForListGetAndPath()
     {
@@ -313,6 +337,8 @@ public sealed class SkillsContentSpecs
         Assert.Equal(Path.Combine(overrideRoot, "mohist"), pathStdout.ToString().Trim());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Theory]
     [InlineData("get")]
     [InlineData("path")]
@@ -328,6 +354,8 @@ public sealed class SkillsContentSpecs
         Assert.Contains("Unknown Mohist built-in skill 'unknown-skill'.", stderr.ToString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task ContentCommands_DoNotTouchDotMohistSkills()
     {

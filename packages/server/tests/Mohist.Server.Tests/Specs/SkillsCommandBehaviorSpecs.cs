@@ -1,10 +1,13 @@
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("SkillsCli")]
 public sealed class SkillsCommandBehaviorSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Skills)]
     [Fact]
     public async Task PublishedCommands_ResolveFromManagedCache_WhenManagedCacheIsPresent()
     {

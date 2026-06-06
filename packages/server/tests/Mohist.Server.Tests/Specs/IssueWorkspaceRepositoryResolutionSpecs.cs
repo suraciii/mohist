@@ -27,6 +27,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
     public Task DisposeAsync() => Task.CompletedTask;
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenProjectRepositoryConfigChanges_AfterIssueCreation_WhenUserOpensWorkspaceDiff_ThenPathAndBaseBranchComeFromCurrentProjectConfig()
     {
@@ -66,6 +68,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         Assert.NotEmpty(_fixture.Git.Diff.Files);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserRequestsWorkspaceEndpoints_ThenApiReturnsRepositoryConfigurationProblem()
     {
@@ -104,6 +108,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         Assert.Equal("repository_not_found", cleanupPayload.GetProperty("code").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenProjectRepositoryBaseBranchChanges_AfterIssueCreation_WhenUserRebasesWithoutBaseBranch_ThenRebaseUsesCurrentBaseBranch()
     {
@@ -128,6 +134,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         Assert.Equal("release", payload.GetProperty("data").GetProperty("baseBranch").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserRebases_ThenApiReturnsRepositoryConfigurationProblem()
     {
@@ -152,6 +160,8 @@ public class IssueWorkspaceRepositoryResolutionSpecs : IAsyncLifetime
         Assert.Contains("secondary", payload.GetProperty("error").GetString() ?? string.Empty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GivenReferencedRepositoryRemoved_WhenUserArchivesIssue_ThenApiReturnsRepositoryConfigurationProblem()
     {

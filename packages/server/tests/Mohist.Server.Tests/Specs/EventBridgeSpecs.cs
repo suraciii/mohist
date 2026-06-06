@@ -3,11 +3,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class EventBridgeSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventBusEvent_ForProjectScopedPayload_IsSentToProjectGroup()
     {
@@ -33,6 +36,8 @@ public class EventBridgeSpecs
         await bridge.StopAsync(CancellationToken.None);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task EventBusEvent_WithoutProjectScope_IsSentToGlobalGroup()
     {

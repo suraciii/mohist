@@ -10,6 +10,8 @@ namespace Mohist.Server.Tests.Specs;
 
 public class SystemUpdateServiceSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_DirtySourceRejectsRequestEvenWhenForceIsSent()
     {
@@ -26,6 +28,8 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("Source tree has uncommitted changes", result.Error);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_RunsOnlyFixedCommandsAndPersistsWaitingState()
     {
@@ -61,6 +65,8 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("Waiting for reconnect", latest.Stage);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_ReturnsFullPersistedStatusPayload()
     {
@@ -86,6 +92,8 @@ public class SystemUpdateServiceSpecs
         Assert.NotEqual(default, result.Status.UpdatedAt);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetLatestStatusAsync_WhenReady_RestartsRunnerBeforeReadyCompletion()
     {
@@ -127,6 +135,8 @@ public class SystemUpdateServiceSpecs
         Assert.True(await store.TryAcquireLockAsync("job-2"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_UnsupportedInstall_IsRejectedWithoutRunningCommands()
     {
@@ -144,6 +154,8 @@ public class SystemUpdateServiceSpecs
         Assert.Empty(commands.Requests);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_WhenNoUpdateAvailable_IsRejectedWithoutRunningCommands()
     {
@@ -161,6 +173,8 @@ public class SystemUpdateServiceSpecs
         Assert.Empty(commands.Requests);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_WhenUpdateAlreadyRunning_ReturnsConflict()
     {
@@ -177,6 +191,8 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("update_in_progress", result.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_WhenPersistedActiveJobExistsAfterRestart_ReturnsConflict()
     {
@@ -212,6 +228,8 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("job-1", result.Status!.JobId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task FileSystemStore_TryAcquireLockAsync_IsDurableAcrossStoreInstances()
     {
@@ -236,6 +254,8 @@ public class SystemUpdateServiceSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task FileSystemStore_TryAcquireLockAsync_RejectsPersistedActiveJobAfterRestart()
     {
@@ -273,6 +293,8 @@ public class SystemUpdateServiceSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_WhenInstallFactsChangeBeforeExecution_FailsWithoutCommands()
     {
@@ -296,6 +318,8 @@ public class SystemUpdateServiceSpecs
         Assert.Equal("Trusted install facts changed before update execution", latest.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task StartAsync_KeepsLockWhileWaitingForReconnect()
     {
@@ -315,6 +339,8 @@ public class SystemUpdateServiceSpecs
         Assert.False(await store.TryAcquireLockAsync("job-2"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetLatestStatusAsync_DoesNotSucceedUntilReadinessAndHashMatch()
     {
@@ -358,6 +384,8 @@ public class SystemUpdateServiceSpecs
         Assert.Contains(fourth.Logs, log => log.Stage == "Ready" && log.Message.Contains("asset /assets/app.js is ready"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetLatestStatusAsync_PersistsReadinessFailuresAcrossReconnectBoundary()
     {
@@ -392,6 +420,8 @@ public class SystemUpdateServiceSpecs
         Assert.Contains(second.Logs, log => log.Stage == "Waiting for reconnect" && log.Message.Contains("Bundled asset is not ready"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetLatestStatusAsync_BoundsPersistedLogEntries()
     {

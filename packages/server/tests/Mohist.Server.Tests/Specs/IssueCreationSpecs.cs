@@ -82,6 +82,8 @@ public class IssueCreationSpecs
         return (await events.ListWorkflowEventsAsync(workflowRunId)).ToList();
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_ReturnsInfoWithNumber()
     {
@@ -99,6 +101,8 @@ public class IssueCreationSpecs
         Assert.Equal("mohist/default", issue.WorkflowProfileId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_DefaultWorkflowProfile_ComesFromDefaultProfile()
     {
@@ -109,6 +113,8 @@ public class IssueCreationSpecs
         Assert.Equal("mohist/default", issue.WorkflowProfileId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_WithProjectContext_DispatchesProjectVariables()
     {
@@ -134,6 +140,8 @@ public class IssueCreationSpecs
         Assert.Contains("trunk", work.Variables);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task StartWorkflow_UsesProjectDefaultTemplate()
     {
@@ -172,6 +180,8 @@ public class IssueCreationSpecs
         Assert.Contains("Project template prompt", work.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_SequentialNumbers()
     {
@@ -184,6 +194,8 @@ public class IssueCreationSpecs
         Assert.Equal(2, second.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CreateIssue_WithLabelsAndPriority()
     {
@@ -195,6 +207,8 @@ public class IssueCreationSpecs
         Assert.Equal("p0", issue.Priority);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Querier_ReturnsIssueInfo()
     {
@@ -209,6 +223,8 @@ public class IssueCreationSpecs
         Assert.Equal("desc", info.Body);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Update_ChangesTitleAndBody()
     {
@@ -224,6 +240,8 @@ public class IssueCreationSpecs
         Assert.Equal("new body", info.Body);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Close_ActiveIssue_CancelsIssueWithoutRewritingLifecycleToWorkflowStage()
     {
@@ -240,6 +258,8 @@ public class IssueCreationSpecs
         Assert.Equal("cancelled", info.Health);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Cancel_ActiveIssue_ClearsBacklogLease_AndRunnerAssignment()
     {
@@ -279,6 +299,8 @@ public class IssueCreationSpecs
         Assert.Single(events, e => e.Type == "WorkflowRunStopped");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task Hydrate_Duplicate_Throws()
     {
@@ -290,6 +312,8 @@ public class IssueCreationSpecs
             grain.CreateAsync(project.Id, 999, "dup", null, null, null, null));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task IssueWorkflowStatus_ProjectsDefaultChangeDirOutsideWorkflowStatus()
     {
@@ -306,6 +330,8 @@ public class IssueCreationSpecs
         Assert.DoesNotContain("ChangeDir", typeof(Mohist.Server.Workflow.Services.WorkflowStatusView).GetProperties().Select(p => p.Name));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task DifferentProjects_IndependentNumbering()
     {
@@ -319,6 +345,8 @@ public class IssueCreationSpecs
         Assert.Equal(1, issue2.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task AddPrerequisite_StartEligibilityAndStartGateComeFromIssueGrain()
     {
@@ -338,6 +366,8 @@ public class IssueCreationSpecs
         await Assert.ThrowsAsync<InvalidOperationException>(() => grain.StartWorkAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task CompletedPrerequisite_AllowsDependentIssueToStart()
     {

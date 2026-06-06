@@ -1,0 +1,388 @@
+{
+  "project": "mohist",
+  "description": "Reorganize the test suite by Bounded Context, factor shared helpers and test data factories, add test categorization via [Trait], and enforce conventions with archtest rules. Five phases, each independently committable; green-bar invariant at every commit boundary.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Add Speed and Sut trait attributes to every spec test",
+      "spec": "specs/test-categorization/spec.md#requirement-every-spec-test-carries-speed-and-sut-traits",
+      "description": "Walk all 87 spec files in packages/server/tests/Mohist.Server.Tests/Specs/ and add [Trait(\"Speed\", ...)] and [Trait(\"Sut\", ...)] attributes to every [Fact] and [Theory]. Speed values: Unit (no fixture, no I/O), Grain (WorkflowGrainFixture/BacklogFixture), Integration (MohistIntegrationFixture.Client), Service (MohistDbFixture — only after Phase 2). Sut values mirror production Bounded Contexts: Workflow, Issue, Project, Epic, Runner, AgentSession, Skills, System, Api, Architecture, Foundation. Cross-cutting specs get multiple Sut traits. Run the verification script to confirm the trait vocabulary is complete and consistent.",
+      "acceptanceCriteria": [
+        "Every [Fact] and [Theory] in the 87 spec files carries exactly one [Trait(\"Speed\", ...)] attribute and at least one [Trait(\"Sut\", ...)] attribute.",
+        "Speed value matches the fixture usage: WorkflowGrainFixture/BacklogFixture users get Grain, MohistIntegrationFixture.Client users get Integration, all other fixture users get Unit.",
+        "Sut values are drawn from the documented vocabulary (Workflow, Issue, Project, Epic, Runner, AgentSession, Skills, System, Api, Architecture, Foundation) and cross-cutting specs get multiple traits.",
+        "No spec test method is left without traits after the mechanical sweep (audit by grepping for [Fact] and confirming every match has [Trait] within 5 lines above)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "87 spec files updated with per-test [Trait] attributes; Speed and Sut counts recorded in the commit message for verification.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "T-002 must be created first so contributors have the vocabulary reference; T-001 can land before T-002 is complete as long as the vocabulary is committed in the same PR."
+    },
+    {
+      "id": "T-002",
+      "title": "Document Speed and Sut trait vocabulary in Support/Traits.cs",
+      "spec": "specs/test-categorization/spec.md#requirement-trait-vocabulary-is-documented-in-code",
+      "description": "Create packages/server/tests/Mohist.Server.Tests/Support/Traits.cs with two public static classes (Speed, Sut) that expose const string fields for each allowed value. This is the single source of truth for the trait vocabulary; future contributors see the choices at the call site via IntelliSense. Also document the migration rule from fixture type to Speed value in an XML doc comment on the Speed class.",
+      "acceptanceCriteria": [
+        "Support/Traits.cs exists and declares Speed.{Unit, Grain, Integration, Service} and Sut.{Workflow, Issue, Project, Epic, Runner, AgentSession, Skills, System, Api, Architecture, Foundation} as public const string fields.",
+        "A future contributor can write [Trait(Speed.Unit, Sut.Workflow)] instead of magic strings without losing IntelliSense.",
+        "T-001's spec files can be refactored to use the constants in a follow-up commit; the trait values are byte-for-byte identical to the string literals used in T-001."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "DOC",
+      "output": "Support/Traits.cs with documented trait vocabulary.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Optional refinement; if T-001 is merged with raw string literals, T-002 can be deferred to a follow-up."
+    },
+    {
+      "id": "T-003",
+      "title": "Verify trait filtering works at the test runner level",
+      "spec": "specs/test-categorization/spec.md#requirement-trait-filtering-works-at-the-test-runner-level",
+      "description": "Run the documented verification commands (dotnet test --filter Speed=Unit, Speed=Grain, Speed=Integration, Sut=Workflow) and capture timing measurements in the commit message. The Unit subset must complete in under 30 seconds. The full suite must still pass.",
+      "acceptanceCriteria": [
+        "dotnet test --filter Speed=Unit runs only tests with [Trait(\"Speed\", \"Unit\")] and completes in under 30 seconds on a developer workstation.",
+        "dotnet test --filter Speed=Grain runs only the WorkflowGrainFixture users and completes in under 90 seconds.",
+        "dotnet test --filter Speed=Integration runs only the WebApplicationFactory users and completes in under 180 seconds.",
+        "dotnet test (no filter) runs all 680+ tests and all pass.",
+        "Test counts under each filter match the audit performed in T-001."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "VERIFY",
+      "output": "Verification log captured in the commit message; CI updated to use Speed filters in follow-up PRs (out of scope for this change).",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "This is a verification task, not a code change. The output is the timing numbers in the commit body."
+    },
+    {
+      "id": "T-004",
+      "title": "Extract ConfigureMohistServices extension from MohistServiceRegistration",
+      "spec": "specs/fixture-sharing/spec.md#requirement-mohistdbfixture-shares-the-production-service-graph",
+      "description": "Refactor packages/server/src/Mohist.Server/Infrastructure/Hosting/MohistServiceRegistration.cs so the body of AddMohistServerCore (after the AddDbContextFactory line) is moved into a public static extension method ConfigureMohistServices(IServiceCollection services, IConfiguration configuration). The AddMohistServerCore method becomes a thin wrapper that calls the extension. The extension is then also callable from test fixtures. This catches drift where production code adds a service that tests forget to register.",
+      "acceptanceCriteria": [
+        "ConfigureMohistServices extension method is public and lives in MohistServiceRegistration.",
+        "AddMohistServerCore behavior is byte-for-byte identical before and after the refactor: same services registered, same lifetimes, same order.",
+        "All 680+ existing tests still pass after the refactor.",
+        "The extension is reusable from test fixtures without copying the service graph."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "REFACTOR",
+      "output": "MohistServiceRegistration.cs with extracted ConfigureMohistServices extension; AddMohistServerCore delegates to it.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Zero behavior change. The refactor is purely structural; it unblocks Phase 2."
+    },
+    {
+      "id": "T-005",
+      "title": "Add MohistDbFixture for service-level specs",
+      "spec": "specs/fixture-sharing/spec.md#requirement-three-named-test-fixture-collections",
+      "description": "Create packages/server/tests/Mohist.Server.Tests/Support/MohistDbFixture.cs as a sealed class implementing IAsyncLifetime. It mirrors MohistIntegrationFixture's service graph (via the ConfigureMohistServices extension from T-004) but skips the WebApplicationFactory<Program> wrapper. It exposes IServiceProvider Services, IGrainFactory Grains, string ConnectionString, RecordingEventStore EventStore, InMemoryEventBus EventBus — but no HttpClient. The fixture initializes an in-memory SQLite database, the in-process Orleans test cluster, and the same DI graph as production.",
+      "acceptanceCriteria": [
+        "MohistDbFixture exists and is a sealed IAsyncLifetime class.",
+        "InitializeAsync sets up SQLite in-memory + Orleans InProcessTestCluster + the production service graph (via ConfigureMohistServices).",
+        "DisposeAsync cleans up the SQLite keeper and Orleans cluster.",
+        "The fixture does NOT start a WebApplicationFactory, so its startup cost is under 3 seconds."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "NEW",
+      "output": "Support/MohistDbFixture.cs with full service graph and no WebApplicationFactory.",
+      "dependsOn": ["T-004"],
+      "passes": false,
+      "notes": "Patterned after the existing WorkflowGrainFixture but uses the production service graph (not a silo-isolated one)."
+    },
+    {
+      "id": "T-006",
+      "title": "Consolidate xUnit collection definitions into MohistCollections.cs",
+      "spec": "specs/fixture-sharing/spec.md#requirement-mohistcollections-consolidates-collection-definitions",
+      "description": "Create packages/server/tests/Mohist.Server.Tests/Support/MohistCollections.cs with all [CollectionDefinition(...)] declarations. Move the inline definitions from MohistIntegrationFixture.cs, WorkflowGrainSpecs.cs, BacklogSpecs.cs (and any other inline declarations) into this single file. The file's namespace is Mohist.Server.Tests.Support.",
+      "acceptanceCriteria": [
+        "MohistCollections.cs declares CollectionDefinition for MohistIntegration, MohistDb (NEW), WorkflowGrain, Backlog, and any other collection in use.",
+        "No [CollectionDefinition(...)] attribute remains in any spec file or support file outside MohistCollections.cs.",
+        "All 680+ existing tests still pass after the consolidation (the collection names are unchanged, so membership is preserved)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "REFACTOR",
+      "output": "Support/MohistCollections.cs with the four collection definitions.",
+      "dependsOn": ["T-005"],
+      "passes": false,
+      "notes": "Pure mechanical refactor; no behavior change."
+    },
+    {
+      "id": "T-007",
+      "title": "Migrate D-class specs from MohistIntegration to MohistDb",
+      "spec": "specs/fixture-sharing/spec.md#requirement-three-named-test-fixture-collections",
+      "description": "Audit the 26 spec files in MohistIntegrationCollection and identify the subset that never call .Client (they use _fixture.Services.CreateScope() only). Migrate those specs to MohistDbCollection. Update their [Trait(\"Speed\", \"Integration\")] to [Trait(\"Speed\", \"Service\")] (and add [Trait(\"Speed\", \"Service\")] for specs that had no Speed trait in Phase 1 because they were assumed to be Integration). Capture the per-spec test count and timing for the migrated set.",
+      "acceptanceCriteria": [
+        "Every spec in MohistIntegrationCollection calls _fixture.Client at least once OR has been migrated to MohistDbCollection.",
+        "MohistDbCollection runs the migrated specs in under 15 seconds total (versus the pre-migration cost of starting WebApplicationFactory).",
+        "All 680+ existing tests still pass after the migration.",
+        "Captured timing measurements show the per-spec speed improvement."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "5–7 spec files migrated to MohistDbCollection with the [Trait(\"Speed\", \"Service\")] attribute.",
+      "dependsOn": ["T-005", "T-006"],
+      "passes": false,
+      "notes": "The exact list of migrated specs is determined by the audit; the design's best guess is IssueQuerierSpecs, IssueWorkflowProfileManagerSpecs, ProjectWorkflowProfileManagerSpecs, and 2–4 others that use _fixture.Services.CreateScope() exclusively."
+    },
+    {
+      "id": "T-008",
+      "title": "Extract WorkflowGrainSpecs helpers to static WorkflowGrainTestHelpers",
+      "spec": "specs/test-data-factories/spec.md#requirement-workflowgrainspecs-helpers-are-extracted-to-static-class",
+      "description": "Create packages/server/tests/Mohist.Server.Tests/Support/WorkflowGrainTestHelpers.cs as a public static class. Move the 100+ lines of protected helpers from WorkflowGrainSpecs (RegisterRunnerAsync, RegisterRunnerForProjectAsync, CreateWorkflowAsync, StartWorkflowAsync, StartWorkflowWithoutRunnerAsync, TestInput, TestProjectId, SeedLeaseAsync, SeedWorkflowTemplateAsync, SeedDefinitionAsync, DeactivateWorkflowAsync, GetQuerier, ClearBacklogAsync) into this static class. Each helper that previously read instance state (_workflowId, _runnerId) takes an explicit IGrainFactory or MohistDbContext parameter. The signatures and return types are preserved exactly; only the call shape changes.",
+      "acceptanceCriteria": [
+        "Every public protected helper from WorkflowGrainSpecs has a public static counterpart in WorkflowGrainTestHelpers.",
+        "Helper signatures take IGrainFactory grains and/or MohistDbContext db explicitly; no helper reads instance state.",
+        "All 21 spec files that previously called the instance helpers can call the static helpers with the same outcomes (asserted by the 21 specs passing in T-011).",
+        "The original 21 spec files still compile and pass against the new static helpers (this is T-011's verification, not T-008's)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "REFACTOR",
+      "output": "Support/WorkflowGrainTestHelpers.cs with the static helpers; WorkflowGrainSpecs.cs still has them for backward compatibility in this commit.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "T-008 is a pure extraction; the helpers are added to the new file but the abstract base still exposes them as protected wrappers. T-011 removes the base and the wrappers."
+    },
+    {
+      "id": "T-009",
+      "title": "Create Support/TestData/ factory classes",
+      "spec": "specs/test-data-factories/spec.md#requirement-a-supporttestdata-directory-centralizes-test-data-factories",
+      "description": "Create six new files in packages/server/tests/Mohist.Server.Tests/Support/TestData/: AgentSessionTestData.cs, WorkflowTestData.cs, WorkflowDefinitionTestData.cs, IssueTestData.cs, ProjectTestData.cs, RepositoryTestData.cs. Each is a public static class with Create* methods that return either the domain object, the EF row, or a tuple of both. The factories are deterministic (no random IDs) so test failure snapshots are reproducible. Also create Index.md documenting each factory and one example call.",
+      "acceptanceCriteria": [
+        "All six TestData files exist with public static Create* methods covering the common test scenarios for their domain entity.",
+        "Every Create* method is deterministic (no DateTime.UtcNow, no Guid.NewGuid, no Path.GetRandomFileName in the success path).",
+        "Index.md lists each factory and its primary methods with one example call per method.",
+        "Index.md explicitly tells contributors to add a new factory rather than inlining when no existing factory fits."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "NEW",
+      "output": "Support/TestData/ with six factory files plus Index.md.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "This task creates the factories but does not yet migrate any spec to use them. T-010 then migrates the spec files."
+    },
+    {
+      "id": "T-010",
+      "title": "Migrate 30+ spec files to use TestData factories",
+      "spec": "specs/test-data-factories/spec.md#requirement-a-supporttestdata-directory-centralizes-test-data-factories",
+      "description": "Walk all spec files and replace inline private static CreateXxx methods with calls to the new TestData factory methods. For example, AgentSessionDomainSpecs.CreateSession() becomes AgentSessionTestData.CreateRunning(); EventStoreSpecs.CreateAgentSession() becomes AgentSessionTestData.CreateRunning(); RuntimeEntrySpecs.CreateRunningSessionRow() becomes AgentSessionTestData.CreateRunning().Row. BuildRootCommand, BuildDefaultService, and similar CLI-side builders also get extracted or replaced.",
+      "acceptanceCriteria": [
+        "All 30+ inline private static Create* methods across spec files are replaced with TestData factory calls.",
+        "The spec files' test logic and assertions are byte-for-byte identical after the migration.",
+        "All 680+ existing tests still pass after the migration.",
+        "No new private static Create* method is added to any spec file in this commit (verified by grep)."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "30+ spec files using TestData factories; zero new inline private static Create* methods.",
+      "dependsOn": ["T-009"],
+      "passes": false,
+      "notes": "Pure mechanical refactor. If any spec needs a custom variant the contributor adds it to the factory file in the same commit."
+    },
+    {
+      "id": "T-011",
+      "title": "Remove WorkflowGrainSpecs abstract base class",
+      "spec": "specs/test-data-factories/spec.md#requirement-workflowgrainspecs-helpers-are-extracted-to-static-class",
+      "description": "Delete packages/server/tests/Mohist.Server.Tests/Specs/WorkflowGrainSpecs.cs (or convert it to a thin facade that re-exports the static helpers — see design open question 3). The 21 spec files that currently inherit from WorkflowGrainSpecs are updated: their class declaration drops the base, their constructor accepts WorkflowGrainFixture directly, and their test methods call WorkflowGrainTestHelpers.StartWorkflowAsync(Grains, Db, ...) with explicit ids instead of relying on the instance state. Verify with the full test suite that no grain spec breaks.",
+      "acceptanceCriteria": [
+        "WorkflowGrainSpecs.cs is deleted from the test project.",
+        "None of the 21 spec files inherit from WorkflowGrainSpecs anymore (verified by grep : WorkflowGrainSpecs).",
+        "None of the 21 spec files have _workflowId or _runnerId instance fields anymore.",
+        "All 148 grain tests (Speed=Grain) still pass after the refactor."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "REFACTOR",
+      "output": "WorkflowGrainSpecs.cs deleted; 21 spec files now self-contained with static helper calls.",
+      "dependsOn": ["T-008", "T-009", "T-010"],
+      "passes": false,
+      "notes": "If open question 3 (deletion vs thin facade) is resolved in favor of facade, the facade file is renamed to something like WorkflowGrainSpecHarness.cs and contains no logic — just static re-exports."
+    },
+    {
+      "id": "T-012",
+      "title": "Move Workflow specs into Specs/Workflow/ subdirectory",
+      "spec": "specs/bounded-context-layout/spec.md#requirement-spec-files-live-under-bounded-context-subdirectories",
+      "description": "Move all Workflow-related spec files from packages/server/tests/Mohist.Server.Tests/Specs/ to Specs/Workflow/{Grain,Querier,Api,Domain,Foundation,Profile}/ subdirectories. Update each file's namespace from Mohist.Server.Tests.Specs to Mohist.Server.Tests.Specs.Workflow.<Sub>. Update the consolidated class names per the design's mapping table (e.g., AdvanceSpecs + HappyPathSpecs + PausingWorkSpecs → WorkflowGrainLifecycleSpecs.cs). Use git mv so the file history is preserved. The 21 behavior-named files are also consolidated into SUT-named files as part of this move.",
+      "acceptanceCriteria": [
+        "All workflow-related spec files live under Specs/Workflow/.../.",
+        "WorkflowGrainSpecs.cs is already deleted (from T-011), so the consolidation can proceed without base-class references.",
+        "Namespaces match the directory: Specs/Workflow/Grain/WorkflowGrainLifecycleSpecs.cs has namespace Mohist.Server.Tests.Specs.Workflow.Grain.",
+        "The original test method names are preserved (e.g., Advance_ToNextStage_EmitsEvents).",
+        "All 148 grain tests still pass after the move."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Specs/Workflow/{Grain,Querier,Api,Domain,Profile}/ directory tree with ~20 consolidated spec files.",
+      "dependsOn": ["T-011"],
+      "passes": false,
+      "notes": "Consolidation of behavior-named files happens here, not in a separate task. The mapping table is in the design doc."
+    },
+    {
+      "id": "T-013",
+      "title": "Move Issue specs into Specs/Issue/ subdirectory",
+      "spec": "specs/bounded-context-layout/spec.md#requirement-spec-files-live-under-bounded-context-subdirectories",
+      "description": "Move all Issue-related spec files to Specs/Issue/{Grain,Querier,Api,Domain,Profile}/ subdirectories. Update namespaces. Consolidate where natural (e.g., IssueRepositoryResolutionRegressionSpecs is over 1000 lines and may split into 3 files by scenario). Use git mv for file history preservation.",
+      "acceptanceCriteria": [
+        "All issue-related spec files live under Specs/Issue/.../.",
+        "Namespaces match: Specs/Issue/Querier/IssueRepositoryResolverSpecs.cs has namespace Mohist.Server.Tests.Specs.Issue.Querier.",
+        "The IssueRepositoryResolutionRegressionSpecs file is split into at most 3 SUT-named files if it exceeds 24 KB.",
+        "All issue-related tests still pass after the move."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Specs/Issue/.../ directory tree with ~25 spec files.",
+      "dependsOn": ["T-012"],
+      "passes": false,
+      "notes": "Can be done in parallel with T-012 if the contributor splits work by SUT."
+    },
+    {
+      "id": "T-014",
+      "title": "Move Project, Epic, Runner, AgentSession specs into subdirectories",
+      "spec": "specs/bounded-context-layout/spec.md#requirement-spec-files-live-under-bounded-context-subdirectories",
+      "description": "Move Project specs to Specs/Project/{Grain,Querier,Api}/, Epic specs to Specs/Epic/{Domain,Api}/, Runner specs to Specs/Runner/{Grain,Api}/, and AgentSession specs to Specs/AgentSession/{Domain,Api}/. Update namespaces. Consolidate the 4 Runner behavior-named files (RunnerBindingSpecs, RunnerFailureSpecs, RunnerRegistrySpecs, RunnerStatusProjectionSpecs) into a single RunnerGrainSpecs.cs. Update AgentSessionSpecs split per the design's split table.",
+      "acceptanceCriteria": [
+        "All four Bounded Contexts have their own subdirectory under Specs/.",
+        "Namespaces match the directory structure.",
+        "AgentSessionSpecs.cs is split into 3 files: AgentSessionSetupSpecs, AgentSessionTelemetrySpecs, AgentSessionEndOfRunSpecs.",
+        "All tests in the moved files still pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Specs/Project/, Specs/Epic/, Specs/Runner/, Specs/AgentSession/ subdirectories with their spec files.",
+      "dependsOn": ["T-012", "T-013"],
+      "passes": false,
+      "notes": "This is the largest move (4 Bounded Contexts) and can be split into 4 sub-tasks if desired."
+    },
+    {
+      "id": "T-015",
+      "title": "Move Skills, System, Api, Foundation specs into subdirectories",
+      "spec": "specs/bounded-context-layout/spec.md#requirement-spec-files-live-under-bounded-context-subdirectories",
+      "description": "Move CLI-side skills specs to Specs/Skills/. Move SystemInfo / Config / Runtime / EventBus / EventBridge / DatabaseInitialization specs to Specs/System/. Move cross-cutting API specs (ApiContractSpecs, TemplateRoutesSpecs, WorkspaceSpecs, WorkflowEventApiSpecs if not already moved) to Specs/Api/. Move pure-unit cross-cutting specs (PromptFrontmatterParserSpecs, VariableBundleSpecs, etc.) to Specs/Foundation/.",
+      "acceptanceCriteria": [
+        "Specs/Skills/ contains the 9 skill-related spec files (or however many after consolidation).",
+        "Specs/System/ contains Config, Runtime, SystemInfo, Update, EventBus, EventBridge, DatabaseInitialization specs.",
+        "Specs/Api/ contains HTTP API contract specs that don't belong to a single SUT.",
+        "Specs/Foundation/ contains pure-unit specs for cross-cutting types.",
+        "All tests still pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Specs/Skills/, Specs/System/, Specs/Api/, Specs/Foundation/ subdirectories.",
+      "dependsOn": ["T-014"],
+      "passes": false,
+      "notes": "The Foundation directory is a catch-all for cross-cutting unit tests; consider whether WorkflowStateSpecs, WorkflowEventSpecs, and WorkflowEventSerializationSpecs should also live there (or stay in Specs/Workflow/)."
+    },
+    {
+      "id": "T-016",
+      "title": "Split the 3 largest remaining spec files",
+      "spec": "specs/bounded-context-layout/spec.md#requirement-spec-file-names-follow-sut-prefix-convention",
+      "description": "By Phase 4 completion, the archtest rule SpecFiles_MustStayBellowSizeBudget will fail on any spec file over 24 KB. Pre-emptively split the largest remaining files: UpdateSpecs.cs (654 lines), IssueQuerierSpecs.cs (638 lines, if not already split), SystemUpdateServiceSpecs.cs (613 lines), MohistDefaultWorkflowProfileSpecs.cs (575 lines). Each split is along natural boundaries (e.g., lifecycle phase, behavior scenario). The split also creates new SUT-named files.",
+      "acceptanceCriteria": [
+        "UpdateSpecs.cs is split into 2 SUT-named files, each under 24 KB.",
+        "IssueQuerierSpecs.cs is split into 2 SUT-named files (ListSpecs and EnrichmentSpecs), each under 24 KB.",
+        "SystemUpdateServiceSpecs.cs is split into 2 SUT-named files (BuildSpecs and ReconnectSpecs), each under 24 KB.",
+        "MohistDefaultWorkflowProfileSpecs.cs is split into 2 SUT-named files (ProjectionSpecs and PromptMergeSpecs), each under 24 KB.",
+        "All tests in the split files still pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "REFACTOR",
+      "output": "8 new SUT-named spec files replacing 4 large files.",
+      "dependsOn": ["T-015"],
+      "passes": false,
+      "notes": "This is a pre-emptive split to satisfy the Phase 5 archtest rule. If the rule is relaxed (open question 4), this task can be deferred."
+    },
+    {
+      "id": "T-017",
+      "title": "Add SpecFiles_MustHaveSpecOrCollectionSuffix archtest rule",
+      "spec": "specs/archtest-enforcement/spec.md#requirement-spec-files-must-end-with-specs-or-collection",
+      "description": "Add a new [Fact] rule to packages/server/tests/Mohist.Server.Tests/Architecture/ArchitectureRules.cs that walks the Specs/ directory and fails if any *.cs file does not end with Specs or Collection (with Index.md as a documented exception). The rule pattern is the same as the existing FeatureDirectories_ShouldOnlyContainDomainGrainsAndServices rule. Verify the rule passes against the current state after Phase 4 is complete, and intentionally create a bad file to confirm the rule rejects it (then delete the bad file).",
+      "acceptanceCriteria": [
+        "The new archtest rule exists in ArchitectureRules.cs and is a [Fact] method.",
+        "The rule passes against the post-Phase-4 spec directory layout.",
+        "An intentionally bad file (e.g., Specs/Workflow/BadName.cs) is rejected with a clear error message.",
+        "All other 680+ tests still pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "ArchitectureRules.cs with the new rule added; existing rules unchanged.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Phase 5 can land this rule first; it does not depend on the file moves being complete because it scans the current location too."
+    },
+    {
+      "id": "T-018",
+      "title": "Add SpecFiles_MustStayBellowSizeBudget archtest rule",
+      "spec": "specs/archtest-enforcement/spec.md#requirement-spec-files-must-stay-under-the-size-budget",
+      "description": "Add a new [Fact] rule to ArchitectureRules.cs that fails if any *.cs file under Specs/ exceeds 24 KB (≈600 lines × 40 chars/line). The threshold is a single const at the top of the rule for easy adjustment. The rule produces a sorted list of offending files in the failure message.",
+      "acceptanceCriteria": [
+        "The new archtest rule exists and uses a const int SpecFileSizeBudgetBytes = 24_000; threshold.",
+        "The rule passes against the post-Phase-4 spec directory layout (which has been pre-split in T-016).",
+        "An intentionally bloated file (e.g., by appending comments) is rejected with a clear error listing the offending file.",
+        "All other 680+ tests still pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "ArchitectureRules.cs with the new rule added.",
+      "dependsOn": ["T-016"],
+      "passes": false,
+      "notes": "T-016 must complete first so the new rule does not immediately fail on the existing large files."
+    },
+    {
+      "id": "T-019",
+      "title": "Add SpecClasses_MustBePublic archtest rule",
+      "spec": "specs/archtest-enforcement/spec.md#requirement-spec-class-declarations-must-be-public",
+      "description": "Add a new [Fact] rule to ArchitectureRules.cs that parses each *.cs file under Specs/ and asserts that any *Specs class declaration uses the public access modifier. Internal/private spec classes are rejected. Use a simple regex (e.g., grep for the class declaration) rather than full Roslyn parsing to keep the test fast.",
+      "acceptanceCriteria": [
+        "The new archtest rule exists and parses the class declarations in each spec file.",
+        "The rule passes against the post-Phase-4 spec directory layout (where all *Specs classes are public).",
+        "An intentionally internal class (e.g., internal class TestSpecs) is rejected with a clear error.",
+        "All other 680+ tests still pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "ArchitectureRules.cs with the new rule added.",
+      "dependsOn": ["T-015"],
+      "passes": false,
+      "notes": "Lightweight regex-based check; if contributors want richer validation (e.g., sealed-by-default) it can be a follow-up."
+    },
+    {
+      "id": "T-020",
+      "title": "Add SpecNamespaces_MustBeUnderSpecs archtest rule",
+      "spec": "archtest-enforcement/spec.md#requirement-spec-namespaces-must-live-under-specs/",
+      "description": "Add a new [Fact] rule to ArchitectureRules.cs that reads each *.cs file under Specs/ and asserts that the namespace declaration starts with Mohist.Server.Tests.Specs. Files that have no namespace (e.g., the existing SkillAssetManifestSpecs.cs which has no top-level type) are accepted as-is. The rule's failure message lists the offending file and its actual namespace.",
+      "acceptanceCriteria": [
+        "The new archtest rule exists and walks each spec file's namespace declaration.",
+        "The rule passes against the post-Phase-4 spec directory layout.",
+        "An intentionally wrong namespace (e.g., namespace Mohist.Server.Tests;) is rejected with a clear error.",
+        "All other 680+ tests still pass."
+      ],
+      "priority": 5,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "ArchitectureRules.cs with the new rule added.",
+      "dependsOn": ["T-015"],
+      "passes": false,
+      "notes": "T-015 (move to subdirs) must complete first so the namespaces are updated."
+    }
+  ]
+}

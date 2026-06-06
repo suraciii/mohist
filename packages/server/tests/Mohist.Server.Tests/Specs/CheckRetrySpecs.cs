@@ -7,6 +7,7 @@ using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -33,6 +34,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
                         new TaskDefinition("ai-review", "AI review", "spec/review"))))])
         ]);
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_RepairTaskRunsBeforeRecheck()
     {
@@ -60,6 +63,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_RepairTaskRunsVerifyTaskBeforeRecheck()
     {
@@ -90,6 +95,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Null(await runner.PollAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task ReviewPassedRepairTask_DoesNotReceiveMarkerCheckResult()
     {
@@ -107,6 +114,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("failedCheckResult", with.Keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NonReviewRepairTask_ReceivesFailedCheckResult()
     {
@@ -124,6 +133,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Contains("failedCheckResult", with.Keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFailsRepeatedly_RepairTaskRunsEachTime()
     {
@@ -154,6 +165,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r6, checks3, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFailsBeyondRetryLimit_WorkflowFailsWithoutInjectingAnotherRepairTask()
     {
@@ -190,6 +203,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.DoesNotContain(build.Tasks, t => t.Id.StartsWith("fix-check:3."));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFailsBeyondRetryLimit_UserRetries_InjectsRepairTaskIgnoringRetryLimit()
     {
@@ -239,6 +254,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(3, run.GetRepairCount("check-1"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void CheckRepairCount_IsStageCheckStateAndSurvivesSnapshotRestore()
     {
@@ -264,6 +281,8 @@ public class CheckRetrySpecs : WorkflowGrainSpecs
         Assert.Equal(1, restored.GetRepairCount("check-1"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task CheckFails_NoRetryConfigured_WorkflowFails()
     {

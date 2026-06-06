@@ -2,11 +2,14 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Domain;
 using System.Text.Json;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class IssueDomainSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void StartWorkflow_MarksIssueInProgress()
     {
@@ -24,6 +27,8 @@ public class IssueDomainSpecs
         Assert.Equal(new DateTime(2026, 6, 5, 1, 1, 0, DateTimeKind.Utc), issue.UpdatedAt);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Complete_IgnoresUnrelatedWorkflowRun()
     {
@@ -36,6 +41,8 @@ public class IssueDomainSpecs
         Assert.Equal(IssueStatus.InProgress, issue.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void State_RoundTripsDomainState()
     {
@@ -69,6 +76,8 @@ public class IssueDomainSpecs
         Assert.Equal(issue.Status, reloaded.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public void Close_KeepsWorkflowReference()
     {

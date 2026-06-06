@@ -17,6 +17,8 @@ public sealed class UpdateInstallSyncSpecs
         _environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = null;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCliAsync_SynchronizesPublishedSkillData_IntoManagedCacheWithManifestAndBuiltInSkills()
     {
@@ -43,6 +45,8 @@ public sealed class UpdateInstallSyncSpecs
         Assert.Contains("mohist-explore", readManifest.Data.Skills);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCliAsync_ReplacesStaleManagedCacheContents_WithCurrentPublishOutput()
     {
@@ -86,6 +90,8 @@ public sealed class UpdateInstallSyncSpecs
         Assert.NotEqual("0.0.0-stale", manifest.Data.Version);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCliAsync_DoesNotModifyExternalAgentSkillDirectories()
     {
@@ -127,6 +133,8 @@ public sealed class UpdateInstallSyncSpecs
             _files.ReadAllText(hermesConfig));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCliAsync_DoesNotModifyRuntimeMohistSkillsDirectory()
     {
@@ -154,6 +162,8 @@ public sealed class UpdateInstallSyncSpecs
         Assert.Equal("internal-skill-body", _files.ReadAllText(nestedSkillPath));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task UpdateCliAsync_EnablesSkillAssetServiceResolution_WithoutMohistSkillsDirOverride()
     {

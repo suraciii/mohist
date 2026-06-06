@@ -88,6 +88,8 @@ public class RunnerStatusApiSpecs
         await db.SaveChangesAsync();
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_NoProjectScopedRunners_ReturnsOnlyGlobalRunners()
     {
@@ -105,6 +107,8 @@ public class RunnerStatusApiSpecs
         Assert.All(runners.EnumerateArray(), r => Assert.Equal("global", r.GetProperty("scope").GetProperty("type").GetString()));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_GlobalRunner_ReturnsRunner()
     {
@@ -141,6 +145,8 @@ public class RunnerStatusApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_ProjectRunner_ReturnsRunner()
     {
@@ -176,6 +182,8 @@ public class RunnerStatusApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_NoRunnersForProject_ReturnsEmptyList()
     {
@@ -206,6 +214,8 @@ public class RunnerStatusApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_OnLegacyRoute_ReturnsNotFound()
     {
@@ -214,6 +224,8 @@ public class RunnerStatusApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_BusyRunner_IncludesActiveWork()
     {
@@ -253,6 +265,8 @@ public class RunnerStatusApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_DisconnectedBusyWorkspaceRunner_IsBusyAndStillShowsConnectionDiagnostic()
     {
@@ -294,6 +308,8 @@ public class RunnerStatusApiSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Runner)]
     [Fact]
     public async Task GetRunners_RunnerFields_UseRunnerTerminology()
     {

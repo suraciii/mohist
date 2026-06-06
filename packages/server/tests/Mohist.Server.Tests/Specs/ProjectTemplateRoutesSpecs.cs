@@ -19,6 +19,8 @@ public class ProjectTemplateRoutesSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ListSystemTemplates_ReturnsAllTwelveBuiltInTemplatesSortedByKey()
     {
@@ -41,6 +43,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal(sorted, keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ListEffectiveProjectTemplates_MergesSystemAndOverrideWithSourceLabels()
     {
@@ -75,6 +79,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.DoesNotContain("---\n", rows["build"].Body);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetSingleEffectiveTemplate_PrefersProjectOverride()
     {
@@ -97,6 +103,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("# Overridden build body", entry.GetProperty("data").GetProperty("body").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetSingleEffectiveTemplate_FallsBackToSystemWhenNoOverrideExists()
     {
@@ -109,6 +117,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("system", entry.GetProperty("data").GetProperty("source").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetOverride_ReturnsNotFoundWhenNoRowExists()
     {
@@ -124,6 +134,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("not_found", payload.GetProperty("code").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task GetOverride_ReturnsRowWhenOverrideExists()
     {
@@ -149,6 +161,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal("# Body B", payload.GetProperty("data").GetProperty("body").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PutOverride_CreatesRow()
     {
@@ -173,6 +187,8 @@ public class ProjectTemplateRoutesSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PutOverride_UpdatesExistingRow()
     {
@@ -207,6 +223,8 @@ public class ProjectTemplateRoutesSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PutOverride_WithEmptyBody_ReturnsBadRequest()
     {
@@ -233,6 +251,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal(HttpStatusCode.NotFound, followUp.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task PutOverride_WithMissingBody_ReturnsBadRequest()
     {
@@ -251,6 +271,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeleteOverride_RemovesRow()
     {
@@ -276,6 +298,8 @@ public class ProjectTemplateRoutesSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task DeleteOverride_IsIdempotentWhenRowDoesNotExist()
     {
@@ -288,6 +312,8 @@ public class ProjectTemplateRoutesSpecs
 
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task Preview_RendersOverrideBodyWithProvidedVariables()
     {
@@ -328,6 +354,8 @@ public class ProjectTemplateRoutesSpecs
         Assert.Empty(missing);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Project)]
     [Fact]
     public async Task ExtractVariables_ReturnsSortedUniqueVariableList()
     {

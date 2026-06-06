@@ -25,6 +25,8 @@ public class ConfigServiceSpecs : IAsyncLifetime
         return Task.CompletedTask;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetConfig_Defaults_ReturnsDefaults()
     {
@@ -33,6 +35,8 @@ public class ConfigServiceSpecs : IAsyncLifetime
         Assert.Equal("localhost", cfg["serverHost"]);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task SetAndGet_ReturnsUpdatedValue()
     {
@@ -41,6 +45,8 @@ public class ConfigServiceSpecs : IAsyncLifetime
         Assert.Equal(8080, cfg["serverPort"]);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Validate_Number_Invalid()
     {
@@ -49,6 +55,8 @@ public class ConfigServiceSpecs : IAsyncLifetime
         Assert.NotNull(error);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Validate_Number_Valid()
     {
@@ -57,6 +65,8 @@ public class ConfigServiceSpecs : IAsyncLifetime
         Assert.Null(error);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetAll_MasksSecrets()
     {

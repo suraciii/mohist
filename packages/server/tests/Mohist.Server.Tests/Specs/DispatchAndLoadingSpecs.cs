@@ -4,6 +4,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -11,6 +12,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
 {
     public DispatchAndLoadingSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task NoRunnerAtStart_RegisterLater_AssignAndRun()
     {
@@ -28,6 +31,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(checkRunnerId, check, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PausedBeforeRunner_StillPaused()
     {
@@ -43,6 +48,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageWithDynamicTasks_LoadTaskCompletes_DynamicTasksRunBeforeChecks()
     {
@@ -86,6 +93,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task DynamicTaskRegistration_DoesNotAbandonInFlightLoadTaskOnConcurrentPoll()
     {
@@ -117,6 +126,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.StartsWith("dynamic-1.", dynamicTask.WorkId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageWithDynamicTasks_TaskWithContract_DispatchPreservesWithContract()
     {
@@ -149,6 +160,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.Contains("src/FeatureFlags.cs", dynamicTask.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageWithDynamicAgentVariables_LoadedDynamicTasksInheritStageAgent()
     {
@@ -183,6 +196,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("kimi-for-coding/k2p6", dynamicTask.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageWithAgentVariables_TaskWithoutAgentInheritsStageAgentAtDispatch()
     {
@@ -212,6 +227,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("kimi-for-coding/k2p6", dynamicTask.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageAgentVariableUpdate_DispatchedTaskInheritsLatestModelOverRenderedAgent()
     {
@@ -245,6 +262,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("old-coding/legacy", task.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StageWithStaticAndDynamicTasks_LoadTaskThenDynamicThenStaticBeforeChecks()
     {
@@ -277,6 +296,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(r4, check, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RunningWorkflow_CanAcceptRuntimeTaskBeforeChecks()
     {
@@ -300,6 +321,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(checkRunnerId, check, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task RuntimeTaskWithInvalidateChecks_ReopensStageChecks()
     {
@@ -331,6 +354,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         await ReportChecksPassAsync(rerunCheckRunnerId, rerunCheck, "check-1");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task FailedTask_FailsWorkflow()
     {
@@ -354,6 +379,8 @@ public class DispatchAndLoadingSpecs : WorkflowGrainSpecs
         Assert.Equal("Failed", status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task LoadTaskFails_WorkflowFails()
     {

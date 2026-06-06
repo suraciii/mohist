@@ -3,6 +3,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -10,6 +11,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
 {
     public WorkflowVariableSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public async Task WorkflowDispatchKeepsTemplates()
     {
@@ -27,6 +30,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Contains("${{ artifacts.changeDir }}", work.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public async Task WorkflowDispatchPreservesOpaqueContextAndAddsRuntimeContext()
     {
@@ -65,6 +70,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.False(document.RootElement.GetProperty("vars").TryGetProperty("planHealthCommand", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public async Task GenericWorkflowCorrelationDoesNotCreateIssueDispatchReference()
     {
@@ -89,6 +96,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Equal("release", work.Stage);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public async Task MohistWorkflowUsesExpressionInputs()
     {
@@ -126,6 +135,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.DoesNotContain("${{ artifacts.changeDir }}", check.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public async Task MohistWorkflowUsesCoreActionsForGenericChecks()
     {
@@ -147,6 +158,8 @@ public class WorkflowVariableSpecs : WorkflowGrainSpecs
         Assert.Contains("\"run\":\"git diff --check\"", check.With);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public async Task MohistWorkflowDispatchesAgentWorkWithoutExecutingAgent()
     {

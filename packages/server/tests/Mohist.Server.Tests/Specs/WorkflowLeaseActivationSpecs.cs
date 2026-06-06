@@ -2,6 +2,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -9,6 +10,8 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
 {
     public WorkflowLeaseActivationSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task PersistedLease_SurvivesActivation_AndRestoresOwnerFields()
     {
@@ -28,6 +31,8 @@ public class WorkflowLeaseActivationSpecs : WorkflowGrainSpecs
         Assert.Equal("already-assigned", differentRunner.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task IncompletePersistedLease_AfterActivation_RemainsNonDispatchable()
     {

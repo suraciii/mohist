@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -12,6 +13,8 @@ public class PromptTemplateEngineSpecs
         return document.RootElement.Clone();
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_ResolvedStringSubstitutesValueAndLeavesMissingListEmpty()
     {
@@ -25,6 +28,8 @@ public class PromptTemplateEngineSpecs
         Assert.Empty(missing);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_NestedPathResolvesThroughObjects()
     {
@@ -38,6 +43,8 @@ public class PromptTemplateEngineSpecs
         Assert.Empty(missing);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_MissingVariableIsLeftInPlaceAndRecorded()
     {
@@ -53,6 +60,8 @@ public class PromptTemplateEngineSpecs
         Assert.Equal(0, depth);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_ChainedStringExpansionConvergesWithinFivePasses()
     {
@@ -70,6 +79,8 @@ public class PromptTemplateEngineSpecs
         Assert.Equal(3, depth);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_NonConvergingCyclicInputIsBoundedByMaxPasses()
     {
@@ -84,6 +95,8 @@ public class PromptTemplateEngineSpecs
         Assert.Contains("${{", rendered);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_SelfReferentialTokenDoesNotLoopAndIsReportedAsMissing()
     {
@@ -98,6 +111,8 @@ public class PromptTemplateEngineSpecs
         Assert.Equal(0, depth);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_ObjectArrayNumberAndBooleanAreJsonStringified()
     {
@@ -121,6 +136,8 @@ public class PromptTemplateEngineSpecs
         Assert.Empty(boolMissing);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Render_NullValueResolvesToLiteralStringNull()
     {
@@ -134,6 +151,8 @@ public class PromptTemplateEngineSpecs
         Assert.Empty(missing);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void ExtractVariables_ReturnsSortedDeduplicatedPathsWithoutRendering()
     {
@@ -144,6 +163,8 @@ public class PromptTemplateEngineSpecs
         Assert.Equal(new[] { "issue.number", "openspecChangeDir" }, variables.ToArray());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void ExtractVariables_DoesNotRequireVariablesToBeResolvable()
     {

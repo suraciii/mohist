@@ -9,6 +9,8 @@ namespace Mohist.Server.Tests.Specs;
 
 public class SystemInfoServiceSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_ReturnsAllSections()
     {
@@ -42,6 +44,8 @@ public class SystemInfoServiceSpecs
         Assert.NotEqual(default, info.Running.StartedAt);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_LocalSourceCleanNewerSource_ReturnsUpdateAvailable()
     {
@@ -71,6 +75,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("A newer source version is available", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_LocalSourceCleanNewerSourceDisabled_ReturnsUnsupported()
     {
@@ -104,6 +110,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("System update is disabled by configuration", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_DirtySource_ReturnsDirtySource()
     {
@@ -133,6 +141,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("Source tree has uncommitted changes", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_UpToDate_ReturnsUpToDate()
     {
@@ -161,6 +171,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("Running server is up to date with source", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_UnsupportedInstall_ReturnsUnsupported()
     {
@@ -183,6 +195,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("Web update is unsupported for the detected deployment", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_MissingRunningGitHash_ReturnsUnknown()
     {
@@ -211,6 +225,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("Cannot determine update status: running git hash is unavailable", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_MissingSourceHead_ReturnsUnknown()
     {
@@ -239,6 +255,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("Cannot determine update status: source HEAD is unavailable", info.Update.Reason);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_LocalSource_ReturnsServiceStatuses()
     {
@@ -269,6 +287,8 @@ public class SystemInfoServiceSpecs
         Assert.Equal("inactive", info.Services.Runner);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_ReturnsPaths()
     {
@@ -290,6 +310,8 @@ public class SystemInfoServiceSpecs
         Assert.NotNull(info.Paths.Opencode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task GetSystemInfo_ExplicitlyEnabled_ReturnsUpdateAvailable()
     {

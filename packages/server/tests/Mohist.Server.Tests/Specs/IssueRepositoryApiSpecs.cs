@@ -26,6 +26,8 @@ public class IssueRepositoryApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithExplicitRepositoryName_ResponseIncludesResolvedRepositoryFromProjectConfig()
     {
@@ -46,6 +48,8 @@ public class IssueRepositoryApiSpecs
         Assert.Null(envelope.Data.RepositoryProblem);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithoutRepositoryName_ResponseIncludesResolvedDefaultRepositoryFromProjectConfig()
     {
@@ -61,6 +65,8 @@ public class IssueRepositoryApiSpecs
         Assert.Null(envelope.Data.RepositoryProblem);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task PostIssue_WithUnknownRepositoryName_ReturnsBadRequestWithoutCreatingIssue()
     {
@@ -79,6 +85,8 @@ public class IssueRepositoryApiSpecs
         Assert.Contains("ghost", envelope.Error ?? string.Empty);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AfterProjectChangesDefaultRepository_ReturnsNewlyResolvedRepositoryContext()
     {
@@ -104,6 +112,8 @@ public class IssueRepositoryApiSpecs
         Assert.True(fetchedNewIssue.Repository.IsDefault);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AfterRepositoryMetadataChange_ReturnsResolvedPathAndBaseBranchFromCurrentProjectConfig()
     {
@@ -130,6 +140,8 @@ public class IssueRepositoryApiSpecs
         Assert.Null(fetched.RepositoryProblem);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
     public async Task GetIssue_AfterReferencedRepositoryRemoved_ReturnsRepositoryProblemInsteadOfFallbackRepository()
     {

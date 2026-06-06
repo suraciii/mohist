@@ -12,6 +12,8 @@ public sealed class SkillsInstallSpecs
     private readonly FakeFileSystem _files = new();
     private readonly MockEnvironmentVariableProvider _environment = new();
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_DefaultTarget_WritesBuiltInDiscoveryStubsUnderAgentsSkills()
     {
@@ -29,6 +31,8 @@ public sealed class SkillsInstallSpecs
         AssertStub(exploreDir, "mohist-explore");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_PathTarget_WritesOnlyToSelectedRepository()
     {
@@ -46,6 +50,8 @@ public sealed class SkillsInstallSpecs
         Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist", "SKILL.md")));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_ClaudeTarget_WritesClaudeSkillsOnly()
     {
@@ -63,6 +69,8 @@ public sealed class SkillsInstallSpecs
         Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore", "SKILL.md")));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_OverwritesExistingBuiltInStubContent()
     {
@@ -81,6 +89,8 @@ public sealed class SkillsInstallSpecs
         Assert.DoesNotContain("old content", _files.ReadAllText(Path.Combine(skillDir, "SKILL.md")));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_DoesNotTouchUnrelatedUserAuthoredSkillDirectories()
     {
@@ -100,6 +110,8 @@ public sealed class SkillsInstallSpecs
         Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-po")));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_HermesTarget_CopiesFullPackagedSkillData()
     {
@@ -136,6 +148,8 @@ public sealed class SkillsInstallSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_HermesTarget_UsesConfiguredHermesHomeAndReportsUpdatedOnRepeatInstall()
     {
@@ -170,6 +184,8 @@ public sealed class SkillsInstallSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Theory]
     [InlineData("--hermes", "--claude")]
     [InlineData("--hermes", "--path", "repo")]
@@ -202,6 +218,8 @@ public sealed class SkillsInstallSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_HermesTarget_DoesNotTouchHermesConfigFiles()
     {
@@ -227,6 +245,8 @@ public sealed class SkillsInstallSpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task Install_DoesNotTouchDotMohistSkills()
     {

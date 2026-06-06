@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Workflow.Domain;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -8,6 +9,8 @@ public class VariableBundleSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = VariableBundle.JsonOptions;
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Empty_HasNullVarsAndStages()
     {
@@ -15,6 +18,8 @@ public class VariableBundleSpecs
         Assert.Null(VariableBundle.Empty.Stages);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Set_ReturnsInputBundle()
     {
@@ -23,6 +28,8 @@ public class VariableBundleSpecs
         Assert.Same(original, VariableBundle.Set(original));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Patch_NullBase_ReturnsOverlay()
     {
@@ -34,6 +41,8 @@ public class VariableBundleSpecs
         Assert.Same(overlay, result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Patch_NullOverlay_ReturnsBase()
     {
@@ -45,6 +54,8 @@ public class VariableBundleSpecs
         Assert.Same(@base, result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Patch_VarsDeepMerge_OverlayOverridesBase()
     {
@@ -76,6 +87,8 @@ public class VariableBundleSpecs
         Assert.Equal(300, agent.GetProperty("timeout").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Patch_StagesMerge_PerStageDeepMerge()
     {
@@ -114,6 +127,8 @@ public class VariableBundleSpecs
         Assert.True(buildDoc.RootElement.GetProperty("flag").GetBoolean());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Patch_StagesCaseInsensitive()
     {
@@ -139,6 +154,8 @@ public class VariableBundleSpecs
         Assert.True(result.Stages.ContainsKey("PLAN"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void MergeAll_MultipleLayers_LaterOverridesEarlier()
     {
@@ -172,6 +189,8 @@ public class VariableBundleSpecs
         Assert.Equal(3, root.GetProperty("obj").GetProperty("y").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void DeepMerge_NonObjectBase_ReplacedByOverlay()
     {
@@ -185,6 +204,8 @@ public class VariableBundleSpecs
         Assert.Equal(1, result.Value.GetProperty("a").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void DeepMerge_NonObjectOverlay_ReplacesBase()
     {
@@ -198,6 +219,8 @@ public class VariableBundleSpecs
         Assert.Equal("string", result.Value.GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void FromJson_EmptyString_ReturnsEmpty()
     {
@@ -206,6 +229,8 @@ public class VariableBundleSpecs
         Assert.Same(VariableBundle.Empty, result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void FromJson_Null_ReturnsEmpty()
     {
@@ -214,6 +239,8 @@ public class VariableBundleSpecs
         Assert.Same(VariableBundle.Empty, result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void FromJson_MalformedJson_ReturnsEmpty()
     {
@@ -222,6 +249,8 @@ public class VariableBundleSpecs
         Assert.Same(VariableBundle.Empty, result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void RoundTrip_Json_Serialization_Works()
     {
@@ -244,6 +273,8 @@ public class VariableBundleSpecs
         Assert.Single(deserialized.Stages);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Patch_AllNull_ReturnsEmpty_NoThrow()
     {
@@ -252,6 +283,8 @@ public class VariableBundleSpecs
         Assert.Same(VariableBundle.Empty, result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void StageVariables_Copy_CreatesIndependentClone()
     {
@@ -264,6 +297,8 @@ public class VariableBundleSpecs
         Assert.Equal(original.Vars?.GetRawText(), copy.Vars?.GetRawText());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void StageVariables_Empty_WhenNoVars()
     {

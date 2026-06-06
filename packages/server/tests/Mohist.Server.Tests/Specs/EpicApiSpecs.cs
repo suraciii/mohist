@@ -15,6 +15,8 @@ public class EpicApiSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CreateEpic_AssignsNextProjectScopedNumber()
     {
@@ -29,6 +31,8 @@ public class EpicApiSpecs
         Assert.Equal(3, third.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task CreateEpic_NumberSequenceIsolatedByProject()
     {
@@ -44,6 +48,8 @@ public class EpicApiSpecs
         Assert.Equal(2, secondA.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicList_ExposesAssignedNumber()
     {
@@ -56,6 +62,8 @@ public class EpicApiSpecs
         Assert.Equal(1, created.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetail_PreservesIdLookupAndExposesNumber()
     {
@@ -68,6 +76,8 @@ public class EpicApiSpecs
         Assert.Equal(1, byId.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task IssuePrimaryEpic_ProjectsAssignedNumber()
     {
@@ -83,6 +93,8 @@ public class EpicApiSpecs
         Assert.Equal(epic.Number, issueDetail.PrimaryEpic!.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicLookup_ByNumberRoute_ReturnsDetailShape()
     {
@@ -102,6 +114,8 @@ public class EpicApiSpecs
         Assert.Equal(byId.Status, byNumber.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetailRoute_ResolvesNumericReference()
     {
@@ -114,6 +128,8 @@ public class EpicApiSpecs
         Assert.Equal(created.Number, byNumeric.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicDetailRoute_ContinuesToResolveIdReference()
     {
@@ -126,6 +142,8 @@ public class EpicApiSpecs
         Assert.Equal(created.Number, byId.Number);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicLookup_ByNumberRoute_UnknownNumberReturnsNotFoundEnvelope()
     {
@@ -144,6 +162,8 @@ public class EpicApiSpecs
         Assert.Equal("not_found", byDetailEnvelope.Code);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_UpdatesTitle()
     {
@@ -156,6 +176,8 @@ public class EpicApiSpecs
         Assert.Equal("Renamed", patched.Title);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_UpdatesDescription()
     {
@@ -168,6 +190,8 @@ public class EpicApiSpecs
         Assert.Equal("after", patched.Description);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_UpdatesPriority()
     {
@@ -180,6 +204,8 @@ public class EpicApiSpecs
         Assert.Equal("p1", patched.Priority);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_AdvancesUpdatedAt()
     {
@@ -195,6 +221,8 @@ public class EpicApiSpecs
         Assert.True(after > before, $"Expected UpdatedAt to advance. Before={before:O}, After={after:O}");
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_PreservesStatus()
     {
@@ -207,6 +235,8 @@ public class EpicApiSpecs
         Assert.Equal("active", patched.Status);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_PreservesLinkedIssueMembership()
     {
@@ -226,6 +256,8 @@ public class EpicApiSpecs
         Assert.Equal(issue.Id, detail.LinkedIssues[0].Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_UnknownEpicReturnsNotFound()
     {
@@ -236,6 +268,8 @@ public class EpicApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Epic)]
     [Fact]
     public async Task EpicPatch_PartialUpdate_LeavesUnspecifiedFieldsUnchanged()
     {

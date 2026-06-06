@@ -9,6 +9,8 @@ namespace Mohist.Server.Tests.Specs;
 [Collection("SkillsCli")]
 public sealed class SkillsCliRuntimeSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task SkillsCommands_DoesNotThrowDependencyInjectionFailures_WhenListingHelp()
     {
@@ -20,6 +22,8 @@ public sealed class SkillsCliRuntimeSpecs
         Assert.DoesNotContain("Unable to resolve service for type 'System.IO.TextWriter'", stderr);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task CliProgram_Main_CanExecuteReadOnlySkillsCommand_ThroughRealCompositionPath()
     {
@@ -48,6 +52,8 @@ public sealed class SkillsCliRuntimeSpecs
         Assert.Equal(string.Empty, stderr);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public void CliProgram_PublishableConfiguration_IncludesPackagedSkillData()
     {

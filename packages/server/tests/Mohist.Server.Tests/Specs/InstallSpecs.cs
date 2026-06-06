@@ -6,6 +6,8 @@ namespace Mohist.Server.Tests.Specs;
 
 public class InstallSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_CreatesSystemdUnitWithCorrectConfiguration()
     {
@@ -36,6 +38,8 @@ public class InstallSpecs
         Assert.Contains("SuccessExitStatus=0 143", unitContent);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallRunner_CreatesSystemdUnitWithCorrectConfiguration()
     {
@@ -67,6 +71,8 @@ public class InstallSpecs
         Assert.Contains("Environment=\"RUNNER_ROOT=/runner\"", unitContent);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_WithCustomRepoRoot_ResolvesRepoPath()
     {
@@ -92,6 +98,8 @@ public class InstallSpecs
         Assert.Contains("WorkingDirectory=/custom/path", unitContent);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task InstallServer_WithoutCustomUrl_UsesDefaultListenUrl()
     {

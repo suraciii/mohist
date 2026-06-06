@@ -8,11 +8,14 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class WorkflowRunStoreSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WhenPersistedETagChanged_RejectsStaleWrite()
     {
@@ -49,6 +52,8 @@ public class WorkflowRunStoreSpecs
             () => store.SaveAsync(run));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SaveAsync_WithEvents_CommitsWorkflowRunAndEventsTogether()
     {

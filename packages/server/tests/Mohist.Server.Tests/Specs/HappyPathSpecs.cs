@@ -1,5 +1,6 @@
 using Mohist.Server.Runner.Grains;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -7,6 +8,8 @@ public class HappyPathSpecs : WorkflowGrainSpecs
 {
     public HappyPathSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task SingleStageTaskAndCheck_BothPass_WorkflowCompletes()
     {
@@ -29,6 +32,8 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task TwoStages_AllTasksAndChecksPass_WorkflowCompletes()
     {
@@ -56,6 +61,8 @@ public class HappyPathSpecs : WorkflowGrainSpecs
         Assert.True(await runner.IsAvailableAsync());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Grain)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task MultiTaskStage_AllTasksPass_CheckRunsAndCompletes()
     {

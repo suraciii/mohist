@@ -25,6 +25,8 @@ public class RuntimeEntrySpecs
         _fixture = fixture;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task WebRoot_WhenConfigured_ServesIndexAndSpaFallback()
     {
@@ -37,6 +39,8 @@ public class RuntimeEntrySpecs
         Assert.Contains("Mohist Test Web", workflowSession);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenRunnerRegisteredWithoutActiveWork_ReportsIdleRuntime()
     {
@@ -65,6 +69,8 @@ public class RuntimeEntrySpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenGlobalRunnerRegistered_ReportsRunnerAvailableForProject()
     {
@@ -88,6 +94,8 @@ public class RuntimeEntrySpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenRunnerRegisteredButOffline_DoesNotReportAvailableCapacity()
     {
@@ -104,6 +112,8 @@ public class RuntimeEntrySpecs
         Assert.DoesNotContain(status.Runners, r => r.Max == 4 && r.Id == runnerId);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenRunnerUnregisteredThenHeartbeats_ReportsRunnerAvailable()
     {
@@ -133,6 +143,8 @@ public class RuntimeEntrySpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task RunnerHeartbeat_WithNoBody_RefreshesRegisteredRunner()
     {
@@ -157,6 +169,8 @@ public class RuntimeEntrySpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenNoRunnerConnected_ReportsUnavailableRuntime()
     {
@@ -170,6 +184,8 @@ public class RuntimeEntrySpecs
         Assert.Equal("No runner is connected. Start the Mohist runner process.", status.RunnerMessage);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenLeaseOwnerDiffers_DoesNotCountStaleSessionAsActive()
     {
@@ -210,6 +226,8 @@ public class RuntimeEntrySpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_WhenLeaseOwnerDiffers_DoesNotReportStaleRunnerAsActiveOwner()
     {
@@ -250,6 +268,8 @@ public class RuntimeEntrySpecs
         }
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentStatus_OnLegacyRoute_ReturnsNotFound()
     {
@@ -258,6 +278,8 @@ public class RuntimeEntrySpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ApiFallback_WhenUnknownApiPath_ReturnsNotFound()
     {

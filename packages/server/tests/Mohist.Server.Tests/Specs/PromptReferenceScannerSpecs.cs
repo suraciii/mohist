@@ -3,6 +3,7 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Definition;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -10,6 +11,8 @@ public class PromptReferenceScannerSpecs
 {
     private static WorkflowDefinition Parse(string yaml) => MohistWorkflow.ParseYaml(yaml);
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Scan_TaskWithPromptReference_ReturnsTopLevelKey()
     {
@@ -30,6 +33,8 @@ public class PromptReferenceScannerSpecs
         Assert.Equal(new[] { "proposal" }, keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Scan_CheckWithPromptReference_ReturnsTopLevelKey()
     {
@@ -50,6 +55,8 @@ public class PromptReferenceScannerSpecs
         Assert.Equal(new[] { "review" }, keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Scan_RepairAndVerifyTasks_ReturnTheirPromptKeys()
     {
@@ -85,6 +92,8 @@ public class PromptReferenceScannerSpecs
         Assert.Contains("re-verify", keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Scan_DuplicateReferences_ReturnUniqueSet()
     {
@@ -111,6 +120,8 @@ public class PromptReferenceScannerSpecs
         Assert.Contains("proposal", keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Scan_KeyWithHyphensAndUnderscores_MatchesAllowedIdentifierCharacters()
     {
@@ -137,6 +148,8 @@ public class PromptReferenceScannerSpecs
         Assert.Contains("build-task", keys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Foundation)]
     [Fact]
     public void Scan_NestedObjectValue_StillMatchesPromptReference()
     {

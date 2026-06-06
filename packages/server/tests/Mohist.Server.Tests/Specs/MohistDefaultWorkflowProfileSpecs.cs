@@ -65,6 +65,8 @@ public sealed class FakeDbContextFactory : IDbContextFactory<MohistDbContext>
 
 public class MohistDefaultWorkflowProfileSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void IssueWithNonAsciiTitle_BuildsIssueNumberBasedOpenSpecChangeVariables()
     {
@@ -85,6 +87,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.False(document.RootElement.TryGetProperty("artifacts", out _));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void IssueWithNonAsciiTitle_ProjectsIssueNumberBasedChangeDir()
     {
@@ -97,6 +101,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("openspec/changes/issue-154", state.ChangeDir);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_LoadsFromYaml()
     {
@@ -124,6 +130,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("mo/issue-${{ issue.number }}", JsonSerializer.Serialize(merge.With));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageTaskTemplateUsesAcpAgentWithPromptLoaderSpec()
     {
@@ -139,6 +147,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("\"base\":\"${{ prompts.build }}\"", withJson);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_BuildStagePromptLoaderConfigExposesFileItemsAndBase()
     {
@@ -155,6 +165,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("${{ prompts.build }}", promptWith.GetProperty("base").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_BuildStageRetainsExistingLoaderKeys()
     {
@@ -167,6 +179,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("${{ openspecChangeDir }}/tasks.json", pathElement.GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_PlanCheckIntegrateStagesAreUnchanged()
     {
@@ -181,6 +195,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.True(reparsed.Stages[2].RequiresApproval);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void AgentConfig_MergesGlobalConfigIntoAgentVariable()
     {
@@ -206,6 +222,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(30000, agent.GetProperty("probeTimeoutMs").GetInt32());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void StageVariables_MergesStageOverrides()
     {
@@ -229,6 +247,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.True(stageVariables.ContainsKey("check"));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void BuildVariables_IncludesPromptsFromLoader()
     {
@@ -251,6 +271,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(7, prompts.EnumerateObject().Count());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void BuildVariables_MergesProjectOverridesAndAddsProjectUniqueKeys()
     {
@@ -279,6 +301,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("# Deploy checklist body", prompts.GetProperty("deploy-checklist").GetString());
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task GetMergedPromptsAsync_KeepsSystemBodyWhenNoOverrideExists()
     {
@@ -292,6 +316,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal(7, merged.Count);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultPrompts_DefineWorkflowArtifactBoundaryForReviewAndAutoFix()
     {
@@ -315,6 +341,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("${{ openspecChangeDir }}/", prompts["auto-fix"], StringComparison.Ordinal);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_ParsesRepairTasksAndWithObjects()
     {
@@ -354,6 +382,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("\"run\":\"git diff --check\"", JsonSerializer.Serialize(check.OnFailure?.Repair?.VerifyTask?.With));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlSerializer_RoundTripsDomainDefinition()
     {
@@ -376,6 +406,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.DoesNotContain("\"expect\"", JsonSerializer.Serialize(reviewRepair?.Task.With));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowYamlParser_TaskWithNeutralArtifactMarker_ParsesSuccessfully()
     {
@@ -401,6 +433,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Equal("doc-task", task.Id);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Theory]
     [InlineData("PASS")]
     [InlineData("FAIL")]
@@ -432,6 +466,8 @@ public class MohistDefaultWorkflowProfileSpecs
         Assert.Contains("bad-task", ex.Message);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void DefaultWorkflowDefinition_HasNoTaskVerdictMarkers()
     {
@@ -482,6 +518,8 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
         _client = fixture.Client;
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWork_WithUnknownPromptReference_Returns400MissingPromptsWithMissingKeysDetails()
     {
@@ -513,6 +551,8 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
         Assert.Contains("does-not-exist", missingKeys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWork_WithMultipleUnknownPromptReferences_ReturnsAllMissingKeysInDetails()
     {
@@ -545,6 +585,8 @@ public class MohistDefaultWorkflowProfileStartWorkSpecs
         Assert.Contains("ghost-two", missingKeys);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public async Task StartWork_WithKnownSystemPromptKey_DoesNotEmitMissingPromptsError()
     {

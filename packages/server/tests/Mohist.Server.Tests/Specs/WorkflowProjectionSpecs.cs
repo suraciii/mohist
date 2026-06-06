@@ -2,11 +2,14 @@ using System.Text.Json;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Xunit;
+using Mohist.Server.Tests.Support;
 
 namespace Mohist.Server.Tests.Specs;
 
 public class WorkflowProjectionSpecs
 {
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusMapper_ProjectsTaskRequiredFiles()
     {
@@ -22,6 +25,8 @@ public class WorkflowProjectionSpecs
         Assert.True(task.RequiredFiles[0].CanFetchContent);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusMapper_ProjectsTaskClassification()
     {
@@ -35,6 +40,8 @@ public class WorkflowProjectionSpecs
         Assert.Equal(TaskClassification.Orchestration, orchTask.Classification);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusMapper_ProjectsMultipleRequiredFiles()
     {
@@ -86,6 +93,8 @@ public class WorkflowProjectionSpecs
         Assert.Equal("tasks.json", task.RequiredFiles[2].Path);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusMapper_WithoutRequiredFiles_ReturnsNullRequiredFiles()
     {
@@ -128,6 +137,8 @@ public class WorkflowProjectionSpecs
         Assert.Equal(TaskClassification.Orchestration, task.Classification);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusMapper_MapTasks_PreservesRequiredFiles()
     {
@@ -164,6 +175,8 @@ public class WorkflowProjectionSpecs
         Assert.Equal("proposal.md", task.RequiredFiles[0].Path);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowStatusMapper_MapTasks_FromDefinitionWithoutRuntimeTasks()
     {
@@ -181,6 +194,8 @@ public class WorkflowProjectionSpecs
         Assert.Empty(result);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void TaskRunExtensions_ExtractRequiredFiles_PreservesMarkers()
     {
@@ -198,6 +213,8 @@ public class WorkflowProjectionSpecs
         Assert.Contains("<promise>REVIEW</promise>", markers);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ComputeStageProgress_ExcludesOrchestrationTasks()
     {
@@ -212,6 +229,8 @@ public class WorkflowProjectionSpecs
         Assert.Equal(0, progress.Failed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ComputeStageProgress_DoesNotCountFailedAsCompleted()
     {
@@ -246,6 +265,8 @@ public class WorkflowProjectionSpecs
         Assert.Equal(1, progress.Failed);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ComputeStageProgress_ReturnsNullForTerminalStatus()
     {
@@ -263,6 +284,8 @@ public class WorkflowProjectionSpecs
         Assert.Null(progress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ComputeStageProgress_ReturnsNullWhenNoUserFacingTasks()
     {
@@ -293,6 +316,8 @@ public class WorkflowProjectionSpecs
         Assert.Null(progress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void ComputeStageProgress_ReturnsNullForApprovalOnlyWaitingStage()
     {
@@ -326,6 +351,8 @@ public class WorkflowProjectionSpecs
         Assert.Null(progress);
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void WorkflowTaskRequiredFile_NoFileContentStored()
     {
@@ -337,6 +364,8 @@ public class WorkflowProjectionSpecs
         Assert.DoesNotContain("proposal", json.ToLowerInvariant().Replace("proposal.md", ""));
     }
 
+    [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
+    [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
     public void FakeFileContent_ReturnsNullForMissingFile()
     {
