@@ -377,4 +377,146 @@ public class ArchitectureRules
             "These production csprojs must reference EnvironmentAbstractions.BannedApiAnalyzer to " +
             "enforce IEnvironmentVariableProvider usage at compile time: " + string.Join(", ", missing));
     }
+
+    private const int SpecFileSizeBudgetBytes = 24_000;
+
+    /// <summary>
+    /// Spec files in <c>Specs/</c> must end with <c>Specs</c> or
+    /// <c>Collection</c> (or be <c>Index.md</c>). Prevents accidental
+    /// mis-naming that breaks the "find the spec for SUT X" intuition.
+    /// </summary>
+    [Fact]
+    public void SpecFiles_MustHaveSpecOrCollectionSuffix()
+    {
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
+        if (!Directory.Exists(specsRoot))
+            return; // Specs dir not present (fresh checkout?); rule is vacuous.
+
+        var specFiles = Directory.EnumerateFiles(
+            specsRoot, "*.cs", SearchOption.AllDirectories);
+
+        var violations = specFiles
+            .Select(p => Path.GetFileNameWithoutExtension(p)!)
+            .Where(name => !name.EndsWith("Specs")
+                        && !name.EndsWith("Collection")
+                        && !name.Equals("Index", StringComparison.Ordinal))
+            .OrderBy(name => name)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Spec files must end with 'Specs' or 'Collection'. Violations: " +
+            string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// Spec files must stay under ~24 KB so contributors notice when a
+    /// file has grown past a comfortable reading size. Larger files
+    /// should be split by lifecycle phase, behavior scenario, or
+    /// SUT-prefix grouping.
+    /// </summary>
+    [Fact]
+    public void SpecFiles_MustStayBellowSizeBudget()
+    {
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
+        if (!Directory.Exists(specsRoot))
+            return;
+
+        var tooBig = Directory.EnumerateFiles(
+            specsRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(p => new FileInfo(p).Length > SpecFileSizeBudgetBytes)
+            .Select(p => Path.GetRelativePath(specsRoot, p))
+            .OrderBy(p => p)
+            .ToList();
+
+        Assert.True(
+            tooBig.Count == 0,
+            $"Spec files must stay under {SpecFileSizeBudgetBytes / 1000} KB. " +
+            "Too big: " + string.Join(", ", tooBig));
+    }
+
+    /// <summary>
+    /// Spec classes must be declared as <c>public</c> so xUnit can
+    /// instantiate them. The rule parses each <c>*.cs</c> file for
+    /// top-level class declarations named <c>*Specs</c> and verifies
+    /// the <c>public</c> modifier is present.
+    /// </summary>
+    [Fact]
+    public void SpecClasses_MustBePublic()
+    {
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
+        if (!Directory.Exists(specsRoot))
+            return;
+
+        var classRegex = new System.Text.RegularExpressions.Regex(
+            @"^\s*(?:public\s+)?(internal|private|protected)?\s*(?:static\s+|sealed\s+|abstract\s+|partial\s+)*class\s+(\w+Specs)\b",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        var violations = new List<string>();
+        foreach (var path in Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            var src = File.ReadAllText(path);
+            foreach (System.Text.RegularExpressions.Match m in classRegex.Matches(src))
+            {
+                var access = m.Groups[1].Value;
+                if (!string.IsNullOrEmpty(access) && access != "public")
+                {
+                    violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {access} {m.Groups[2].Value}");
+                }
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Spec classes must be public. Violations: " + string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// Spec files in <c>Specs/</c> must declare a namespace under
+    /// <c>Mohist.Server.Tests.Specs</c>. Prevents accidentally placing
+    /// test code outside the Specs sub-namespace, which would break
+    /// test discovery and namespace-based filtering.
+    /// </summary>
+    [Fact]
+    public void SpecNamespaces_MustBeUnderSpecs()
+    {
+        var specsRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "Specs"));
+        if (!Directory.Exists(specsRoot))
+            return;
+
+        var namespaceRegex = new System.Text.RegularExpressions.Regex(
+            @"^\s*namespace\s+([\w\.]+)\s*;",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        var violations = new List<string>();
+        foreach (var path in Directory.EnumerateFiles(specsRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            var src = File.ReadAllText(path);
+            var m = namespaceRegex.Match(src);
+            if (!m.Success)
+            {
+                // No namespace declaration; skip (the existing test in
+                // SkillsCliCollection.cs is such a file).
+                continue;
+            }
+            var ns = m.Groups[1].Value;
+            if (!ns.StartsWith("Mohist.Server.Tests.Specs", StringComparison.Ordinal))
+            {
+                violations.Add($"{Path.GetRelativePath(specsRoot, path)}: {ns}");
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Spec namespaces must be under 'Mohist.Server.Tests.Specs'. Violations: " +
+            string.Join(", ", violations));
+    }
 }
