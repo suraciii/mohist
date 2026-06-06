@@ -1,4 +1,5 @@
 using Mohist.Cli;
+using Mohist.Server.Tests.Support;
 using System.Net;
 using System.Text;
 using Xunit;
@@ -71,7 +72,12 @@ public class ProjectCliSpecs
     public async Task IssueList_UsesPersistedActiveProjectWhenProjectIdIsOmitted()
     {
         var files = new FakeFileSystem();
-        await files.WriteAllTextAsync("/state/cli-state.json", """{ "activeProjectId": "proj_123" }""");
+        var statePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".mohist",
+            "cli-state.json");
+        files.AddDirectory(Path.GetDirectoryName(statePath)!);
+        await files.WriteAllTextAsync(statePath, """{ "activeProjectId": "proj_123" }""");
         var http = new RecordingHttpHandler();
         http.EnqueueJson(HttpStatusCode.OK, """{ "success": true, "data": [] }""");
 
@@ -87,34 +93,9 @@ public class ProjectCliSpecs
         Assert.Equal("/api/projects/proj_123/issues", http.Requests.Single().RequestUri!.PathAndQuery);
     }
 
-    private sealed class FakeFileSystem : IFileSystem
+    private sealed class FakeFileSystem : Mohist.Server.Tests.Support.FakeFileSystem
     {
-        private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
-
-        public string SingleFileContents => _files.Values.Single();
-
-        public Task WriteAllTextAsync(string path, string contents)
-        {
-            _files[Path.GetFullPath(path)] = contents;
-            return Task.CompletedTask;
-        }
-
-        public Task<string> ReadAllTextAsync(string path)
-        {
-            return Task.FromResult(SingleFileContents);
-        }
-
-        public bool Exists(string path) => _files.Count > 0;
-
-        public bool DirectoryExists(string path) => false;
-
-        public void CreateDirectory(string path)
-        {
-        }
-
-        public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) => [];
-
-        public void Delete(string path) => _files.Clear();
+        public string SingleFileContents => Files.Values.Single();
     }
 
     private sealed class NoopCommandExecutor : ICommandExecutor

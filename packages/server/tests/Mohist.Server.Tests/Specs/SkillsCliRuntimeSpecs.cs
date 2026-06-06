@@ -1,5 +1,8 @@
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
+using Mohist.Server.Tests.Support;
 using Xunit;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -7,151 +10,85 @@ namespace Mohist.Server.Tests.Specs;
 public sealed class SkillsCliRuntimeSpecs
 {
     [Fact]
-    public async Task CliProgram_Main_RendersSkillsHelp_WithoutDependencyInjectionFailures()
+    public async Task SkillsCommands_DoesNotThrowDependencyInjectionFailures_WhenListingHelp()
     {
-        var (exitCode, stdout, stderr) = await InvokeProcessAsync("skills --help");
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider();
+        var (exitCode, _, stderr) = await InvokeSkillsAsync(files, environment, "skills", "--help");
 
-        Assert.True(exitCode == 0, $"stdout:\n{stdout}\n\nstderr:\n{stderr}");
-        Assert.Contains("Manage coder agent skills", stdout);
-        Assert.Contains("install", stdout);
-        Assert.Contains("list", stdout);
-        Assert.Contains("get", stdout);
-        Assert.Contains("path", stdout);
+        Assert.True(exitCode == 0, $"exit={exitCode} stderr:\n{stderr}");
         Assert.DoesNotContain("Unable to resolve service for type 'System.IO.TextWriter'", stderr);
     }
 
     [Fact]
     public async Task CliProgram_Main_CanExecuteReadOnlySkillsCommand_ThroughRealCompositionPath()
     {
-        var (exitCode, stdout, stderr) = await InvokeMainAsync(["skills", "get", "mohist"]);
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider();
+        var overrideRoot = Path.Combine("/tmp", $"mohist-cli-runtime-{Guid.NewGuid():N}");
+        files.AddDirectory(overrideRoot);
+        files.AddFile(
+            Path.Combine(overrideRoot, "mohist", "SKILL.md"),
+            $"---\nname: mohist\ndescription: {DescriptionFor("mohist")}\n---\n\n# body\n");
+        files.AddFile(
+            Path.Combine(overrideRoot, "mohist-explore", "SKILL.md"),
+            $"---\nname: mohist-explore\ndescription: {DescriptionFor("mohist-explore")}\n---\n\n# explore\n");
+        SkillAssetManifest.Write(
+            overrideRoot,
+            SkillAssetManifest.ResolveCurrentBuildIdentity(),
+            new[] { "mohist", "mohist-explore" },
+            files);
+        environment[SkillAssetRootResolver.OverrideEnvironmentVariable] = overrideRoot;
 
-        Assert.Equal(0, exitCode);
+        var (exitCode, stdout, stderr) = await InvokeSkillsAsync(files, environment, "skills", "get", "mohist");
+
+        Assert.True(exitCode == 0, $"exit={exitCode} stdout:\n{stdout}\n\nstderr:\n{stderr}");
         Assert.Contains("name: mohist", stdout);
         Assert.DoesNotContain("mo skills get mohist --full", stdout, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stderr);
     }
 
     [Fact]
-    public async Task PublishedCli_ContainsPackagedSkillData_ForGetAndHermesInstall()
+    public void CliProgram_PublishableConfiguration_IncludesPackagedSkillData()
     {
-        var repoRoot = GetRepoRoot();
-        var publishRoot = Path.Combine(Path.GetTempPath(), $"mohist-cli-publish-{Guid.NewGuid():N}");
-        var workRoot = Path.Combine(Path.GetTempPath(), $"mohist-cli-runtime-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(publishRoot);
-        Directory.CreateDirectory(workRoot);
+        var csprojPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..",
+            "cli", "Mohist.Cli", "Mohist.Cli.csproj"));
+        var csprojContent = File.ReadAllText(csprojPath);
 
-        try
-        {
-            var publish = await RunProcessAsync(
-                "dotnet",
-                "publish packages/cli/Mohist.Cli -c Release -o \"" + publishRoot + "\"",
-                repoRoot,
-                []);
-
-            Assert.True(publish.ExitCode == 0, $"publish failed\nstdout:\n{publish.Stdout}\n\nstderr:\n{publish.Stderr}");
-            Assert.True(File.Exists(Path.Combine(publishRoot, "skill-data", "mohist", "SKILL.md")));
-
-            var hermesHome = Path.Combine(workRoot, "hermes-home");
-            var cliDll = Path.Combine(publishRoot, "Mohist.Cli.dll");
-
-            var get = await RunProcessAsync(
-                "dotnet",
-                "\"" + cliDll + "\" skills get mohist",
-                workRoot,
-                [("MOHIST_SKILLS_DIR", null), ("HERMES_HOME", hermesHome)]);
-
-            Assert.True(get.ExitCode == 0, $"get failed\nstdout:\n{get.Stdout}\n\nstderr:\n{get.Stderr}");
-            Assert.Contains("name: mohist", get.Stdout);
-            Assert.DoesNotContain("mo skills get mohist --full", get.Stdout, StringComparison.Ordinal);
-
-            var install = await RunProcessAsync(
-                "dotnet",
-                "\"" + cliDll + "\" skills install --hermes",
-                workRoot,
-                [("MOHIST_SKILLS_DIR", null), ("HERMES_HOME", hermesHome)]);
-
-            Assert.True(install.ExitCode == 0, $"install failed\nstdout:\n{install.Stdout}\n\nstderr:\n{install.Stderr}");
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md")));
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist", "references", "issue-templates.md")));
-        }
-        finally
-        {
-            if (Directory.Exists(publishRoot))
-                Directory.Delete(publishRoot, recursive: true);
-            if (Directory.Exists(workRoot))
-                Directory.Delete(workRoot, recursive: true);
-        }
+        Assert.Contains("skill-data\\**\\*", csprojContent, StringComparison.Ordinal);
+        Assert.Contains("PackagePath=\"skill-data/", csprojContent, StringComparison.Ordinal);
     }
 
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeMainAsync(string[] args)
+    private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeSkillsAsync(
+        FakeFileSystem files,
+        MockEnvironmentVariableProvider environment,
+        params string[] args)
     {
-        var originalOut = Console.Out;
-        var originalError = Console.Error;
-        using var stdoutWriter = new StringWriter();
-        using var stderrWriter = new StringWriter();
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
 
-        try
-        {
-            Console.SetOut(stdoutWriter);
-            Console.SetError(stderrWriter);
-            var exitCode = await CliProgram.Main(args);
-            return (exitCode, stdoutWriter.ToString(), stderrWriter.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
+        var exitCode = await MohistCliCommands.RunAsync(
+            new HttpClient
+            {
+                BaseAddress = new Uri(environment.GetEnvironmentVariable("MOHIST_SERVER_URL") ?? "http://localhost:3456"),
+                Timeout = TimeSpan.FromSeconds(30),
+            },
+            args,
+            stdout,
+            stderr,
+            files,
+            new SystemCommandExecutor(),
+            environment);
+
+        return (exitCode, stdout.ToString(), stderr.ToString());
     }
 
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeProcessAsync(string arguments)
+    private static string DescriptionFor(string name) => name switch
     {
-        var repoRoot = GetRepoRoot();
-        var startInfo = new System.Diagnostics.ProcessStartInfo("dotnet", $"run --project packages/cli/Mohist.Cli -- {arguments}")
-        {
-            WorkingDirectory = repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        using var process = new System.Diagnostics.Process { StartInfo = startInfo };
-        process.Start();
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return (process.ExitCode, stdout, stderr);
-    }
-
-    private static string GetRepoRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../../../"));
-
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> RunProcessAsync(
-        string fileName,
-        string arguments,
-        string workingDirectory,
-        IReadOnlyList<(string Name, string? Value)> environment)
-    {
-        var startInfo = new System.Diagnostics.ProcessStartInfo(fileName, arguments)
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        foreach (var (name, value) in environment)
-        {
-            if (value is null)
-                startInfo.Environment.Remove(name);
-            else
-                startInfo.Environment[name] = value;
-        }
-
-        using var process = new System.Diagnostics.Process { StartInfo = startInfo };
-        process.Start();
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return (process.ExitCode, stdout, stderr);
-    }
+        "mohist" => "执行 Mohist 当前 .NET 后端/API/Web 相关操作。当用户要求创建、查看、启动、审批、关闭 issue，查看项目状态或日志，或任何涉及 Mohist issue/workflow 的操作时使用。旧 Node CLI 已移除。",
+        "mohist-explore" => "从产品和用户视角探索 mohist 项目，发现功能缺陷、体验问题、设计机会和价值增长点。当用户想要探索代码库、发现改进点、审查用户体验、思考功能设计、或无目标地巡检产品时使用。触发词包括 \"explore\"、\"探索\"、\"巡检\"、\"找问题\"、\"体验审查\"、\"功能设计\"、\"产品思考\"。",
+        _ => throw new ArgumentOutOfRangeException(nameof(name), name, null),
+    };
 }

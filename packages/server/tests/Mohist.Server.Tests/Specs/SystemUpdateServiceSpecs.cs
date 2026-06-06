@@ -2,7 +2,9 @@ using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.SystemInfo;
+using Mohist.Server.Tests.Support;
 using Xunit;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -463,6 +465,7 @@ public class SystemUpdateServiceSpecs
             commandRunner,
             readinessProbe,
             configuration,
+            new MockEnvironmentVariableProvider(),
             NullLogger<SystemUpdateService>.Instance);
     }
 

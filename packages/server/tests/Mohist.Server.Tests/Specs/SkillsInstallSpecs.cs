@@ -1,149 +1,127 @@
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Cli;
+using Mohist.Server.Tests.Support;
+using EnvironmentAbstractions.TestHelpers;
 using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
 [Collection("SkillsCli")]
-public sealed class SkillsInstallSpecs : IDisposable
+public sealed class SkillsInstallSpecs
 {
-    private readonly string _tempRoot = Path.Combine(Path.GetTempPath(), $"mohist-skills-install-{Guid.NewGuid():N}");
-    private readonly string _originalDirectory;
-
-    public SkillsInstallSpecs()
-    {
-        _originalDirectory = TryGetCurrentDirectory();
-        Environment.SetEnvironmentVariable("HERMES_HOME", null);
-    }
+    private readonly FakeFileSystem _files = new();
+    private readonly MockEnvironmentVariableProvider _environment = new();
 
     [Fact]
     public async Task Install_DefaultTarget_WritesBuiltInDiscoveryStubsUnderAgentsSkills()
     {
-        Directory.CreateDirectory(_tempRoot);
-        try
-        {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install"]).InvokeAsync();
+        using var stdout = new StringWriter();
+        var assets = BuildDefaultAssetService();
 
-            Assert.Equal(0, exitCode);
-            AssertStub(Path.Combine(_tempRoot, ".agents", "skills", "mohist", "SKILL.md"), "mohist");
-            AssertStub(Path.Combine(_tempRoot, ".agents", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(_originalDirectory);
-        }
+        var exitCode = await BuildRootCommand(stdout, assets: assets)
+            .Parse(["skills", "install"])
+            .InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        var agentsDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist", "SKILL.md");
+        AssertStub(agentsDir, "mohist");
+        var exploreDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore", "SKILL.md");
+        AssertStub(exploreDir, "mohist-explore");
     }
 
     [Fact]
     public async Task Install_PathTarget_WritesOnlyToSelectedRepository()
     {
-        var currentRoot = Path.Combine(_tempRoot, "current");
-        var targetRoot = Path.Combine(_tempRoot, "target");
-        Directory.CreateDirectory(currentRoot);
-        Directory.CreateDirectory(targetRoot);
-        try
-        {
-            Directory.SetCurrentDirectory(currentRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install", "--path", targetRoot]).InvokeAsync();
+        var targetRoot = Path.Combine("/tmp", $"skills-install-path-{Guid.NewGuid():N}");
+        _files.AddDirectory(targetRoot);
+        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-cwd-{Guid.NewGuid():N}"));
 
-            Assert.Equal(0, exitCode);
-            AssertStub(Path.Combine(targetRoot, ".agents", "skills", "mohist", "SKILL.md"), "mohist");
-            Assert.False(File.Exists(Path.Combine(currentRoot, ".agents", "skills", "mohist", "SKILL.md")));
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(_originalDirectory);
-        }
+        var assets = BuildDefaultAssetService();
+        var exitCode = await BuildRootCommand()
+            .Parse(["skills", "install", "--path", targetRoot])
+            .InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        AssertStub(Path.Combine(targetRoot, ".agents", "skills", "mohist", "SKILL.md"), "mohist");
+        Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist", "SKILL.md")));
     }
 
     [Fact]
     public async Task Install_ClaudeTarget_WritesClaudeSkillsOnly()
     {
-        Directory.CreateDirectory(_tempRoot);
-        try
-        {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install", "--claude"]).InvokeAsync();
+        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-claude-{Guid.NewGuid():N}"));
 
-            Assert.Equal(0, exitCode);
-            AssertStub(Path.Combine(_tempRoot, ".claude", "skills", "mohist", "SKILL.md"), "mohist");
-            AssertStub(Path.Combine(_tempRoot, ".claude", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
-            Assert.False(File.Exists(Path.Combine(_tempRoot, ".agents", "skills", "mohist", "SKILL.md")));
-            Assert.False(File.Exists(Path.Combine(_tempRoot, ".agents", "skills", "mohist-explore", "SKILL.md")));
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(_originalDirectory);
-        }
+        var assets = BuildDefaultAssetService();
+        var exitCode = await BuildRootCommand()
+            .Parse(["skills", "install", "--claude"])
+            .InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        AssertStub(Path.Combine(_files.Cwd, ".claude", "skills", "mohist", "SKILL.md"), "mohist");
+        AssertStub(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-explore", "SKILL.md"), "mohist-explore");
+        Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist", "SKILL.md")));
+        Assert.False(_files.HasFile(Path.Combine(_files.Cwd, ".agents", "skills", "mohist-explore", "SKILL.md")));
     }
 
     [Fact]
     public async Task Install_OverwritesExistingBuiltInStubContent()
     {
-        var skillDir = Path.Combine(_tempRoot, ".agents", "skills", "mohist");
-        Directory.CreateDirectory(skillDir);
-        await File.WriteAllTextAsync(Path.Combine(skillDir, "SKILL.md"), "old content");
-        try
-        {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install"]).InvokeAsync();
+        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-overwrite-{Guid.NewGuid():N}"));
+        var skillDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist");
+        _files.AddDirectory(skillDir);
+        _files.AddFile(Path.Combine(skillDir, "SKILL.md"), "old content");
 
-            Assert.Equal(0, exitCode);
-            AssertStub(Path.Combine(skillDir, "SKILL.md"), "mohist");
-            Assert.DoesNotContain("old content", await File.ReadAllTextAsync(Path.Combine(skillDir, "SKILL.md")));
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(_originalDirectory);
-        }
+        var assets = BuildDefaultAssetService();
+        var exitCode = await BuildRootCommand()
+            .Parse(["skills", "install"])
+            .InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        AssertStub(Path.Combine(skillDir, "SKILL.md"), "mohist");
+        Assert.DoesNotContain("old content", _files.ReadAllText(Path.Combine(skillDir, "SKILL.md")));
     }
 
     [Fact]
     public async Task Install_DoesNotTouchUnrelatedUserAuthoredSkillDirectories()
     {
-        var userSkillDir = Path.Combine(_tempRoot, ".agents", "skills", "mohist-po");
-        Directory.CreateDirectory(userSkillDir);
+        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-untouched-{Guid.NewGuid():N}"));
+        var userSkillDir = Path.Combine(_files.Cwd, ".agents", "skills", "mohist-po");
+        _files.AddDirectory(userSkillDir);
         var sentinelPath = Path.Combine(userSkillDir, "SKILL.md");
-        await File.WriteAllTextAsync(sentinelPath, "user-authored");
-        try
-        {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install"]).InvokeAsync();
+        _files.AddFile(sentinelPath, "user-authored");
 
-            Assert.Equal(0, exitCode);
-            Assert.Equal("user-authored", await File.ReadAllTextAsync(sentinelPath));
-            Assert.False(Directory.Exists(Path.Combine(_tempRoot, ".claude", "skills", "mohist-po")));
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(_originalDirectory);
-        }
+        var assets = BuildDefaultAssetService();
+        var exitCode = await BuildRootCommand()
+            .Parse(["skills", "install"])
+            .InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("user-authored", _files.ReadAllText(sentinelPath));
+        Assert.False(_files.DirectoryExists(Path.Combine(_files.Cwd, ".claude", "skills", "mohist-po")));
     }
 
     [Fact]
     public async Task Install_HermesTarget_CopiesFullPackagedSkillData()
     {
-        var hermesHome = Path.Combine(_tempRoot, "hermes-home");
-        Environment.SetEnvironmentVariable("HERMES_HOME", hermesHome);
-        Directory.CreateDirectory(_tempRoot);
+        var hermesHome = Path.Combine("/tmp", $"hermes-home-{Guid.NewGuid():N}");
+        _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         try
         {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand(stdout, stderr).Parse(["skills", "install", "--hermes"]).InvokeAsync();
+            var assets = BuildDefaultAssetService();
+            var exitCode = await BuildRootCommand(stdout, stderr, assets)
+                .Parse(["skills", "install", "--hermes"])
+                .InvokeAsync();
 
             Assert.Equal(0, exitCode);
             var mohistSkill = Path.Combine(hermesHome, "skills", "mohist", "SKILL.md");
             var exploreSkill = Path.Combine(hermesHome, "skills", "mohist-explore", "SKILL.md");
             AssertFullPackagedSkill(mohistSkill, "mohist");
             AssertFullPackagedSkill(exploreSkill, "mohist-explore");
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist", "references", "issue-templates.md")));
-            Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills", "mohist-po")));
-            Assert.False(Directory.Exists(Path.Combine(_tempRoot, ".agents", "skills")));
-            Assert.False(Directory.Exists(Path.Combine(_tempRoot, ".claude", "skills")));
+            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist", "references", "issue-templates.md")));
+            Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills", "mohist-po")));
 
             var output = stdout.ToString();
             Assert.Contains("mohist: created", output);
@@ -154,36 +132,41 @@ public sealed class SkillsInstallSpecs : IDisposable
         }
         finally
         {
-            RestoreCurrentDirectory();
-            Environment.SetEnvironmentVariable("HERMES_HOME", null);
+            _environment[SkillInstallService.HermesHomeEnvironmentVariable] = null;
         }
     }
 
     [Fact]
     public async Task Install_HermesTarget_UsesConfiguredHermesHomeAndReportsUpdatedOnRepeatInstall()
     {
-        var hermesHome = Path.Combine(_tempRoot, "custom-hermes-home");
+        var hermesHome = Path.Combine("/tmp", $"custom-hermes-home-{Guid.NewGuid():N}");
         var defaultHermesRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hermes", "skills");
-        Environment.SetEnvironmentVariable("HERMES_HOME", hermesHome);
-        Directory.CreateDirectory(_tempRoot);
+        _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
 
         try
         {
-            var (firstExitCode, _, _) = await InvokeCliProcessAsync("skills install --hermes", _tempRoot, ("HERMES_HOME", hermesHome));
-            var (secondExitCode, secondStdout, secondStderr) = await InvokeCliProcessAsync("skills install --hermes", _tempRoot, ("HERMES_HOME", hermesHome));
-            var secondOutput = secondStdout + secondStderr;
+            var assets = BuildDefaultAssetService();
 
-            Assert.Equal(0, firstExitCode);
-            Assert.Equal(0, secondExitCode);
-            Assert.True(File.Exists(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md")));
+            var firstExit = await BuildRootCommand()
+                .Parse(["skills", "install", "--hermes"])
+                .InvokeAsync();
+            Assert.Equal(0, firstExit);
+            using var secondStdout = new StringWriter();
+            using var secondStderr = new StringWriter();
+            var secondExit = await BuildRootCommand(secondStdout, secondStderr, assets)
+                .Parse(["skills", "install", "--hermes"])
+                .InvokeAsync();
+            Assert.Equal(0, secondExit);
+            var secondOutput = secondStdout.ToString() + secondStderr.ToString();
+
+            Assert.True(_files.HasFile(Path.Combine(hermesHome, "skills", "mohist", "SKILL.md")));
             Assert.Contains("mohist: updated", secondOutput);
             Assert.Contains("mohist-explore: updated", secondOutput);
             Assert.NotEqual(Path.GetFullPath(defaultHermesRoot), Path.GetFullPath(Path.Combine(hermesHome, "skills")));
         }
         finally
         {
-            RestoreCurrentDirectory();
-            Environment.SetEnvironmentVariable("HERMES_HOME", null);
+            _environment[SkillInstallService.HermesHomeEnvironmentVariable] = null;
         }
     }
 
@@ -192,176 +175,144 @@ public sealed class SkillsInstallSpecs : IDisposable
     [InlineData("--hermes", "--path", "repo")]
     public async Task Install_HermesTarget_RejectsIncompatibleOptionsBeforeWriting(params string[] args)
     {
-        var hermesHome = Path.Combine(_tempRoot, "hermes-home");
-        var repoPath = Path.Combine(_tempRoot, "repo");
-        Environment.SetEnvironmentVariable("HERMES_HOME", hermesHome);
-        Directory.CreateDirectory(_tempRoot);
-        Directory.CreateDirectory(repoPath);
+        var hermesHome = Path.Combine("/tmp", $"hermes-home-{Guid.NewGuid():N}");
+        var repoPath = Path.Combine("/tmp", $"hermes-repo-{Guid.NewGuid():N}");
+        _files.AddDirectory(repoPath);
+        _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         try
         {
-            Directory.SetCurrentDirectory(_tempRoot);
+            var assets = BuildDefaultAssetService();
             var normalizedArgs = args.Select(arg => arg == "repo" ? repoPath : arg).Prepend("install").Prepend("skills").ToArray();
-            var exitCode = await BuildRootCommand(stdout, stderr).Parse(normalizedArgs).InvokeAsync();
+            var exitCode = await BuildRootCommand(stdout, stderr, assets)
+                .Parse(normalizedArgs)
+                .InvokeAsync();
 
             Assert.Equal(1, exitCode);
             Assert.Contains("cannot be combined", stderr.ToString());
             Assert.Equal(string.Empty, stdout.ToString());
-            Assert.False(Directory.Exists(Path.Combine(hermesHome, "skills")));
-            Assert.False(Directory.Exists(Path.Combine(_tempRoot, ".claude", "skills")));
-            Assert.False(Directory.Exists(Path.Combine(repoPath, ".agents", "skills")));
+            Assert.False(_files.DirectoryExists(Path.Combine(hermesHome, "skills")));
+            Assert.False(_files.DirectoryExists(Path.Combine(repoPath, ".agents", "skills")));
         }
         finally
         {
-            Directory.SetCurrentDirectory(_originalDirectory);
-            Environment.SetEnvironmentVariable("HERMES_HOME", null);
+            _environment[SkillInstallService.HermesHomeEnvironmentVariable] = null;
         }
     }
 
     [Fact]
     public async Task Install_HermesTarget_DoesNotTouchHermesConfigFiles()
     {
-        var hermesHome = Path.Combine(_tempRoot, "hermes-home");
+        var hermesHome = Path.Combine("/tmp", $"hermes-config-{Guid.NewGuid():N}");
         var configPath = Path.Combine(hermesHome, "config.yaml");
-        Environment.SetEnvironmentVariable("HERMES_HOME", hermesHome);
-        Directory.CreateDirectory(hermesHome);
-        await File.WriteAllTextAsync(configPath, "skills:\n  external_dirs:\n    - /existing\n");
+        _files.AddDirectory(hermesHome);
+        _files.AddFile(configPath, "skills:\n  external_dirs:\n    - /existing\n");
+        _environment[SkillInstallService.HermesHomeEnvironmentVariable] = hermesHome;
+
         try
         {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install", "--hermes"]).InvokeAsync();
+            var assets = BuildDefaultAssetService();
+            var exitCode = await BuildRootCommand()
+                .Parse(["skills", "install", "--hermes"])
+                .InvokeAsync();
 
             Assert.Equal(0, exitCode);
-            Assert.Equal("skills:\n  external_dirs:\n    - /existing\n", await File.ReadAllTextAsync(configPath));
+            Assert.Equal("skills:\n  external_dirs:\n    - /existing\n", _files.ReadAllText(configPath));
         }
         finally
         {
-            Directory.SetCurrentDirectory(_originalDirectory);
-            Environment.SetEnvironmentVariable("HERMES_HOME", null);
+            _environment[SkillInstallService.HermesHomeEnvironmentVariable] = null;
         }
     }
 
     [Fact]
     public async Task Install_DoesNotTouchDotMohistSkills()
     {
-        var mohistSkillsDir = Path.Combine(_tempRoot, ".mohist", "skills");
-        Directory.CreateDirectory(mohistSkillsDir);
+        _files.SetCurrentDirectory(Path.Combine("/tmp", $"skills-install-runtime-{Guid.NewGuid():N}"));
+        var mohistSkillsDir = Path.Combine(_files.Cwd, ".mohist", "skills");
+        _files.AddDirectory(mohistSkillsDir);
         var sentinelPath = Path.Combine(mohistSkillsDir, "sentinel.txt");
-        await File.WriteAllTextAsync(sentinelPath, "keep");
-        try
-        {
-            Directory.SetCurrentDirectory(_tempRoot);
-            var exitCode = await BuildRootCommand().Parse(["skills", "install"]).InvokeAsync();
+        _files.AddFile(sentinelPath, "keep");
 
-            Assert.Equal(0, exitCode);
-            Assert.Equal("keep", await File.ReadAllTextAsync(sentinelPath));
-            Assert.False(Directory.Exists(Path.Combine(mohistSkillsDir, "mohist")));
-        }
-        finally
-        {
-            Directory.SetCurrentDirectory(_originalDirectory);
-        }
+        var assets = BuildDefaultAssetService();
+        var exitCode = await BuildRootCommand()
+            .Parse(["skills", "install"])
+            .InvokeAsync();
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("keep", _files.ReadAllText(sentinelPath));
+        Assert.False(_files.DirectoryExists(Path.Combine(mohistSkillsDir, "mohist")));
     }
 
-    public void Dispose()
+    private SkillAssetService BuildDefaultAssetService()
     {
-        RestoreCurrentDirectory();
-        if (Directory.Exists(_tempRoot))
-            Directory.Delete(_tempRoot, recursive: true);
-    }
+        var sourceRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..",
+            "cli", "Mohist.Cli", "skill-data");
+        sourceRoot = Path.GetFullPath(sourceRoot);
+        var targetRoot = Path.Combine("/tmp", $"skills-install-assets-{Guid.NewGuid():N}");
+        _files.AddDirectory(targetRoot);
 
-    private void RestoreCurrentDirectory()
-    {
-        var target = Directory.Exists(_originalDirectory) ? _originalDirectory : Path.GetTempPath();
-        if (Directory.Exists(target))
-            Directory.SetCurrentDirectory(target);
-    }
-
-    private static string TryGetCurrentDirectory()
-    {
-        try
+        if (Directory.Exists(sourceRoot))
         {
-            var current = Directory.GetCurrentDirectory();
-            return Directory.Exists(current) ? current : Path.GetTempPath();
+            foreach (var file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(sourceRoot, file);
+                _files.AddFile(Path.Combine(targetRoot, relative), File.ReadAllText(file));
+            }
         }
-        catch (IOException)
-        {
-            return Path.GetTempPath();
-        }
+
+        SkillAssetManifest.Write(
+            targetRoot,
+            SkillAssetManifest.ResolveCurrentBuildIdentity(),
+            new[] { "mohist", "mohist-explore" },
+            _files);
+
+        var resolver = new SkillAssetRootResolver(
+            _files,
+            _environment,
+            getOverrideAssetRoot: () => targetRoot,
+            getManagedAssetRoot: null,
+            getUserHome: () => targetRoot);
+        return new SkillAssetService(_files, _environment, resolver);
     }
 
-    private static System.CommandLine.RootCommand BuildRootCommand(TextWriter? output = null, TextWriter? error = null)
+    private System.CommandLine.RootCommand BuildRootCommand(
+        TextWriter? output = null,
+        TextWriter? error = null,
+        SkillAssetService? assets = null)
     {
         output ??= TextWriter.Null;
         error ??= TextWriter.Null;
         var services = new ServiceCollection();
-        services.AddSingleton(new MohistCliApi(new HttpClient(), output, error, RealFileSystem.Instance, new SystemCommandExecutor()));
-        services.AddSingleton<TextWriter>(output);
+        services.AddSingleton(new MohistCliApi(new HttpClient(), output, error, _files, new SystemCommandExecutor()));
+        services.AddSingleton(output);
+        services.AddSingleton(error);
+        services.AddSingleton<IFileSystem>(_files);
+        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
+        services.AddSingleton<IEnvironmentVariableProvider>(_environment);
+        services.AddSingleton<SystemdServiceInstaller>();
+        services.AddSingleton<SourceCodeUpdater>();
+        services.AddSingleton(assets ?? BuildDefaultAssetService());
         services.AddSingleton<SkillInstallService>(_ => new SkillInstallService(
             _.GetRequiredService<SkillAssetService>(),
             _.GetRequiredService<IFileSystem>(),
+            _.GetRequiredService<IEnvironmentVariableProvider>(),
             output,
             error));
-        services.AddSingleton<IFileSystem>(RealFileSystem.Instance);
-        services.AddSingleton<ICommandExecutor>(new SystemCommandExecutor());
-        services.AddSingleton<SystemdServiceInstaller>();
-        services.AddSingleton<SourceCodeUpdater>();
-        services.AddSingleton<SkillAssetService>();
 
         var provider = services.BuildServiceProvider();
         var api = provider.GetRequiredService<MohistCliApi>();
         return MohistCliCommands.Build(api, provider);
     }
 
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeCliMainAsync(string[] args)
+    private void AssertStub(string path, string name)
     {
-        var originalOut = Console.Out;
-        var originalError = Console.Error;
-        using var stdoutWriter = new StringWriter();
-        using var stderrWriter = new StringWriter();
-
-        try
-        {
-            Console.SetOut(stdoutWriter);
-            Console.SetError(stderrWriter);
-            var exitCode = await CliProgram.Main(args);
-            return (exitCode, stdoutWriter.ToString(), stderrWriter.ToString());
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
-        }
-    }
-
-    private static async Task<(int ExitCode, string Stdout, string Stderr)> InvokeCliProcessAsync(string arguments, string workingDirectory, params (string Name, string Value)[] environment)
-    {
-        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../../../"));
-        var startInfo = new System.Diagnostics.ProcessStartInfo("dotnet", $"run --project packages/cli/Mohist.Cli -- {arguments}")
-        {
-            WorkingDirectory = repoRoot,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        startInfo.Environment["DOTNET_CLI_WORKING_DIR"] = workingDirectory;
-        foreach (var (name, value) in environment)
-            startInfo.Environment[name] = value;
-
-        using var process = new System.Diagnostics.Process { StartInfo = startInfo };
-        process.Start();
-        var stdout = await process.StandardOutput.ReadToEndAsync();
-        var stderr = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return (process.ExitCode, stdout, stderr);
-    }
-
-    private static void AssertStub(string path, string name)
-    {
-        Assert.True(File.Exists(path), $"Expected skill stub at '{path}'.");
-        var content = File.ReadAllText(path);
+        Assert.True(_files.HasFile(path), $"Expected skill stub at '{path}'.");
+        var content = _files.ReadAllText(path);
         Assert.Contains("---", content);
         Assert.Contains($"name: {name}", content);
         Assert.Contains($"description: {DescriptionFor(name)}", content);
@@ -369,10 +320,10 @@ public sealed class SkillsInstallSpecs : IDisposable
         Assert.DoesNotContain("<artifact", content);
     }
 
-    private static void AssertFullPackagedSkill(string path, string name)
+    private void AssertFullPackagedSkill(string path, string name)
     {
-        Assert.True(File.Exists(path), $"Expected full Hermes skill at '{path}'.");
-        var content = File.ReadAllText(path);
+        Assert.True(_files.HasFile(path), $"Expected full Hermes skill at '{path}'.");
+        var content = _files.ReadAllText(path);
         Assert.Contains($"name: {name}", content);
         Assert.Contains($"description: {DescriptionFor(name)}", content);
         Assert.Contains("---", content);

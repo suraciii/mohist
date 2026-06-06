@@ -57,15 +57,24 @@ public sealed record SystemUpdateJobState(
 
 public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
 {
+    public const string HomeEnvironmentVariable = "HOME";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _statePath;
     private readonly string _lockPath;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly IEnvironmentVariableProvider _environment;
     private bool _locked;
     private string? _lockOwnerJobId;
 
     public FileSystemSystemUpdateStore(IConfiguration configuration)
+        : this(configuration, SystemEnvironmentVariableProvider.Instance)
     {
+    }
+
+    public FileSystemSystemUpdateStore(IConfiguration configuration, IEnvironmentVariableProvider environment)
+    {
+        _environment = environment;
         _statePath = ResolveStatePath(configuration);
         _lockPath = _statePath + ".lock";
         var dir = Path.GetDirectoryName(_statePath);
@@ -193,13 +202,13 @@ public sealed class FileSystemSystemUpdateStore : ISystemUpdateStore
         }
     }
 
-    private static string ResolveStatePath(IConfiguration configuration)
+    private string ResolveStatePath(IConfiguration configuration)
     {
         var configured = configuration["Mohist:SystemUpdate:StatePath"];
         if (!string.IsNullOrWhiteSpace(configured))
             return configured;
 
-        var home = Environment.GetEnvironmentVariable("HOME")
+        var home = _environment.GetEnvironmentVariable(HomeEnvironmentVariable)
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(home, ".mohist", "system-update.json");
     }
@@ -280,12 +289,15 @@ public sealed class HttpSystemReadinessProbe : ISystemReadinessProbe
 
 public sealed class SystemUpdateService
 {
+    public const string HomeEnvironmentVariable = "HOME";
+
     private const int MaxLogEntries = 200;
     private readonly Func<CancellationToken, Task<SystemInfoResponse>> _getSystemInfo;
     private readonly ISystemUpdateStore _store;
     private readonly ISystemUpdateCommandRunner _commandRunner;
     private readonly ISystemReadinessProbe _readinessProbe;
     private readonly IConfiguration _configuration;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly ILogger<SystemUpdateService> _logger;
 
     public SystemUpdateService(
@@ -294,8 +306,9 @@ public sealed class SystemUpdateService
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
         ILogger<SystemUpdateService> logger)
-        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, logger)
+        : this(_ => systemInfoService.GetSystemInfoAsync(), store, commandRunner, readinessProbe, configuration, environment, logger)
     {
     }
 
@@ -305,6 +318,7 @@ public sealed class SystemUpdateService
         ISystemUpdateCommandRunner commandRunner,
         ISystemReadinessProbe readinessProbe,
         IConfiguration configuration,
+        IEnvironmentVariableProvider environment,
         ILogger<SystemUpdateService> logger)
     {
         _getSystemInfo = getSystemInfo;
@@ -312,6 +326,7 @@ public sealed class SystemUpdateService
         _commandRunner = commandRunner;
         _readinessProbe = readinessProbe;
         _configuration = configuration;
+        _environment = environment;
         _logger = logger;
     }
 

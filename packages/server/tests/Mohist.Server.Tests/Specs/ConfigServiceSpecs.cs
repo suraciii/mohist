@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Tests.Support;
 using Xunit;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.Tests.Specs;
 
@@ -13,7 +15,7 @@ public class ConfigServiceSpecs : IAsyncLifetime
     {
         var config = new ConfigurationBuilder().Build();
         _configPath = Path.Combine(Path.GetTempPath(), $"mohist-config-{Guid.NewGuid():N}.jsonc");
-        _svc = new ConfigService(config, Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance, _configPath);
+        _svc = new ConfigService(config, new MockEnvironmentVariableProvider(), Microsoft.Extensions.Logging.Abstractions.NullLogger<ConfigService>.Instance, _configPath);
         return Task.CompletedTask;
     }
 

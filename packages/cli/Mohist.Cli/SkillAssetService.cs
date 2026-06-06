@@ -14,33 +14,59 @@ internal sealed class SkillAssetService
         BuiltIns.Select(skill => skill.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
     private readonly SkillAssetRootResolution _resolution;
+    private readonly IFileSystem _fileSystem;
     private readonly string? _assetRoot;
 
     public SkillAssetService()
-        : this(SkillAssetRootResolver.Default)
+        : this(RealFileSystem.Instance, SystemEnvironmentVariableProvider.Instance, SkillAssetRootResolver.CreateDefault(RealFileSystem.Instance, SystemEnvironmentVariableProvider.Instance))
     {
     }
 
-    internal SkillAssetService(SkillAssetRootResolver resolver)
+    public SkillAssetService(IFileSystem fileSystem)
+        : this(fileSystem, SystemEnvironmentVariableProvider.Instance, SkillAssetRootResolver.CreateDefault(fileSystem, SystemEnvironmentVariableProvider.Instance))
     {
+    }
+
+    public SkillAssetService(IFileSystem fileSystem, IEnvironmentVariableProvider environment)
+        : this(fileSystem, environment, SkillAssetRootResolver.CreateDefault(fileSystem, environment))
+    {
+    }
+
+    internal SkillAssetService(string? overrideAssetRoot)
+        : this(RealFileSystem.Instance, overrideAssetRoot)
+    {
+    }
+
+    internal SkillAssetService(IFileSystem fileSystem, IEnvironmentVariableProvider environment, SkillAssetRootResolver resolver)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(resolver);
+        _fileSystem = fileSystem;
         _resolution = resolver.Resolve(BuiltInSkillNames);
         _assetRoot = _resolution.AssetRoot;
     }
 
-    internal SkillAssetService(SkillAssetRootResolution resolution)
+    internal SkillAssetService(IFileSystem fileSystem, SkillAssetRootResolver resolver)
+        : this(fileSystem, SystemEnvironmentVariableProvider.Instance, resolver)
     {
+    }
+
+    internal SkillAssetService(IFileSystem fileSystem, SkillAssetRootResolution resolution)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(resolution);
+        _fileSystem = fileSystem;
         _resolution = resolution;
         _assetRoot = resolution.AssetRoot;
     }
 
-    internal SkillAssetService(string? overrideAssetRoot)
-        : this(BuildTestOnlyResolution(overrideAssetRoot))
+    internal SkillAssetService(IFileSystem fileSystem, string? overrideAssetRoot)
+        : this(fileSystem, BuildTestOnlyResolution(fileSystem, overrideAssetRoot))
     {
     }
 
-    private static SkillAssetRootResolution BuildTestOnlyResolution(string? overrideAssetRoot)
+    private static SkillAssetRootResolution BuildTestOnlyResolution(IFileSystem fileSystem, string? overrideAssetRoot)
     {
         var resolvedRoot = string.IsNullOrWhiteSpace(overrideAssetRoot)
             ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "skill-data"))
@@ -76,10 +102,10 @@ internal sealed class SkillAssetService
         var skillDirectory = Path.Combine(_assetRoot, definition.Name);
         var skillFile = Path.Combine(skillDirectory, "SKILL.md");
 
-        if (!File.Exists(skillFile))
+        if (!_fileSystem.Exists(skillFile))
             return SkillAssetReadResult.Fail(BuildMissingAssetDiagnostic(definition.Name, skillFile));
 
-        var content = File.ReadAllText(skillFile, Encoding.UTF8);
+        var content = _fileSystem.ReadAllText(skillFile);
         if (!TryReadFrontmatter(content, out var frontmatterName, out var frontmatterDescription))
             return SkillAssetReadResult.Fail($"Built-in skill asset '{definition.Name}' has invalid AgentSkills frontmatter.");
 
@@ -90,8 +116,8 @@ internal sealed class SkillAssetService
             return SkillAssetReadResult.Fail($"Built-in skill asset '{definition.Name}' has mismatched frontmatter description.");
 
         var supplementaryFiles = includeSupplementaryFiles
-            ? EnumerateSupplementaryFiles(skillDirectory)
-            : [];
+            ? EnumerateSupplementaryFiles(skillDirectory).ToArray()
+            : Array.Empty<SkillSupplementaryFile>();
 
         return SkillAssetReadResult.Success(new BuiltInSkillContent(
             definition.Name,
@@ -126,21 +152,21 @@ internal sealed class SkillAssetService
         return $"{message} {resolverMessage}";
     }
 
-    private static IReadOnlyList<SkillSupplementaryFile> EnumerateSupplementaryFiles(string skillDirectory)
+    private IEnumerable<SkillSupplementaryFile> EnumerateSupplementaryFiles(string skillDirectory)
     {
         var files = new List<SkillSupplementaryFile>();
         foreach (var folderName in new[] { "references", "templates" })
         {
             var folderPath = Path.Combine(skillDirectory, folderName);
-            if (!Directory.Exists(folderPath))
+            if (!_fileSystem.DirectoryExists(folderPath))
                 continue;
 
-            foreach (var file in Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
+            foreach (var file in _fileSystem.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
                          .OrderBy(path => Path.GetRelativePath(skillDirectory, path), StringComparer.Ordinal))
             {
                 files.Add(new SkillSupplementaryFile(
                     Path.GetRelativePath(skillDirectory, file).Replace(Path.DirectorySeparatorChar, '/'),
-                    File.ReadAllText(file, Encoding.UTF8)));
+                    _fileSystem.ReadAllText(file)));
             }
         }
 

@@ -1,3 +1,4 @@
+
 namespace Mohist.Cli;
 
 internal enum SkillAssetRootSource
@@ -11,44 +12,51 @@ internal enum SkillAssetRootSource
 internal sealed class SkillAssetRootResolver
 {
     public const string OverrideEnvironmentVariable = "MOHIST_SKILLS_DIR";
+    public const string HomeEnvironmentVariable = "HOME";
 
-    public static SkillAssetRootResolver Default { get; } = new(
-        getOverrideAssetRoot: GetDefaultOverrideAssetRoot,
-        getManagedAssetRoot: null,
-        getUserHome: null,
-        getBuildIdentity: null);
-
+    private readonly IFileSystem _fileSystem;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly Func<string?>? _getOverrideAssetRoot;
     private readonly Func<string?>? _getManagedAssetRoot;
     private readonly Func<string?>? _getUserHome;
     private readonly Func<SkillAssetBuildIdentity> _getBuildIdentity;
 
+    public static SkillAssetRootResolver CreateDefault(IFileSystem fileSystem, IEnvironmentVariableProvider environment) =>
+        new(fileSystem, environment,
+            getOverrideAssetRoot: null,
+            getManagedAssetRoot: null,
+            getUserHome: null,
+            getBuildIdentity: null);
+
     internal SkillAssetRootResolver(
-        Func<string?>? getOverrideAssetRoot,
+        IFileSystem fileSystem,
+        IEnvironmentVariableProvider environment,
+        Func<string?>? getOverrideAssetRoot = null,
         Func<string?>? getManagedAssetRoot = null,
         Func<string?>? getUserHome = null,
         Func<SkillAssetBuildIdentity>? getBuildIdentity = null)
     {
-        _getOverrideAssetRoot = getOverrideAssetRoot;
+        _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _getOverrideAssetRoot = getOverrideAssetRoot ?? (() => _environment.GetEnvironmentVariable(OverrideEnvironmentVariable));
         _getManagedAssetRoot = getManagedAssetRoot;
-        _getUserHome = getUserHome ?? DefaultUserHome;
+        _getUserHome = getUserHome ?? (() => DefaultUserHome(_environment));
         _getBuildIdentity = getBuildIdentity ?? SkillAssetManifest.ResolveCurrentBuildIdentity;
     }
 
-    private static string? GetDefaultOverrideAssetRoot() =>
-        Environment.GetEnvironmentVariable(OverrideEnvironmentVariable);
-
-    public static string DefaultManagedAssetRoot()
+    public string DefaultManagedAssetRoot()
     {
-        var home = DefaultUserHome();
+        var home = _userHome();
         return string.IsNullOrWhiteSpace(home)
             ? Path.Combine(AppContext.BaseDirectory, "skill-data")
             : Path.Combine(home, ".mohist", "cli", "skill-data");
     }
 
-    private static string? DefaultUserHome()
+    private string? _userHome() => _getUserHome?.Invoke();
+
+    private static string? DefaultUserHome(IEnvironmentVariableProvider environment)
     {
-        var home = Environment.GetEnvironmentVariable("HOME");
+        var home = environment.GetEnvironmentVariable(HomeEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(home))
             return home;
         return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -64,7 +72,7 @@ internal sealed class SkillAssetRootResolver
         if (!string.IsNullOrWhiteSpace(overrideRoot))
         {
             var candidate = NormalizeRoot(overrideRoot);
-            if (!Directory.Exists(candidate))
+            if (!_fileSystem.DirectoryExists(candidate))
             {
                 return SkillAssetRootResolution.Failed(
                     candidate,
@@ -73,7 +81,7 @@ internal sealed class SkillAssetRootResolver
                     BuildOverrideMissingDiagnostic(candidate));
             }
 
-            var validation = SkillAssetManifest.Validate(candidate, identity, expectedSkillNames);
+            var validation = SkillAssetManifest.Validate(candidate, identity, expectedSkillNames, _fileSystem);
             if (validation.IsValid)
                 return SkillAssetRootResolution.Selected(candidate, SkillAssetRootSource.Override, validation);
 
@@ -88,9 +96,9 @@ internal sealed class SkillAssetRootResolver
         if (!string.IsNullOrWhiteSpace(managedRoot))
         {
             var normalized = NormalizeRoot(managedRoot);
-            if (Directory.Exists(normalized))
+            if (_fileSystem.DirectoryExists(normalized))
             {
-                var validation = SkillAssetManifest.Validate(normalized, identity, expectedSkillNames);
+                var validation = SkillAssetManifest.Validate(normalized, identity, expectedSkillNames, _fileSystem);
                 if (validation.IsValid)
                     return SkillAssetRootResolution.Selected(normalized, SkillAssetRootSource.ManagedCache, validation);
 
@@ -103,9 +111,9 @@ internal sealed class SkillAssetRootResolver
         }
 
         var siblingRoot = NormalizeRoot(Path.Combine(AppContext.BaseDirectory, "skill-data"));
-        if (Directory.Exists(siblingRoot))
+        if (_fileSystem.DirectoryExists(siblingRoot))
         {
-            var validation = SkillAssetManifest.Validate(siblingRoot, identity, expectedSkillNames);
+            var validation = SkillAssetManifest.Validate(siblingRoot, identity, expectedSkillNames, _fileSystem);
             if (validation.IsValid)
                 return SkillAssetRootResolution.Selected(siblingRoot, SkillAssetRootSource.SiblingFallback, validation);
 

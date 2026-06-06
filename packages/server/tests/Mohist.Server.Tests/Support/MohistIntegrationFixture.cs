@@ -9,7 +9,9 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.SystemInfo;
 using Xunit;
+using EnvironmentAbstractions.TestHelpers;
 
 namespace Mohist.Server.Tests.Support;
 
@@ -102,8 +104,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<FakeGitService>();
             services.AddSingleton<IGitService>(provider => provider.GetRequiredService<FakeGitService>());
             services.RemoveAll<ConfigService>();
+            services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
             services.AddSingleton(provider => new ConfigService(
                 provider.GetRequiredService<IConfiguration>(),
+                provider.GetRequiredService<IEnvironmentVariableProvider>(),
                 provider.GetRequiredService<ILogger<ConfigService>>(),
                 _configPath));
         });

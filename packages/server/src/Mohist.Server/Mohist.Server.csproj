@@ -14,6 +14,11 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="EnvironmentAbstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EnvironmentAbstractions.BannedApiAnalyzer" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

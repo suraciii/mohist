@@ -1,12 +1,16 @@
+using Mohist.Server.SystemInfo;
+
 namespace Mohist.Server.Api;
 
 public static class FsRoutes
 {
+    public const string HomeEnvironmentVariable = "HOME";
+
     public static WebApplication MapFsRoutes(this WebApplication app)
     {
-        app.MapGet("/api/fs/home", () =>
+        app.MapGet("/api/fs/home", (IEnvironmentVariableProvider environment) =>
         {
-            var home = Environment.GetEnvironmentVariable("HOME")
+            var home = environment.GetEnvironmentVariable(HomeEnvironmentVariable)
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             return ApiResults.Ok(home);
         });
@@ -33,9 +37,9 @@ public static class FsRoutes
             }
         });
 
-        app.MapGet("/api/fs/search", (string query, int? limit) =>
+        app.MapGet("/api/fs/search", (string query, int? limit, IEnvironmentVariableProvider environment) =>
         {
-            var home = Environment.GetEnvironmentVariable("HOME")
+            var home = environment.GetEnvironmentVariable(HomeEnvironmentVariable)
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             var results = new List<object>();
             var searchLimit = limit ?? 50;

@@ -4,15 +4,29 @@ namespace Mohist.Cli;
 
 internal sealed class SkillInstallService
 {
+    public const string HermesHomeEnvironmentVariable = "HERMES_HOME";
+
     private readonly SkillAssetService _assets;
     private readonly IFileSystem _fileSystem;
+    private readonly IEnvironmentVariableProvider _environment;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
 
     public SkillInstallService(SkillAssetService assets, IFileSystem fileSystem, TextWriter output, TextWriter error)
+        : this(assets, fileSystem, SystemEnvironmentVariableProvider.Instance, output, error)
+    {
+    }
+
+    public SkillInstallService(
+        SkillAssetService assets,
+        IFileSystem fileSystem,
+        IEnvironmentVariableProvider environment,
+        TextWriter output,
+        TextWriter error)
     {
         _assets = assets;
         _fileSystem = fileSystem;
+        _environment = environment;
         _output = output;
         _error = error;
     }
@@ -52,11 +66,11 @@ internal sealed class SkillInstallService
         return 0;
     }
 
-    private static string ResolveTargetRoot(SkillInstallOptions options)
+    private string ResolveTargetRoot(SkillInstallOptions options)
     {
         if (options.Hermes)
         {
-            var hermesHome = Environment.GetEnvironmentVariable("HERMES_HOME");
+            var hermesHome = _environment.GetEnvironmentVariable(HermesHomeEnvironmentVariable);
             var hermesBasePath = string.IsNullOrWhiteSpace(hermesHome)
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".hermes")
                 : Path.GetFullPath(hermesHome);
@@ -64,7 +78,7 @@ internal sealed class SkillInstallService
         }
 
         var basePath = options.TargetPath is null
-            ? Directory.GetCurrentDirectory()
+            ? _fileSystem.CurrentDirectory
             : Path.GetFullPath(options.TargetPath);
         var installFolder = options.Claude ? Path.Combine(".claude", "skills") : Path.Combine(".agents", "skills");
         return Path.Combine(basePath, installFolder);

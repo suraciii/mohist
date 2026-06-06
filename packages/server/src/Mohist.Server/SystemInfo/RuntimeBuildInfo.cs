@@ -11,17 +11,24 @@ public interface IRuntimeBuildInfo
 
 public sealed class RuntimeBuildInfo : IRuntimeBuildInfo
 {
+    public const string GitHashEnvironmentVariable = "MOHIST_GIT_HASH";
+
     public string? Version { get; }
     public string? GitHash { get; }
     public DateTimeOffset StartedAt { get; }
 
     public RuntimeBuildInfo()
+        : this(SystemEnvironmentVariableProvider.Instance)
     {
-        StartedAt = DateTimeOffset.UtcNow;
-        (Version, GitHash) = ResolveIdentity();
     }
 
-    private static (string? Version, string? GitHash) ResolveIdentity()
+    public RuntimeBuildInfo(IEnvironmentVariableProvider environment)
+    {
+        StartedAt = DateTimeOffset.UtcNow;
+        (Version, GitHash) = ResolveIdentity(environment);
+    }
+
+    private static (string? Version, string? GitHash) ResolveIdentity(IEnvironmentVariableProvider environment)
     {
         var assembly = typeof(RuntimeBuildInfo).Assembly;
         var informationalVersion = assembly
@@ -31,7 +38,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo
         return ResolveIdentity(
             informationalVersion,
             versionFromAssembly,
-            () => Environment.GetEnvironmentVariable("MOHIST_GIT_HASH"),
+            () => environment.GetEnvironmentVariable(GitHashEnvironmentVariable),
             TryReadGitHeadFromSource);
     }
 

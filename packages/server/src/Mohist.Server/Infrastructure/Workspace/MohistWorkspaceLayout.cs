@@ -1,11 +1,21 @@
+using Mohist.Server.SystemInfo;
+
 namespace Mohist.Server.Infrastructure.Workspace;
 
 public static class MohistWorkspaceLayout
 {
+    public const string RunnerRootEnvironmentVariable = "MOHIST_RUNNER_ROOT";
+    public const string WorkspaceRootEnvironmentVariable = "MOHIST_WORKSPACE_ROOT";
+
     public static string DefaultRunnerRoot()
     {
-        var configured = Environment.GetEnvironmentVariable("MOHIST_RUNNER_ROOT")
-            ?? Environment.GetEnvironmentVariable("MOHIST_WORKSPACE_ROOT");
+        return DefaultRunnerRoot(SystemEnvironmentVariableProvider.Instance);
+    }
+
+    public static string DefaultRunnerRoot(IEnvironmentVariableProvider environment)
+    {
+        var configured = environment.GetEnvironmentVariable(RunnerRootEnvironmentVariable)
+            ?? environment.GetEnvironmentVariable(WorkspaceRootEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(configured);
 
