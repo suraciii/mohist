@@ -33,6 +33,23 @@ public static class MohistServiceRegistration
 {
     public static IServiceCollection AddMohistServerCore(this IServiceCollection services, IConfiguration configuration)
     {
+        return services.ConfigureMohistServices(configuration);
+    }
+
+    /// <summary>
+    /// Registers the full Mohist service graph on the given
+    /// <see cref="IServiceCollection"/>. Production code calls this via
+    /// <see cref="AddMohistServerCore"/>; test fixtures (e.g.
+    /// <c>MohistDbFixture</c>) call it directly to mirror the production
+    /// service registration without spinning up a <c>WebApplicationFactory</c>.
+    /// </summary>
+    /// <remarks>
+    /// Any new service the production app needs MUST be added here so the
+    /// test fixture picks it up automatically and does not drift from
+    /// production.
+    /// </remarks>
+    public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
+    {
         var connectionString = ResolveSqliteConnectionString(configuration);
 
         services.AddDbContextFactory<MohistDbContext>(options =>

@@ -121,6 +121,3 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
         return root;
     }
 }
-
-[CollectionDefinition("MohistIntegration", DisableParallelization = true)]
-public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;

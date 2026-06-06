@@ -73,9 +73,6 @@ public class BacklogFixture : IAsyncLifetime
     }
 }
 
-[CollectionDefinition("Backlog", DisableParallelization = true)]
-public class BacklogCollection;
-
 [Collection("Backlog")]
 public class BacklogSpecs : IClassFixture<BacklogFixture>
 {

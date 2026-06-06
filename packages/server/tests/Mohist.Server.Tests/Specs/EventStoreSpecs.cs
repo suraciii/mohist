@@ -11,17 +11,17 @@ using Xunit;
 
 namespace Mohist.Server.Tests.Specs;
 
-[Collection("MohistIntegration")]
+[Collection("MohistDb")]
 public class EventStoreSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly MohistDbFixture _fixture;
 
-    public EventStoreSpecs(MohistIntegrationFixture fixture)
+    public EventStoreSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AppendWorkflowEventAsync_StoresMinimalDomainEventRow()
@@ -70,7 +70,7 @@ public class EventStoreSpecs
             });
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task ListWorkflowEventsAsync_ProjectsDomainEventsFromPayload()
@@ -92,7 +92,7 @@ public class EventStoreSpecs
         Assert.Equal("task.1", payload.TaskId);
     }
 
-    [Trait(Traits.Speed.Name, Traits.Speed.Integration)]
+    [Trait(Traits.Speed.Name, Traits.Speed.Service)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
     public async Task AgentSessionStore_StoresSessionStateAndDomainEventsInOneCommit()

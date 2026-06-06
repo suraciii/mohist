@@ -84,10 +84,7 @@ public class WorkflowGrainFixture : IAsyncLifetime
     }
 }
 
-[CollectionDefinition("WorkflowGrain", DisableParallelization = true)]
-public class WorkflowGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
-
-internal class DbSchemaInitializer(IDbContextFactory<MohistDbContext> dbFactory) : IHostedService
+internal sealed class DbSchemaInitializer(IDbContextFactory<MohistDbContext> dbFactory) : IHostedService
 {
     public async Task StartAsync(CancellationToken ct)
     {
