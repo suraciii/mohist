@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
@@ -34,10 +35,12 @@ public static class StatusRoutes
             return ApiResults.Ok(status);
         });
 
-        app.MapGet("/api/projects/{projectRef}/status", async (string projectRef, IssueQuerier issuesQuery, ProjectRefResolver projects, IEnvironmentVariableProvider environment) =>
+        var byRef = app.MapGroup("/api/projects/{projectRef}")
+            .AddEndpointFilter<ProjectResolutionEndpointFilter>();
+
+        byRef.MapGet("/status", async (HttpContext context, IssueQuerier issuesQuery, IEnvironmentVariableProvider environment) =>
         {
-            var current = await projects.ResolveAsync(projectRef);
-            if (current is null) return ApiResults.NotFound("Project not found");
+            var current = context.GetResolvedProject();
 
             var allIssues = await issuesQuery.ListAsync(current.Id, current, all: true);
             var active = allIssues.Where(i => i.Health == "active").ToList();

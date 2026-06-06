@@ -1,5 +1,5 @@
+using Microsoft.AspNetCore.Http;
 using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Services;
@@ -10,32 +10,27 @@ public static class AgentRoutes
 {
     public static WebApplication MapAgentRoutes(this WebApplication app)
     {
-        var group = app.MapGroup("/api/projects/{projectRef}/agent");
+        var group = app.MapGroup("/api/projects/{projectRef}/agent")
+            .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapGet("/status", async (string projectRef, IGrainFactory grains, WorkflowActivityQuerier projection, ProjectRefResolver projects) =>
+        group.MapGet("/status", async (HttpContext context, IGrainFactory grains, WorkflowActivityQuerier projection) =>
         {
-            var project = await projects.ResolveAsync(projectRef);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
+            var project = context.GetResolvedProject();
             var runners = await ListAvailableRunnersAsync(grains, project.Id);
             var activeAgents = await projection.ListActiveAgentsAsync(project.Id);
 
             return ApiResults.Ok(AgentStatusResponse.Create(activeAgents, runners));
         });
 
-        group.MapGet("/sessions", async (string projectRef, string? status, int? limit, AgentSessionQuerier sessions, ProjectRefResolver projects) =>
+        group.MapGet("/sessions", async (HttpContext context, string? status, int? limit, AgentSessionQuerier sessions) =>
         {
-            var project = await projects.ResolveAsync(projectRef);
-            return project is null
-                ? ApiResults.NotFound("Project not found")
-                : ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
+            var project = context.GetResolvedProject();
+            return ApiResults.Ok(await sessions.ListCurrentAsync(project.Id, status, limit ?? 50));
         });
 
-        group.MapGet("/activity", async (string projectRef, int? limit, AgentSessionQuerier sessions, IGrainFactory grains, WorkflowActivityQuerier projection, ProjectRefResolver projects, CancellationToken ct) =>
+        group.MapGet("/activity", async (HttpContext context, int? limit, AgentSessionQuerier sessions, IGrainFactory grains, WorkflowActivityQuerier projection, CancellationToken ct) =>
         {
-            var project = await projects.ResolveAsync(projectRef);
-            if (project is null) return ApiResults.NotFound("Project not found");
-
+            var project = context.GetResolvedProject();
             var runnerIds = (await ListAvailableRunnersAsync(grains, project.Id)).Select(r => r.RunnerId).ToArray();
             return ApiResults.Ok(await sessions.GetActivityAsync(project.Id, limit, runnerIds: runnerIds, ct: ct));
         });

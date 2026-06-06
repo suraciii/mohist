@@ -20,10 +20,9 @@ public static partial class IssueRoutes
             int number,
             IssueWorkflowProfileManager issueProfileManager,
             IssueQuerier issuesQuery,
-            ProjectRefResolver projects,
             ProjectQuerier projectsQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             var response = await BuildIssueWorkflowProfileResponseAsync(project.Id, number, issueProfileManager, issuesQuery, projectsQuery);
             return response is null ? ApiResults.NotFound($"Issue #{number} not found") : ApiResults.Ok(response);
         });
@@ -35,10 +34,9 @@ public static partial class IssueRoutes
             IssueTemplateRequest req,
             IssueWorkflowProfileManager issueProfileManager,
             IssueQuerier issuesQuery,
-            ProjectRefResolver projects,
             ProjectQuerier projectsQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
             return await UpdateIssueWorkflowTemplateAsync(project.Id, number, req, issueProfileManager, issuesQuery, projectsQuery);
         });
 
@@ -48,10 +46,9 @@ public static partial class IssueRoutes
             int number,
             IssueWorkflowProfileManager issueProfileManager,
             IssueQuerier issuesQuery,
-            ProjectRefResolver projects,
             ProjectQuerier projectsQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -66,10 +63,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -83,10 +79,9 @@ public static partial class IssueRoutes
             int number,
             VariableBundle bundle,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -100,10 +95,9 @@ public static partial class IssueRoutes
             int number,
             VariableBundle patch,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -116,10 +110,9 @@ public static partial class IssueRoutes
             string projectRef,
             int number,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -134,15 +127,14 @@ public static partial class IssueRoutes
             string key,
             IssuePromptUpsertRequest? req,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
             if (req is null || string.IsNullOrWhiteSpace(req.Body))
                 return ApiResults.BadRequest("body is required");
             if (string.IsNullOrWhiteSpace(key))
                 return ApiResults.BadRequest("key is required");
 
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -157,13 +149,12 @@ public static partial class IssueRoutes
             int number,
             string key,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
             if (string.IsNullOrWhiteSpace(key))
                 return ApiResults.BadRequest("key is required");
 
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -179,10 +170,9 @@ public static partial class IssueRoutes
             string key,
             PromptPreviewRequest? req,
             IssueWorkflowProfileManager issueProfileManager,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetInfoAsync(project.Id, number, project);
             if (issue is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -212,10 +202,9 @@ public static partial class IssueRoutes
             int number,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");

@@ -30,22 +30,14 @@ public static partial class IssueRoutes
     /// Throws if the filter has not run for the current request — that almost
     /// always means the route group forgot to apply the filter.
     /// </summary>
-    internal static ProjectInfo GetRequiredProject(HttpContext context, ProjectRefResolver resolver, string projectRef)
-    {
-        if (context.Items.TryGetValue(ProjectResolutionEndpointFilter.ProjectInfoItemKey, out var value)
-            && value is ProjectInfo cached)
-        {
-            return cached;
-        }
-
-        // Defensive: the filter should have populated HttpContext.Items.
-        // If we reach here, fall back to the resolver and assert non-null.
-        return resolver.ResolveAsync(projectRef).GetAwaiter().GetResult()
-            ?? throw new InvalidOperationException(
-                $"ProjectRefResolver returned null for '{projectRef}' but " +
-                "ProjectResolutionEndpointFilter should have 404'd earlier. " +
-                "Verify the route group applies AddEndpointFilter<ProjectResolutionEndpointFilter>().");
-    }
+    /// <remarks>
+    /// This helper is a thin wrapper around
+    /// <see cref="ProjectResolutionHttpContextExtensions.GetResolvedProject"/>;
+    /// we keep it so that IssueRoutes handlers can express "I need the project"
+    /// without explicitly taking a dependency on the filter contract.
+    /// </remarks>
+    internal static ProjectInfo GetRequiredProject(HttpContext context)
+        => context.GetResolvedProject();
 
     internal static async Task<string?> ResolveWorkflowRunIdAsync(
         IGrainFactory grains,

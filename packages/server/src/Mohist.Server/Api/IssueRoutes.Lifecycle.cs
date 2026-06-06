@@ -18,10 +18,9 @@ public static partial class IssueRoutes
             int number,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -51,10 +50,9 @@ public static partial class IssueRoutes
             AddCommentRequest req,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -75,10 +73,9 @@ public static partial class IssueRoutes
             int number,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -99,10 +96,9 @@ public static partial class IssueRoutes
             int number,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -124,10 +120,9 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
             IGitService git,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var issue = await issuesQuery.GetAsync(project.Id, number);
             if (issue is null) return ApiResults.NotFound("Issue not found");
@@ -163,10 +158,9 @@ public static partial class IssueRoutes
             int number,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -186,10 +180,9 @@ public static partial class IssueRoutes
             string projectRef,
             IGrainFactory grains,
             IssueQuerier issuesQuery,
-            IGitService git,
-            ProjectRefResolver projects) =>
+            IGitService git) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var all = await issuesQuery.ListAsync(project.Id, null, all: true);
             var completed = all.Where(i => i.Status == "done" && i.ArchivedAt == null).ToList();

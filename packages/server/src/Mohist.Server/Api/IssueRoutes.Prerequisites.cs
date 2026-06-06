@@ -15,10 +15,9 @@ public static partial class IssueRoutes
             AddPrerequisiteRequest req,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
@@ -44,10 +43,9 @@ public static partial class IssueRoutes
             int prerequisiteNumber,
             IGrainFactory grains,
             IssueIdentityResolver issueIdentityResolver,
-            IssueQuerier issuesQuery,
-            ProjectRefResolver projects) =>
+            IssueQuerier issuesQuery) =>
         {
-            var project = GetRequiredProject(ctx, projects, projectRef);
+            var project = GetRequiredProject(ctx);
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
