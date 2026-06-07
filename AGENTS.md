@@ -49,17 +49,11 @@ packages/web/
 └── tests/                      # Web UI tests
 ```
 
-## 工作流阶段
+## 工作流
 
-实际由 `mohist-default.workflow.yaml` 定义 (8 个 stage)：
+工作流是**用户可配置的**：每个项目可选择或自定义自己的 workflow 模板（YAML），由 runner 解释执行。**AGENTS.md 不记录具体 stage 名称或职责**——这些会在模板和实现之间持续漂移。默认模板和当前 stage 设计见 `packages/server/src/Mohist.Server/Issue/Services/WorkflowProfiles/` 下的 yaml 文件，运行时调度契约见 `design/workflow-scheduling.md`。
 
-```
-proposal → specs → design → tasks → self-review → load-tasks → ai-review → integrate
-                            ↑                       ↑              ↑           ↑
-                          (用户审批)             (auto)         (用户审批)   (auto)
-```
-
-Issue 状态机 (`IssueStatus` 枚举) 与上述 stage 不同，定义在 `Issue/Domain/IssueStatus.cs`：
+Issue 自身有独立于 workflow stage 的生命周期状态机（`IssueStatus` 枚举），定义在 `Issue/Domain/IssueStatus.cs`：
 
 | Issue 状态 | 含义 |
 |------|------|
@@ -68,22 +62,7 @@ Issue 状态机 (`IssueStatus` 枚举) 与上述 stage 不同，定义在 `Issue
 | `Done` | workflow 成功完成 |
 | `Cancelled` | 显式关闭或归档 |
 
-> **重要**：AGENTS.md 早期版本描述的 `Draft → Plan → Build → Check → Integrate → Done` 是设计意图，**当前实现的 yaml 用 `proposal/specs/design/tasks/.../integrate`** 命名，请以 yaml 为准。
-
 Explore 不再是 Mohist runtime 内置功能。探索/需求澄清通过 `mo skills install` 安装的外部 agent skill（如 `mohist-explore`）完成；Mohist runtime 只管理 issue、workflow、审批、产物和执行调度。
-
-### 各阶段职责
-
-| Stage | 职责 | Gate |
-|------|------|------|
-| `proposal` | 产生技术 proposal | — |
-| `specs` | 拆解为 capability specs | — |
-| `design` | 任务设计 / 变量构建 | — |
-| `tasks` | 逐个执行任务 (AFK/HITL) | 健康门控 (build) + 全任务完成 |
-| `self-review` | 自我审查 | — |
-| `load-tasks` | 加载下一批任务 | — |
-| `ai-review` | AI 代码审查 | 用户审批 + merge-ready 检查 |
-| `integrate` | spec sync + 归档 + 合并 + 集成后健康检查 | 集成后门控 (build+test) |
 
 ## 常用命令
 
@@ -128,10 +107,10 @@ npm run dev:web
 - Grain 单线程激活模型替代旧 `WorkflowEngine` + `Mutex` + `CheckpointManager`
 
 ### 审批流
-- Plan（`design`） 和 Check（`ai-review`）阶段需要用户审批
+- 用户审批的 stage 由 workflow 模板在 yaml 中声明（典型默认模板包含两个审批 gate：设计与 AI 审查）
 - 审批暂停时 UI 通过 `stage_changed` 事件 + `availableActions` 字段推断待办（**`approval_requested` SSE 事件当前未 emit**，见 `EventBusEventTypes.cs:13` 是死注册）
 - 通过/驳回后自动入队 `resume-pipeline`
-- 失败回退：当前实现用 `rerun` action 目标 `run.CurrentStageId`，**不跨阶段回退**（Check 驳回/Integrate 失败都重跑当前 stage，与文档早期描述不一致；待修）
+- 失败回退：当前实现用 `rerun` action 目标 `run.CurrentStageId`，**不跨阶段回退**——驳回和失败都重跑当前 stage，跨阶段回退待修
 
 ### Provider 接口
 - 当前实现统一通过 **opencode** runtime 委托 agent 工作
@@ -140,11 +119,10 @@ npm run dev:web
 - 多 provider 架构（anthropic/openai/glm/kimi/deepseek/minimax/qwen）是历史设计意图，**当前未实现**
 
 ### OpenSpec 集成
-- 基于 proposal → specs + design → tasks 模型
+- 基于 OpenSpec 的 proposal → specs + design → tasks 模型
 - 产物存放在 `openspec/changes/{slug}/`
-- `self-review.md` 在 Plan 阶段自动生成（agent 自审）
-- `review.md` 在 Check 阶段自动生成（AI 审查）
-- Integrate 阶段自动同步增量规格到主规格 + 归档 change
+- 模板中可声明自我审查与 AI 审查 stage 产出 self-review.md / review.md 制品
+- 模板中可声明整合 stage 自动同步增量规格到主规格 + 归档 change
 - 支持 Ralph 式任务执行（逐个任务、断点续传、失败恢复）
 
 ## 后端重构：ASP.NET Core / Orleans
