@@ -33,7 +33,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly IEventBus _eventBus;
-    private readonly IEnumerable<IWorkflowCompletionHook> _completionHooks;
+    private readonly IEnumerable<IWorkflowCompletedHook> _completedHooks;
+    private readonly IEnumerable<IWorkflowFailedHook> _failedHooks;
+    private readonly IEnumerable<IWorkflowStoppedHook> _stoppedHooks;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
 
@@ -43,7 +45,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IStateStore<WorkflowExecutionContext> variablesStore,
         IWorkflowBacklogDirectory backlogs,
         IEventBus eventBus,
-        IEnumerable<IWorkflowCompletionHook> completionHooks,
+        IEnumerable<IWorkflowCompletedHook> completedHooks,
+        IEnumerable<IWorkflowFailedHook> failedHooks,
+        IEnumerable<IWorkflowStoppedHook> stoppedHooks,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
@@ -52,7 +56,9 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _variablesStore = variablesStore;
         _backlogs = backlogs;
         _eventBus = eventBus;
-        _completionHooks = completionHooks;
+        _completedHooks = completedHooks;
+        _failedHooks = failedHooks;
+        _stoppedHooks = stoppedHooks;
         _profileManager = profileManager;
         _log = log;
     }
@@ -946,7 +952,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             WorkflowRunResumed => OnWorkflowResumedAsync(),
             WorkflowRunPaused => OnWorkflowPausedAsync(reason),
             WorkflowRunStopped => OnWorkflowStoppedAsync(reason),
-            WorkflowRunFailed => DisableWorkHeartbeatAsync(),
+            WorkflowRunFailed => OnWorkflowFailedAsync(reason),
             WorkflowRunCompleted => OnWorkflowCompletedAsync(),
             StageStarted => EnsureWorkHeartbeatAsync(),
             StageCompleted x => ReleaseStageLocksAsync(x.Stage, "completed"),
@@ -983,12 +989,20 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         EmitStageChanged("stopped", reason);
         await DisableWorkHeartbeatAsync();
+        await DispatchLifecycleHooksAsync(_stoppedHooks, "stopped", reason);
+    }
+
+    private async Task OnWorkflowFailedAsync(string? reason)
+    {
+        EmitStageChanged("failed", reason);
+        await DisableWorkHeartbeatAsync();
+        await DispatchLifecycleHooksAsync(_failedHooks, "failed", reason);
     }
 
     private async Task OnWorkflowCompletedAsync()
     {
         await DisableWorkHeartbeatAsync();
-        await DispatchCompletedHooksAsync();
+        await DispatchLifecycleHooksAsync(_completedHooks, "completed", null);
     }
 
     private Task OnApprovalResolvedAsync(StageApprovalResolved e)
@@ -1013,21 +1027,26 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return Task.CompletedTask;
     }
 
-    private async Task DispatchCompletedHooksAsync()
+    private async Task DispatchLifecycleHooksAsync<T>(IEnumerable<T> hooks, string terminal, string? reason) where T : class
     {
         if (_run is null) return;
 
         var (projectId, issueId, issueNumber) = GetHookContext();
-        var context = new WorkflowCompletionHookContext(GrainKey, projectId, issueId, issueNumber);
-        foreach (var hook in _completionHooks)
+        var context = new WorkflowLifecycleHookContext(GrainKey, projectId, issueId, issueNumber, reason);
+        foreach (var hook in hooks)
         {
             try
             {
-                await hook.OnCompletedAsync(context);
+                switch (hook)
+                {
+                    case IWorkflowCompletedHook c: await c.OnCompletedAsync(context); break;
+                    case IWorkflowFailedHook f: await f.OnFailedAsync(context); break;
+                    case IWorkflowStoppedHook s: await s.OnStoppedAsync(context); break;
+                }
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Workflow {WorkflowRunId} completion hook {Hook} failed", GrainKey, hook.GetType().Name);
+                _log.LogError(ex, "Workflow {WorkflowRunId} {Terminal} hook {Hook} failed", GrainKey, terminal, hook.GetType().Name);
             }
         }
     }

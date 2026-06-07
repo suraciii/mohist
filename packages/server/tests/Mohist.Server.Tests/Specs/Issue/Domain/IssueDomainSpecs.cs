@@ -80,14 +80,17 @@ public class IssueDomainSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Issue)]
     [Fact]
-    public void Close_KeepsWorkflowReference()
+    public void Close_ClearsWorkflowReference_AndMarksCancelled()
     {
+        // After the G3 fix, Close() clears ActiveWorkflowRunId so the issue
+        // can be reopened or a new workflow started (the old "stuck issue"
+        // pattern).
         var issue = Mohist.Server.Issue.Domain.Issue.Create("issue_1", "project-1", 1, "Build the feature");
         issue.StartWorkflow("wr_1");
 
         issue.Close();
 
         Assert.Equal(Mohist.Server.Issue.Domain.IssueStatus.Cancelled, issue.Status);
-        Assert.Equal("wr_1", issue.ActiveWorkflowRunId);
+        Assert.Null(issue.ActiveWorkflowRunId);
     }
 }

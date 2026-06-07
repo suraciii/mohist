@@ -165,6 +165,10 @@ public class IssueGrain : Grain, IIssueGrain
             var wfGrain = GrainFactory.GetGrain<IWorkflowGrain>(wrId);
             await wfGrain.StopAsync("issue-closed");
         }
+        // Explicit close. IssueWorkflowCompletionHook.OnStoppedAsync will
+        // also call AbortWorkAsync for the same Stopped event; AbortWorkflow
+        // is idempotent (no-op if already Cancelled), so the double dispatch
+        // is safe.
         _issue.Close();
         await SaveIssueAsync();
     }
@@ -173,6 +177,13 @@ public class IssueGrain : Grain, IIssueGrain
     {
         if (_issue is null) return;
         if (!_issue.Complete(workflowRunId)) return;
+        await SaveIssueAsync();
+    }
+
+    public async Task AbortWorkAsync(string workflowRunId, string? reason)
+    {
+        if (_issue is null) return;
+        if (!_issue.AbortWorkflow(workflowRunId)) return;
         await SaveIssueAsync();
     }
 
