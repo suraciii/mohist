@@ -30,8 +30,7 @@ public static class WorkspaceRoutes
             if (!await BranchExistsAsync(git, issue, repoPath))
                 return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
 
-            var runId = issue.WorkflowRunId;
-            if (string.IsNullOrEmpty(runId))
+            if (string.IsNullOrEmpty(issue.WorkflowRunId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
 
             try
@@ -76,8 +75,7 @@ public static class WorkspaceRoutes
             if (!await BranchExistsAsync(git, issue, repoPath))
                 return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found" });
 
-            var runId = issue.WorkflowRunId;
-            if (string.IsNullOrEmpty(runId))
+            if (string.IsNullOrEmpty(issue.WorkflowRunId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow" });
 
             try
@@ -124,8 +122,7 @@ public static class WorkspaceRoutes
             if (!await BranchExistsAsync(git, issue, repoPath))
                 return ApiResults.Ok(new { available = false, reason = "branch_missing", message = "Branch not found", hash, diff = "" });
 
-            var runId = issue.WorkflowRunId;
-            if (string.IsNullOrEmpty(runId))
+            if (string.IsNullOrEmpty(issue.WorkflowRunId))
                 return ApiResults.Ok(new { available = false, reason = "not_started", message = "Issue has no active workflow", hash, diff = "" });
 
             try
@@ -153,8 +150,7 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            var runId = issue.WorkflowRunId;
-            if (string.IsNullOrEmpty(runId))
+            if (string.IsNullOrEmpty(issue.WorkflowRunId))
                 return ApiResults.Ok(new { exists = false });
 
             try
@@ -180,8 +176,7 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            var runId = issue.WorkflowRunId;
-            if (string.IsNullOrEmpty(runId))
+            if (string.IsNullOrEmpty(issue.WorkflowRunId))
                 return ApiResults.Ok(new { @base = (string?)null, head = (string?)null });
 
             try

@@ -40,7 +40,6 @@ public struct StageDefinitionSurrogate
     [Id(2)] public List<CheckDefinition> Checks;
     [Id(4)] public bool RequiresApproval;
     [Id(5)] public Dictionary<string, JsonElement?>? Variables;
-    [Id(6)] public Dictionary<string, StageEventPolicy>? On;
     [Id(7)] public string? LockBehavior;
     [Id(8)] public List<string>? Resources;
 }
@@ -49,7 +48,7 @@ public struct StageDefinitionSurrogate
 public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefinition, StageDefinitionSurrogate>
 {
     public StageDefinition ConvertFromSurrogate(in StageDefinitionSurrogate surrogate) =>
-        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.RequiresApproval, surrogate.Variables, surrogate.On, surrogate.LockBehavior, surrogate.Resources);
+        new(surrogate.Stage, surrogate.Tasks, surrogate.Checks, surrogate.RequiresApproval, surrogate.Variables, surrogate.LockBehavior, surrogate.Resources);
 
     public StageDefinitionSurrogate ConvertToSurrogate(in StageDefinition value) => new()
     {
@@ -58,7 +57,6 @@ public sealed class StageDefinitionSurrogateConverter : IConverter<StageDefiniti
         Checks = value.Checks,
         RequiresApproval = value.RequiresApproval,
         Variables = value.Variables,
-        On = value.On,
         LockBehavior = value.LockBehavior,
         Resources = value.Resources,
     };
@@ -71,18 +69,13 @@ public struct TaskDefinitionSurrogate
     [Id(1)] public string Title;
     [Id(2)] public string? Uses;
     [Id(3)] public Dictionary<string, JsonElement?>? With;
-    [Id(4)] public string[]? DependsOn;
-    [Id(5)] public string[]? OnSuccessEmit;
 }
 
 [RegisterConverter]
 public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition, TaskDefinitionSurrogate>
 {
     public TaskDefinition ConvertFromSurrogate(in TaskDefinitionSurrogate surrogate) =>
-        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With, surrogate.DependsOn)
-        {
-            OnSuccessEmit = surrogate.OnSuccessEmit,
-        };
+        new(surrogate.Id, surrogate.Title, surrogate.Uses, surrogate.With);
 
     public TaskDefinitionSurrogate ConvertToSurrogate(in TaskDefinition value) => new()
     {
@@ -90,8 +83,6 @@ public sealed class TaskDefinitionSurrogateConverter : IConverter<TaskDefinition
         Title = value.Title,
         Uses = value.Uses,
         With = value.With,
-        DependsOn = value.DependsOn,
-        OnSuccessEmit = value.OnSuccessEmit,
     };
 }
 
@@ -158,45 +149,5 @@ public sealed class CheckFailureRepairSurrogateConverter : IConverter<CheckFailu
         Limit = value.Limit,
         Task = value.Task,
         VerifyTask = value.VerifyTask,
-    };
-}
-
-[GenerateSerializer]
-public struct StageEventPolicySurrogate
-{
-    [Id(0)] public StageResetAction Reset;
-}
-
-[RegisterConverter]
-public sealed class StageEventPolicySurrogateConverter : IConverter<StageEventPolicy, StageEventPolicySurrogate>
-{
-    public StageEventPolicy ConvertFromSurrogate(in StageEventPolicySurrogate surrogate) =>
-        new(surrogate.Reset);
-
-    public StageEventPolicySurrogate ConvertToSurrogate(in StageEventPolicy value) => new()
-    {
-        Reset = value.Reset,
-    };
-}
-
-[GenerateSerializer]
-public struct StageResetActionSurrogate
-{
-    [Id(0)] public string[]? Tasks;
-    [Id(1)] public string[]? Checks;
-    [Id(2)] public bool Approval;
-}
-
-[RegisterConverter]
-public sealed class StageResetActionSurrogateConverter : IConverter<StageResetAction, StageResetActionSurrogate>
-{
-    public StageResetAction ConvertFromSurrogate(in StageResetActionSurrogate surrogate) =>
-        new(surrogate.Tasks, surrogate.Checks, surrogate.Approval);
-
-    public StageResetActionSurrogate ConvertToSurrogate(in StageResetAction value) => new()
-    {
-        Tasks = value.Tasks,
-        Checks = value.Checks,
-        Approval = value.Approval,
     };
 }
