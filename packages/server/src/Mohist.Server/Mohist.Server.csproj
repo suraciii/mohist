@@ -15,6 +15,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="YamlDotNet" />
     <PackageReference Include="EnvironmentAbstractions" />
+    <PackageReference Include="CloudNative.CloudEvents" />
   </ItemGroup>
 
   <ItemGroup>

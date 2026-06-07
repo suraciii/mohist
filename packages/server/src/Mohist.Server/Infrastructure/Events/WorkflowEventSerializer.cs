@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Infrastructure.Events;
@@ -8,6 +9,50 @@ internal static class WorkflowEventSerializer
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static string Type(WorkflowEvent payload) => Unwrap(payload).GetType().Name;
+
+    /// <summary>
+    /// CloudEvents 1.0.2 reverse-DNS <c>type</c> for the workflow domain event.
+    /// Legacy PascalCase class names are still emitted as the persisted
+    /// <c>EventRow.Type</c> (via <see cref="Type"/>) for storage compatibility;
+    /// the CloudEvents bus uses this mapping instead.
+    /// </summary>
+    public static string BusType(WorkflowEvent payload) => Unwrap(payload) switch
+    {
+        WorkflowRunStarted => EventCatalog.ReverseDns.WorkflowRunStarted,
+        WorkflowRunResumed => EventCatalog.ReverseDns.WorkflowRunResumed,
+        WorkflowRunPaused => EventCatalog.ReverseDns.WorkflowRunPaused,
+        WorkflowRunStopped => EventCatalog.ReverseDns.WorkflowRunStopped,
+        WorkflowRunCompleted => EventCatalog.ReverseDns.WorkflowRunCompleted,
+        WorkflowRunFailed => EventCatalog.ReverseDns.WorkflowRunFailed,
+        StageStarted => EventCatalog.ReverseDns.StageStarted,
+        StageCompleted => EventCatalog.ReverseDns.StageCompleted,
+        StageFailed => EventCatalog.ReverseDns.StageFailed,
+        StageApprovalRequested => EventCatalog.ReverseDns.StageApprovalRequested,
+        StageApprovalResolved => EventCatalog.ReverseDns.StageApprovalResolved,
+        TaskCompleted => EventCatalog.ReverseDns.TaskCompleted,
+        TaskFailed => EventCatalog.ReverseDns.TaskFailed,
+        CheckPassed => EventCatalog.ReverseDns.CheckPassed,
+        CheckFailed => EventCatalog.ReverseDns.CheckFailed,
+        CheckPending => EventCatalog.ReverseDns.CheckPending,
+        RepairScheduled => EventCatalog.ReverseDns.RepairScheduled,
+        _ => throw new InvalidOperationException($"No CloudEvents type for {Unwrap(payload).GetType().Name}"),
+    };
+
+    /// <summary>
+    /// Extract the workflow run id (source) and the issue number subject
+    /// from a staged event's row metadata.
+    /// </summary>
+    public static (string WorkflowRunId, string? IssueNumber) ExtractContext(StagedWorkflowEvent staged) =>
+        ExtractContextFromSource(staged.Row.Source);
+
+    public static (string WorkflowRunId, string? IssueNumber) ExtractContextFromSource(string source)
+    {
+        // Source format: /workflow-runs/{workflowRunId}  (WorkflowEventPersistence.WorkflowRunSource)
+        var prefix = "/workflow-runs/";
+        if (!source.StartsWith(prefix, StringComparison.Ordinal))
+            return (source, null);
+        return (source[prefix.Length..], null);
+    }
 
     public static JsonElement ToData(WorkflowEvent payload) =>
         JsonSerializer.SerializeToElement(Unwrap(payload), JsonOptions);

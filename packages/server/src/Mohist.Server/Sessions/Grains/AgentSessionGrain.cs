@@ -281,7 +281,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private async Task EmitStartedAsync(AgentSession session)
     {
         var row = await LoadProjectionAsync(session.Id);
-        _eventBus.Emit("coder_session_started", new CoderSessionStartedEvent(
+        var payload = new CoderSessionStartedEvent(
             session.IssueNumber.ToString(),
             session.ProjectId,
             session.Id,
@@ -290,38 +290,53 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             session.Settings.Model,
             row?.Stage,
             null,
-            null));
+            null);
+        _eventBus.Emit(CloudEventFactory.Create(
+            type: "coder_session_started",
+            source: AgentSessionSource(session),
+            data: payload,
+            subject: session.IssueNumber.ToString(),
+            projectId: session.ProjectId,
+            issueNumber: session.IssueNumber.ToString()));
     }
 
     private void EmitTranscriptEntry(AgentSession session, AgentSessionRuntimeEventRow entry)
     {
         var text = ExtractText(entry.PayloadJson);
+        var source = AgentSessionSource(session);
+        var subject = session.IssueNumber.ToString();
         if (entry.Type is "agent_message_chunk" or "agent_output_chunk")
         {
-            _eventBus.Emit("coder_text_chunk", new CoderTranscriptEntryEvent(
+            var payload = new CoderTranscriptEntryEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
                 entry.WorkId,
                 session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
-                text));
+                text);
+            _eventBus.Emit(CloudEventFactory.Create(
+                type: "coder_text_chunk", source: source, data: payload,
+                subject: subject, projectId: session.ProjectId, issueNumber: subject));
         }
         else if (entry.Type is "agent_thought_chunk")
         {
-            _eventBus.Emit("coder_thought_chunk", new CoderTranscriptEntryEvent(
+            var payload = new CoderTranscriptEntryEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
                 entry.WorkId,
                 session.Status.AgentRuntimeSessionId ?? session.Id,
                 session.Id,
-                text));
+                text);
+            _eventBus.Emit(CloudEventFactory.Create(
+                type: "coder_thought_chunk", source: source, data: payload,
+                subject: subject, projectId: session.ProjectId, issueNumber: subject));
         }
         else if (entry.Type is "tool_call" or "tool_call_update")
         {
             var tool = ParseToolCall(entry.PayloadJson, entry.Type);
             if (tool is null) return;
 
-            _eventBus.Emit("coder_tool_call", new CoderToolCallEvent(
+            var payload = new CoderToolCallEvent(
                 session.IssueNumber.ToString(),
                 session.ProjectId,
                 entry.WorkId,
@@ -338,31 +353,58 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 tool.NormalizedName,
                 tool.DisplayTitle,
                 tool.DisplaySubtitle,
-                tool.Category));
+                tool.Category);
+            _eventBus.Emit(CloudEventFactory.Create(
+                type: "coder_tool_call", source: source, data: payload,
+                subject: subject, projectId: session.ProjectId, issueNumber: subject));
         }
     }
 
-    private void EmitStatusChanged(AgentSession session) => _eventBus.Emit("coder_session_status_changed", new CoderSessionStatusChangedEvent(
-        session.IssueNumber.ToString(),
-        session.ProjectId,
-        session.Id,
-        session.Status.AgentRuntimeSessionId ?? session.Id,
-        AgentSessionStatusNames.ToName(session.Status.Phase),
-        session.Status.LastDataAt?.ToString("o"),
-        session.Status.FailureReason));
-
-    private void EmitTerminal(AgentSession session, string terminal) => _eventBus.Emit(terminal switch
+    private void EmitStatusChanged(AgentSession session)
     {
-        "failed" => "coder_session_failed",
-        "cancelled" => "coder_session_cancelled",
-        _ => "coder_session_completed"
-    }, new CoderSessionTerminalEvent(
-        session.IssueNumber.ToString(),
-        session.ProjectId,
-        session.Id,
-        terminal,
-        session.Status.FailureReason,
-        DurationMs(session)));
+        var payload = new CoderSessionStatusChangedEvent(
+            session.IssueNumber.ToString(),
+            session.ProjectId,
+            session.Id,
+            session.Status.AgentRuntimeSessionId ?? session.Id,
+            AgentSessionStatusNames.ToName(session.Status.Phase),
+            session.Status.LastDataAt?.ToString("o"),
+            session.Status.FailureReason);
+        _eventBus.Emit(CloudEventFactory.Create(
+            type: "coder_session_status_changed",
+            source: AgentSessionSource(session),
+            data: payload,
+            subject: session.IssueNumber.ToString(),
+            projectId: session.ProjectId,
+            issueNumber: session.IssueNumber.ToString()));
+    }
+
+    private void EmitTerminal(AgentSession session, string terminal)
+    {
+        var busName = terminal switch
+        {
+            "failed" => "coder_session_failed",
+            "cancelled" => "coder_session_cancelled",
+            _ => "coder_session_completed"
+        };
+        var payload = new CoderSessionTerminalEvent(
+            session.IssueNumber.ToString(),
+            session.ProjectId,
+            session.Id,
+            terminal,
+            session.Status.FailureReason,
+            DurationMs(session));
+        _eventBus.Emit(CloudEventFactory.Create(
+            type: busName,
+            source: AgentSessionSource(session),
+            data: payload,
+            subject: session.IssueNumber.ToString(),
+            projectId: session.ProjectId,
+            issueNumber: session.IssueNumber.ToString()));
+    }
+
+    private static Uri AgentSessionSource(AgentSession session) =>
+        new($"/mohist/agent-session/{session.Id}", UriKind.Relative);
 
     private static long DurationMs(AgentSession session)
     {

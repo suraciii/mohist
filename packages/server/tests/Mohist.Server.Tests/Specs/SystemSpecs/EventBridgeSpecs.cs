@@ -31,7 +31,12 @@ public class EventBridgeSpecs
         var message = Assert.Single(hub.Messages);
         Assert.Equal("project:project-1", message.GroupName);
         Assert.Equal("stage_changed", message.EventName);
-        Assert.IsType<StageChangedEvent>(message.Data);
+        var envelope = Assert.IsType<CloudEventEnvelope>(message.Data);
+        Assert.Equal("stage_changed", envelope.Type);
+        Assert.Equal("1.0", envelope.SpecVersion);
+        Assert.NotNull(envelope.Id);
+        Assert.NotNull(envelope.Time);
+        Assert.Equal("project-1", envelope.Extensions?["projectid"]);
 
         await bridge.StopAsync(CancellationToken.None);
     }

@@ -1,8 +1,10 @@
-using Mohist.Server.Infrastructure.Events;
+using CloudNative.CloudEvents;
 using Microsoft.EntityFrameworkCore;
-using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Issue.Services.WorkflowProfiles;
+using Mohist.Server.Workflow.Domain.Definition;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Xunit;
@@ -40,8 +42,11 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
     [Fact]
     public async Task WorkflowStart_EmitsStageChanged()
     {
-        var received = new List<object>();
-        Action<object> handler = data => received.Add(data);
+        var received = new List<CloudEvent>();
+        Action<object> handler = data =>
+        {
+            if (data is CloudEvent ce) received.Add(ce);
+        };
         _fixture.EventBus.On("stage_changed", handler);
 
         try
@@ -52,7 +57,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
             await wf.StartAsync(TestInput());
 
             Assert.Single(received);
-            var json = System.Text.Json.JsonSerializer.Serialize(received[0]);
+            Assert.Equal("stage_changed", received[0].Type);
+            var json = (received[0].Data as System.Text.Json.JsonElement?)?.GetRawText() ?? "";
             Assert.Contains("\"action\":\"started\"", json);
             Assert.Contains("\"stage\":\"plan\"", json);
         }
@@ -67,8 +73,11 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
     [Fact]
     public async Task WorkflowPause_EmitsStageChanged()
     {
-        var received = new List<object>();
-        Action<object> handler = data => received.Add(data);
+        var received = new List<CloudEvent>();
+        Action<object> handler = data =>
+        {
+            if (data is CloudEvent ce) received.Add(ce);
+        };
         _fixture.EventBus.On("stage_changed", handler);
 
         try
@@ -82,7 +91,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
             await wf.PauseAsync("user-requested");
 
             Assert.Single(received);
-            var json = System.Text.Json.JsonSerializer.Serialize(received[0]);
+            Assert.Equal("stage_changed", received[0].Type);
+            var json = (received[0].Data as System.Text.Json.JsonElement?)?.GetRawText() ?? "";
             Assert.Contains("\"action\":\"paused\"", json);
             Assert.Contains("\"reason\":\"user-requested\"", json);
         }
@@ -97,8 +107,11 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
     [Fact]
     public async Task WorkflowResume_EmitsStageChanged()
     {
-        var received = new List<object>();
-        Action<object> handler = data => received.Add(data);
+        var received = new List<CloudEvent>();
+        Action<object> handler = data =>
+        {
+            if (data is CloudEvent ce) received.Add(ce);
+        };
         _fixture.EventBus.On("stage_changed", handler);
 
         try
@@ -113,7 +126,8 @@ public class WorkflowEventSpecs : IClassFixture<WorkflowGrainFixture>
             await wf.ResumeAsync();
 
             Assert.Single(received);
-            var json = System.Text.Json.JsonSerializer.Serialize(received[0]);
+            Assert.Equal("stage_changed", received[0].Type);
+            var json = (received[0].Data as System.Text.Json.JsonElement?)?.GetRawText() ?? "";
             Assert.Contains("\"action\":\"resumed\"", json);
         }
         finally

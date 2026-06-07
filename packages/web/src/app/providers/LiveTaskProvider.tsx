@@ -16,6 +16,40 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
   return (AGENT_DETAIL_EVENTS as readonly string[]).includes(name)
 }
 
+/**
+ * Wire shape from the SignalR bus. The server now sends the full CloudEvents
+ * 1.0.2 envelope; the Web reads {@link payload} for the original event data
+ * and {@link extensions} for routing metadata (projectid, workflowrunid, issueno).
+ * Falls back to the legacy raw-payload shape for any unmigrated producers.
+ */
+interface CloudEventEnvelope {
+  type: string
+  payload: unknown
+  id: string
+  source: string
+  specVersion: string
+  subject?: string
+  time?: string
+  dataContentType?: string
+  extensions?: Record<string, unknown>
+}
+
+function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
+  if (rawData && typeof rawData === 'object' && 'payload' in (rawData as object)) {
+    const payload = (rawData as CloudEventEnvelope).payload
+    if (payload && typeof payload === 'object') {
+      return payload as Record<string, unknown>
+    }
+    return {}
+  }
+  if (rawData && typeof rawData === 'object') {
+    return rawData as Record<string, unknown>
+  }
+  return {}
+}
+
+export const __testing__ = { unwrapEnvelope }
+
 
 function getCurrentIssueNumber(): number | null {
   const match = window.location.pathname.match(/\/issue\/(\d+)/)
@@ -64,7 +98,7 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
   const handleEvent = useCallback(
     (eventName: string, rawData: unknown) => {
       try {
-        const parsed = rawData as Record<string, unknown>
+        const parsed = unwrapEnvelope(rawData)
 
         if (isAgentDetailEvent(eventName)) {
           dispatchAgentEvent(eventName, parsed as AgentDetailEventMap[typeof eventName])

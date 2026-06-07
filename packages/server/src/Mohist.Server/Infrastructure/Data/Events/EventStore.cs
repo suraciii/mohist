@@ -23,7 +23,13 @@ public class EventStore : IEventStore
         await db.SaveChangesAsync(ct);
 
         var dto = WorkflowEventPersistence.ToDto(staged.Single());
-        _eventBus.Emit(dto.Type, dto);
+        var busType = WorkflowEventSerializer.BusType(payload);
+        var evt = CloudEventFactory.Create(
+            type: busType,
+            source: new Uri($"/mohist/workflow/{workflowRunId}", UriKind.Relative),
+            data: dto,
+            workflowRunId: workflowRunId);
+        _eventBus.Emit(evt);
         return dto;
     }
 
