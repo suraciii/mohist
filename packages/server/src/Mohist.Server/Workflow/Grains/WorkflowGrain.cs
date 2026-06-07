@@ -889,14 +889,35 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         if (_run is null) return;
         var current = _run.Stages.FirstOrDefault(s => s.Id == _run.CurrentStageId);
-        _eventBus.Emit("stage_changed", new StageChangedEvent(
-            GetProjectId(),
-            GrainKey,
-            _run.CurrentStageId,
-            current?.Status.ToString() ?? "Unknown",
+        var projectId = GetProjectId();
+        var runId = GrainKey;
+        var stageId = _run.CurrentStageId;
+        var status = current?.Status.ToString() ?? "Unknown";
+        var payload = new StageChangedEvent(
+            projectId,
+            runId,
+            stageId,
+            status,
             action,
             reason,
-            DateTime.UtcNow.ToString("o")));
+            DateTime.UtcNow.ToString("o"));
+        var subject = _run.Metadata?.Annotations is { } a && a.TryGetValue("issueNumber", out var n)
+            ? n.ToString()
+            : null;
+        _eventBus.Emit(CloudEventFactory.Create(
+            type: "stage_changed",
+            source: new Uri($"/mohist/workflow/{runId}/stage/{stageId}", UriKind.Relative),
+            data: payload,
+            subject: subject,
+            projectId: projectId,
+            workflowRunId: runId,
+            issueNumber: subject,
+            extraExtensions: new Dictionary<string, object?>
+            {
+                ["stage"] = stageId,
+                ["status"] = status,
+                ["action"] = action,
+            }));
     }
 
     private async Task CommitAsync(IReadOnlyList<WorkflowEvent> events, string? reason = null, bool saveVariables = false)

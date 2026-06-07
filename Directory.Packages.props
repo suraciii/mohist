@@ -23,5 +23,6 @@
     <PackageVersion Include="EnvironmentAbstractions" Version="5.0.0" />
     <PackageVersion Include="EnvironmentAbstractions.BannedApiAnalyzer" Version="1.0.0" />
     <PackageVersion Include="EnvironmentAbstractions.TestHelpers" Version="5.0.0" />
+    <PackageVersion Include="CloudNative.CloudEvents" Version="2.8.0" />
   </ItemGroup>
 </Project>

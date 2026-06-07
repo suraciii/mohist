@@ -103,8 +103,14 @@ public class WorkflowRunStore : IWorkflowRunStore
     {
         foreach (var e in stagedEvents)
         {
-            var dto = WorkflowEventPersistence.ToDto(e);
-            _eventBus.Emit(dto.Type, dto);
+            var (runId, _) = WorkflowEventSerializer.ExtractContext(e);
+            var busType = WorkflowEventSerializer.BusType(e.Payload);
+            var evt = CloudEventFactory.Create(
+                type: busType,
+                source: new Uri($"/mohist/workflow/{runId}", UriKind.Relative),
+                data: WorkflowEventSerializer.ToData(e.Payload),
+                workflowRunId: runId);
+            _eventBus.Emit(evt);
         }
     }
 }

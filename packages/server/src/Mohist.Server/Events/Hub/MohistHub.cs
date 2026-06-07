@@ -4,6 +4,13 @@ namespace Mohist.Server.Events.Hub;
 
 public interface IEventsClient
 {
+    /// <summary>
+    /// Receive an event from the bus. <paramref name="eventName"/> is the
+    /// CloudEvents <c>type</c> for back-compat; <paramref name="data"/>
+    /// carries a <see cref="CloudEventEnvelope"/> with the full CloudEvents
+    /// 1.0.2 attributes (id, source, type, subject, time, extensions, data).
+    /// New Web code should read from <c>envelope</c> in <paramref name="data"/>.
+    /// </summary>
     Task OnEvent(string eventName, object? data);
 }
 
