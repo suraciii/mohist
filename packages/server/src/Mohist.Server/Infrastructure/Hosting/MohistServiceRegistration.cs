@@ -74,7 +74,9 @@ public static class MohistServiceRegistration
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();
-        services.AddSingleton<IWorkflowCompletionHook, IssueWorkflowCompletionHook>();
+        services.AddSingleton<IWorkflowCompletedHook, IssueWorkflowCompletionHook>();
+        services.AddSingleton<IWorkflowFailedHook, IssueWorkflowCompletionHook>();
+        services.AddSingleton<IWorkflowStoppedHook, IssueWorkflowCompletionHook>();
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionQuerier>();
         services.AddScoped<WorkflowActivityQuerier>();
@@ -85,6 +87,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddHostedService<EventBridge>();
+        services.AddHostedService<AgentSessionRunnerBridge>();
         services.AddSingleton<ConfigService>();
         services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());
