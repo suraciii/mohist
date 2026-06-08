@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Errors;
 using Mohist.Server.Workflow.Services.Prompts;
+using Mohist.Server.Workflow.Services;
 
 namespace Mohist.Server.Issue.Services.WorkflowProfiles;
 
@@ -24,7 +24,7 @@ public class IssueWorkflowProfileRegistry
     {
         var profileId = string.IsNullOrWhiteSpace(id) ? IssueWorkflowProfiles.DefaultId : id;
         if (_profiles.TryGetValue(profileId, out var profile)) return profile;
-        throw new DomainNotFoundException("WorkflowProfile", profileId);
+        throw new KeyNotFoundException($"WorkflowProfile '{profileId}' not found");
     }
 
     public IReadOnlyList<WorkflowProfileInfo> List() => _profiles.Values

@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
-using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 
 namespace Mohist.Server.Api;
@@ -114,7 +113,7 @@ public static partial class IssueRoutes
                 await grains.GetGrain<IWorkflowGrain>(wrId).StopAsync("user-stop");
                 return ApiResults.Ok();
             }
-            catch (WorkflowDomainException ex)
+            catch (InvalidOperationException ex)
             {
                 return ApiResults.Conflict(ex.Message);
             }

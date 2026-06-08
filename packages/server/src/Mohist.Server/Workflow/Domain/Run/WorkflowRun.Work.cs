@@ -58,9 +58,9 @@ public static partial class WorkflowRunExtensions
         {
             var current = run.CurrentStage();
             if (!current.Initialized)
-                throw new WorkflowDomainException($"Cannot add runtime task: stage {current.Id} is not initialized");
+                throw new InvalidOperationException($"Cannot add runtime task: stage {current.Id} is not initialized");
             if (!string.IsNullOrWhiteSpace(stage) && stage != current.Id)
-                throw new WorkflowDomainException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
+                throw new InvalidOperationException("Cannot add runtime task to stage " + stage + "; current stage is " + current.Id);
 
             var newTask = TaskRun.MakeTask(current.Tasks, task);
             current.Tasks.Add(newTask);

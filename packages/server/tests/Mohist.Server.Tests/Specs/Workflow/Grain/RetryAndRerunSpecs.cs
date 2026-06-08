@@ -99,7 +99,7 @@ public class RetryAndRerunSpecs : WorkflowGrainSpecs
     {
         await StartWorkflowAsync(SingleStage());
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await Grains.GetGrain<IWorkflowGrain>(_workflowId!).RetryAsync());
     }
 }

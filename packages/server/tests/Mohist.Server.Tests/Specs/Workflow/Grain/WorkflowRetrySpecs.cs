@@ -175,7 +175,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
         var workflow = await StartWorkflowAsync(SingleStage());
         var (_, r1) = await PollWorkAnyAsync();
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await workflow.RetryAsync());
     }
 
@@ -193,7 +193,7 @@ public class WorkflowRetrySpecs : WorkflowGrainSpecs
 
         await workflow.RejectAsync("needs rework");
 
-        await Assert.ThrowsAsync<WorkflowDomainException>(async () =>
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await workflow.RetryAsync());
     }
 

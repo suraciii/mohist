@@ -11,10 +11,10 @@ public static partial class WorkflowRunExtensions
         public void ClaimBy(string runnerId, DateTimeOffset now)
         {
             if (string.IsNullOrWhiteSpace(runnerId))
-                throw new WorkflowDomainException("Runner id is required");
+                throw new InvalidOperationException("Runner id is required");
 
             if (run.Claim is not null)
-                throw new WorkflowDomainException($"Workflow is already claimed by {run.Claim.RunnerId}");
+                throw new InvalidOperationException($"Workflow is already claimed by {run.Claim.RunnerId}");
 
             run.Claim = new WorkflowClaimInfo(runnerId, now);
         }
@@ -25,7 +25,7 @@ public static partial class WorkflowRunExtensions
         public void RequireClaimedBy(string runnerId)
         {
             if (!run.IsClaimedBy(runnerId))
-                throw new WorkflowDomainException(run.Claim is null
+                throw new InvalidOperationException(run.Claim is null
                     ? "Workflow is not claimed"
                     : $"Workflow is claimed by {run.Claim.RunnerId}, not {runnerId}");
         }

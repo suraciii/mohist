@@ -83,7 +83,7 @@ public static partial class WorkflowRunExtensions
 
         private StageCheck FindCheck(string name)
             => stage.Checks.FirstOrDefault(c => c.Name == name)
-                ?? throw new WorkflowDomainException($"Check {name} not found in stage {stage.Id}");
+                ?? throw new InvalidOperationException($"Check {name} not found in stage {stage.Id}");
 
         private StageCheck CurrentCheck()
             => stage.Checks.FirstOrDefault(c => c.Status == StageCheckStatus.Pending)!;
@@ -130,7 +130,7 @@ public static partial class WorkflowRunExtensions
         private void RetryFailedTask(string taskRunId)
         {
             var failedTask = stage.Tasks.LastOrDefault(t => t.Id == taskRunId && t.Status == TaskRunStatus.Failed)
-                ?? throw new WorkflowDomainException($"Failed task {taskRunId} not found or not in failed state");
+                ?? throw new InvalidOperationException($"Failed task {taskRunId} not found or not in failed state");
 
             var input = new TaskDefinition(failedTask.DefinitionId, failedTask.Title, failedTask.Uses, failedTask.WithInput);
             var newTask = TaskRun.MakeTask(stage.Tasks, input);
@@ -143,7 +143,7 @@ public static partial class WorkflowRunExtensions
         private void RetryFailedCheck(string? checkName)
         {
             var failedCheck = stage.Checks.FirstOrDefault(c => c.Name == checkName && c.Status == StageCheckStatus.Failed)
-                ?? throw new WorkflowDomainException($"Failed check {checkName} not found or not in failed state");
+                ?? throw new InvalidOperationException($"Failed check {checkName} not found or not in failed state");
 
             failedCheck.Status = StageCheckStatus.Pending;
             failedCheck.Message = null;
@@ -159,7 +159,7 @@ public static partial class WorkflowRunExtensions
             JsonElement? output = null)
         {
             if (repairTasks.Count == 0)
-                throw new WorkflowDomainException($"Check {checkName} repair requires at least one task");
+                throw new InvalidOperationException($"Check {checkName} repair requires at least one task");
 
             var check = stage.FindCheck(checkName);
             foreach (var repairTask in repairTasks)
