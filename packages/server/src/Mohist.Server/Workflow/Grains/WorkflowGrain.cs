@@ -1138,7 +1138,7 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
             annotations["issueNumber"] = issueNumber;
         }
 
-        return new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, annotations);
+        return new WorkflowRunMetadata(input.Name, DateTimeOffset.UtcNow, input.Labels, annotations);
     }
 
     private async Task SaveRunAsync()
