@@ -1,8 +1,10 @@
 using System.Text.Json;
+using CloudNative.CloudEvents;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
@@ -28,7 +30,9 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly IssueIdentityResolver _identityResolver;
     private readonly WorkflowProfileManager _workflowProfileManager;
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
+    private readonly IEventBus _eventBus;
     private readonly ILogger<IssueGrain> _log;
+    private readonly List<IDisposable> _subscriptions = new();
 
     public IssueGrain(
         IStateStore<Domain.Issue> issueStore,
@@ -39,6 +43,7 @@ public class IssueGrain : Grain, IIssueGrain
         IssueIdentityResolver identityResolver,
         WorkflowProfileManager workflowProfileManager,
         ProjectWorkflowProfileManager projectProfileManager,
+        IEventBus eventBus,
         ILogger<IssueGrain> log)
     {
         _issueStore = issueStore;
@@ -49,6 +54,7 @@ public class IssueGrain : Grain, IIssueGrain
         _identityResolver = identityResolver;
         _workflowProfileManager = workflowProfileManager;
         _projectProfileManager = projectProfileManager;
+        _eventBus = eventBus;
         _log = log;
     }
 
@@ -57,6 +63,66 @@ public class IssueGrain : Grain, IIssueGrain
     public override async Task OnActivateAsync(CancellationToken ct)
     {
         _issue = await _issueStore.LoadAsync(GrainKey);
+
+        // Subscribe to workflow lifecycle events. Each handler filters by
+        // the workflow run id extension and calls the same domain commands
+        // the user-driven API paths call (CompleteWorkAsync / AbortWorkAsync).
+        // The handlers run as fire-and-forget Action<CloudEvent> callbacks
+        // so the bus dispatch never blocks the WorkflowGrain that emitted
+        // the event; the issue grain queues the command message and
+        // processes it when its single-threaded activation is free.
+        _subscriptions.Add(_eventBus.OnType(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted));
+        _subscriptions.Add(_eventBus.OnType(EventCatalog.ReverseDns.WorkflowRunStopped, OnWorkflowStopped));
+        _subscriptions.Add(_eventBus.OnType(EventCatalog.ReverseDns.WorkflowRunFailed, OnWorkflowFailed));
+    }
+
+    public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
+    {
+        foreach (var sub in _subscriptions)
+        {
+            try { sub.Dispose(); } catch { /* swallow — best effort during deactivation */ }
+        }
+        _subscriptions.Clear();
+        return Task.CompletedTask;
+    }
+
+    private void OnWorkflowCompleted(CloudEvent evt)
+    {
+        if (_issue is null) return;
+        var wrId = TryGetExtension(evt, "workflowrunid");
+        if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
+        if (_issue.Status != Domain.IssueStatus.InProgress) return;
+        _ = CompleteWorkAsync(wrId);
+    }
+
+    private void OnWorkflowStopped(CloudEvent evt)
+    {
+        if (_issue is null) return;
+        var wrId = TryGetExtension(evt, "workflowrunid");
+        if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
+        if (_issue.Status != Domain.IssueStatus.InProgress) return;
+        _ = AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "stopped");
+    }
+
+    private void OnWorkflowFailed(CloudEvent evt)
+    {
+        if (_issue is null) return;
+        var wrId = TryGetExtension(evt, "workflowrunid");
+        if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
+        if (_issue.Status != Domain.IssueStatus.InProgress) return;
+        _ = AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "failed");
+    }
+
+    private static string? TryGetExtension(CloudEvent evt, string name)
+    {
+        foreach (var (attr, value) in evt.GetPopulatedAttributes())
+        {
+            if (attr.IsExtension && attr.Name == name && value is not null)
+            {
+                return value.ToString();
+            }
+        }
+        return null;
     }
 
     public async Task<string?> ResolveRepositoryRefAsync(string projectId, string? repositoryRef)
