@@ -51,7 +51,7 @@ public sealed class WorktreeCleanupService : IHostedService
         _subscriptions.Clear();
     }
 
-    private async void OnWorkflowCompleted(CloudEvent evt)
+    private async Task OnWorkflowCompleted(CloudEvent evt)
     {
         var projectId = TryGetString(evt, "projectid");
         var issueNumberStr = TryGetString(evt, "issueno");
