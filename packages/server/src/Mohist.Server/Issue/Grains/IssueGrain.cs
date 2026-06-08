@@ -81,7 +81,8 @@ public class IssueGrain : Grain, IIssueGrain
     {
         foreach (var sub in _subscriptions)
         {
-            try { sub.Dispose(); } catch { /* swallow — best effort during deactivation */ }
+            try { sub.Dispose(); }
+            catch (Exception ex) { _log.LogWarning(ex, "IssueGrain subscription dispose failed during deactivation"); }
         }
         _subscriptions.Clear();
         return Task.CompletedTask;
