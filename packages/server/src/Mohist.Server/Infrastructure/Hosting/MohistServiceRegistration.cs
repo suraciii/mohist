@@ -74,10 +74,11 @@ public static class MohistServiceRegistration
         services.AddSingleton<Mohist.Server.Workflow.Services.Prompts.IPromptLoader, Mohist.Server.Workflow.Services.Prompts.FilePromptLoader>();
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();
-        services.AddSingleton<IWorkflowCompletedHook, IssueWorkflowCompletionHook>();
-        // Issue-side transitions for Failed/Stopped are handled by IssueGrain's
-        // bus subscription (Step 5 of design/event-mechanism.md). The hook
-        // is now worktree-cleanup only.
+        // IWorkflowCompletedHook / Failed / Stopped are no longer registered.
+        // Step 8 of design/event-mechanism.md moved dispatch off the
+        // in-grain hook chain: IssueGrain bus subscription handles Issue
+        // transitions; WorktreeCleanupService handles the worktree
+        // cleanup that the hook used to do.
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionQuerier>();
         services.AddScoped<WorkflowActivityQuerier>();
@@ -89,6 +90,8 @@ public static class MohistServiceRegistration
         services.AddSingleton<IEventBus, InMemoryEventBus>();
         services.AddHostedService<EventBridge>();
         services.AddHostedService<AgentSessionRunnerBridge>();
+        services.AddHostedService<IssueWorkflowReconciliationService>();
+        services.AddHostedService<WorktreeCleanupService>();
         services.AddSingleton<ConfigService>();
         services.AddSingleton<RuntimeBuildInfo>();
         services.AddSingleton<IRuntimeBuildInfo>(sp => sp.GetRequiredService<RuntimeBuildInfo>());

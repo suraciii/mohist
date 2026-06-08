@@ -33,9 +33,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     private readonly IStateStore<WorkflowExecutionContext> _variablesStore;
     private readonly IWorkflowBacklogDirectory _backlogs;
     private readonly IEventBus _eventBus;
-    private readonly IEnumerable<IWorkflowCompletedHook> _completedHooks;
-    private readonly IEnumerable<IWorkflowFailedHook> _failedHooks;
-    private readonly IEnumerable<IWorkflowStoppedHook> _stoppedHooks;
     private readonly WorkflowProfileManager _profileManager;
     private readonly ILogger<WorkflowGrain> _log;
 
@@ -45,9 +42,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         IStateStore<WorkflowExecutionContext> variablesStore,
         IWorkflowBacklogDirectory backlogs,
         IEventBus eventBus,
-        IEnumerable<IWorkflowCompletedHook> completedHooks,
-        IEnumerable<IWorkflowFailedHook> failedHooks,
-        IEnumerable<IWorkflowStoppedHook> stoppedHooks,
         WorkflowProfileManager profileManager,
         ILogger<WorkflowGrain> log)
     {
@@ -56,9 +50,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         _variablesStore = variablesStore;
         _backlogs = backlogs;
         _eventBus = eventBus;
-        _completedHooks = completedHooks;
-        _failedHooks = failedHooks;
-        _stoppedHooks = stoppedHooks;
         _profileManager = profileManager;
         _log = log;
     }
@@ -97,7 +88,45 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (!string.Equals(reminderName, WorkHeartbeatReminderName, StringComparison.Ordinal))
             return;
 
+        await CheckLeaseAgeAsync();
         await EnsureWorkHeartbeatAsync();
+    }
+
+    private static readonly TimeSpan LeaseTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Detect a stuck lease (no runner report, no heartbeat from the runner,
+    /// the workflow is still waiting on the lease) and emit a
+    /// <c>com.mohist.workflow.lease-expired</c> event so subscribers
+    /// (AgentSessionRunnerBridge, etc.) can mark the in-flight session
+    /// failed and the workflow can re-dispatch or surface a task-failed
+    /// transition.
+    /// </summary>
+    private async Task CheckLeaseAgeAsync()
+    {
+        if (_lease?.DispatchedAt is not { } dispatchedAt) return;
+        var age = DateTime.UtcNow - dispatchedAt;
+        if (age < LeaseTimeout) return;
+
+        var runId = GrainKey;
+        var workId = _lease.WorkId;
+        var runnerId = _lease.RunnerId;
+
+        _log.LogWarning(
+            "Workflow {RunId} lease for work {WorkId} (runner {RunnerId}) has been pending for {AgeSeconds}s; emitting lease_expired",
+            runId, workId, runnerId, age.TotalSeconds);
+
+        _eventBus.Emit(CloudEventFactory.Create(
+            type: EventCatalog.ReverseDns.LeaseExpired,
+            source: new Uri($"/mohist/workflow/{runId}/work/{workId}", UriKind.Relative),
+            subject: runId,
+            workflowRunId: runId,
+            extraExtensions: new Dictionary<string, object?>
+            {
+                ["workid"] = workId,
+                ["runnerid"] = runnerId ?? string.Empty,
+                ["ageseconds"] = (long)age.TotalSeconds,
+            }));
     }
 
     public async Task StartAsync(WorkflowStartInput? input = null)
@@ -989,20 +1018,21 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
     {
         EmitStageChanged("stopped", reason);
         await DisableWorkHeartbeatAsync();
-        await DispatchLifecycleHooksAsync(_stoppedHooks, "stopped", reason);
+        // Step 8 of design/event-mechanism.md: hook dispatch removed.
+        // Side effects now flow through the bus — IssueGrain subscribes
+        // to com.mohist.workflow.run.stopped (Step 5) and the
+        // worktree cleanup service subscribes to .completed.
     }
 
     private async Task OnWorkflowFailedAsync(string? reason)
     {
         EmitStageChanged("failed", reason);
         await DisableWorkHeartbeatAsync();
-        await DispatchLifecycleHooksAsync(_failedHooks, "failed", reason);
     }
 
     private async Task OnWorkflowCompletedAsync()
     {
         await DisableWorkHeartbeatAsync();
-        await DispatchLifecycleHooksAsync(_completedHooks, "completed", null);
     }
 
     private Task OnApprovalResolvedAsync(StageApprovalResolved e)
@@ -1029,26 +1059,10 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private async Task DispatchLifecycleHooksAsync<T>(IEnumerable<T> hooks, string terminal, string? reason) where T : class
     {
-        if (_run is null) return;
-
-        var (projectId, issueId, issueNumber) = GetHookContext();
-        var context = new WorkflowLifecycleHookContext(GrainKey, projectId, issueId, issueNumber, reason);
-        foreach (var hook in hooks)
-        {
-            try
-            {
-                switch (hook)
-                {
-                    case IWorkflowCompletedHook c: await c.OnCompletedAsync(context); break;
-                    case IWorkflowFailedHook f: await f.OnFailedAsync(context); break;
-                    case IWorkflowStoppedHook s: await s.OnStoppedAsync(context); break;
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "Workflow {WorkflowRunId} {Terminal} hook {Hook} failed", GrainKey, terminal, hook.GetType().Name);
-            }
-        }
+        // No-op shim retained for any callers that may still reference
+        // DispatchLifecycleHooksAsync. Step 8 of design/event-mechanism.md:
+        // hook dispatch was removed; terminal-side effects flow through the
+        // bus (IssueGrain bus subscription, worktree cleanup hosted service).
     }
 
     private string GetProjectId() => _variables?.String("project", "id") ?? "";
