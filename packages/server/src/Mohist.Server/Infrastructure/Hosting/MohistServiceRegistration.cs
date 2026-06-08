@@ -75,8 +75,9 @@ public static class MohistServiceRegistration
         services.AddSingleton<PromptTemplateEngine>();
         services.AddScoped<IssueWorkflowProfileRegistry>();
         services.AddSingleton<IWorkflowCompletedHook, IssueWorkflowCompletionHook>();
-        services.AddSingleton<IWorkflowFailedHook, IssueWorkflowCompletionHook>();
-        services.AddSingleton<IWorkflowStoppedHook, IssueWorkflowCompletionHook>();
+        // Issue-side transitions for Failed/Stopped are handled by IssueGrain's
+        // bus subscription (Step 5 of design/event-mechanism.md). The hook
+        // is now worktree-cleanup only.
         services.AddScoped<IEventStore, EventStore>();
         services.AddScoped<AgentSessionQuerier>();
         services.AddScoped<WorkflowActivityQuerier>();

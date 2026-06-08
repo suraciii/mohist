@@ -59,18 +59,16 @@ public class IssueWorkflowLifecycleHookSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.Workflow)]
     [Fact]
-    public void IssueWorkflowCompletionHook_ImplementsAllThreeTerminalHooks()
+    public void IssueWorkflowCompletionHook_ImplementsOnlyCompletedHook()
     {
-        // Compile-time check: the hook must implement every terminal interface
-        // so a single DI registration covers all three transitions.
+        // Step 5 of the event-mechanism migration: the hook no longer
+        // implements Failed/Stopped — those transitions are driven by
+        // IssueGrain's bus subscription. The hook is worktree-cleanup only.
         var hook = new IssueWorkflowCompletionHook(
-            grains: null!,
             projectsQuery: null!,
             git: null!,
             log: NullLogger<IssueWorkflowCompletionHook>.Instance);
 
         Assert.IsAssignableFrom<IWorkflowCompletedHook>(hook);
-        Assert.IsAssignableFrom<IWorkflowFailedHook>(hook);
-        Assert.IsAssignableFrom<IWorkflowStoppedHook>(hook);
     }
 }
