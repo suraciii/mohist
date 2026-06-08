@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { EventName, EventMap, Issue, LiveTaskState, RebaseConflictState } from '../../entities/issue'
 import { dispatchAgentEvent, AGENT_DETAIL_EVENTS } from '../../entities/agent'
 import type { AgentDetailEventMap } from '../../entities/agent'
+import { dispatchRebaseEvent } from '../../entities/issue/model/rebase-events'
 import { useProject } from '../../entities/project'
 import { LiveTaskContext } from '../../entities/issue'
 import { useEventsConnection } from '../../shared/api/events-hub'
@@ -18,34 +19,46 @@ function isAgentDetailEvent(name: string): name is AgentDetailEventName {
 
 /**
  * Wire shape from the SignalR bus. The server now sends the full CloudEvents
- * 1.0.2 envelope; the Web reads {@link payload} for the original event data
- * and {@link extensions} for routing metadata (projectid, workflowrunid, issueno).
- * Falls back to the legacy raw-payload shape for any unmigrated producers.
+ * 1.0.2 envelope; the Web reads {@link data} for the original event body
+ * and {@link extensions} for routing metadata (projectid, workflowrunid,
+ * issueno). Falls back to the legacy raw-payload shape (where the event
+ * body sits in a top-level `payload` field) for any unmigrated producers.
+ *
+ * Note on field casing: the server-side `CloudEventEnvelope` record uses
+ * PascalCase property names (SpecVersion, DataContentType, ...) when
+ * serialised by System.Text.Json, so the wire JSON has `specVersion`,
+ * not the CloudEvents-spec lowercase `specversion`. The structural
+ * check here matches what the server actually emits.
  */
-interface CloudEventEnvelope {
-  type: string
-  payload: unknown
-  id: string
-  source: string
-  specVersion: string
-  subject?: string
-  time?: string
-  dataContentType?: string
-  extensions?: Record<string, unknown>
-}
-
 function unwrapEnvelope(rawData: unknown): Record<string, unknown> {
-  if (rawData && typeof rawData === 'object' && 'payload' in (rawData as object)) {
-    const payload = (rawData as CloudEventEnvelope).payload
+  if (!rawData || typeof rawData !== 'object') {
+    return {}
+  }
+  const candidate = rawData as Record<string, unknown>
+  // CloudEvents envelope marker: id + source + type + specVersion all
+  // present as strings. duck-typing on 'payload' alone would mis-parse
+  // any future event whose data payload happens to contain a nested
+  // 'payload' field.
+  if (
+    typeof candidate.specVersion === 'string'
+    && typeof candidate.id === 'string'
+    && typeof candidate.source === 'string'
+    && typeof candidate.type === 'string'
+  ) {
+    if (candidate.data && typeof candidate.data === 'object') {
+      return candidate.data as Record<string, unknown>
+    }
+    return {}
+  }
+  // Legacy raw-payload shape (unmigrated producers).
+  if (typeof candidate.type === 'string' && 'payload' in candidate) {
+    const payload = candidate.payload
     if (payload && typeof payload === 'object') {
       return payload as Record<string, unknown>
     }
     return {}
   }
-  if (rawData && typeof rawData === 'object') {
-    return rawData as Record<string, unknown>
-  }
-  return {}
+  return candidate
 }
 
 export const __testing__ = { unwrapEnvelope }
@@ -208,8 +221,28 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             }
             break
           }
+          case 'rebase_started': {
+            const d = parsed as EventMap['rebase_started']
+            dispatchRebaseEvent({ type: 'rebase_started', issueNumber: d.issueNumber })
+            break
+          }
+          case 'rebase_progress': {
+            const d = parsed as EventMap['rebase_progress']
+            dispatchRebaseEvent({
+              type: 'rebase_progress',
+              issueNumber: d.issueNumber,
+              step: d.step,
+            })
+            break
+          }
           case 'rebase_completed': {
+            const d = parsed as EventMap['rebase_completed']
             setRebaseConflict(null)
+            dispatchRebaseEvent({
+              type: 'rebase_completed',
+              issueNumber: d.issueNumber,
+              rebased: d.rebased,
+            })
             queryClient.invalidateQueries({ queryKey: ['issues'] })
             break
           }
@@ -220,6 +253,13 @@ function useLiveEvents(projectId: string | null): LiveTaskState {
             } else {
               setRebaseConflict(null)
             }
+            dispatchRebaseEvent({
+              type: 'rebase_conflict',
+              issueNumber: d.issueNumber,
+              conflicts: d.conflicts,
+              status: d.status,
+              error: d.error,
+            })
             if (d.status === 'failed') {
               toast.error(`Rebase conflict on Issue #${d.issueNumber}`)
             }
