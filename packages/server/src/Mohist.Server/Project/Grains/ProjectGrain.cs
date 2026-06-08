@@ -3,6 +3,7 @@ using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Errors;
 using Mohist.Server.Infrastructure.Serialization;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
@@ -43,7 +44,7 @@ public class ProjectGrain : Grain, IProjectGrain
         name = ProjectName.NormalizeOrThrow(name);
 
         if (_project is not null)
-            throw new InvalidOperationException($"Project '{GrainKey}' already exists");
+            throw new DomainConflictException($"Project '{GrainKey}' already exists");
 
         var branch = baseBranch ?? "main";
         var repos = new List<RepositoryInfo>
@@ -128,9 +129,9 @@ public class ProjectGrain : Grain, IProjectGrain
     {
         if (_project is null) return null;
         if (string.IsNullOrWhiteSpace(path) && string.IsNullOrWhiteSpace(remote))
-            throw new InvalidOperationException("path or remote is required");
+            throw new DomainValidationException("path or remote is required");
         if (_project.Repositories.Any(r => string.Equals(r.Name, repoName, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"Repository '{repoName}' already exists");
+            throw new DomainConflictException($"Repository '{repoName}' already exists");
 
         _project.Repositories.Add(new RepositoryInfo
         {

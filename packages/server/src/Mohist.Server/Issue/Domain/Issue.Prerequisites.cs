@@ -1,3 +1,5 @@
+using Mohist.Server.Infrastructure.Errors;
+
 namespace Mohist.Server.Issue.Domain;
 
 public sealed partial class Issue
@@ -5,7 +7,7 @@ public sealed partial class Issue
     public void AddPrerequisite(int prerequisiteNumber, DateTime? now = null)
     {
         if (prerequisiteNumber == Number)
-            throw new InvalidOperationException("Issue cannot depend on itself");
+            throw new DomainValidationException("Issue cannot depend on itself");
         if (_prerequisiteNumbers.Contains(prerequisiteNumber)) return;
         _prerequisiteNumbers = [.. _prerequisiteNumbers, prerequisiteNumber];
         Touch(now);

@@ -199,35 +199,28 @@ public static class WorkspaceRoutes
             if (issue is null) return ApiResults.NotFound("Issue not found");
             if (CheckRepositoryConfig(issue) is { } repoError) return repoError;
 
-            try
+            var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
+            var workflow = await grain.GetWorkflowStatusAsync();
+            if (IsWorkflowActive(workflow))
             {
-                var grain = grains.GetGrain<IIssueGrain>(GrainKey.Issue(issue.Id));
-                var workflow = await grain.GetWorkflowStatusAsync();
-                if (IsWorkflowActive(workflow))
-                {
-                    return ApiResults.Conflict("Cannot remove a worktree while the issue workflow is active", "worktree_active");
-                }
-
-                var activeAgents = await projection.ListActiveAgentsAsync(pid);
-                if (activeAgents.Any(a => a.IssueNumber == number))
-                {
-                    return ApiResults.Conflict("Cannot remove a worktree while an agent is running", "worktree_agent_running");
-                }
-
-                var (repoPath, _) = ResolveRepo(issue);
-                var projectName = issue.ProjectName ?? "project";
-                var removal = await git.RemoveWorktreeAsync(repoPath, projectName, number);
-                if (removal.Status == "failed")
-                {
-                    return ApiResults.Conflict(removal.Message, "worktree_cleanup_failed", removal);
-                }
-
-                return ApiResults.Ok(ToCleanupResponse(removal));
+                return ApiResults.Conflict("Cannot remove a worktree while the issue workflow is active", "worktree_active");
             }
-            catch (InvalidOperationException)
+
+            var activeAgents = await projection.ListActiveAgentsAsync(pid);
+            if (activeAgents.Any(a => a.IssueNumber == number))
             {
-                return ApiResults.NotFound($"Issue #{number} not found");
+                return ApiResults.Conflict("Cannot remove a worktree while an agent is running", "worktree_agent_running");
             }
+
+            var (repoPath, _) = ResolveRepo(issue);
+            var projectName = issue.ProjectName ?? "project";
+            var removal = await git.RemoveWorktreeAsync(repoPath, projectName, number);
+            if (removal.Status == "failed")
+            {
+                return ApiResults.Conflict(removal.Message, "worktree_cleanup_failed", removal);
+            }
+
+            return ApiResults.Ok(ToCleanupResponse(removal));
         });
 
         return app;
