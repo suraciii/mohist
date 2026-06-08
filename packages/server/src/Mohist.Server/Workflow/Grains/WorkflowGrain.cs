@@ -1061,6 +1061,8 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
 
     private string? GetIssueId() => _variables?.String("issue", "id");
 
+    private string? GetIssueNumber() => _variables?.String("issue", "number");
+
     private WorkflowRunMetadata? BuildRunMetadata(WorkflowStartInput? input)
     {
         if (input is null) return null;
@@ -1081,6 +1083,13 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         {
             annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
             annotations["issueId"] = issueId;
+        }
+
+        var issueNumber = GetIssueNumber();
+        if (!string.IsNullOrWhiteSpace(issueNumber))
+        {
+            annotations ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            annotations["issueNumber"] = issueNumber;
         }
 
         return new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, annotations);

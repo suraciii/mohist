@@ -10,6 +10,9 @@ public static class EventCatalog
     /// <summary>
     /// All registered CloudEvents <c>type</c> values. New events must be added here
     /// AND must have a producer that calls <c>bus.Emit</c> with that exact type string.
+    /// Includes both legacy snake_case names (kept for back-compat with the Web) and
+    /// the new reverse-DNS names. The EventBridge subscribes to the union so both
+    /// legacy Web consumers and new reverse-DNS producers see fan-out.
     /// </summary>
     public static readonly IReadOnlyList<string> All = new[]
     {
@@ -68,11 +71,44 @@ public static class EventCatalog
         "schedule_triggered",
         "schedule_completed",
         "schedule_failed",
+        // === Reverse-DNS names (com.mohist.*) — preferred for new emits ===
+        ReverseDns.WorkflowRunStarted,
+        ReverseDns.WorkflowRunResumed,
+        ReverseDns.WorkflowRunPaused,
+        ReverseDns.WorkflowRunStopped,
+        ReverseDns.WorkflowRunCompleted,
+        ReverseDns.WorkflowRunFailed,
+        ReverseDns.WorkflowRunRetrying,
+        ReverseDns.WorkflowRunRerunning,
+        ReverseDns.StageStarted,
+        ReverseDns.StageCompleted,
+        ReverseDns.StageFailed,
+        ReverseDns.StageApprovalRequested,
+        ReverseDns.StageApprovalResolved,
+        ReverseDns.TaskStarted,
+        ReverseDns.TaskCompleted,
+        ReverseDns.TaskFailed,
+        ReverseDns.CheckStarted,
+        ReverseDns.CheckPassed,
+        ReverseDns.CheckFailed,
+        ReverseDns.CheckPending,
+        ReverseDns.RepairScheduled,
+        ReverseDns.AgentSessionStarted,
+        ReverseDns.AgentSessionCompleted,
+        ReverseDns.AgentSessionFailed,
+        ReverseDns.AgentSessionCancelled,
+        ReverseDns.AgentSessionStatusChanged,
+        ReverseDns.RunnerDisconnected,
+        ReverseDns.LeaseExpired,
+        ReverseDns.IssueCompleted,
+        ReverseDns.IssueCancelled,
     };
 
     /// <summary>
     /// Reverse-DNS type values for new emits. Producers should prefer these over
-    /// the legacy snake_case names.
+    /// the legacy snake_case names. The string constants must be referenced by
+    /// Emit sites via this class (or appear in <see cref="All"/>) so the catalog
+    /// stays the single source of truth.
     /// </summary>
     public static class ReverseDns
     {

@@ -50,7 +50,9 @@ public class WorkflowRunStore : IWorkflowRunStore
             var stagedEvents = await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            Publish(stagedEvents);
+            var projectId = ExtractProjectId(run);
+            var issueNumber = ExtractIssueNumber(run);
+            Publish(stagedEvents, projectId, issueNumber);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -99,7 +101,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
     }
 
-    private void Publish(IReadOnlyList<StagedWorkflowEvent> stagedEvents)
+    private void Publish(IReadOnlyList<StagedWorkflowEvent> stagedEvents, string? projectId, string? issueNumber)
     {
         foreach (var e in stagedEvents)
         {
@@ -109,8 +111,32 @@ public class WorkflowRunStore : IWorkflowRunStore
                 type: busType,
                 source: new Uri($"/mohist/workflow/{runId}", UriKind.Relative),
                 data: WorkflowEventSerializer.ToData(e.Payload),
-                workflowRunId: runId);
+                projectId: projectId,
+                workflowRunId: runId,
+                issueNumber: issueNumber);
             _eventBus.Emit(evt);
         }
+    }
+
+    private static string? ExtractProjectId(WorkflowRun run)
+    {
+        if (run.Metadata.Annotations is not null
+            && run.Metadata.Annotations.TryGetValue("projectId", out var pid)
+            && !string.IsNullOrWhiteSpace(pid))
+        {
+            return pid;
+        }
+        return null;
+    }
+
+    private static string? ExtractIssueNumber(WorkflowRun run)
+    {
+        if (run.Metadata.Annotations is not null
+            && run.Metadata.Annotations.TryGetValue("issueNumber", out var n)
+            && !string.IsNullOrWhiteSpace(n))
+        {
+            return n;
+        }
+        return null;
     }
 }
