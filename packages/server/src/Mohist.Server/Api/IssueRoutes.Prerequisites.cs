@@ -21,19 +21,12 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
-            {
-                var result = await grain.AddPrerequisiteAsync(req.PrerequisiteNumber);
-                if (!result.Success)
-                    return ApiResults.NotFound(result.Message);
+            var result = await grain.AddPrerequisiteAsync(req.PrerequisiteNumber);
+            if (!result.Success)
+                return ApiResults.NotFound(result.Message);
 
-                var info = await issuesQuery.GetAsync(project.Id, number);
-                return ApiResults.Ok(info);
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            var info = await issuesQuery.GetAsync(project.Id, number);
+            return ApiResults.Ok(info);
         });
 
         group.MapDelete("/{number:int}/prerequisites/{prerequisiteNumber:int}", async (
@@ -49,16 +42,9 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
-            {
-                await grain.RemovePrerequisiteAsync(prerequisiteNumber);
-                var info = await issuesQuery.GetAsync(project.Id, number);
-                return ApiResults.Ok(info);
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            await grain.RemovePrerequisiteAsync(prerequisiteNumber);
+            var info = await issuesQuery.GetAsync(project.Id, number);
+            return ApiResults.Ok(info);
         });
     }
 }

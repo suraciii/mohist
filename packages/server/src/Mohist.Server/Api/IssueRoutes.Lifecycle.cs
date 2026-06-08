@@ -56,15 +56,8 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
-            {
-                var comment = await grain.AddCommentAsync(req.Body);
-                return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            var comment = await grain.AddCommentAsync(req.Body);
+            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body } });
         });
 
         group.MapPost("/{number:int}/close", async (
@@ -79,15 +72,8 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
-            {
-                await grain.CancelAsync();
-                return ApiResults.Ok();
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            await grain.CancelAsync();
+            return ApiResults.Ok();
         });
 
         group.MapPost("/{number:int}/reopen", async (
@@ -164,15 +150,8 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
-            {
-                await grain.UnarchiveAsync();
-                return ApiResults.Ok();
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            await grain.UnarchiveAsync();
+            return ApiResults.Ok();
         });
 
         group.MapPost("/archive-completed", async (

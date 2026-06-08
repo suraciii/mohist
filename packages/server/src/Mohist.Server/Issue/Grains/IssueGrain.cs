@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Errors;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Project.Domain;
@@ -147,7 +148,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (resolution.HasProblem)
         {
             var problem = resolution.Problem!;
-            throw new InvalidOperationException(
+            throw new DomainValidationException(
                 $"Cannot start workflow: {problem.Message} (code={problem.Code}, repositoryRef={problem.RepositoryRef ?? "<none>"})");
         }
         return resolution;
@@ -158,7 +159,7 @@ public class IssueGrain : Grain, IIssueGrain
         EnsureIssue();
         var eligibility = await GetStartEligibilityAsync();
         if (!eligibility.Startable)
-            throw new InvalidOperationException(eligibility.Message ?? "Issue is waiting for prerequisites");
+            throw new DomainConflictException(eligibility.Message ?? "Issue is waiting for prerequisites");
 
         var issue = _issue!;
 
@@ -344,7 +345,7 @@ public class IssueGrain : Grain, IIssueGrain
     public async Task<string> CreateAsync(string projectId, int number, string title, string? body, string[]? labels, string? priority, string? repositoryRef = null, string? issueId = null)
     {
         if (_issue is not null)
-            throw new InvalidOperationException($"Issue '{GrainKey}' already exists");
+            throw new DomainConflictException($"Issue '{GrainKey}' already exists");
 
         var resolvedRef = await ResolveRepositoryRefAsync(projectId, repositoryRef);
 
@@ -457,7 +458,7 @@ public class IssueGrain : Grain, IIssueGrain
     private void EnsureIssue()
     {
         if (_issue is null)
-            throw new InvalidOperationException($"Issue '{GrainKey}' not found");
+            throw new DomainNotFoundException("Issue", GrainKey);
     }
 
     private async Task<IssuePrerequisiteSummary?> LoadIssueSummaryAsync(int issueNumber)
@@ -478,7 +479,7 @@ public class IssueGrain : Grain, IIssueGrain
 
     public async Task<IssueCommentResult> AddCommentAsync(string body)
     {
-        if (_issue is null) throw new InvalidOperationException("Issue not found");
+        if (_issue is null) throw new DomainNotFoundException("Issue", GrainKey);
 
         var comment = new IssueCommentRow
         {

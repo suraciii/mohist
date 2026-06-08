@@ -1,3 +1,5 @@
+using Mohist.Server.Infrastructure.Errors;
+
 namespace Mohist.Server.Issue.Domain;
 
 public sealed partial class Issue
@@ -41,9 +43,9 @@ public sealed partial class Issue
     public void StartWorkflow(string wrId, DateTime? now = null)
     {
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
-            throw new InvalidOperationException($"Issue #{Number} is {_status}");
+            throw new DomainConflictException($"Issue #{Number} is {_status}");
         if (_activeWorkflowRunId is not null)
-            throw new InvalidOperationException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
+            throw new DomainConflictException($"Issue #{Number} already has workflow {_activeWorkflowRunId}");
         _activeWorkflowRunId = NormalizeOptional(wrId);
         _status = IssueStatus.InProgress;
         Touch(now);
@@ -54,7 +56,7 @@ public sealed partial class Issue
         if (_activeWorkflowRunId != workflowRunId) return false;
         if (_status == IssueStatus.Done) return false;
         if (_status != IssueStatus.InProgress)
-            throw new InvalidOperationException($"Issue #{Number} is {_status}, only InProgress can complete");
+            throw new DomainConflictException($"Issue #{Number} is {_status}, only InProgress can complete");
         _status = IssueStatus.Done;
         _activeWorkflowRunId = null;
         Touch(now);
@@ -64,7 +66,7 @@ public sealed partial class Issue
     public void Archive(DateTime? now = null)
     {
         if (_status != IssueStatus.Done)
-            throw new InvalidOperationException($"Issue #{Number} is {_status}, only Done can archive");
+            throw new DomainConflictException($"Issue #{Number} is {_status}, only Done can archive");
         var archivedAt = now ?? DateTime.UtcNow;
         _archivedAt = archivedAt;
         Touch(archivedAt);
@@ -79,7 +81,7 @@ public sealed partial class Issue
     public void Close(DateTime? now = null)
     {
         if (_status == IssueStatus.Done || _archivedAt != null)
-            throw new InvalidOperationException($"Issue #{Number} cannot close");
+            throw new DomainConflictException($"Issue #{Number} cannot close");
         _status = IssueStatus.Cancelled;
         _activeWorkflowRunId = null;
         Touch(now);
@@ -88,7 +90,7 @@ public sealed partial class Issue
     public void Reopen(DateTime? now = null)
     {
         if (_status != IssueStatus.Cancelled)
-            throw new InvalidOperationException($"Issue #{Number} is not cancelled");
+            throw new DomainConflictException($"Issue #{Number} is not cancelled");
         _status = IssueStatus.Backlog;
         Touch(now);
     }

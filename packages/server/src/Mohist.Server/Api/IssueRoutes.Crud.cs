@@ -75,17 +75,10 @@ public static partial class IssueRoutes
 
             var grain = await GetIssueGrainAsync(grains, issueIdentityResolver, project.Id, number);
             if (grain is null) return ApiResults.NotFound($"Issue #{number} not found");
-            try
-            {
-                await grain.UpdateFullAsync(new UpdateIssueData(
-                    req.Title, req.Body, req.Labels, req.Priority));
-                var info = await issuesQuery.GetAsync(project.Id, number);
-                return ApiResults.Ok(info);
-            }
-            catch (InvalidOperationException)
-            {
-                return ApiResults.NotFound($"Issue #{number} not found");
-            }
+            await grain.UpdateFullAsync(new UpdateIssueData(
+                req.Title, req.Body, req.Labels, req.Priority));
+            var info = await issuesQuery.GetAsync(project.Id, number);
+            return ApiResults.Ok(info);
         });
     }
 }
