@@ -88,6 +88,8 @@ public static class MohistServiceRegistration
         services.AddScoped<IssueWorkflowProfileManager>();
         services.AddSingleton<IWorkflowBacklogDirectory, InMemoryWorkflowBacklogDirectory>();
         services.AddSingleton<IEventBus, InMemoryEventBus>();
+        services.AddSingleton<ConnectionSubscriptionRegistry>();
+        services.AddSingleton<IUserNotificationDispatcher, UserNotificationDispatcher>();
         services.AddHostedService<EventBridge>();
         services.AddHostedService<AgentSessionRunnerBridge>();
         services.AddHostedService<IssueWorkflowReconciliationService>();
