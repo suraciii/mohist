@@ -34,8 +34,8 @@ public class WorkflowVariablesStore : IStateStore<WorkflowExecutionContext>
         await db.SaveChangesAsync();
     }
 
-    public Task DeleteAsync(string key) => throw new NotSupportedException();
-    public Task<IReadOnlyList<WorkflowExecutionContext>> ListAsync() => throw new NotSupportedException();
+    public Task DeleteAsync(string key) => throw new NotImplementedException();
+    public Task<IReadOnlyList<WorkflowExecutionContext>> ListAsync() => throw new NotImplementedException();
 
     internal static WorkflowExecutionContext? Deserialize(string json) =>
         JsonSerializer.Deserialize<WorkflowExecutionContext>(json, WorkflowStorageJson.Options);

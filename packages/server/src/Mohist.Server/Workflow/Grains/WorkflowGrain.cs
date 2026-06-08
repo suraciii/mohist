@@ -987,17 +987,36 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         if (_run is not null)
         {
             _runDirty = true;
-            await SaveRunAsync(events);
-        }
-
-        if (saveVariables)
-        {
-            await SaveLeaseAsync();
-            await SaveVariablesAsync();
+            await SaveAllAsync(events, saveVariables);
         }
 
         foreach (var e in events)
             await On(e, reason);
+    }
+
+    private async Task SaveAllAsync(IReadOnlyList<WorkflowEvent> events, bool saveLeaseAndVariables)
+    {
+        if (_run is null) return;
+        try
+        {
+            if (saveLeaseAndVariables)
+            {
+                await _runStore.SaveAllAsync(_run, events, _lease, _variables);
+            }
+            else
+            {
+                await _runStore.SaveAsync(_run, events);
+            }
+            _runDirty = false;
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} save failed because the persisted run ETag changed; deactivating grain to reload state",
+                GrainKey);
+            DeactivateOnIdle();
+            throw;
+        }
     }
 
     private Task On(WorkflowEvent e, string? reason = null) =>

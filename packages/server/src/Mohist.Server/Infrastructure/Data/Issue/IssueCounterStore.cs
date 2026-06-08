@@ -35,7 +35,7 @@ public class IssueCounterStore : IStateStore<IssueCounterState>
         await db.SaveChangesAsync();
     }
 
-    public Task DeleteAsync(string key) => throw new NotSupportedException();
+    public Task DeleteAsync(string key) => throw new NotImplementedException();
 
-    public Task<IReadOnlyList<IssueCounterState>> ListAsync() => throw new NotSupportedException();
+    public Task<IReadOnlyList<IssueCounterState>> ListAsync() => throw new NotImplementedException();
 }

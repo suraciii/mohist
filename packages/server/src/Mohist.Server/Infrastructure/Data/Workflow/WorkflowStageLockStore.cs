@@ -42,7 +42,7 @@ public class WorkflowStageLockStore : IStateStore<WorkflowStageLockState>
         await db.SaveChangesAsync();
     }
 
-    public Task<IReadOnlyList<WorkflowStageLockState>> ListAsync() => throw new NotSupportedException();
+    public Task<IReadOnlyList<WorkflowStageLockState>> ListAsync() => throw new NotImplementedException();
 
     private static WorkflowStageLockState Deserialize(string json) =>
         JsonSerializer.Deserialize<WorkflowStageLockState>(json)!;
