@@ -47,14 +47,14 @@ public sealed class EventBridge : IHostedService, IDisposable
         _subscriptions.Clear();
     }
 
-    private void ForwardToHub(CloudEvent cloudEvent)
+    private async Task ForwardToHub(CloudEvent cloudEvent)
     {
         try
         {
             var projectId = ExtractProjectId(cloudEvent);
             var group = $"project:{projectId ?? "global"}";
             var envelope = CloudEventEnvelope.From(cloudEvent);
-            _ = _hub.Clients.Group(group).OnEvent(cloudEvent.Type ?? envelope.Type, envelope);
+            await _hub.Clients.Group(group).OnEvent(cloudEvent.Type ?? envelope.Type, envelope);
         }
         catch (Exception ex)
         {

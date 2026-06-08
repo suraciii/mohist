@@ -86,31 +86,31 @@ public class IssueGrain : Grain, IIssueGrain
         return Task.CompletedTask;
     }
 
-    private void OnWorkflowCompleted(CloudEvent evt)
+    private async Task OnWorkflowCompleted(CloudEvent evt)
     {
         if (_issue is null) return;
         var wrId = TryGetExtension(evt, "workflowrunid");
         if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
         if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        _ = CompleteWorkAsync(wrId);
+        await CompleteWorkAsync(wrId);
     }
 
-    private void OnWorkflowStopped(CloudEvent evt)
+    private async Task OnWorkflowStopped(CloudEvent evt)
     {
         if (_issue is null) return;
         var wrId = TryGetExtension(evt, "workflowrunid");
         if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
         if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        _ = AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "stopped");
+        await AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "stopped");
     }
 
-    private void OnWorkflowFailed(CloudEvent evt)
+    private async Task OnWorkflowFailed(CloudEvent evt)
     {
         if (_issue is null) return;
         var wrId = TryGetExtension(evt, "workflowrunid");
         if (wrId is null || wrId != _issue.ActiveWorkflowRunId) return;
         if (_issue.Status != Domain.IssueStatus.InProgress) return;
-        _ = AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "failed");
+        await AbortWorkAsync(wrId, TryGetExtension(evt, "reason") ?? "failed");
     }
 
     private static string? TryGetExtension(CloudEvent evt, string name)

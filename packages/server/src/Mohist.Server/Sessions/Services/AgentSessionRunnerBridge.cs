@@ -60,7 +60,7 @@ public sealed class AgentSessionRunnerBridge : IHostedService
         _subscriptions.Clear();
     }
 
-    private async void OnRunnerDisconnected(CloudEvent evt)
+    private async Task OnRunnerDisconnected(CloudEvent evt)
     {
         var runnerId = TryGetString(evt, "runnerid");
         if (string.IsNullOrEmpty(runnerId))
