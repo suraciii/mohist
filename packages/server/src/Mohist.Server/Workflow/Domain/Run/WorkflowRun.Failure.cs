@@ -60,7 +60,12 @@ public static partial class WorkflowRunExtensions
                 Id = current.Id,
                 Attempt = current.Attempt + 1,
                 RequiresApproval = current.RequiresApproval,
-                Status = StageRunStatus.Running
+                Status = StageRunStatus.Running,
+                // Carry the rejection reason over to the new stage so the
+                // operator can see "why was this rejected last time"
+                // while the rerun is in flight. Cleared on the next
+                // successful Approve (or overwritten on a fresh Reject).
+                LastRejectionReason = current.LastRejectionReason,
             };
             run.Stages[stageIdx] = newStage;
             run.Failure = null;
