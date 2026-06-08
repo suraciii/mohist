@@ -111,21 +111,48 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         var runId = GrainKey;
         var workId = _lease.WorkId;
         var runnerId = _lease.RunnerId;
+        var reason = $"lease expired after {age.TotalSeconds:F0}s without runner report";
 
         _log.LogWarning(
-            "Workflow {RunId} lease for work {WorkId} (runner {RunnerId}) has been pending for {AgeSeconds}s; emitting lease_expired",
+            "Workflow {RunId} lease for work {WorkId} (runner {RunnerId}) has been pending for {AgeSeconds}s; failing the run",
             runId, workId, runnerId, age.TotalSeconds);
+
+        var current = _run?.CurrentStage();
+        if (current is null) return;
+        if (_run!.Status == WorkflowRunStatus.Completed
+            || _run.Status == WorkflowRunStatus.Failed
+            || _run.Status == WorkflowRunStatus.Stopped)
+        {
+            return;
+        }
+
+        current.Failure = new FailureDetails(
+            FailureReason.LeaseExpired,
+            current.Id,
+            Message: reason);
+        current.Status = StageRunStatus.Failed;
+        _run.Failure = current.Failure;
+        _run.Status = WorkflowRunStatus.Failed;
+        _lease = null;
+
+        await SaveRunAsync([
+            new StageFailed(current.Id, reason),
+            new WorkflowRunFailed(reason),
+        ]);
 
         _eventBus.Emit(CloudEventFactory.Create(
             type: EventCatalog.ReverseDns.LeaseExpired,
             source: new Uri($"/mohist/workflow/{runId}/work/{workId}", UriKind.Relative),
             subject: runId,
+            projectId: GetProjectId(),
+            issueNumber: GetIssueNumber(),
             workflowRunId: runId,
             extraExtensions: new Dictionary<string, object?>
             {
                 ["workid"] = workId,
                 ["runnerid"] = runnerId ?? string.Empty,
                 ["ageseconds"] = (long)age.TotalSeconds,
+                ["reason"] = reason,
             }));
     }
 

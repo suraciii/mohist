@@ -36,7 +36,16 @@ public sealed class EventBridge : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken ct)
+    {
+        foreach (var sub in _subscriptions)
+        {
+            try { sub.Dispose(); }
+            catch (Exception ex) { _log.LogWarning(ex, "EventBridge subscription dispose failed during stop"); }
+        }
+        _subscriptions.Clear();
+        return Task.CompletedTask;
+    }
 
     public void Dispose()
     {

@@ -52,7 +52,16 @@ public sealed class AgentSessionRunnerBridge : IHostedService
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken ct)
+    {
+        foreach (var s in _subscriptions)
+        {
+            try { s.Dispose(); }
+            catch (Exception ex) { _log.LogWarning(ex, "AgentSessionRunnerBridge subscription dispose failed during stop"); }
+        }
+        _subscriptions.Clear();
+        return Task.CompletedTask;
+    }
 
     public void Dispose()
     {
