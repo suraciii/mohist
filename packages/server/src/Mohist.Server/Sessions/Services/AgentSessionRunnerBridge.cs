@@ -24,7 +24,6 @@ public sealed class AgentSessionRunnerBridge : IHostedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly IGrainFactory _grains;
     private readonly ILogger<AgentSessionRunnerBridge> _log;
-    private readonly List<IDisposable> _subscriptions = new();
 
     private static readonly HashSet<string> TerminalStates = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -47,26 +46,17 @@ public sealed class AgentSessionRunnerBridge : IHostedService
 
     public Task StartAsync(CancellationToken ct)
     {
-        _subscriptions.Add(_bus.OnType(EventCatalog.ReverseDns.RunnerDisconnected, OnRunnerDisconnected));
+        // Static, permanent subscription. Restart the process
+        // to remove it.
+        _bus.Subscribe(EventCatalog.ReverseDns.RunnerDisconnected, OnRunnerDisconnected);
         _log.LogInformation("AgentSessionRunnerBridge subscribed to {Event}", EventCatalog.ReverseDns.RunnerDisconnected);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken ct)
     {
-        foreach (var s in _subscriptions)
-        {
-            try { s.Dispose(); }
-            catch (Exception ex) { _log.LogWarning(ex, "AgentSessionRunnerBridge subscription dispose failed during stop"); }
-        }
-        _subscriptions.Clear();
+        // No subscriptions to tear down.
         return Task.CompletedTask;
-    }
-
-    public void Dispose()
-    {
-        foreach (var s in _subscriptions) s.Dispose();
-        _subscriptions.Clear();
     }
 
     private async Task OnRunnerDisconnected(CloudEvent evt)

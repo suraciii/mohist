@@ -32,7 +32,6 @@ public class IssueGrain : Grain, IIssueGrain
     private readonly ProjectWorkflowProfileManager _projectProfileManager;
     private readonly IEventBus _eventBus;
     private readonly ILogger<IssueGrain> _log;
-    private readonly List<IDisposable> _subscriptions = new();
 
     public IssueGrain(
         IStateStore<Domain.Issue> issueStore,
@@ -64,26 +63,28 @@ public class IssueGrain : Grain, IIssueGrain
     {
         _issue = await _issueStore.LoadAsync(GrainKey);
 
-        // Subscribe to workflow lifecycle events. Each handler filters by
-        // the workflow run id extension and calls the same domain commands
-        // the user-driven API paths call (CompleteWorkAsync / AbortWorkAsync).
-        // The handlers run as fire-and-forget Action<CloudEvent> callbacks
-        // so the bus dispatch never blocks the WorkflowGrain that emitted
-        // the event; the issue grain queues the command message and
-        // processes it when its single-threaded activation is free.
-        _subscriptions.Add(_eventBus.OnType(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted));
-        _subscriptions.Add(_eventBus.OnType(EventCatalog.ReverseDns.WorkflowRunStopped, OnWorkflowStopped));
-        _subscriptions.Add(_eventBus.OnType(EventCatalog.ReverseDns.WorkflowRunFailed, OnWorkflowFailed));
+        // Static, permanent bus subscription. The bus has no
+        // Unsubscribe — restart the process to remove it. The
+        // handler captures <c>this</c>, but that is safe: if the
+        // activation has been deactivated by the time the bus
+        // dispatches, the call into the grain enters Orleans's
+        // grain-call pipeline, which rehydrates a fresh
+        // activation against the same persisted state and runs
+        // the method on the new dispatcher. From the grain's
+        // perspective it is a regular method call with the state
+        // reloaded from <c>IStateStore</c>.
+        _eventBus.Subscribe(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted);
+        _eventBus.Subscribe(EventCatalog.ReverseDns.WorkflowRunStopped, OnWorkflowStopped);
+        _eventBus.Subscribe(EventCatalog.ReverseDns.WorkflowRunFailed, OnWorkflowFailed);
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        foreach (var sub in _subscriptions)
-        {
-            try { sub.Dispose(); }
-            catch (Exception ex) { _log.LogWarning(ex, "IssueGrain subscription dispose failed during deactivation"); }
-        }
-        _subscriptions.Clear();
+        // No subscriptions to tear down. The bus's typed
+        // subscriptions are permanent. If this grain is
+        // reactivated later, OnActivateAsync will re-register,
+        // which is idempotent because the bus dedupes by handler
+        // identity.
         return Task.CompletedTask;
     }
 
@@ -148,7 +149,7 @@ public class IssueGrain : Grain, IIssueGrain
         if (resolution.HasProblem)
         {
             var problem = resolution.Problem!;
-            throw new ArgumentException(
+            throw new InvalidOperationException(
                 $"Cannot start workflow: {problem.Message} (code={problem.Code}, repositoryRef={problem.RepositoryRef ?? "<none>"})");
         }
         return resolution;

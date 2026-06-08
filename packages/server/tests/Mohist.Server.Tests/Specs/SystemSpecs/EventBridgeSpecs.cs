@@ -12,12 +12,21 @@ public class EventBridgeSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task EventBusEvent_ForProjectScopedPayload_IsSentToProjectGroup()
+    public async Task EventBusEvent_ForSubscribedConnection_IsPushedToThatClient()
     {
         var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+        var registry = new ConnectionSubscriptionRegistry();
+        var dispatcher = new UserNotificationDispatcher(registry);
         var hub = new RecordingHubContext();
-        var bridge = new EventBridge(bus, hub, NullLogger<EventBridge>.Instance);
+        var bridge = new EventBridge(bus, dispatcher, hub, NullLogger<EventBridge>.Instance);
         await bridge.StartAsync(CancellationToken.None);
+
+        // Two connections. Only the first one is subscribed to the
+        // event type. The dispatcher should forward to that one
+        // only.
+        registry.RegisterConnection("conn-A");
+        registry.RegisterConnection("conn-B");
+        registry.Subscribe("conn-A", "stage_changed");
 
         bus.Emit("stage_changed", new StageChangedEvent(
             "project-1",
@@ -29,7 +38,7 @@ public class EventBridgeSpecs
             "2026-06-05T00:00:00.0000000Z"));
 
         var message = Assert.Single(hub.Messages);
-        Assert.Equal("project:project-1", message.GroupName);
+        Assert.Equal("conn-A", message.ConnectionId);
         Assert.Equal("stage_changed", message.EventName);
         var envelope = Assert.IsType<CloudEventEnvelope>(message.Data);
         Assert.Equal("stage_changed", envelope.Type);
@@ -44,18 +53,23 @@ public class EventBridgeSpecs
     [Trait(Traits.Speed.Name, Traits.Speed.Unit)]
     [Trait(Traits.Sut.Name, Traits.Sut.System)]
     [Fact]
-    public async Task EventBusEvent_WithoutProjectScope_IsSentToGlobalGroup()
+    public async Task EventBusEvent_ForUnsubscribedConnection_IsNotPushedToThatClient()
     {
         var bus = new InMemoryEventBus(NullLogger<InMemoryEventBus>.Instance);
+        var registry = new ConnectionSubscriptionRegistry();
+        var dispatcher = new UserNotificationDispatcher(registry);
         var hub = new RecordingHubContext();
-        var bridge = new EventBridge(bus, hub, NullLogger<EventBridge>.Instance);
+        var bridge = new EventBridge(bus, dispatcher, hub, NullLogger<EventBridge>.Instance);
         await bridge.StartAsync(CancellationToken.None);
+
+        registry.RegisterConnection("conn-A");
+        // conn-A has no subscriptions — registry defaults to empty set
 
         bus.Emit("schedule_triggered", new { reason = "manual" });
 
-        var message = Assert.Single(hub.Messages);
-        Assert.Equal("project:global", message.GroupName);
-        Assert.Equal("schedule_triggered", message.EventName);
+        // No messages pushed because conn-A is not subscribed to
+        // "schedule_triggered".
+        Assert.Empty(hub.Messages);
 
         await bridge.StopAsync(CancellationToken.None);
     }
@@ -84,9 +98,9 @@ public class EventBridgeSpecs
 
             public IEventsClient All => throw new NotSupportedException();
             public IEventsClient AllExcept(IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
-            public IEventsClient Client(string connectionId) => throw new NotSupportedException();
-            public IEventsClient Clients(IReadOnlyList<string> connectionIds) => throw new NotSupportedException();
-            public IEventsClient Group(string groupName) => new RecordingEventsClient(_context, groupName);
+            public IEventsClient Client(string connectionId) => new RecordingEventsClient(_context, connectionId);
+            public IEventsClient Clients(IReadOnlyList<string> connectionIds) => new RecordingEventsClient(_context, "multi");
+            public IEventsClient Group(string groupName) => throw new NotSupportedException();
             public IEventsClient GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => throw new NotSupportedException();
             public IEventsClient Groups(IReadOnlyList<string> groupNames) => throw new NotSupportedException();
             public IEventsClient User(string userId) => throw new NotSupportedException();
@@ -96,17 +110,17 @@ public class EventBridgeSpecs
         private sealed class RecordingEventsClient : IEventsClient
         {
             private readonly RecordingHubContext _context;
-            private readonly string _groupName;
+            private readonly string _connectionId;
 
-            public RecordingEventsClient(RecordingHubContext context, string groupName)
+            public RecordingEventsClient(RecordingHubContext context, string connectionId)
             {
                 _context = context;
-                _groupName = groupName;
+                _connectionId = connectionId;
             }
 
             public Task OnEvent(string eventName, object? data)
             {
-                _context.Messages.Add(new RecordedHubEvent(_groupName, eventName, data));
+                _context.Messages.Add(new RecordedHubEvent(_connectionId, eventName, data));
                 return Task.CompletedTask;
             }
         }
@@ -118,5 +132,5 @@ public class EventBridgeSpecs
         }
     }
 
-    private sealed record RecordedHubEvent(string GroupName, string EventName, object? Data);
+    private sealed record RecordedHubEvent(string ConnectionId, string EventName, object? Data);
 }

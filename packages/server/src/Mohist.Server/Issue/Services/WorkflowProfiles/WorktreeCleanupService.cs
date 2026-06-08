@@ -22,7 +22,6 @@ public sealed class WorktreeCleanupService : IHostedService
     private readonly ProjectQuerier _projectsQuery;
     private readonly IGitService _git;
     private readonly ILogger<WorktreeCleanupService> _log;
-    private readonly List<IDisposable> _subscriptions = new();
 
     public WorktreeCleanupService(
         IEventBus bus,
@@ -38,26 +37,19 @@ public sealed class WorktreeCleanupService : IHostedService
 
     public Task StartAsync(CancellationToken ct)
     {
-        _subscriptions.Add(_bus.OnType(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted));
+        // Static, permanent subscription. The bus has no
+        // Unsubscribe — restart the process to remove it.
+        _bus.Subscribe(EventCatalog.ReverseDns.WorkflowRunCompleted, OnWorkflowCompleted);
         _log.LogInformation("WorktreeCleanupService subscribed to {Event}", EventCatalog.ReverseDns.WorkflowRunCompleted);
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken ct)
     {
-        foreach (var s in _subscriptions)
-        {
-            try { s.Dispose(); }
-            catch (Exception ex) { _log.LogWarning(ex, "WorktreeCleanupService subscription dispose failed during stop"); }
-        }
-        _subscriptions.Clear();
+        // No subscriptions to tear down. The bus's typed
+        // subscriptions are permanent; this method is a
+        // no-op kept for the IHostedService contract.
         return Task.CompletedTask;
-    }
-
-    public void Dispose()
-    {
-        foreach (var s in _subscriptions) s.Dispose();
-        _subscriptions.Clear();
     }
 
     private async Task OnWorkflowCompleted(CloudEvent evt)
