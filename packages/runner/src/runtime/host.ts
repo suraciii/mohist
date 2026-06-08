@@ -8,6 +8,7 @@ import { WorkExecutor } from "./executor.js"
 import { discoverOpencodeModels } from "./opencode-models.js"
 import { AcpSessionManager, createSharedAcpConnection, type SharedAcpConnection } from "./acp-connection.js"
 import type { WorkItem } from "../core/types.js"
+import type { WorkItemResult } from "../core/types.js"
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -138,6 +139,28 @@ export class RunnerHost {
   }
 
   private async executeAndReport(work: WorkItem, signal: AbortSignal) {
+    // Capture the last known result for a best-effort drain report when the
+    // host is being torn down (SIGINT). Using a fresh AbortSignal (with a
+    // short timeout) for the final report so the server can mark the lease
+    // failed promptly instead of waiting the 5-min lease timeout.
+    let lastResult: WorkItemResult | undefined
+    let lastError: unknown
+    const reportDrain = async (status: "failed", message: string) => {
+      const drainController = new AbortController()
+      const drainTimeout = setTimeout(() => drainController.abort(), 2000)
+      try {
+        await this.connection.report(
+          work,
+          { status, message },
+          drainController.signal,
+        )
+      } catch (drainError) {
+        console.error("drain report failed for work", work.workId, drainError)
+      } finally {
+        clearTimeout(drainTimeout)
+      }
+    }
+
     if (this.workExecutor === null) {
       // ACP connection failed to initialize at startup; fall back to the
       // per-work-item ephemeral path so the work still attempts to run.
@@ -154,24 +177,30 @@ export class RunnerHost {
         const fallback = await createSharedAcpConnection(typeof workspacePath === "string" ? workspacePath : process.cwd())
         executor.updateAcpConnection(fallback)
         try {
-          const result = await executor.execute(work, signal)
-          await this.connection.report(work, result, signal)
+          lastResult = await executor.execute(work, signal)
+          await this.connection.report(work, lastResult, signal)
         } finally {
           await fallback.shutdown()
         }
       } catch (error) {
+        lastError = error
         console.error("ephemeral ACP path failed for work", work.workId, error)
-        await this.connection.report(work, { status: "failed", message: String(error) }, signal)
+        await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
+          await reportDrain("failed", String(error))
+        })
       }
       return
     }
 
     try {
-      const result = await this.workExecutor.execute(work, signal)
-      await this.connection.report(work, result, signal)
+      lastResult = await this.workExecutor.execute(work, signal)
+      await this.connection.report(work, lastResult, signal)
     } catch (error) {
+      lastError = error
       console.error("executor failed for work", work.workId, error)
-      await this.connection.report(work, { status: "failed", message: String(error) }, signal)
+      await this.connection.report(work, { status: "failed", message: String(error) }, signal).catch(async () => {
+        await reportDrain("failed", String(error))
+      })
     }
   }
 

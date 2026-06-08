@@ -28,9 +28,10 @@ public static class MohistConfigurationExtensions
     }
 
     /// <summary>
-    /// 去除 JSONC 中的单行和多行注释。
+    /// 去除 JSONC 中的单行和多行注释。public so ConfigService can share this
+    /// implementation rather than maintain its own copy.
     /// </summary>
-    private static string StripJsoncComments(string json)
+    public static string StripJsoncComments(string json)
     {
         var result = new System.Text.StringBuilder();
         var i = 0;

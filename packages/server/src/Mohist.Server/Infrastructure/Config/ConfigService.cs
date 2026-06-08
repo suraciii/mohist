@@ -201,7 +201,7 @@ public class ConfigService
         try
         {
             var json = File.ReadAllText(_configPath);
-            var cleaned = StripJsoncComments(json);
+            var cleaned = MohistConfigurationExtensions.StripJsoncComments(json);
             var doc = JsonDocument.Parse(cleaned);
             var result = new Dictionary<string, JsonNode?>();
             FlattenJson(doc.RootElement, "", result);
@@ -224,7 +224,7 @@ public class ConfigService
         if (File.Exists(_configPath))
         {
             var json = await File.ReadAllTextAsync(_configPath);
-            var cleaned = StripJsoncComments(json);
+            var cleaned = MohistConfigurationExtensions.StripJsoncComments(json);
             try
             {
                 root = JsonNode.Parse(cleaned)?.AsObject();
@@ -353,56 +353,5 @@ public class ConfigService
     {
         try { JsonSerializer.Deserialize<JsonElement>(value); return true; }
         catch { return false; }
-    }
-
-    private static string StripJsoncComments(string json)
-    {
-        var result = new System.Text.StringBuilder();
-        var i = 0;
-        while (i < json.Length)
-        {
-            if (i + 1 < json.Length && json[i] == '/' && json[i + 1] == '*')
-            {
-                i += 2;
-                while (i < json.Length - 1 && !(json[i] == '*' && json[i + 1] == '/'))
-                    i++;
-                i += 2;
-                continue;
-            }
-
-            if (i + 1 < json.Length && json[i] == '/' && json[i + 1] == '/')
-            {
-                while (i < json.Length && json[i] != '\n')
-                    i++;
-                continue;
-            }
-
-            if (json[i] == '"')
-            {
-                result.Append(json[i]);
-                i++;
-                while (i < json.Length)
-                {
-                    result.Append(json[i]);
-                    if (json[i] == '\\' && i + 1 < json.Length)
-                    {
-                        i++;
-                        result.Append(json[i]);
-                    }
-                    else if (json[i] == '"')
-                    {
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-                continue;
-            }
-
-            result.Append(json[i]);
-            i++;
-        }
-
-        return result.ToString();
     }
 }
