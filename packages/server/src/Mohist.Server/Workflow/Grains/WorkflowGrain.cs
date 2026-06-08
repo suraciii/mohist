@@ -1057,14 +1057,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         return Task.CompletedTask;
     }
 
-    private async Task DispatchLifecycleHooksAsync<T>(IEnumerable<T> hooks, string terminal, string? reason) where T : class
-    {
-        // No-op shim retained for any callers that may still reference
-        // DispatchLifecycleHooksAsync. Step 8 of design/event-mechanism.md:
-        // hook dispatch was removed; terminal-side effects flow through the
-        // bus (IssueGrain bus subscription, worktree cleanup hosted service).
-    }
-
     private string GetProjectId() => _variables?.String("project", "id") ?? "";
 
     private string? GetIssueId() => _variables?.String("issue", "id");
@@ -1092,15 +1084,6 @@ public class WorkflowGrain : Grain, IWorkflowGrain, IRemindable
         }
 
         return new WorkflowRunMetadata(input.Name, DateTimeOffset.MinValue, input.Labels, annotations);
-    }
-
-    private (string ProjectId, string? IssueId, int? IssueNumber) GetHookContext()
-    {
-        var projectId = _variables?.String("project", "id") ?? "";
-        var issueId = GetIssueId();
-        var numberStr = _variables?.String("issue", "number");
-        var issueNumber = int.TryParse(numberStr, out var n) ? n : (int?)null;
-        return (projectId, issueId, issueNumber);
     }
 
     private async Task SaveRunAsync()
