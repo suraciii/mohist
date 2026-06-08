@@ -874,7 +874,7 @@ export function IssueDetailPage() {
                     </>
                   )}
 
-                  {issue.health === IssueHealth.Active && !isBacklog && !isAgentRunningOnThis && (
+                  {issue.health === IssueHealth.Active && !isAgentRunningOnThis && (
                     <Button
                       variant="outline"
                       onClick={() => closeMutation.mutate()}
