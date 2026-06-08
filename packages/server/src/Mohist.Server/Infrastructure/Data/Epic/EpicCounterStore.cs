@@ -35,7 +35,7 @@ public class EpicCounterStore : IStateStore<EpicCounterState>
         await db.SaveChangesAsync();
     }
 
-    public Task DeleteAsync(string key) => throw new NotSupportedException();
+    public Task DeleteAsync(string key) => throw new NotImplementedException();
 
-    public Task<IReadOnlyList<EpicCounterState>> ListAsync() => throw new NotSupportedException();
+    public Task<IReadOnlyList<EpicCounterState>> ListAsync() => throw new NotImplementedException();
 }

@@ -47,7 +47,7 @@ public class WorkflowBacklogStore : IStateStore<WorkflowBacklogState>
         await db.SaveChangesAsync();
     }
 
-    public Task<IReadOnlyList<WorkflowBacklogState>> ListAsync() => throw new NotSupportedException();
+    public Task<IReadOnlyList<WorkflowBacklogState>> ListAsync() => throw new NotImplementedException();
 
     private static WorkflowBacklogState Deserialize(string json) =>
         JsonSerializer.Deserialize<WorkflowBacklogState>(json)!;

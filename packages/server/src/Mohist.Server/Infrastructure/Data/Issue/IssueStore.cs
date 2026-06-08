@@ -46,9 +46,9 @@ public class IssueStore : IStateStore<DomainIssue>
         await db.SaveChangesAsync();
     }
 
-    public Task DeleteAsync(string key) => throw new NotSupportedException();
+    public Task DeleteAsync(string key) => throw new NotImplementedException();
 
-    public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotSupportedException();
+    public Task<IReadOnlyList<DomainIssue>> ListAsync() => throw new NotImplementedException();
 
     public static DomainIssue? Deserialize(string json) =>
         JsonSerializer.Deserialize<DomainIssue>(json, JsonOptions);

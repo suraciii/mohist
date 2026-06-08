@@ -12,6 +12,7 @@ public interface IWorkflowRunStore
 {
     Task SaveAsync(WorkflowRun run, CancellationToken ct = default);
     Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default);
+    Task SaveAllAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, WorkLease? lease, WorkflowExecutionContext? variables, CancellationToken ct = default);
     Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default);
 }
 
@@ -56,8 +57,69 @@ public class WorkflowRunStore : IWorkflowRunStore
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(ct);
+            // transaction is rolled back automatically by `await using` on
+            // dispose. The caller (WorkflowGrain.SaveRunAsync) logs the
+            // ETag mismatch and deactivates the grain to reload state.
             throw;
+        }
+    }
+
+    public async Task SaveAllAsync(
+        WorkflowRun run,
+        IReadOnlyList<WorkflowEvent> events,
+        WorkLease? lease,
+        WorkflowExecutionContext? variables,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await StageRunAsync(db, run, ct);
+            var stagedEvents = await WorkflowEventPersistence.StageAsync(db, run.Id, events, ct);
+            await StageLeaseAsync(db, run.Id, lease, ct);
+            await StageVariablesAsync(db, run.Id, variables, ct);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            var projectId = ExtractProjectId(run);
+            var issueNumber = ExtractIssueNumber(run);
+            Publish(stagedEvents, projectId, issueNumber);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // transaction is rolled back automatically by `await using` on
+            // dispose.
+            throw;
+        }
+    }
+
+    private static async Task StageLeaseAsync(MohistDbContext db, string runId, WorkLease? lease, CancellationToken ct)
+    {
+        if (lease is null) return;
+        var row = await db.WorkflowLeases.FindAsync([runId], ct);
+        var json = WorkflowLeaseJson.Serialize(lease);
+        if (row is null)
+        {
+            db.WorkflowLeases.Add(new WorkflowLeaseRow { WorkflowRunId = runId, State = json });
+        }
+        else
+        {
+            row.State = json;
+        }
+    }
+
+    private static async Task StageVariablesAsync(MohistDbContext db, string runId, WorkflowExecutionContext? variables, CancellationToken ct)
+    {
+        if (variables is null) return;
+        var row = await db.WorkflowVariables.FindAsync([runId], ct);
+        var json = WorkflowVariablesStore.Serialize(variables);
+        if (row is null)
+        {
+            db.WorkflowVariables.Add(new WorkflowVariablesRow { WorkflowRunId = runId, State = json });
+        }
+        else
+        {
+            row.State = json;
         }
     }
 
